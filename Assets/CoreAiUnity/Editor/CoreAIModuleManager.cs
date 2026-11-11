@@ -20,6 +20,8 @@ namespace CoreAI.Editor
     /// default; the <c>COREAI_LUA</c> scripting define opts a target into the runtime and its security
     /// surface (the runtime guards on <c>COREAI_LUA</c>).</item>
     /// <item><b>LLMUnity</b> — package <c>ai.undream.llm</c>; its presence sets <c>COREAI_HAS_LLMUNITY</c>.</item>
+    /// <item><b>Markdown renderer</b> — package <c>com.neoxider.markdownrenderer</c>, pinned to a release; its presence
+    /// sets <c>COREAI_HAS_MARKDOWN_RENDERER</c> and chat answers render as Markdown.</item>
     /// </list>
     /// "Enable + Update" runs <see cref="Client.Add(string)"/> with the canonical git URL, which both
     /// installs the package when missing and re-resolves it to the latest commit of its branch.
@@ -29,8 +31,12 @@ namespace CoreAI.Editor
         private const string LlmUnityId = "ai.undream.llm";
         private const string LlmUnityUrl = "https://github.com/undreamai/LLMUnity.git";
 
+        internal const string MarkdownRendererId = "com.neoxider.markdownrenderer";
+        internal const string MarkdownRendererUrl = "https://github.com/NeoXider/NeoxiderMarkdownRenderer.git#v1.2.1";
+
         private const string LlmDefine = "COREAI_LLM";
         private const string LuaDefine = "COREAI_LUA";
+        private const string MarkdownOffDefine = "COREAI_DISABLE_MARKDOWN_RENDERER";
 
         private static bool _busy;
 
@@ -111,6 +117,38 @@ namespace CoreAI.Editor
             RemovePackage("LLMUnity", LlmUnityId);
         }
 
+        // ----------------------------------------------------------------- Markdown renderer
+
+        [MenuItem("CoreAI/Setup/Modules/Markdown Renderer/Install (v1.2.1)", priority = 30)]
+        public static void InstallMarkdownRenderer()
+        {
+            if (!EditorUtility.DisplayDialog("CoreAI Modules",
+                    "Install com.neoxider.markdownrenderer v1.2.1 from GitHub?\n\nChat answers in CoreAiChatPanel and " +
+                    "the Hub then render as Markdown. It is a separate package with its own licence: Neoxider's " +
+                    "changes are MIT, the original Markdown UIElement code stays under the Unity Companion License, " +
+                    "and the bundled Markdig is BSD-2-Clause (see its LICENSE.md). Remove it from the same menu.",
+                    "Install", "Cancel"))
+            {
+                return;
+            }
+
+            AddOrUpdatePackage("Markdown renderer", MarkdownRendererUrl);
+        }
+
+        [MenuItem("CoreAI/Setup/Modules/Markdown Renderer/Remove package", priority = 31)]
+        public static void RemoveMarkdownRenderer()
+        {
+            if (!EditorUtility.DisplayDialog("CoreAI Modules",
+                    "Remove the Markdown renderer package?\n\nCOREAI_HAS_MARKDOWN_RENDERER will unset and chat answers " +
+                    "go back to plain text. Nothing else changes.",
+                    "Remove", "Cancel"))
+            {
+                return;
+            }
+
+            RemovePackage("Markdown renderer", MarkdownRendererId);
+        }
+
         // ----------------------------------------------------------------- Status
 
         [MenuItem("CoreAI/Setup/Modules/Report module status", priority = 40)]
@@ -125,6 +163,7 @@ namespace CoreAI.Editor
             Pump(list, () =>
             {
                 string llmunity = DescribePackage(list, LlmUnityId);
+                string markdown = DescribePackage(list, MarkdownRendererId);
                 bool llmEnabled = HasDefine(LlmDefine);
                 bool luaEnabled = HasDefine(LuaDefine);
 
@@ -136,7 +175,9 @@ namespace CoreAI.Editor
                     $"COREAI_LUA define: {(luaEnabled ? "SET (Lua enabled)" : "not set")}\n" +
                     $"-> Lua effective: {(luaEnabled ? "ENABLED" : "disabled")}\n\n" +
                     $"LLMUnity package: {llmunity}\n" +
-                    $"-> Local LLM effective: {(llmEnabled && llmunity != "not installed" ? "ENABLED" : "disabled")}";
+                    $"-> Local LLM effective: {(llmEnabled && llmunity != "not installed" ? "ENABLED" : "disabled")}\n\n" +
+                    $"Markdown renderer package: {markdown}\n" +
+                    $"-> Chat answers as Markdown: {(markdown != "not installed" && !HasDefine(MarkdownOffDefine) ? "ENABLED" : "disabled")}";
 
                 EditorUtility.DisplayDialog("CoreAI - Module status", message, "OK");
             });

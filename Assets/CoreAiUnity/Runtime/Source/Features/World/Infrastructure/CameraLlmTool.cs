@@ -18,9 +18,30 @@ namespace CoreAI.Infrastructure.World
     /// <see cref="LlmToolImageResult"/> — a small JSON summary for the tool message plus the JPEG as an image
     /// part — and the tool loop lifts it into the model's image channel automatically, like the agent-vision
     /// <c>camera_capture</c> tool (<see cref="CoreAI.Vision.CameraLlmTool"/>).
+    /// <para>
+    /// Deprecated onto the agent-vision <c>camera</c> tool: <c>camera_tool</c> / <c>capture_camera</c> keep working
+    /// as an alias for one release and capture through the same implementation, the shared
+    /// <see cref="ICameraFrameReadback"/> (async GPU readback where the platform has it, the synchronous path on
+    /// WebGL). New hosts register <see cref="CoreAI.Vision.CameraLlmTool"/> instead, which adds the agent's own
+    /// camera, look, orbit and listing. Its name, parameters and summary shape are unchanged.
+    /// </para>
     /// </summary>
     public sealed class CameraLlmTool : IAIFunctionsLlmTool
     {
+        private readonly ICameraFrameReadback _readback;
+
+        /// <summary>Captures through <see cref="CameraFrameReadback.CreateDefault"/>.</summary>
+        public CameraLlmTool()
+            : this(null)
+        {
+        }
+
+        /// <summary>Captures through <paramref name="readback"/>; null picks <see cref="CameraFrameReadback.CreateDefault"/>.</summary>
+        public CameraLlmTool(ICameraFrameReadback readback)
+        {
+            _readback = readback ?? CameraFrameReadback.CreateDefault();
+        }
+
         public string Name => "camera_tool";
         public string Description => "Access scene cameras to take screenshots for visual analysis.";
 
@@ -71,21 +92,33 @@ namespace CoreAI.Infrastructure.World
                         $"No camera perfectly matching '{cameraName}' and no active cameras found in the scene.");
                 }
 
-                // Clamp resolution to avoid memory overflow (vision models rarely need > 1024).
+                // WHY: vision models rarely use more than 1024 px, and the clamp bounds memory per capture.
                 width = Mathf.Clamp(width, 64, 1024);
                 height = Mathf.Clamp(height, 64, 1024);
 
-                byte[] jpgBytes = CaptureCameraJpeg(targetCam, width, height);
+                string targetName = targetCam.name;
+                CameraFrameReadbackResult frame = await _readback.CaptureAsync(targetCam, width, height,
+                    CaptureImageFormat.Jpeg, 75, cancellationToken);
+                byte[] jpgBytes = frame?.Bytes;
+                if (jpgBytes == null || jpgBytes.Length == 0)
+                {
+                    return SerializeError($"Failed to capture camera '{targetName}'.");
+                }
+
                 string summaryJson = JsonConvert.SerializeObject(new
                 {
                     success = true,
                     resolution = $"{width}x{height}",
-                    camera = targetCam.name,
+                    camera = targetName,
                     format = "jpeg",
                     sizeBytes = jpgBytes.Length,
                     imageAttached = true
                 });
                 return new LlmToolImageResult(summaryJson, AiAttachment.Image(jpgBytes, "image/jpeg"));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -104,7 +137,8 @@ namespace CoreAI.Infrastructure.World
         /// <summary>
         /// Renders <paramref name="targetCam"/> to an offscreen target at the given size (clamped to
         /// 64..1024) and returns the frame encoded as JPEG bytes. Restores the camera target texture and
-        /// the active render texture. Must run on the Unity main thread.
+        /// the active render texture. Must run on the Unity main thread. Synchronous (one GPU stall);
+        /// <c>capture_camera</c> itself uses the non-blocking <see cref="ICameraFrameReadback"/>.
         /// </summary>
         public static byte[] CaptureCameraJpeg(Camera targetCam, int width, int height, int quality = 75)
         {

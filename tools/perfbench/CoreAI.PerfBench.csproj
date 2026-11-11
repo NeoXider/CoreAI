@@ -1,0 +1,77 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    P19 portable performance benchmarks: micro-benchmarks of the engine-free hot paths and the P19
+    reference scenes run headless (in-memory world, no rendering) against the production Lua tier that
+    tools/portable/LuaTier compiles from Assets/ unmodified, with the shipped Lua.dll.
+
+    The exact run commands (CoreCLR, and Mono with the Boehm and SGen collectors bundled with Unity)
+    are in dev-docs/PERF_BASELINE_2026-11.md, section "Commands". Build with an artifacts path of its
+    own: the portable projects are shared with the portable suites, and a separate obj/bin keeps a
+    concurrent build from colliding with theirs.
+
+    WHY the assembly name CoreAI.Mods.Tests: it is the friend name CoreAI.Core, CoreAI.Mods,
+    CoreAI.RbxApi.Instances and CoreAI.RbxApi.Unity grant InternalsVisibleTo, so the benchmarks reach the
+    same internal seams the EditMode fixtures pin (signal binding, the legacy event tick, the SSE line
+    parser) without any change under Assets/.
+    WHY LangVersion 9 and nullable off: the linked scenario files under Assets/ are compiled by Unity as
+    C# 9, so a newer language feature in them must break this build as it would break the editor's.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>CoreAI.Mods.Tests</AssemblyName>
+    <RootNamespace>CoreAI.PerfBench</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Optimize>true</Optimize>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <TieredPGO>true</TieredPGO>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <DefineConstants>$(DefineConstants);COREAI_LLM;COREAI_LUA</DefineConstants>
+    <NoWarn>$(NoWarn);CS1591;CS0618;CS0414;CS0169;CS0649;CS0162;CS0168;CS0219;CS8632;CS0067;CS1998;CS4014;NU1702</NoWarn>
+    <IsPackable>false</IsPackable>
+    <RepoRoot>$(MSBuildThisFileDirectory)../..</RepoRoot>
+    <PortableRoot>$(RepoRoot)/tools/portable</PortableRoot>
+    <ScenariosRoot>$(RepoRoot)/Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios</ScenariosRoot>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
+    <!-- WHY: the Mono CLI runs a netstandard2.1 entry assembly directly; dotnet run cannot start it. -->
+    <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(PortableRoot)/CoreAI.Core.csproj" />
+    <ProjectReference Include="$(PortableRoot)/CoreAI.RbxApi.Datatypes/CoreAI.RbxApi.Datatypes.csproj" />
+    <ProjectReference Include="$(PortableRoot)/CoreAI.RbxApi.Instances/CoreAI.RbxApi.Instances.csproj" />
+    <ProjectReference Include="$(PortableRoot)/CoreAI.LuauDownlevel/CoreAI.LuauDownlevel.csproj" />
+    <ProjectReference Include="$(PortableRoot)/LuaTier/UnityEngine/UnityEngine.csproj" />
+    <ProjectReference Include="$(PortableRoot)/LuaTier/CoreAI.Source/CoreAI.Source.csproj" />
+    <ProjectReference Include="$(PortableRoot)/LuaTier/CoreAI.RbxApi.Unity/CoreAI.RbxApi.Unity.csproj" />
+    <ProjectReference Include="$(PortableRoot)/LuaTier/CoreAI.RbxApi.Binding/CoreAI.RbxApi.Binding.csproj" />
+    <ProjectReference Include="$(PortableRoot)/LuaTier/CoreAI.Mods/CoreAI.Mods.csproj" />
+    <Reference Include="Lua">
+      <HintPath>$(RepoRoot)/Assets/CoreAIMods/Plugins/Lua.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <PackageReference Include="UniTask" Version="2.5.11" />
+    <PackageReference Include="Microsoft.Bcl.TimeProvider" Version="8.0.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="$(ScenariosRoot)/PerfScenario.cs" Link="Scenarios/PerfScenario.cs" />
+    <Compile Include="$(ScenariosRoot)/PerfLuaSources.cs" Link="Scenarios/PerfLuaSources.cs" />
+    <Compile Include="$(ScenariosRoot)/PerfRuntimeCounters.cs" Link="Scenarios/PerfRuntimeCounters.cs" />
+    <Compile Include="$(ScenariosRoot)/PerfDistribution.cs" Link="Scenarios/PerfDistribution.cs" />
+    <Compile Include="$(ScenariosRoot)/PerfReport.cs" Link="Scenarios/PerfReport.cs" />
+    <Compile Include="$(ScenariosRoot)/PerfReportJson.cs" Link="Scenarios/PerfReportJson.cs" />
+    <Compile Include="$(ScenariosRoot)/PerfModWorld.cs" Link="Scenarios/PerfModWorld.cs" />
+    <Compile Include="Program.cs" />
+    <Compile Include="BenchEnvironment.cs" />
+    <Compile Include="MicroBench.cs" />
+    <Compile Include="MicroCases.cs" />
+    <Compile Include="ScenarioFrames.cs" />
+    <Compile Include="AllocationTrace.cs" />
+    <Compile Include="StreamingCases.cs" />
+  </ItemGroup>
+</Project>

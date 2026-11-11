@@ -72,7 +72,15 @@ namespace CoreAI.Ai
         /// quota (<see cref="QuotaExceeded"/>) nor a provider rate limit (<see cref="RateLimited"/>) is
         /// involved — the backend was never asked. Never retried, never used to switch backends.
         /// </summary>
-        ClientLimitExceeded = 14
+        ClientLimitExceeded = 14,
+
+        /// <summary>
+        /// The configured backend cannot run in this build: the host selected an LLM mode whose module is not
+        /// compiled in (for example an HTTP API without the <c>COREAI_LLM</c> scripting define). A configuration
+        /// fault, not a provider fault: the request never left the process, a replay returns the same answer,
+        /// and the error text names the fix. Never retried, never used to switch backends.
+        /// </summary>
+        NotConfigured = 15
     }
 
     /// <summary>Identifies the budget that expired without parsing provider error text.</summary>
@@ -592,6 +600,12 @@ namespace CoreAI.Ai
         /// </para>
         /// </summary>
         public bool? AllowTextShapedToolCallsOnNativeEndpoint { get; set; }
+
+        /// <summary>
+        /// Optional "still working" signal (from <see cref="AiTaskRequest.Progress"/>): each report re-arms the idle
+        /// window of <see cref="CoreAI.Infrastructure.Llm.TimeoutLlmClientDecorator"/>. <c>null</c> keeps the plain deadline.
+        /// </summary>
+        public LlmRequestProgress Progress { get; set; }
     }
 
     /// <summary>

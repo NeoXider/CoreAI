@@ -611,6 +611,8 @@ namespace CoreAI.Ai.LuaCs
                 case RbxVector3 _: return "Vector3";
                 case RbxVector2 _: return "Vector2";
                 case RbxCFrame _: return "CFrame";
+                case RbxRay _: return "Ray";
+                case RbxRegion3 _: return "Region3";
                 case RbxColor3 _: return "Color3";
                 case RbxUDim _: return "UDim";
                 case RbxUDim2 _: return "UDim2";

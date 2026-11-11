@@ -16,7 +16,7 @@ context, so the host adds them explicitly (the same pattern as a game's own tool
 | `wait` | `WaitLlmTool` | Opt-in via `AgentBuilder.WithWaitTool()`. |
 | `world_command` | `WorldLlmTool` | Auto-attached to the built-in **Creator** and **Builder** roles by `WorldCommandsInstaller.RegisterWorldBuildingRolesTool` whenever `RegisterWorldCommands` runs on the container — not host-wired for those two roles. See the table below for other roles. |
 | `get_mod_logs`, `save_world`, `load_world`, `list_autosaves`, `load_autosave` | `GetModLogsLlmTool`, `SaveWorldLlmTool`, `LoadWorldLlmTool`, `ListAutoSavesLlmTool`, `LoadAutoSaveLlmTool` | Mod logs and world saves; auto-attached to the built-in **Programmer** role by the same `CoreAiModsInstaller` callback. |
-| `camera` (`camera_capture`/`screenshot`/`camera_look`/`camera_list`) | `CoreAI.Vision.CameraLlmTool` (`Assets/CoreAiUnity/Runtime/Source/Features/Vision/CameraLlmTool.cs`) | Auto-attached to the built-in **Programmer** role by `WorldCommandsInstaller.RegisterAgentVision`. The **chat panel** can also attach it to whichever role is the active chat role at runtime via `CoreAiChatService.TryEnsureCameraToolForRole` → `CoreAiChatCameraTools.TryAttachCameraTool`, gated on vision support. The model sees and calls the four function names; `camera` itself is only the registered wrapper. Do not confuse this with the older, differently-named `CameraLlmTool` in `Assets/CoreAiUnity/Runtime/Source/Features/World/Infrastructure/CameraLlmTool.cs` (tool name `camera_tool`, single function `capture_camera`) described further below — that one is the host-wired variant, not auto-registered anywhere. |
+| `camera` (`camera_capture`/`screenshot`/`camera_look`/`camera_list`) | `CoreAI.Vision.CameraLlmTool` (`Assets/CoreAiUnity/Runtime/Source/Features/Vision/CameraLlmTool.cs`) | Auto-attached to the built-in **Programmer** role by `WorldCommandsInstaller.RegisterAgentVision`. The **chat panel** can also attach it to whichever role is the active chat role at runtime via `CoreAiChatService.TryEnsureCameraToolForRole` → `CoreAiChatCameraTools.TryAttachCameraTool`, only when `CoreAiChatService.IsVisionEnabled()` is true (the same verdict as the capability gate below). The model sees and calls the four function names; `camera` itself is only the registered wrapper. Do not confuse this with the older, differently-named `CameraLlmTool` in `Assets/CoreAiUnity/Runtime/Source/Features/World/Infrastructure/CameraLlmTool.cs` (tool name `camera_tool`, single function `capture_camera`) described further below — that one is the host-wired variant, not auto-registered anywhere. |
 
 ## Optional / host-wired (add via `AgentBuilder.WithTool(...)` when your game provides the context)
 
@@ -117,18 +117,22 @@ flag** so a text-only model never receives an image part it cannot parse.
 
 ### Capability gate
 
-`CoreAISettingsAsset.VisionSupport` (enum `VisionSupportMode`): `On` / `Off` / `Auto`. `Auto` infers
-from the model name via `VisionCapability.ModelLooksVisionCapable` (matches `gpt-4o`, `gpt-4.1`, `o1/o3/o4`,
-`*vision*`, `*-vl*`, `llava`, `gemini`, `claude-3/4`, `pixtral`, `llama-3.2`, `phi-*-vision`, …). The
-resolved value is `CoreAISettingsAsset.IsVisionEnabled`, surfaced as `CoreAi.IsVisionEnabled()` /
-`CoreAiChatService.IsVisionEnabled()`. **Both** the host send path and tool registration check it; when it
-is `false`, no image is attached and `capture_camera` is not registered.
+`CoreAISettingsAsset.VisionSupport` (enum `VisionSupportMode`): `On` / `Off` / `Auto`. `Auto` is **on by
+default**: `VisionCapability.AutoAssumesVisionCapable` treats every model as vision-capable, including an empty
+model name, except utility models whose name contains an embedding, audio, rerank or moderation marker (`embed`,
+`nomic-embed`, `-bge`, `gte-`, `e5-`, `rerank`, `whisper`, `tts`, `speech`, `moderation`, `-guard`). The list of
+known vision model names (`VisionCapability.ModelLooksVisionCapable`: `gpt-4o`, `gpt-4.1`, `o1/o3/o4`, `*vision*`,
+`*-vl*`, `llava`, `gemini`, `claude-3/4`, `pixtral`, `llama-3.2`, `phi-*-vision`, …) is not consulted by `Auto`;
+it backs the explicit name heuristic only. A text-only model under `Auto` therefore needs **Off** (or the Hub's
+**Detect vision**, which probes the model and stores On or Off). The resolved value is
+`CoreAISettingsAsset.IsVisionEnabled`, surfaced as `CoreAi.IsVisionEnabled()` / `CoreAiChatService.IsVisionEnabled()`.
+The host send path, `CoreAi.RegisterCameraVisionTool` and the chat panel's `camera` attach all check it; when it is
+`false`, no image is attached and no camera tool is registered.
 
 The Hub **AI Settings** page exposes this as a **Vision** dropdown (Auto / On / Off, backed by
-`CoreAISettingsAsset.SetVisionSupport`). Use **On** to force the gate open for a multimodal model whose
-name the `Auto` heuristic does not recognise (e.g. a local `qwen3.5` vision build), so the camera tool and
-image sends become usable without renaming the model; use **Off** to hard-disable vision on a model the
-heuristic would otherwise treat as vision-capable.
+`CoreAISettingsAsset.SetVisionSupport`). Use **On** to keep vision on for a model whose name happens to contain
+a utility marker; use **Off** to hard-disable vision on a text-only model, which `Auto` would otherwise treat as
+vision-capable.
 
 ### Host send path (camera → model)
 

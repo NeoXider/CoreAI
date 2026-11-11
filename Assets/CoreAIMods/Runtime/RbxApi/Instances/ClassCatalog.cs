@@ -557,8 +557,8 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>
         /// The MVP1 class set (roadmap §5.1.3): Instance, Folder, Model, Part (geometry-free
         /// placeholder — spatial properties arrive with the property/datatype slice), Workspace,
-        /// DataModel, the container services so paths resolve, and Lighting as a structural
-        /// service node (its ClockTime/Ambient properties stay absent — the loud stub answers).
+        /// DataModel, the container services so paths resolve, and Lighting with its P9 day-cycle
+        /// slice (the rest of its members are loud stubs phased to P9).
         /// </summary>
         public static ClassCatalog CreateMvp1()
         {
@@ -588,7 +588,9 @@ namespace CoreAI.Mods.Rbx.Instances
             // mirror tags Backpack with no NotCreatable (script-creatable) while PlayerGui and
             // PlayerScripts are NotCreatable engine children, so only Backpack is creatable here.
             catalog.Register(new ClassDescriptor("Backpack", "Instance", false, true, false));
-            catalog.Register(new ClassDescriptor("PlayerGui", "Instance", false, false, false));
+            catalog.Register(new ClassDescriptor("BasePlayerGui", "Instance", true, false, false));
+            catalog.Register(new ClassDescriptor("PlayerGui", "BasePlayerGui", false, false, false,
+                descriptor => new RbxPlayerGui(descriptor)));
             catalog.Register(new ClassDescriptor("PlayerScripts", "Instance", false, false, false));
             catalog.Register(new ClassDescriptor("PVInstance", "Instance", true, false, false));
             catalog.Register(new ClassDescriptor("Folder", "Instance", false, true, false));
@@ -617,16 +619,18 @@ namespace CoreAI.Mods.Rbx.Instances
             // TODO: MVP-later — creatable Cameras with per-instance state once multiple
             // viewports/cameras are meaningful.
             catalog.Register(new ClassDescriptor("Camera", "PVInstance", false, false, false));
+            catalog.Register(Terrain.RbxTerrain.CreateDescriptor());
+            Terrain.RbxTerrain.RegisterKnownUnimplementedMembers(catalog);
             catalog.Register(new ClassDescriptor("ServiceProvider", "Instance", true, false, false));
             catalog.Register(new ClassDescriptor("DataModel", "ServiceProvider", false, false, false,
                 descriptor => new RbxDataModel(descriptor)));
-            // TODO: MVP-later — Lighting sun/ambient property mapping (ClockTime, Ambient,
-            // GeographicLatitude ...) lands with the lighting slice; today it is structure only.
-            catalog.Register(new ClassDescriptor("Lighting", "Instance", false, false, true));
+            catalog.Register(new ClassDescriptor("Lighting", "Instance", false, false, true,
+                descriptor => new RbxLighting(descriptor)));
             catalog.Register(new ClassDescriptor("ReplicatedStorage", "Instance", false, false, true));
             catalog.Register(new ClassDescriptor("ServerStorage", "Instance", false, false, true));
             catalog.Register(new ClassDescriptor("ServerScriptService", "Instance", false, false, true));
-            catalog.Register(new ClassDescriptor("StarterPlayer", "Instance", false, false, true));
+            catalog.Register(new ClassDescriptor("StarterPlayer", "Instance", false, false, true,
+                descriptor => new RbxStarterPlayer(descriptor)));
             catalog.Register(new ClassDescriptor("Players", "Instance", false, false, true,
                 descriptor => new RbxPlayers(descriptor)));
             // WHY: pulled forward from MVP10 for MVP1 mini-game controls (TODO.md pending note);
@@ -691,16 +695,18 @@ namespace CoreAI.Mods.Rbx.Instances
                 descriptor => new RbxColor3Value(descriptor)));
             catalog.Register(new ClassDescriptor("MaterialVariant", "Instance", false, true, false,
                 descriptor => new RbxMaterialVariant(descriptor)));
+            // WHY Light abstract and PointLight creatable: Light.yaml is NotCreatable and PointLight.yaml
+            // is not; SpotLight and SurfaceLight stay loud class stubs until the rest of P9.
+            catalog.Register(new ClassDescriptor("Light", "Instance", true, false, false));
+            catalog.Register(new ClassDescriptor("PointLight", "Light", false, true, false,
+                descriptor => new RbxPointLight(descriptor)));
 
             // WHY Raycast is absent from the WorldRoot table below: it landed in MVP8 slice 8.5, and
             // a stub for a shipped member is worse than none — it fails a call that works.
             catalog.RegisterKnownUnimplementedMembers("Workspace",
                 RbxKnownUnimplementedMemberDescriptor.UnsupportedWriteProperty(
                     "SignalBehavior",
-                    "signal mode is Deferred-only; use task.defer when explicit ordering is needed"),
-                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
-                    "Terrain",
-                    "build terrain from Parts; voxel Terrain is a roadmap non-goal"));
+                    "signal mode is Deferred-only; use task.defer when explicit ordering is needed"));
 
             string humanoidRigWorkaround =
                 "CoreAI's character is a motor, not a full R15 rig; these members land with the "
@@ -769,16 +775,8 @@ namespace CoreAI.Mods.Rbx.Instances
                     "RightSurface", surfaceWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
                     "TopSurface", surfaceWorkaround));
-            catalog.RegisterKnownUnimplementedMembers("Lighting",
-                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
-                    "ClockTime",
-                    "configure the host scene lighting outside Lua until the lighting slice is scheduled"),
-                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
-                    "Ambient",
-                    "configure the host scene lighting outside Lua until the lighting slice is scheduled"),
-                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
-                    "GeographicLatitude",
-                    "configure the host scene lighting outside Lua until the lighting slice is scheduled"));
+            RegisterLightingKnownUnimplementedMembers(catalog);
+            RbxGuiCatalog.Register(catalog);
             catalog.RegisterKnownUnimplementedMembers("RunService",
                 RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
                     "BindToRenderStep", "MVP2",
@@ -887,14 +885,11 @@ namespace CoreAI.Mods.Rbx.Instances
                     "chat is TextChatService, a non-goal of this rung"),
                 RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(
                     "GetNetworkPing",
-                    "network telemetry ships with the MVP11 transport"),
+                    "network telemetry ships with the MVP5 transport"),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
                     "RespawnLocation",
                     "choosing a respawn point needs the SpawnLocation class, which no rung has "
                     + "claimed; move the character with PivotTo in Player.CharacterAdded instead"),
-                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
-                    "CameraMode",
-                    "camera modes are host-scene configuration in this rung"),
                 RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
                     "CanLoadCharacterAppearance",
                     "avatar appearance fetch is a platform backend concern, not planned; "
@@ -905,7 +900,7 @@ namespace CoreAI.Mods.Rbx.Instances
                     + "the spawned character always has the default look"),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
                     "StarterGear",
-                    "per-player StarterGear lands with character contents (MVP10/MVP14); use Backpack meanwhile"));
+                    "per-player StarterGear lands with character contents (MVP7/MVP15); use Backpack meanwhile"));
             // WHY these stay loud: each needs a character rig CoreAI does not model (seats,
             // ragdoll, swimming, climbing, accessories, animation). A silent no-op would let a
             // script believe it sat a player down; the loud stub names the rung instead.
@@ -944,9 +939,6 @@ namespace CoreAI.Mods.Rbx.Instances
                     "GetAppliedDescription", humanoidRigWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
                     "LoadAnimation", "animation playback lands with the animation slice"),
-                RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
-                    "Move", "MVP10",
-                    "drive movement with Humanoid:MoveTo until input-driven Move lands"),
                 RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
                     "EquipTool", "tools land with the Backpack contents slice"),
                 RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
@@ -955,6 +947,46 @@ namespace CoreAI.Mods.Rbx.Instances
             RegisterKnownUnimplementedCreatableClasses(catalog, physicsWorkaround);
             catalog.EnsureKnownUnimplementedMembersFlattened();
             return catalog;
+        }
+
+        /// <summary>
+        /// The <c>Lighting</c> members of the mirror's dump the P9 day-cycle slice does not answer: the
+        /// rest of P9 is planned (fog, colour shift, environment and exposure, shadows, the moon), and the
+        /// three <c>RobloxScriptSecurity</c> members stay deliberately out of reach of scripts.
+        /// </summary>
+        private static void RegisterLightingKnownUnimplementedMembers(ClassCatalog catalog)
+        {
+            const string phase = "P9";
+            const string lookWorkaround =
+                "set Lighting.ClockTime, Brightness, Ambient and OutdoorAmbient, which are live; the rest "
+                + "of the look is the host's until this member lands";
+            const string fogWorkaround =
+                "fog follows the host's look settings until the fog members land";
+            const string moonWorkaround =
+                "read Lighting:GetSunDirection(); the moon is not modelled until this member lands";
+            const string securityWorkaround =
+                "a RobloxScriptSecurity member only Roblox's own scripts may set; CoreAI models no such "
+                + "security level, so scripts never reach it";
+            catalog.RegisterKnownUnimplementedMembers("Lighting",
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("ColorShift_Bottom", phase, lookWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("ColorShift_Top", phase, lookWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty(
+                    "EnvironmentDiffuseScale", phase, lookWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty(
+                    "EnvironmentSpecularScale", phase, lookWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty(
+                    "ExposureCompensation", phase, lookWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("FogColor", phase, fogWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("FogEnd", phase, fogWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("FogStart", phase, fogWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("GlobalShadows", phase, lookWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("ShadowSoftness", phase, lookWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.PlannedMethod("GetMoonDirection", phase, moonWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.PlannedMethod("GetMoonPhase", phase, moonWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("LightingStyle", securityWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
+                    "PrioritizeLightingQuality", securityWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("Technology", securityWorkaround));
         }
 
         /// <summary>
@@ -986,11 +1018,10 @@ namespace CoreAI.Mods.Rbx.Instances
             const string shapeCastWorkaround =
                 "cast several workspace:Raycast rays across the shape's extent until shape casts land";
             const string fieldOfViewWorkaround =
-                "the host camera rig owns the field of view; drive the view with Camera.CFrame and "
-                + "Camera.CameraType";
+                "only the vertical field of view is modeled; read and write Camera.FieldOfView";
             const string screenSpaceWorkaround =
-                "screen-space camera queries are not implemented; use a ClickDetector for clicks "
-                + "on parts and place 3D content in world space";
+                "the near plane is the host camera's; project with Camera:WorldToViewportPoint and "
+                + "cast from Camera:ViewportPointToRay";
             const string vrWorkaround = "VR camera control is not supported";
             const string placeIdentityWorkaround =
                 "CoreAI worlds are not Roblox places and carry no platform identity; key saved "
@@ -1107,8 +1138,6 @@ namespace CoreAI.Mods.Rbx.Instances
                     "deprecated in Roblox; " + overlapWorkaround));
             catalog.RegisterKnownUnimplementedMembers("Camera",
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
-                    "FieldOfView", fieldOfViewWorkaround),
-                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
                     "FieldOfViewMode", fieldOfViewWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
                     "DiagonalFieldOfView", fieldOfViewWorkaround),
@@ -1117,17 +1146,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
                     "Focus", "aim Camera.CFrame at the target with CFrame.lookAt"),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
-                    "ViewportSize", screenSpaceWorkaround),
-                RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
                     "NearPlaneZ", screenSpaceWorkaround),
-                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
-                    "ScreenPointToRay", screenSpaceWorkaround),
-                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
-                    "ViewportPointToRay", screenSpaceWorkaround),
-                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
-                    "WorldToScreenPoint", screenSpaceWorkaround),
-                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
-                    "WorldToViewportPoint", screenSpaceWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
                     "GetPartsObscuringTarget",
                     "cast workspace:Raycast from Camera.CFrame.Position to the target"),
@@ -1254,9 +1273,9 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>
         /// Real, script-creatable Roblox classes CoreAI does not implement yet (M1-05): Instance.new
-        /// raises their loud stub. Planned rungs follow the roadmap's own class lists (MVP14 GUI
-        /// subset, MVP15 Sound/ParticleEmitter); everything else is backlog or deliberately
-        /// unsupported. Services and NotCreatable classes are not listed: Instance.new refuses them
+        /// raises their loud stub. Planned rungs follow the roadmap's own class lists (MVP15 GUI
+        /// subset, MVP17 Sound/ParticleEmitter, P9 lighting, P10 asset classes); everything else is
+        /// backlog or deliberately unsupported. Services and NotCreatable classes are not listed: Instance.new refuses them
         /// with the Roblox "Unable to create" error, exactly as Roblox does.
         /// </summary>
         private static void RegisterKnownUnimplementedCreatableClasses(ClassCatalog catalog,
@@ -1266,14 +1285,16 @@ namespace CoreAI.Mods.Rbx.Instances
                 "create a Part and set Shape (for example Enum.PartType.Wedge) and Size instead";
             const string jointWorkaround =
                 "group the parts in a Model and move it with PivotTo, or keep them Anchored";
-            const string guiWorkaround = "build HUD content in 3D space until the GUI subset lands";
             const string guiBacklogWorkaround =
-                "use the GUI subset classes (ScreenGui, Frame, TextLabel, TextButton, ImageLabel, "
-                + "TextBox, UICorner, UIListLayout) once they land";
+                "draw 2D GUI with a ScreenGui in player.PlayerGui (Frame, TextLabel, TextButton, ImageLabel, "
+                + "TextBox, ScrollingFrame) or a UxmlService screen; this class is not drawn yet";
+            const string guiLayoutWorkaround =
+                "arrange the objects with a UIListLayout or UIGridLayout, or set each Position";
             const string effectsWorkaround =
                 "express the effect with parts, Transparency and Color animated by TweenService";
             const string lightingWorkaround =
-                "configure the host scene lighting outside Lua until the lighting slice is scheduled";
+                "set Lighting.ClockTime, Brightness, Ambient and OutdoorAmbient, or light a part with a "
+                + "PointLight, until this class lands";
             const string avatarWorkaround =
                 "avatar appearance is a platform backend concern, not planned; the character "
                 + "always has the default look";
@@ -1286,10 +1307,10 @@ namespace CoreAI.Mods.Rbx.Instances
                 RbxKnownUnimplementedClassDescriptor.Backlog("WedgePart", partShapeWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("CornerWedgePart", partShapeWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("TrussPart", partShapeWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("MeshPart",
+                RbxKnownUnimplementedClassDescriptor.Planned("MeshPart", "P10",
                     "create a Part; mesh assets are not loaded, and rbxassetid content is never "
                     + "fetched"),
-                RbxKnownUnimplementedClassDescriptor.Backlog("SpecialMesh", partShapeWorkaround),
+                RbxKnownUnimplementedClassDescriptor.Planned("SpecialMesh", "P10", partShapeWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("SpawnLocation",
                     "place a Part where players should appear and move the character there in "
                     + "Player.CharacterAdded"),
@@ -1344,17 +1365,17 @@ namespace CoreAI.Mods.Rbx.Instances
                     "use a ClickDetector on the part for interaction"),
                 RbxKnownUnimplementedClassDescriptor.Backlog("Team",
                     "no Teams service in this rung; track sides with an attribute on each Player"),
-                RbxKnownUnimplementedClassDescriptor.Backlog("Decal",
+                RbxKnownUnimplementedClassDescriptor.Planned("Decal", "P10",
                     "use Color and Material; image content is never fetched"),
-                RbxKnownUnimplementedClassDescriptor.Backlog("Texture",
+                RbxKnownUnimplementedClassDescriptor.Planned("Texture", "P10",
                     "use Color and Material, or a MaterialVariant for a tiled texture"),
-                RbxKnownUnimplementedClassDescriptor.Backlog("SurfaceAppearance",
+                RbxKnownUnimplementedClassDescriptor.Planned("SurfaceAppearance", "P10",
                     "use a MaterialVariant for a custom surface"),
                 RbxKnownUnimplementedClassDescriptor.Backlog("Highlight", effectsWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("SelectionBox", effectsWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Planned("Sound", "MVP15",
+                RbxKnownUnimplementedClassDescriptor.Planned("Sound", "MVP17",
                     "play no audio from Lua until the audio rung lands"),
-                RbxKnownUnimplementedClassDescriptor.Planned("ParticleEmitter", "MVP15",
+                RbxKnownUnimplementedClassDescriptor.Planned("ParticleEmitter", "MVP17",
                     effectsWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("Beam", effectsWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("Trail", effectsWorkaround),
@@ -1362,15 +1383,16 @@ namespace CoreAI.Mods.Rbx.Instances
                 RbxKnownUnimplementedClassDescriptor.Backlog("Smoke", effectsWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("Sparkles", effectsWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("Explosion", effectsWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("PointLight", lightingWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("SpotLight", lightingWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("SurfaceLight", lightingWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("Sky", lightingWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("Atmosphere", lightingWorkaround),
+                RbxKnownUnimplementedClassDescriptor.Planned("SpotLight", "P9", lightingWorkaround),
+                RbxKnownUnimplementedClassDescriptor.Planned("SurfaceLight", "P9", lightingWorkaround),
+                RbxKnownUnimplementedClassDescriptor.Planned("Sky", "P9", lightingWorkaround),
+                RbxKnownUnimplementedClassDescriptor.Planned("Atmosphere", "P9", lightingWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("Clouds", lightingWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("BloomEffect", lightingWorkaround),
+                RbxKnownUnimplementedClassDescriptor.Planned("BloomEffect", "P9", lightingWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("BlurEffect", lightingWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("ColorCorrectionEffect",
+                RbxKnownUnimplementedClassDescriptor.Planned("ColorCorrectionEffect", "P9",
+                    lightingWorkaround),
+                RbxKnownUnimplementedClassDescriptor.Planned("ColorGradingEffect", "P9",
                     lightingWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("SunRaysEffect", lightingWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("DepthOfFieldEffect",
@@ -1387,31 +1409,20 @@ namespace CoreAI.Mods.Rbx.Instances
                 RbxKnownUnimplementedClassDescriptor.Unsupported("BodyColors", avatarWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Unsupported("HumanoidDescription",
                     avatarWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Planned("ScreenGui", "MVP14", guiWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Planned("Frame", "MVP14", guiWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Planned("TextLabel", "MVP14", guiWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Planned("TextButton", "MVP14", guiWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Planned("ImageLabel", "MVP14", guiWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Planned("TextBox", "MVP14", guiWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Planned("UICorner", "MVP14", guiWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Planned("UIListLayout", "MVP14",
-                    guiWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("ImageButton", guiBacklogWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("ScrollingFrame",
-                    guiBacklogWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("BillboardGui", guiBacklogWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("SurfaceGui", guiBacklogWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("ViewportFrame",
-                    guiBacklogWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("UIGridLayout", guiBacklogWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("UIPadding", guiBacklogWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("UIStroke", guiBacklogWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("UIGradient", guiBacklogWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("UIScale", guiBacklogWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("UIAspectRatioConstraint",
-                    guiBacklogWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("UISizeConstraint",
-                    guiBacklogWorkaround),
+                RbxKnownUnimplementedClassDescriptor.Backlog("ViewportFrame", guiBacklogWorkaround),
+                RbxKnownUnimplementedClassDescriptor.Backlog("VideoFrame", guiBacklogWorkaround),
+                RbxKnownUnimplementedClassDescriptor.Backlog("CanvasGroup", guiBacklogWorkaround),
+                RbxKnownUnimplementedClassDescriptor.Planned("UIGradient", "MVP15",
+                    "use a solid BackgroundColor3; gradients are not drawn yet"),
+                RbxKnownUnimplementedClassDescriptor.Backlog("UITextSizeConstraint",
+                    "set TextSize directly, or TextScaled = true to fit the box"),
+                RbxKnownUnimplementedClassDescriptor.Backlog("UIPageLayout", guiLayoutWorkaround),
+                RbxKnownUnimplementedClassDescriptor.Backlog("UITableLayout", guiLayoutWorkaround),
+                RbxKnownUnimplementedClassDescriptor.Backlog("UIFlexItem", guiLayoutWorkaround),
+                RbxKnownUnimplementedClassDescriptor.Backlog("UIDragDetector",
+                    "drag with UserInputService.InputChanged and move the object's Position"),
                 RbxKnownUnimplementedClassDescriptor.Unsupported("PathfindingModifier",
                     "PathfindingService is not planned; steer with scripted waypoints"),
                 RbxKnownUnimplementedClassDescriptor.Unsupported("PathfindingLink",

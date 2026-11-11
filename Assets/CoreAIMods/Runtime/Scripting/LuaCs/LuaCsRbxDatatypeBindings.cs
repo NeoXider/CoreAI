@@ -22,6 +22,7 @@ namespace CoreAI.Ai.LuaCs
         private static readonly LuaTable Vector3Meta = BuildVector3Meta();
         private static readonly LuaTable Vector2Meta = BuildVector2Meta();
         private static readonly LuaTable CFrameMeta = BuildCFrameMeta();
+        private static readonly LuaTable RayMeta = BuildRayMeta();
         private static readonly LuaTable Color3Meta = BuildColor3Meta();
         private static readonly LuaTable UDimMeta = BuildUDimMeta();
         private static readonly LuaTable UDim2Meta = BuildUDim2Meta();
@@ -51,6 +52,11 @@ namespace CoreAI.Ai.LuaCs
         public static LuaValue Wrap(RbxCFrame value)
         {
             return Box(value, CFrameMeta);
+        }
+
+        public static LuaValue Wrap(RbxRay value)
+        {
+            return Box(value, RayMeta);
         }
 
         public static LuaValue Wrap(RbxColor3 value)
@@ -144,6 +150,16 @@ namespace CoreAI.Ai.LuaCs
             t["one"] = Wrap(RbxVector2.One);
             t["xAxis"] = Wrap(RbxVector2.XAxis);
             t["yAxis"] = Wrap(RbxVector2.YAxis);
+            return new LuaValue(t);
+        }
+
+        /// <summary>The <c>Ray</c> global: <c>Ray.new(Origin, Direction)</c>, each argument defaulting to zero.</summary>
+        public static LuaValue BuildRayGlobal()
+        {
+            LuaTable t = new();
+            t["new"] = Fn("Ray.new", ctx => Wrap(new RbxRay(
+                OptionalVector3(ctx, 0, "Ray.new", 1) ?? RbxVector3.Zero,
+                OptionalVector3(ctx, 1, "Ray.new", 2) ?? RbxVector3.Zero)));
             return new LuaValue(t);
         }
 
@@ -735,6 +751,52 @@ namespace CoreAI.Ai.LuaCs
             }
 
             throw ExpectedArgument(what, "a Vector2", value, argumentNumber);
+        }
+
+        // ---- Ray ----------------------------------------------------------------------------
+
+        private static LuaTable BuildRayMeta()
+        {
+            Dictionary<string, LuaValue> methods = new(StringComparer.Ordinal)
+            {
+                ["ClosestPoint"] = new LuaValue(Fn("Ray.ClosestPoint", ctx => Wrap(
+                    SelfRay(ctx).ClosestPoint(ReadVector3(ctx, 1, "Ray:ClosestPoint", 1))))),
+                ["Distance"] = new LuaValue(Fn("Ray.Distance", ctx =>
+                    SelfRay(ctx).Distance(ReadVector3(ctx, 1, "Ray:Distance", 1))))
+            };
+
+            LuaTable meta = new();
+            meta[Metamethods.Index] = Fn("Ray.__index", ctx =>
+            {
+                RbxRay self = SelfRay(ctx);
+                string key = ReadString(ctx, 1, "Ray member access");
+                switch (key)
+                {
+                    case "Origin": return Wrap(self.Origin);
+                    case "Direction": return Wrap(self.Direction);
+                    case "Unit": return Wrap(self.Unit);
+                    default:
+                        return methods.TryGetValue(key, out LuaValue method)
+                            ? method
+                            : throw NotAMember(key, "Ray");
+                }
+            });
+            meta[Metamethods.NewIndex] = Fn("Ray.__newindex", _ => throw ReadOnlyMember("Ray"));
+            meta[Metamethods.Eq] = Fn("Ray.__eq", ctx =>
+                TryUnbox(Arg(ctx, 0), out RbxRay a) && TryUnbox(Arg(ctx, 1), out RbxRay b) && a == b);
+            meta[Metamethods.ToString] = Fn("Ray.__tostring", ctx => SelfRay(ctx).ToString());
+            return Lock(meta);
+        }
+
+        private static RbxRay SelfRay(LuaFunctionExecutionContext ctx)
+        {
+            LuaValue value = Arg(ctx, 0);
+            if (TryUnbox(value, out RbxRay ray))
+            {
+                return ray;
+            }
+
+            throw ExpectedArgument("Ray method", "a Ray", value, 1);
         }
 
         // ---- CFrame -------------------------------------------------------------------------
@@ -1521,15 +1583,33 @@ namespace CoreAI.Ai.LuaCs
         private static Action<object[]> BuildSignalHandler(
             LuaCsRbxModContext context, object callable)
         {
+            // WHY one argument array per handler, reused on every fire: every spawn path of the scheduler
+            // copies the arguments it is handed before the handler's thread starts (CopyArguments), so the
+            // array is free again when SpawnSignalHandler returns; it is cleared so it holds no value alive.
+            object[] buffer = null;
             return args =>
             {
-                object[] luaArgs = new object[args.Length];
-                for (int index = 0; index < args.Length; index++)
+                int count = args.Length;
+                if (count == 0)
+                {
+                    context.Bindings.SpawnSignalHandler(context, callable, Array.Empty<object>());
+                    return;
+                }
+
+                object[] luaArgs = buffer != null && buffer.Length == count ? buffer : buffer = new object[count];
+                for (int index = 0; index < count; index++)
                 {
                     luaArgs[index] = MarshalSignalArg(context, args[index]);
                 }
 
-                context.Bindings.SpawnSignalHandler(context, callable, luaArgs);
+                try
+                {
+                    context.Bindings.SpawnSignalHandler(context, callable, luaArgs);
+                }
+                finally
+                {
+                    Array.Clear(luaArgs, 0, count);
+                }
             };
         }
 
@@ -1567,6 +1647,7 @@ namespace CoreAI.Ai.LuaCs
                 case RbxEnumItem item: return Wrap(item);
                 case RbxVector3 v3: return Wrap(v3);
                 case RbxVector2 v2: return Wrap(v2);
+                case RbxRay ray: return Wrap(ray);
                 case RbxUDim udim: return Wrap(udim);
                 case RbxUDim2 udim2: return Wrap(udim2);
                 case LuaCsRbxNetworkTable table: return BuildSignalTable(context, table, 0);

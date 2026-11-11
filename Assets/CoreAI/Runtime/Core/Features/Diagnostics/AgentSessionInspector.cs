@@ -93,7 +93,8 @@ namespace CoreAI.Diagnostics
                 : roleId.Trim();
             AiTaskRequest inspectRequest = CloneRequestForRole(request, resolvedRoleId);
 
-            AgentMemoryPolicy.RoleMemoryConfig roleConfig = _memoryPolicy.GetRoleConfig(resolvedRoleId);
+            AgentMemoryPolicy.RoleMemoryConfig roleConfig = AiTaskRequestScopeRules.ApplyHistoryMode(
+                _memoryPolicy.GetRoleConfig(resolvedRoleId), inspectRequest);
             string traceId = "agent-session-inspector";
             // WHY: AiOrchestrator builds the base prompt with the request-scoped SystemPrompt override
             // (AiOrchestrator.BuildRequestAsync), so resolving the role prompt alone would report a prompt
@@ -109,6 +110,7 @@ namespace CoreAI.Diagnostics
             string systemWithMemory = systemPrefix;
             AgentMemoryPromptParts memoryParts = default;
             if (_memoryPolicy.IsMemoryEnabled(resolvedRoleId) &&
+                AiTaskRequestScopeRules.AllowsDurableMemory(inspectRequest) &&
                 _memoryStore != null &&
                 _memoryStore.TryLoad(resolvedRoleId, out AgentMemoryState state) &&
                 !string.IsNullOrWhiteSpace(state?.Memory))
@@ -118,7 +120,8 @@ namespace CoreAI.Diagnostics
                 systemWithMemory = AppendTailBudgetSection(systemPrefix, memoryParts.PrefixBlock);
             }
 
-            IReadOnlyList<ILlmTool> tools = _memoryPolicy.GetToolsForRole(resolvedRoleId);
+            IReadOnlyList<ILlmTool> tools = AiTaskRequestScopeRules.MergeRequestTools(
+                _memoryPolicy.GetToolsForRole(resolvedRoleId), inspectRequest.RequestTools);
             tools = FilterToolsForRequest(tools, inspectRequest);
             string systemWithTools = AiToolContractPromptFormatter.AppendToolContract(
                 systemWithMemory,

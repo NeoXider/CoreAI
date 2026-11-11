@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Authority;
+using CoreAI.ChatMarkdown;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Threading;
@@ -233,6 +234,34 @@ namespace CoreAI.Chat
         /// <see cref="OnResponseReceived"/> and from work scheduled shortly after it.
         /// </summary>
         protected IReadOnlyList<Label> TurnStreamingBubbles => _turnStreamingBubbles;
+
+        private ICoreAiChatBubbleRenderer _bubbleRenderer;
+        private bool _bubbleRendererChosen;
+
+        /// <summary>
+        /// What assistant bubbles show. Null keeps plain labels. Unless a host sets it, the panel takes
+        /// <see cref="CoreAiChatMarkdownBubbles.CreateDefaultFor"/> on its first message: Markdown when the optional
+        /// renderer package is installed, plain labels otherwise or when this type overrides
+        /// <see cref="CreateMessageBubble"/>. User bubbles and tool-call lines always stay plain.
+        /// </summary>
+        public ICoreAiChatBubbleRenderer BubbleRenderer
+        {
+            get
+            {
+                if (!_bubbleRendererChosen)
+                {
+                    _bubbleRendererChosen = true;
+                    _bubbleRenderer = CoreAiChatMarkdownBubbles.CreateDefaultFor(this);
+                }
+
+                return _bubbleRenderer;
+            }
+            set
+            {
+                _bubbleRenderer = value;
+                _bubbleRendererChosen = true;
+            }
+        }
 
         /// <summary>Tracks the in-flight tool round so ToolRoundStarted can carry the last tool name.</summary>
         private string _lastToolNameInTurn;
@@ -711,6 +740,7 @@ namespace CoreAI.Chat
 
         protected virtual void OnDisable()
         {
+            ClearUiFocus();
             // WHY: BusyStateChanged(false) is raised later by teardown and handlers may submit reentrantly.
             // Publish lifecycle ownership first so that submit is rejected before it can reach a provider.
             _lifecycleActive = false;
@@ -830,6 +860,7 @@ namespace CoreAI.Chat
 
         protected virtual void OnDestroy()
         {
+            ClearUiFocus();
             _lifecycleActive = false;
             _destroyed = true;
             CoreAiRoutingUi.ControllerChanged -= HandleRoutingControllerChanged;
@@ -1179,6 +1210,7 @@ namespace CoreAI.Chat
             ChatContainer = ResolveChatContainer(Root);
             MessageScroll = Root.Q<ScrollView>("coreai-chat-scroll");
             InputField = Root.Q<TextField>("coreai-chat-input");
+            BindUiFocusReporting();
             SendButton = Root.Q<Button>("coreai-chat-send");
             ClearButton = Root.Q<Button>("coreai-chat-clear");
             CollapseButton = Root.Q<Button>("coreai-chat-collapse");
@@ -1595,6 +1627,15 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
+        /// True while a CoreAI text field other than this panel's own input has focus (the in-world chat overlay,
+        /// a Hub page): the panel's polled open and Escape keys then belong to that field. Pure for EditMode tests.
+        /// </summary>
+        internal static bool IsAnotherSurfaceTyping(bool anySurfaceHasTextFocus, bool ownInputHasFocus)
+        {
+            return anySurfaceHasTextFocus && !ownInputHasFocus;
+        }
+
+        /// <summary>
         /// Whether chat hotkeys (open + Escape) should react right now, given cursor visibility gating.
         /// Pure so EditMode tests can cover every lock-mode/visibility combination without a live cursor.
         /// </summary>
@@ -1836,6 +1877,93 @@ namespace CoreAI.Chat
             _runtimeOverrideEscapeChatShortcuts = null;
             _runtimeOverrideChatRequiresVisibleCursor = null;
             ApplyShortcutTooltips();
+        }
+
+        private readonly string _uiFocusSurfaceId = "coreai.chat." + Guid.NewGuid().ToString("N");
+        private CoreAI.UiFocus.ICoreAiUiFocus _uiFocus;
+        private bool _uiFocusResolved;
+        private bool _inputHasFocus;
+        private bool _pointerOverPanel;
+
+        /// <summary>
+        /// The UI focus service this panel reports its text focus and pointer hover to; resolved from the
+        /// scene's CoreAI scope on first use unless a host supplies one here.
+        /// </summary>
+        public void SetUiFocus(CoreAI.UiFocus.ICoreAiUiFocus uiFocus)
+        {
+            _uiFocus?.Clear(_uiFocusSurfaceId);
+            _uiFocus = uiFocus;
+            _uiFocusResolved = true;
+            ReportUiFocus();
+        }
+
+        private void BindUiFocusReporting()
+        {
+            InputField?.RegisterCallback<FocusInEvent>(_ => SetInputFocus(true));
+            InputField?.RegisterCallback<FocusOutEvent>(_ => SetInputFocus(false));
+            Root?.RegisterCallback<PointerEnterEvent>(_ => SetPointerOver(true));
+            Root?.RegisterCallback<PointerLeaveEvent>(_ => SetPointerOver(false));
+        }
+
+        private void SetInputFocus(bool focused)
+        {
+            _inputHasFocus = focused;
+            ReportUiFocus();
+        }
+
+        private void SetPointerOver(bool over)
+        {
+            _pointerOverPanel = over;
+            ReportUiFocus();
+        }
+
+        private void ReportUiFocus()
+        {
+            CoreAI.UiFocus.ICoreAiUiFocus focus = ResolveUiFocus();
+            focus?.Report(_uiFocusSurfaceId, _inputHasFocus, _pointerOverPanel);
+        }
+
+        private void ClearUiFocus()
+        {
+            _inputHasFocus = false;
+            _pointerOverPanel = false;
+            _uiFocus?.Clear(_uiFocusSurfaceId);
+        }
+
+        private CoreAI.UiFocus.ICoreAiUiFocus ResolveUiFocus()
+        {
+            if (_uiFocusResolved)
+            {
+                return _uiFocus;
+            }
+
+            _uiFocus = FindSceneUiFocus();
+            _uiFocusResolved = _uiFocus != null;
+            return _uiFocus;
+        }
+
+        /// <summary>
+        /// The UI focus service of the scene's CoreAI scope, or null while no scope is built; the fallback
+        /// path for surfaces (this panel, the Hub) that the container does not construct.
+        /// </summary>
+        public static CoreAI.UiFocus.ICoreAiUiFocus FindSceneUiFocus()
+        {
+            CoreAILifetimeScope lifetimeScope =
+                UnityEngine.Object.FindAnyObjectByType<CoreAILifetimeScope>(FindObjectsInactive.Include);
+            if (lifetimeScope?.Container == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                return (CoreAI.UiFocus.ICoreAiUiFocus)lifetimeScope.Container.Resolve(
+                    typeof(CoreAI.UiFocus.ICoreAiUiFocus));
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         protected virtual void InitService()
@@ -2256,7 +2384,7 @@ namespace CoreAI.Chat
                     Root.focusController == null ||
                     Root.focusController.focusedElement == null;
 
-                if (!noUitkKeyboardFocus)
+                if (!noUitkKeyboardFocus || IsAnotherSurfaceTyping(ResolveUiFocus()?.HasTextFocus ?? false, _inputHasFocus))
                 {
                     return;
                 }
@@ -3869,6 +3997,14 @@ namespace CoreAI.Chat
 
             if (!isUser)
             {
+                VisualElement rendered = BubbleRenderer?.CreateAssistantContent(NormalizeAssistantDisplayText(text));
+                if (rendered != null)
+                {
+                    ApplyAvatarSprite(avatar);
+                    AddBubbleContent(row, contentSlot, rendered);
+                    return row;
+                }
+
                 Label bubble = new(NormalizeAssistantDisplayText(text));
                 bubble.style.whiteSpace = WhiteSpace.Normal;
                 bubble.AddToClassList("coreai-chat-message");
@@ -4660,8 +4796,12 @@ namespace CoreAI.Chat
                 return;
             }
 
-            _streamingLabel.RemoveFromClassList(StreamingActiveUssClassName);
+            Label released = _streamingLabel;
+            released.RemoveFromClassList(StreamingActiveUssClassName);
             _streamingLabel = null;
+            // WHY the field, not BubbleRenderer: a bubble that never got text has nothing to complete, and teardown
+            // must not resolve a renderer.
+            _bubbleRenderer?.OnStreamingBubbleCompleted(released);
         }
 
         /// <summary>
@@ -4740,6 +4880,7 @@ namespace CoreAI.Chat
             }
 
             _streamingRenderCapReached = cappedAtLimit;
+            BubbleRenderer?.OnStreamingTextChanged(_streamingLabel);
             if (ScrollAnchor == ChatScrollAnchor.Bottom
                 || (ScrollAnchor == ChatScrollAnchor.FollowIfAtBottom && _readerFollowsBottom))
             {

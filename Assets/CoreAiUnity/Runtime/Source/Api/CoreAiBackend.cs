@@ -114,10 +114,14 @@ namespace CoreAI
     /// CoreAiBackendHealth health = await CoreAiBackend.VerifyAsync();
     /// </code>
     /// <para>
-    /// Switches mutate the shared <see cref="CoreAISettingsAsset"/> and hot-swap the routed primary
-    /// client inside the live <see cref="LlmClientRegistry"/>; the very next request uses the new
-    /// backend. When no <see cref="CoreAILifetimeScope"/> is up yet, only the settings are mutated and
-    /// the normal bootstrap picks them up (methods then return <c>false</c>).
+    /// Switches are <b>session overrides</b> on the <see cref="CoreAISettingsAsset"/>
+    /// (<see cref="CoreAISettingsAsset.HasSessionOverrides"/>): the getters return the switched values while the
+    /// asset's serialized fields stay untouched, so a key supplied at runtime is never saved into the asset, never
+    /// survives Play Mode and never reaches a build. The routed primary client inside the live
+    /// <see cref="LlmClientRegistry"/> is hot-swapped; the very next request uses the new backend. When no
+    /// <see cref="CoreAILifetimeScope"/> is up yet, only the session values change and the normal bootstrap picks
+    /// them up (methods then return <c>false</c>). <see cref="ClearSessionOverrides"/> returns to the asset's own
+    /// values; edit the asset in the inspector (or through its <c>Configure*</c> methods) to change them for good.
     /// </para>
     /// </summary>
     public static class CoreAiBackend
@@ -178,14 +182,45 @@ namespace CoreAI
                     return false;
                 }
 
-                settings.ConfigureClientOwnedApi(
-                    baseUrl,
-                    apiKey,
-                    model,
-                    temperature ?? settings.Temperature,
-                    timeoutSeconds ?? settings.RequestTimeoutSeconds,
-                    maxTokens ?? settings.MaxTokens,
-                    overrideTemperature ?? settings.OverrideTemperature);
+                ApplySessionHttp(settings, LlmExecutionMode.ClientOwnedApi, baseUrl, apiKey, model, temperature,
+                    timeoutSeconds, maxTokens, overrideTemperature);
+                return RebuildAndNotify(settings);
+            }
+        }
+
+        /// <summary>
+        /// <see cref="ApplyHttpApi(string,string,string,float?,int?,int?,bool?)"/> that keeps a given HTTP mode:
+        /// <see cref="LlmExecutionMode.ClientOwnedApi"/>, <see cref="LlmExecutionMode.ClientLimited"/> (the asset's
+        /// request and prompt caps stay in force) or <see cref="LlmExecutionMode.ServerManagedApi"/> (pass the
+        /// backend token as <paramref name="apiKey"/>).
+        /// </summary>
+        /// <exception cref="ArgumentException"><paramref name="mode"/> is not an HTTP mode.</exception>
+        public static bool ApplyHttpApi(
+            LlmExecutionMode mode,
+            string baseUrl,
+            string apiKey,
+            string model,
+            float? temperature = null,
+            int? timeoutSeconds = null,
+            int? maxTokens = null,
+            bool? overrideTemperature = null)
+        {
+            if (!LlmPipelineInstaller.IsHttpMode(mode))
+            {
+                throw new ArgumentException($"'{mode}' is not an HTTP execution mode.", nameof(mode));
+            }
+
+            lock (SyncRoot)
+            {
+                CoreAISettingsAsset? settings = ResolveSettings();
+                if (settings == null)
+                {
+                    LogWarning("ApplyHttpApi: no CoreAISettingsAsset available.");
+                    return false;
+                }
+
+                ApplySessionHttp(settings, mode, baseUrl, apiKey, model, temperature, timeoutSeconds, maxTokens,
+                    overrideTemperature);
                 return RebuildAndNotify(settings);
             }
         }
@@ -204,9 +239,8 @@ namespace CoreAI
                     return false;
                 }
 
-                settings.ConfigureServerManagedApi(backendBaseUrl, model, backendAuthToken,
-                    settings.Temperature, settings.RequestTimeoutSeconds, settings.MaxTokens,
-                    settings.OverrideTemperature);
+                ApplySessionHttp(settings, LlmExecutionMode.ServerManagedApi, backendBaseUrl, backendAuthToken, model,
+                    null, null, null, null);
                 return RebuildAndNotify(settings);
             }
         }
@@ -235,7 +269,7 @@ namespace CoreAI
                     return false;
                 }
 
-                settings.ConfigureLlmUnity(
+                settings.ApplySessionLlmUnity(
                     agentName ?? settings.LlmUnityAgentName,
                     string.IsNullOrWhiteSpace(ggufModelPath) ? settings.GgufModelPath : ggufModelPath,
                     settings.LlmUnityKeepAlive,
@@ -304,7 +338,7 @@ namespace CoreAI
                     return false;
                 }
 
-                settings.ConfigureOffline(useCustomResponse, customResponse, roles);
+                settings.ApplySessionOffline(useCustomResponse, customResponse, roles);
                 return RebuildAndNotify(settings);
             }
         }
@@ -321,27 +355,39 @@ namespace CoreAI
                     return false;
                 }
 
-                settings.ConfigureAuto();
+                settings.ApplySessionAuto();
                 return RebuildAndNotify(settings);
             }
         }
 
-        /// <summary>Changes the model on the current backend configuration (hot; next request uses it).</summary>
+        /// <summary>
+        /// Changes the model on the current backend configuration (hot; next request uses it). Session-only: the
+        /// asset keeps its own model.
+        /// </summary>
         public static bool SetModel(string model)
         {
-            return MutateAndRebuild(s => s.SetModelName(model));
+            return MutateAndRebuild(s => s.SetSessionModelName(model));
         }
 
-        /// <summary>Changes the API key on the current backend configuration (hot).</summary>
+        /// <summary>
+        /// Changes the API key on the current backend configuration (hot). Session-only: the key is never written
+        /// into the asset, so the next inspector edit cannot save it and a build cannot pack it.
+        /// </summary>
         public static bool SetApiKey(string apiKey)
         {
-            return MutateAndRebuild(s => s.SetApiKey(apiKey));
+            return MutateAndRebuild(s => s.SetSessionApiKey(apiKey));
         }
 
-        /// <summary>Changes the OpenAI-compatible base URL on the current backend configuration (hot).</summary>
+        /// <summary>Changes the OpenAI-compatible base URL on the current backend configuration (hot; session-only).</summary>
         public static bool SetApiBaseUrl(string baseUrl)
         {
-            return MutateAndRebuild(s => s.SetApiBaseUrl(baseUrl));
+            return MutateAndRebuild(s => s.SetSessionApiBaseUrl(baseUrl));
+        }
+
+        /// <summary>Drops every runtime switch of this session and returns to the asset's own backend fields (hot).</summary>
+        public static bool ClearSessionOverrides()
+        {
+            return MutateAndRebuild(s => s.ClearSessionOverrides());
         }
 
         /// <summary>
@@ -557,6 +603,28 @@ namespace CoreAI
         }
 
         #region Internals
+
+        private static void ApplySessionHttp(
+            CoreAISettingsAsset settings,
+            LlmExecutionMode mode,
+            string baseUrl,
+            string apiKey,
+            string model,
+            float? temperature,
+            int? timeoutSeconds,
+            int? maxTokens,
+            bool? overrideTemperature)
+        {
+            settings.ApplySessionHttpApi(
+                mode,
+                baseUrl,
+                apiKey,
+                model,
+                temperature ?? settings.Temperature,
+                timeoutSeconds ?? settings.RequestTimeoutSeconds,
+                maxTokens ?? settings.MaxTokens,
+                overrideTemperature ?? settings.OverrideTemperature);
+        }
 
         private static bool MutateAndRebuild(Action<CoreAISettingsAsset> mutate)
         {

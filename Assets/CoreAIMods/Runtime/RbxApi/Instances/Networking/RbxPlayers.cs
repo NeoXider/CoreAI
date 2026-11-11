@@ -35,6 +35,75 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
 
         public string NetworkActorId { get; private set; }
 
+        private RbxCameraMode _cameraMode = RbxCameraMode.Classic;
+        private double _cameraMaxZoomDistance = RbxStarterPlayer.DefaultCameraMaxZoomDistance;
+        private double _cameraMinZoomDistance = RbxStarterPlayer.DefaultCameraMinZoomDistance;
+
+        /// <summary>
+        /// Mirror <c>Player.CameraMode</c>: <c>LockFirstPerson</c> holds the default camera in first person.
+        /// Starts as <c>StarterPlayer.CameraMode</c> when the player joins.
+        /// </summary>
+        public RbxCameraMode CameraMode
+        {
+            get => _cameraMode;
+            set
+            {
+                if (!Enum.IsDefined(typeof(RbxCameraMode), value) || _cameraMode == value)
+                {
+                    return;
+                }
+
+                _cameraMode = value;
+                NotifyPropertyChanged(nameof(CameraMode));
+            }
+        }
+
+        /// <summary>
+        /// Mirror <c>Player.CameraMaxZoomDistance</c>, studs: how far the default camera may zoom out. A value
+        /// below <see cref="CameraMinZoomDistance"/> is raised to it. Starts as the StarterPlayer's.
+        /// </summary>
+        public double CameraMaxZoomDistance
+        {
+            get => _cameraMaxZoomDistance;
+            set => SetZoomDistance(ref _cameraMaxZoomDistance, Math.Max(value, _cameraMinZoomDistance),
+                nameof(CameraMaxZoomDistance));
+        }
+
+        /// <summary>
+        /// Mirror <c>Player.CameraMinZoomDistance</c>, studs: how far the default camera may zoom in. A value
+        /// above <see cref="CameraMaxZoomDistance"/> is lowered to it. Starts as the StarterPlayer's.
+        /// </summary>
+        public double CameraMinZoomDistance
+        {
+            get => _cameraMinZoomDistance;
+            set => SetZoomDistance(ref _cameraMinZoomDistance,
+                Math.Max(0d, Math.Min(value, _cameraMaxZoomDistance)), nameof(CameraMinZoomDistance));
+        }
+
+        /// <summary>Copies the StarterPlayer camera settings, as Roblox does when a player joins.</summary>
+        internal void CopyCameraSettingsFrom(RbxStarterPlayer starter)
+        {
+            if (starter == null)
+            {
+                return;
+            }
+
+            _cameraMode = starter.CameraMode;
+            _cameraMaxZoomDistance = starter.CameraMaxZoomDistance;
+            _cameraMinZoomDistance = starter.CameraMinZoomDistance;
+        }
+
+        private void SetZoomDistance(ref double field, double value, string property)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value) || field.Equals(value))
+            {
+                return;
+            }
+
+            field = value;
+            NotifyPropertyChanged(property);
+        }
+
         /// <summary>
         /// Mirror <c>Player.DisplayName</c> (writable; mirror tags carry no ReadOnly). Defaults to
         /// the username — the mirror states no fallback, so this default is OURS. A change fires
@@ -434,6 +503,7 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
                 }
 
                 player.Initialize(actor, userId, username, displayName);
+                player.CopyCameraSettingsFrom(Parent?.FindFirstChildOfClass("StarterPlayer") as RbxStarterPlayer);
                 player.Parent = this;
                 if (Scheduler != null)
                 {
@@ -630,6 +700,32 @@ namespace CoreAI.Mods.Rbx.Instances.Networking
             }
 
             return listed;
+        }
+
+        /// <summary>
+        /// The only player <see cref="GetPlayers"/> would list, or null when there are none or several;
+        /// allocation-free, for per-frame callers such as the default camera.
+        /// </summary>
+        public RbxPlayer GetSoleListedPlayer()
+        {
+            RbxPlayer sole = null;
+            for (int index = 0; index < _players.Count; index++)
+            {
+                RbxPlayer player = _players[index];
+                if (!IsListed(player))
+                {
+                    continue;
+                }
+
+                if (sole != null)
+                {
+                    return null;
+                }
+
+                sole = player;
+            }
+
+            return sole;
         }
 
         /// <summary>

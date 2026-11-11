@@ -9,15 +9,16 @@ Full methodology: [benchmark guide](../Assets/CoreAIBenchmark/README.md) · [ben
 
 ## Suite Versioning Policy
 
-Scores are only comparable **within the same suite version**. Scenario sets, checkpoint weights, penalties, and caps change between versions, so a v1.6 score and a hypothetical v1.7 score are different measurements even for the same model. The suite version is stamped into every report JSON (`suiteVersion`) and shown in the report header. When the suite version bumps, the leaderboard starts a new section; older sections are kept for history but never mixed into the current ranking.
+Scores are only comparable **within the same suite version**. Scenario sets, checkpoint weights, penalties, and caps change between versions, so a v1.6 score and a hypothetical v1.7 score are different measurements even for the same model. The suite version is stamped into every report JSON (`suiteVersion`) and shown in the report header. When the suite version bumps, the leaderboard starts a new section; older sections are kept for history but never mixed into the current ranking. A bump that changes only some scenarios says which in the version history; rows of the older version may then be carried into the new ranking with exactly those scenarios excluded (`tools/benchmark_chart.py --carry-over`, which labels such a row with its own suite and notes each excluded result).
 
-**Current suite version: v2.0** (G1-G8, 35 scenarios: 28 regular and 7 extreme, plus the optional G6 image-feedback twin). The current v2.0 section publishes the first maintainer run, the OpenCode free-tier sweep and its resumed run, a local qwen3.8 variant from the same multi-target run, and the 2026-10-18 DeepSeek/Dots/Nemotron runs. The v1.15 results are historical and cannot be ranked against v2.0.
+**Current suite version: v2.1** (G1-G8, 35 scenarios: 28 regular and 7 extreme, plus the optional G6 image-feedback twin). No v2.1 run is published yet. Suite 2.1 changes only the G6 image-feedback twin, so the v2.0 sections below stay comparable with v2.1 everywhere except a vision G6 score (see [Leaderboard — Suite v2.1](#leaderboard--suite-v21)). They publish the first maintainer run, the OpenCode free-tier sweep and its resumed run, a local qwen3.8 variant from the same multi-target run, and the 2026-10-18 DeepSeek/Dots/Nemotron runs. The v1.15 results are historical and cannot be ranked against v2.x.
 
 ### Suite version history
 
 | Suite | Status | Notes |
 |---|---|---|
-| v2.0 | **Current** | Adds an extreme tier: one extremely hard scenario per group except G6, reported as a separate extreme sub-score and still counted in the suite score. Regrades G6 on build geometry (enclosed courtyard, gate, towers, keep, roofs, objects inside and around the walls, spread, construction quality). Closes grader loopholes in G1-G5, G7 and G8, and the recorder reports real object positions and applies batch-level spawn defaults. Not comparable with any 1.x score. |
+| v2.1 | **Current** | Changes only the G6 image-feedback twin (`g6_free_build_vision`, run with `COREAI_BENCHMARK_VISION_MODE=image` or `both`): its camera tool gains a fifth function, `camera_orbit`, a point target (`targetX/Y/Z`) and `fov` on `camera_look`, and new tool descriptions, and the prompt's list of available tools names `camera_orbit`. The benchmark gives the model no free agent camera: it moves only the preview camera the visual world marks for it, as in v2.0. The text G6 (`g6_free_build`) and every other group, prompt, weight, penalty and cap are untouched, so v2.0 scores stay comparable except a vision G6 score. |
+| v2.0 | Comparable except vision G6 | Adds an extreme tier: one extremely hard scenario per group except G6, reported as a separate extreme sub-score and still counted in the suite score. Regrades G6 on build geometry (enclosed courtyard, gate, towers, keep, roofs, objects inside and around the walls, spread, construction quality). Closes grader loopholes in G1-G5, G7 and G8, and the recorder reports real object positions and applies batch-level spawn defaults. Not comparable with any 1.x score. |
 | v1.16 | Unpublished | Each clean-tools checkpoint declares what it measures; G4 `clean_tool` also fails on a failed call that never ran Lua. A G6 turn cut by the deadline is counted in generation time. Castle pacing applies only to the default castle goal. No run was published. |
 | v1.15 | Historical | Failed tools and invalid commands are charged once when a clean-tools checkpoint already covers them; G6 clean-tools is non-mandatory. Read-only benchmark Lua world queries use the virtual scene, camera history keeps the latest frame, provider transport timeouts remain environment failures after partial builds, and A/B report heroes prefer a captured vision run. |
 | v1.14 | Historical | G8 explicitly identifies both removable objects; the recorder preserves full tool arguments and G6 Lua replay. CoreAI 7.47.2 forwards captured camera images as image content to the model after a truncation fix; the published Bunny run predates that fix. G6 has a ten-minute wall budget and reserves capture/export time. |
@@ -27,6 +28,25 @@ Scores are only comparable **within the same suite version**. Scenario sets, che
 | v1.6 | Historical | G1-G7 scenario groups, six-dimension scoring, role fitness, mean-over-repetitions suite score. |
 | < v1.6 | Retired | Pre-leaderboard development iterations; results were not published and are not comparable. |
 
+## Leaderboard — Suite v2.1
+
+No v2.1 run has been published yet. What changed from v2.0, exactly:
+
+- **Only the G6 image-feedback twin** (`g6_free_build_vision`) changes. Its camera tool now offers five functions
+  instead of four: the new `camera_orbit` (yaw, pitch and distance around an object or a point), and `camera_look`
+  takes a point target (`targetX`, `targetY`, `targetZ`) and a field of view (`fov`) besides its position, rotation
+  and `lookAt`. Every camera function and the tool itself have new descriptions, and the system prompt's list of
+  available tools includes `camera_orbit`. Captures keep their size and JPEG quality. The benchmark keeps the free
+  agent camera off, so the model moves only the preview camera the visual world marks for it, as in v2.0.
+- **The text G6** (`g6_free_build`) and every scenario of G1-G5, G7 and G8 are untouched: same prompts, tools,
+  weights, penalties and caps.
+
+So the v2.0 rows below stay comparable with v2.1 runs everywhere except a vision G6 score. The 2026-10-15
+maintainer run (`224850`) graded its G6 column on the image-feedback twin, so its G6 cells, and the suite scores
+that include them, do not compare with a v2.1 vision build; the 2026-10-17 and 2026-10-18 runs used the text G6
+and carry over unchanged. `tools/benchmark_chart.py --carry-over 2.0` charts a v2.1 leaderboard that way: it keeps
+each carried v2.0 row, excludes its vision G6 result with a note, and therefore marks such a row "not ranked".
+
 ## Leaderboard — Suite v2.0
 
 <img src="Images/benchmark_leaderboard_2.0_dark.svg" alt="CoreAI Game-Creation Benchmark suite v2.0 leaderboard: suite score, extreme tier, group heatmap, tokens and failed tool calls" width="900">
@@ -35,7 +55,7 @@ Scores are only comparable **within the same suite version**. Scenario sets, che
 
 PNG exports of the same comparison charts: [dark PNG](Images/benchmark_leaderboard_2.0_dark.png), [light PNG](Images/benchmark_leaderboard_2.0.png).
 
-The chart merges every published v2.0 report under `Docs/BenchmarkRuns`: one row per display name, the newest usable scenario result wins, and newer Environment failures are filled from an older usable attempt when available. Rows with missing model-graded scenarios are hatched and are not rankable against complete rows.
+The chart merges every published v2.0 report under `Docs/BenchmarkRuns`: one row per display name, the newest usable scenario result wins, and newer Environment failures are filled from an older usable attempt when available. `tools/benchmark_chart.py` ranks only full runs: a row that graded every scenario of G1-G8 gets a rank number, and the G6 image-feedback build counts as the G6 scenario, so a run with either G6 variant is full. Every row prints its graded count next to its score (`35/35`). A row with a scenario or a whole group missing is listed after the ranked rows, hatched and marked "not ranked", and a run with no graded scenario is listed as "no graded scenarios" without a bar. `--markdown` adds Graded and Like-for-like columns and names the groups the like-for-like mean covers; `--ranked-only` leaves the unranked rows out.
 
 Maintainer run `20261015_224850` (2026-10-15): suite v2.0, 35 scenarios per model (28 regular, 7 extreme) plus the G6
 image-feedback build, one repetition, reasoning effort `high` (MiniCPM exposes none), no temperature sent
@@ -109,7 +129,10 @@ replaces those full rows with the numbers above.
 provider outage, so their suite score is a mean over a *different, easier* scenario set and cannot be
 compared with the table above. They are listed for completeness only; a clean re-run is still required
 before any ranking claim. The **shared-6** column is the honest like-for-like number: the mean over the
-six groups every scored model in this sweep actually ran (G1, G2, G3, G4, G5, G8).
+six groups every scored model in this sweep actually ran (G1, G2, G3, G4, G5, G8). The chart generator
+and the comparison report now compute this like-for-like mean themselves (the mean of the group scores
+over the groups every compared model graded, each group weighing the same) and name the groups it covers;
+over all published v2.0 rows those groups are G1-G5, G7 and G8.
 
 | Model | Graded | Suite (unrankable) | shared-6 | Missing | Runs |
 |---|---:|---:|---:|---|---|
@@ -144,9 +167,10 @@ How to read the sweep:
   resumed `122332` attempt (`HTTP 502`/`503` certificate failures), so no graded scenario exists. Both
   routes answered normally during the pre-flight check hours earlier and fail the same way on the raw
   OpenCode CLI with its default agent, so this is a provider-side outage, not a harness or profile
-  effect. Their zero-scenario reports are deliberately **not** published: a run with zero graded
-  scenarios renders a misleading "suite score 0.0" card, which is a bug worth fixing (see `TODO.md`)
-  rather than a result worth archiving.
+  effect. Their zero-scenario reports were deliberately **not** published: at the time a run with zero
+  graded scenarios rendered a misleading "suite score 0.0" card. Reports and cards now say "no graded
+  scenarios" with unrated tiles for such a run, and the chart and comparisons list it unranked without a
+  score, so a dead route can no longer read as a model that scored zero.
 - **G6 zeros split into two very different causes.** `Beam Free` scored a genuine 0.00: it produced
   **zero tool calls** in the build turn and answered in prose, so nothing was built. The other G6
   zeros in the sweep are Environment rows, not model failures. Only two free routes have a full
@@ -179,7 +203,9 @@ How to read the sweep:
 > not a controlled multi-rep A/B. **Archived reports for `013724` originally carried short target
 > labels (`beam`, `glm-flash`, ...) because the report's model id came from the target label; their
 > `metadata.modelId` was normalized to the picker display names above so the chart merges the two
-> attempts instead of creating duplicate rows.**
+> attempts instead of creating duplicate rows.** Target lists now take a separate `displayName`
+> (`{"label":"beam","displayName":"Beam Free",...}`): the report's model id is the display name while the
+> short label keeps naming the files, so this normalization is no longer needed for new runs.
 
 ## Local qwen3.8-flash-next-iq3_xxs in the same multi-target run — Suite v2.0
 
@@ -383,13 +409,13 @@ Add one row to the appropriate table (cloud or local) with your name/handle in *
 | Run id | The `yyyyMMdd_HHmmss` timestamp from the report filename — goes into the **Run** column. |
 | Model identity | Exact model id / file name and, for local models, the quantization (e.g. `Q4_K_M`, `imatrix`) and context length used. |
 | Hardware | For local runs: GPU/CPU, VRAM/RAM, and the runtime (LM Studio / llama.cpp / other) with version. Cloud runs: provider + endpoint type. |
-| Suite version | Must match the leaderboard section you are adding to (currently **v2.0**; check `suiteVersion` in your report JSON). |
+| Suite version | Must match the leaderboard section you are adding to (currently **v2.1**; check `suiteVersion` in your report JSON). |
 | Settings | Groups run (full current submissions must be G1-G8), repetitions, any timeout overrides, and any non-default endpoint settings. |
 
 ### 3. What reviewers check
 
 - The report JSON parses, its `suiteVersion` matches the section, and the table row matches the JSON's suite score, pass-rate, P/PA/F, dimension scores, tool-error rate, tokens, and run id.
-- All eight groups G1-G8 were run for a current v2.0 submission (partial-group runs are not rankable — dimensions the run did not measure cannot be compared).
+- All eight groups G1-G8 were run for a current v2.1 submission (partial-group runs are not rankable — dimensions the run did not measure cannot be compared). `tools/benchmark_chart.py --markdown` shows it: a rankable row reads `35/35` in its Graded column, and any other row is marked "not ranked".
 - The model id, quantization, and hardware declaration are plausible and complete.
 - No signs of harness modification (scenario prompts, weights, penalties, or caps changed locally).
 

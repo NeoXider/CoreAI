@@ -157,17 +157,15 @@ namespace CoreAI.Composition
 
             RegisterAgentVision(builder);
             RegisterWorldBuildingRolesTool(builder);
+            RegisterInventoryProfileTool(builder);
         }
 
         /// <summary>
-        /// Attaches the native <c>world_command</c> tool (<see cref="WorldLlmTool"/>) to the built-in
-        /// scene-building chat roles (<see cref="BuiltInAgentRoleIds.Creator"/> and
-        /// <see cref="BuiltInAgentRoleIds.Builder"/>). Both roles' system prompts
-        /// (<see cref="CoreAI.Ai.BuiltInAgentSystemPromptTexts.Creator"/> /
-        /// <see cref="CoreAI.Ai.BuiltInAgentSystemPromptTexts.Builder"/>) tell the model to place objects
-        /// with this tool; without the wiring the roles had no way to build and fell back to text/memory.
-        /// The Programmer role builds through the Lua/Rbx surface instead (see <c>CoreAiModsInstaller</c>)
-        /// and is intentionally left unchanged.
+        /// Registers the native <c>world_command</c> tool (<see cref="WorldLlmTool"/>) into the
+        /// <see cref="BuiltInToolProfileIds.WorldBuilder"/> profile, which the built-in scene-building roles
+        /// (<see cref="BuiltInAgentRoleIds.Creator"/> and <see cref="BuiltInAgentRoleIds.Builder"/>) reference.
+        /// Both roles' system prompts tell the model to place objects with this tool. The Programmer role
+        /// builds through the Lua/Rbx surface instead (see <c>CoreAiModsInstaller</c>).
         /// </summary>
         private static void RegisterWorldBuildingRolesTool(IContainerBuilder builder)
         {
@@ -180,13 +178,11 @@ namespace CoreAI.Composition
                     ICoreAISettings settings = container.Resolve<ICoreAISettings>();
                     IGameLogger logger = container.Resolve<IGameLogger>();
 
-                    // WHY: a fresh tool instance per role — WorldLlmTool is lightweight and AddToolForRole
-                    // keeps a per-role list, so sharing state across roles is neither needed nor desirable.
-                    // The contains-guard keeps the registration idempotent: a duplicate world_command name
-                    // resolves as ambiguous downstream, so a second pass (Play-Mode re-entry, a rebuilt or
-                    // shared policy across scopes) must not append it twice.
-                    AddWorldToolIfMissing(policy, BuiltInAgentRoleIds.Creator, executor, settings, logger);
-                    AddWorldToolIfMissing(policy, BuiltInAgentRoleIds.Builder, executor, settings, logger);
+                    // WHY a factory: each role of the profile gets its own lightweight instance, as before. The
+                    // profile replaces an entry by name, so a second pass (Play-Mode re-entry, a rebuilt or
+                    // shared policy across scopes) still leaves one world_command per role.
+                    policy.AddToolToProfile(BuiltInToolProfileIds.WorldBuilder, "world_command",
+                        _ => new WorldLlmTool(executor, settings, logger));
                 }
                 catch (VContainerException)
                 {
@@ -197,42 +193,77 @@ namespace CoreAI.Composition
         }
 
         /// <summary>
-        /// Adds a fresh <see cref="WorldLlmTool"/> to <paramref name="roleId"/> only when that role does
-        /// not already expose <c>world_command</c>, so repeated registration never produces the ambiguous
-        /// duplicate tool name that would break tool resolution.
+        /// Registers <c>get_inventory</c> (<see cref="InventoryLlmTool"/>) into the
+        /// <see cref="BuiltInToolProfileIds.Inventory"/> profile, which the built-in Merchant role references,
+        /// when the container holds an <see cref="InventoryTool.IInventoryProvider"/>. Without a provider nothing
+        /// is registered and the Merchant prompt's inventory instruction stays conditional on the tool.
         /// </summary>
-        private static void AddWorldToolIfMissing(
-            AgentMemoryPolicy policy,
-            string roleId,
-            ICoreAiWorldCommandExecutor executor,
-            ICoreAISettings settings,
-            IGameLogger logger)
+        private static void RegisterInventoryProfileTool(IContainerBuilder builder)
         {
-            foreach (ILlmTool existing in policy.GetToolsForRole(roleId))
+            builder.RegisterBuildCallback(container =>
             {
-                if (existing != null && existing.Name == "world_command")
+                try
                 {
-                    return;
-                }
-            }
+                    InventoryTool.IInventoryProvider provider =
+                        container.ResolveOrDefault<InventoryTool.IInventoryProvider>();
+                    if (provider == null)
+                    {
+                        return;
+                    }
 
-            policy.AddToolForRole(roleId, new WorldLlmTool(executor, settings, logger));
+                    container.Resolve<AgentMemoryPolicy>()
+                        .AddToolToProfile(BuiltInToolProfileIds.Inventory, new InventoryLlmTool(provider));
+                }
+                catch (VContainerException)
+                {
+                    // WHY: Minimal containers (tests, headless tools) may omit the orchestration services.
+                }
+            });
         }
 
         /// <summary>
-        /// Registers the agent-vision service and attaches the <c>camera</c> tool
-        /// (<c>camera_capture</c>/<c>camera_look</c>/<c>camera_list</c>) to the built-in Programmer role.
-        /// Capture is always read-only-safe on any camera; movement is gated by the opt-in
-        /// <see cref="CoreAI.Vision.CoreAiAgentCamera"/> marker so the player's camera is never hijacked.
-        /// See <c>Docs/CoreAI/agent-vision.md</c>. SmartChat is intentionally not registered by default
-        /// (hosts can add it via <see cref="AgentMemoryPolicy.AddToolForRole"/>).
+        /// Registers the agent-vision blocks (<see cref="Vision.AgentCameraOptions"/>,
+        /// <see cref="Vision.ICameraFrameReadback"/>, <see cref="Vision.IAgentCameraRig"/>), the service built from
+        /// them, and the <c>camera</c> tool (<c>camera_capture</c>/<c>camera_look</c>/<c>camera_orbit</c>/
+        /// <c>camera_list</c>) into the <see cref="BuiltInToolProfileIds.Vision"/> profile, which the built-in
+        /// Programmer role references. A block registered before this call is kept, so a game configures or
+        /// replaces one without touching the others. Capture is always read-only-safe on any camera; movement is
+        /// gated by the opt-in <see cref="CoreAI.Vision.CoreAiAgentCamera"/> marker (or the free agent camera) so
+        /// the player's camera is never hijacked. See <c>Docs/CoreAI/agent-vision.md</c>. SmartChat is
+        /// intentionally not given the profile by default (hosts can add it via
+        /// <see cref="AgentMemoryPolicy.SetToolProfilesForRole"/> or <see cref="AgentMemoryPolicy.AddToolForRole"/>).
         /// </summary>
-        private static void RegisterAgentVision(IContainerBuilder builder)
+        internal static void RegisterAgentVision(IContainerBuilder builder)
         {
-            // WHY: Factory lambda: the service's clock/rate-limit ctor args are not container-resolvable, so
-            // construct with its production defaults (Stopwatch clock, 1s capture rate limit).
-            builder.Register(_ => new Vision.AgentCameraService(), Lifetime.Singleton)
-                .As<Vision.IAgentCameraService>();
+            if (!builder.Exists(typeof(Vision.AgentCameraOptions)))
+            {
+                builder.RegisterInstance(Vision.AgentCameraOptions.CreateDefault());
+            }
+
+            if (!builder.Exists(typeof(Vision.ICameraFrameReadback), true))
+            {
+                builder.Register<Vision.ICameraFrameReadback>(_ => Vision.CameraFrameReadback.CreateDefault(),
+                    Lifetime.Singleton);
+            }
+
+            if (!builder.Exists(typeof(Vision.IAgentCameraRig), true))
+            {
+                builder.Register<Vision.IAgentCameraRig>(
+                    r => new Vision.AgentCameraRig(r.Resolve<Vision.AgentCameraOptions>(), null),
+                    Lifetime.Singleton);
+            }
+
+            if (!builder.Exists(typeof(Vision.IAgentCameraService), true))
+            {
+                // WHY a factory: the clock argument is not container-resolvable; null keeps the monotonic default.
+                builder.Register(r => new Vision.AgentCameraService(
+                            r.Resolve<Vision.AgentCameraOptions>(),
+                            r.Resolve<Vision.ICameraFrameReadback>(),
+                            r.Resolve<Vision.IAgentCameraRig>(),
+                            null),
+                        Lifetime.Singleton)
+                    .As<Vision.IAgentCameraService>();
+            }
 
             builder.RegisterBuildCallback(container =>
             {
@@ -241,8 +272,8 @@ namespace CoreAI.Composition
                     AgentMemoryPolicy policy = container.Resolve<AgentMemoryPolicy>();
                     Vision.IAgentCameraService cameraService =
                         container.Resolve<Vision.IAgentCameraService>();
-                    policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
-                        new CoreAI.Vision.CameraLlmTool(cameraService, BuiltInAgentRoleIds.Programmer));
+                    policy.AddToolToProfile(BuiltInToolProfileIds.Vision, "camera",
+                        roleId => new CoreAI.Vision.CameraLlmTool(cameraService, roleId));
                 }
                 catch (VContainerException)
                 {
@@ -268,11 +299,23 @@ namespace CoreAI.Composition
 
             public void Dispose()
             {
-                if (_asset != null)
+                if (_asset == null)
+                {
+                    return;
+                }
+
+                // WHY both: an edit-mode scope (a test, an editor tool) is disposed outside Play Mode, where
+                // Object.Destroy is refused with an error log and the asset would leak.
+                if (Application.isPlaying)
                 {
                     Object.Destroy(_asset);
-                    _asset = null;
                 }
+                else
+                {
+                    Object.DestroyImmediate(_asset);
+                }
+
+                _asset = null;
             }
         }
     }

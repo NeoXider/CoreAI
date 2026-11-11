@@ -22,6 +22,10 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>Mirror value 5: airborne and falling.</summary>
         Freefall = 5,
 
+        /// <summary>Mirror value 6: free flight with no gravity, entered by
+        /// <c>ChangeState(Flying)</c> (a DEV candidate: the mirror lists the state with no locomotion).</summary>
+        Flying = 6,
+
         /// <summary>Mirror value 7: the frame contact with the ground is regained.</summary>
         Landed = 7,
 
@@ -137,6 +141,43 @@ namespace CoreAI.Mods.Rbx.Instances
         /// of releasing it.
         /// </remarks>
         void Release()
+        {
+        }
+
+        /// <summary>
+        /// Drives the character along a world direction in studs (length at most 1, scaled by the
+        /// walk or flight speed) until called again; a zero vector stops it. Behind
+        /// <c>Humanoid:Move</c>.
+        /// </summary>
+        /// <remarks>
+        /// WHY the default walks through <see cref="MoveTo"/>: a host motor written before Move
+        /// existed still answers the default control script, by chasing a point a few studs ahead
+        /// that the next call moves on, instead of leaving the character frozen.
+        /// </remarks>
+        void Move(RbxVector3 directionStuds)
+        {
+            MoveTo(directionStuds.Magnitude <= 1e-4f
+                ? (RbxVector3?)null
+                : Position + directionStuds * MoveLookAheadStuds);
+        }
+
+        /// <summary>How far ahead the default <see cref="Move"/> aims its <see cref="MoveTo"/>, in studs.</summary>
+        float MoveLookAheadStuds => 4f;
+
+        /// <summary>
+        /// Enters (true) or leaves (false) free flight: no gravity, the full Move direction including
+        /// its vertical part. Answers whether the motor flies at all; the default cannot.
+        /// </summary>
+        bool SetFlying(bool flying)
+        {
+            return false;
+        }
+
+        /// <summary>True while the motor is in free flight.</summary>
+        bool IsFlying => false;
+
+        /// <summary>While flying, lets the character pass through other parts (noclip).</summary>
+        void SetNoclip(bool noclip)
         {
         }
     }
@@ -321,6 +362,8 @@ namespace CoreAI.Mods.Rbx.Instances
         private string _displayName = "";
         private bool _died;
         private RbxHumanoidState _state = RbxHumanoidState.Running;
+        private bool _noclip;
+        private RbxVector3 _requestedMove = RbxVector3.Zero;
         private RbxVector3? _walkTarget;
         private double _walkElapsed;
         private double _reportedRunningSpeed;
@@ -534,6 +577,24 @@ namespace CoreAI.Mods.Rbx.Instances
             {
                 _motor.MoveTo(_walkTarget);
             }
+            else if (_requestedMove.Magnitude > 1e-4f)
+            {
+                _motor.Move(_requestedMove);
+            }
+
+            // WHY the null motor is skipped: the pipeline attaches it for a moment before every
+            // rebuilt motor, and dropping flight on that transient would end it on every rebuild.
+            if (IsFlying && !(_motor is NullRbxCharacterMotor))
+            {
+                if (_motor.SetFlying(true))
+                {
+                    _motor.SetNoclip(_noclip);
+                }
+                else
+                {
+                    EnterState(RbxHumanoidState.Freefall);
+                }
+            }
             if (_scheduler != null)
             {
                 _scheduler.PhaseReached += OnPhaseReached;
@@ -572,6 +633,97 @@ namespace CoreAI.Mods.Rbx.Instances
         public RbxHumanoidState GetState()
         {
             return _state;
+        }
+
+        /// <summary>
+        /// The camera frame <c>Move(direction, true)</c> reads; the bindings point it at
+        /// <c>workspace.CurrentCamera</c>. Null makes a camera-relative move a world move.
+        /// </summary>
+        public Func<RbxCFrame?> CameraFrameProvider { get; set; }
+
+        /// <summary>True while the Humanoid is in free flight (<see cref="RbxHumanoidState.Flying"/>).</summary>
+        public bool IsFlying => _state == RbxHumanoidState.Flying;
+
+        /// <summary>
+        /// Framework switch (not a mirror member): while flying, the character passes through parts.
+        /// Off by default; a host preset or a chat command turns it on.
+        /// </summary>
+        public bool Noclip
+        {
+            get => _noclip;
+            set
+            {
+                _noclip = value;
+                if (IsFlying)
+                {
+                    _motor.SetNoclip(value);
+                }
+            }
+        }
+
+        /// <summary>The last direction <see cref="Move"/> resolved, in world studs, length at most 1.</summary>
+        public RbxVector3 RequestedMoveDirection => _requestedMove;
+
+        /// <summary>
+        /// Mirror <c>Humanoid:Move(moveDirection, relativeToCamera)</c>: walks (or, while flying, flies)
+        /// along a direction until called again. A non-zero move ends a <c>MoveTo</c> in progress with
+        /// <c>MoveToFinished(false)</c> (OURS: player input overrides click-to-move); a zero move leaves
+        /// it running. Refused while dead.
+        /// </summary>
+        public void Move(RbxVector3 moveDirection, bool relativeToCamera = false)
+        {
+            if (_died)
+            {
+                return;
+            }
+
+            RbxCFrame? camera = relativeToCamera ? CameraFrameProvider?.Invoke() : null;
+            RbxVector3 resolved = RbxCharacterControlMath.ResolveMoveDirection(
+                moveDirection, relativeToCamera, camera, keepVertical: IsFlying);
+            bool moving = resolved.Magnitude > 1e-4f;
+            if (moving && _walkTarget.HasValue)
+            {
+                FinishWalk(reached: false);
+            }
+
+            if (!moving && _walkTarget.HasValue)
+            {
+                return;
+            }
+
+            _requestedMove = moving ? resolved : RbxVector3.Zero;
+            _motor.Move(_requestedMove);
+        }
+
+        /// <summary>
+        /// Enters or leaves free flight. Entering needs a motor that flies; leaving drops to
+        /// <see cref="RbxHumanoidState.Freefall"/>, and the next grounded step lands. Answers whether
+        /// the requested state now holds.
+        /// </summary>
+        public bool SetFlying(bool flying)
+        {
+            if (_died || flying == IsFlying)
+            {
+                return !_died && flying == IsFlying;
+            }
+
+            if (flying)
+            {
+                if (!_motor.SetFlying(true))
+                {
+                    return false;
+                }
+
+                _motor.SetNoclip(_noclip);
+                EnterState(RbxHumanoidState.Flying);
+                return true;
+            }
+
+            _motor.SetNoclip(false);
+            _motor.SetFlying(false);
+            EnterState(RbxHumanoidState.Freefall);
+            FreeFalling.Fire(true);
+            return true;
         }
 
         /// <summary>
@@ -777,6 +929,11 @@ namespace CoreAI.Mods.Rbx.Instances
 
         private void UpdateGroundedState()
         {
+            if (_state == RbxHumanoidState.Flying)
+            {
+                return;
+            }
+
             if (!_motor.IsGrounded)
             {
                 if (_state != RbxHumanoidState.Freefall)
@@ -941,6 +1098,13 @@ namespace CoreAI.Mods.Rbx.Instances
         {
             _died = true;
             _walkTarget = null;
+            _requestedMove = RbxVector3.Zero;
+            if (_state == RbxHumanoidState.Flying)
+            {
+                _motor.SetNoclip(false);
+                _motor.SetFlying(false);
+            }
+
             // WHY the state changes before Died fires: Advance refuses a dead Humanoid, so this is
             // the last time the running speed is looked at, and a walk cycle driven by Running
             // alone would otherwise keep the last rate forever with auto-respawn off. EnterState

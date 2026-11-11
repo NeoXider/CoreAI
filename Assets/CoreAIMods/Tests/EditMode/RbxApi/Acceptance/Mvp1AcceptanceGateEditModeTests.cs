@@ -1009,20 +1009,34 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 "Shape", "Material", "MaterialVariant", "Position", "Size", "CFrame", "Orientation",
                 "Rotation", "Color", "Transparency", "Anchored", "CanCollide"
             }),
-            ("Camera", new[] { "CFrame", "CameraType", "CameraSubject" }),
+            ("Camera", new[] { "CFrame", "CameraType", "CameraSubject", "FieldOfView", "ViewportSize" }),
             ("Humanoid", new[]
             {
                 "Health", "MaxHealth", "WalkSpeed", "JumpPower", "JumpHeight", "UseJumpPower",
                 "DisplayName", "MoveDirection", "RootPart", "Jump"
             }),
-            ("Player", new[] { "UserId", "DisplayName", "Character" }),
+            ("Player", new[]
+            {
+                "UserId", "DisplayName", "Character", "CameraMode", "CameraMaxZoomDistance",
+                "CameraMinZoomDistance"
+            }),
             ("Players", new[] { "LocalPlayer", "CharacterAutoLoads", "RespawnTime", "MaxPlayers" }),
-            ("UserInputService", new[] { "MouseBehavior" }),
+            ("UserInputService", new[] { "MouseBehavior", "MouseDeltaSensitivity" }),
+            ("StarterPlayer", new[]
+            {
+                "DevComputerMovementMode", "CameraMode", "CameraMaxZoomDistance", "CameraMinZoomDistance"
+            }),
             ("ClickDetector", new[] { "MaxActivationDistance" }),
             ("MaterialVariant", new[]
             {
                 "BaseMaterial", "ColorMap", "NormalMap", "RoughnessMap", "MetalnessMap", "StudsPerTile"
             }),
+            ("Lighting", new[]
+            {
+                "ClockTime", "TimeOfDay", "GeographicLatitude", "Brightness", "Ambient", "OutdoorAmbient"
+            }),
+            ("Light", new[] { "Brightness", "Color", "Enabled", "Shadows" }),
+            ("PointLight", new[] { "Range" }),
             ("ValueBase", new[] { "Value" }),
             ("Tween", new[] { "Instance", "TweenInfo", "PlaybackState" })
         };
@@ -1039,17 +1053,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             "HealthChanged", "MoveToFinished", "Running", "Jumping", "FreeFalling", "StateChanged",
             "Touched", "TouchEnded", "CharacterAdded", "CharacterRemoving", "OnServerEvent",
             "OnClientEvent", "OnServerInvoke", "OnClientInvoke", "InvokeServer", "InvokeClient",
-            "InputBegan", "InputEnded", "InputChanged", "IsKeyDown", "GetKeysPressed",
-            "GetMouseLocation", "Heartbeat", "Stepped", "RenderStepped", "PreAnimation",
-            "PreSimulation", "PostSimulation", "PreRender", "MouseClick", "MouseHoverEnter",
-            "MouseHoverLeave", "Completed"
+            "InputBegan", "InputEnded", "InputChanged", "TextBoxFocused", "TextBoxFocusReleased",
+            "IsKeyDown", "GetKeysPressed", "GetMouseLocation", "GetMouseDelta", "Heartbeat", "Stepped",
+            "RenderStepped", "PreAnimation", "PreSimulation", "PostSimulation", "PreRender", "MouseClick",
+            "MouseHoverEnter", "MouseHoverLeave", "Completed", "LightingChanged"
         };
 
         /// <summary>One instance of every class that declares a row of the BoundProperties table.</summary>
         private static readonly string[] RepresentativeClasses =
         {
             "Part", "Model", "Workspace", "Camera", "Humanoid", "Player", "Players",
-            "UserInputService", "ClickDetector", "MaterialVariant", "IntValue", "Tween"
+            "UserInputService", "StarterPlayer", "ClickDetector", "MaterialVariant", "Lighting",
+            "PointLight", "IntValue", "Tween"
         };
 
         /// <summary>
@@ -1271,8 +1286,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                     Player = game:GetService('Players'):GetPlayers()[1],
                     Players = game:GetService('Players'),
                     UserInputService = game:GetService('UserInputService'),
+                    StarterPlayer = game:GetService('StarterPlayer'),
                     ClickDetector = Instance.new('ClickDetector'),
                     MaterialVariant = Instance.new('MaterialVariant'),
+                    Lighting = game:GetService('Lighting'),
+                    PointLight = Instance.new('PointLight'),
                     IntValue = Instance.new('IntValue'),
                     Tween = game:GetService('TweenService'):Create(
                         part, TweenInfo.new(1), {Transparency = 1}),

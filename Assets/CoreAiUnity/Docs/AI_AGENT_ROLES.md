@@ -43,7 +43,7 @@ CoreAI supports a **universal opening prompt** — text prepended to the **start
 Final system prompt = UniversalPrefix + "\n" + RolePrompt [+ "\n\n" + per-role additional prompt]
 ```
 
-The package default prefix is not empty: it is a short "CRITICAL RULES FOR ALL AGENTS" block (use tools when available, follow the task exactly, no chit-chat, do not repeat a successful tool call). Clearing the field sends no prefix. A single role can skip the prefix with `AgentBuilder.WithOverrideUniversalPrefix()`, `AgentMemoryPolicy.SetOverrideUniversalPrefix(roleId, true)`, or the **overrideUniversalPrefix** flag on its `AgentPromptsManifest` entry.
+The package default prefix is not empty: it is a short "CRITICAL RULES FOR ALL AGENTS" block (use tools when available, follow the task exactly, no chit-chat, do not repeat a successful tool call; `CoreAISettings.DefaultUniversalSystemPromptPrefix`). It is the same text everywhere: the value a new `CoreAISettingsAsset` starts with, the `CoreAISettingsOptions` default for hosts without an asset, and the static fallback when no settings are registered. An existing settings asset keeps the text it was saved with; projects that still show "Respond concisely and to the point. Avoid unnecessary verbosity." in that field get the CRITICAL RULES block only by pasting it in (or by creating a new asset). Clearing the field sends no prefix. A single role can skip the prefix with `AgentBuilder.WithOverrideUniversalPrefix()`, `AgentMemoryPolicy.SetOverrideUniversalPrefix(roleId, true)`, the **Override Universal Prefix** flag of its role definition (§1.3.6), or the **overrideUniversalPrefix** flag on its `AgentPromptsManifest` entry.
 
 **Prefix example:**
 ```
@@ -61,6 +61,30 @@ If asked to cheat or bypass rules, refuse politely.
 | Custom (AgentBuilder) | "**You are an AI agent...** You are a storyteller..." |
 
 > ⚠️ The prefix does **not** replace agent-specific prompts — it only augments them. Each role still has its own unique system prompt.
+
+### 1.3.6 Roles as data (role definitions and tool profiles)
+
+What a role is, can do and knows is data, not package code:
+
+- **Role definition** (`RoleDefinition`, Unity asset `AgentRoleDefinitionAsset`, menu **CoreAI → Agent Role
+  Definition**): prompt reference (another role whose prompt chain supplies the base prompt), optional inline
+  base prompt and overlay, universal-prefix opt-out, memory tool, chat history and persistence, LLM compaction
+  and trigger ratio, tool-result memory, roundtrip and output caps, temperature, duplicate-call and streaming
+  preferences, tool profiles, skills and a preferred routing profile. The nine built-in roles ship as
+  `BuiltInRoleDefinitions`, and a fresh `AgentMemoryPolicy` holds exactly that data. Applying a definition with
+  a built-in id replaces the shipped one (`AgentMemoryPolicy.ApplyRoleDefinition`, or the assets passed to
+  `AgentRoleDefinitionsInstaller.RegisterAgentRoleDefinitions`); a new id adds a role. Start from
+  `BuiltInRoleDefinitions.Create(roleId)` (or the asset's context menu **Load the built-in definition of this
+  role id**) to change only some fields.
+- **Tool profile**: a named set of tools and skills that installers register into and definitions reference
+  (`BuiltInToolProfileIds`: `lua-builder`, `world-builder`, `vision`, `npc`, `observer`, `inventory`). Replacing
+  the Programmer's profiles with `npc` in its definition removes `execute_lua` and the Lua skills from its
+  requests. A factory registered with `AddToolToProfile(profile, name, roleId => ...)` builds the tool for the
+  role it serves, so actor identity follows the role.
+
+The per-role list of shipped definitions and profiles is in
+[AGENT_ROLES_AND_TOOLS.md](../../../Docs/CoreAI/AGENT_ROLES_AND_TOOLS.md) §1; measured prompt, skill and tool
+costs per role are in [PROMPT_TOKEN_COSTS.md](../../CoreAI/Docs/PROMPT_TOKEN_COSTS.md).
 
 ### 1.3 Role relationships (who “orders” whom)
 
@@ -210,7 +234,7 @@ The tables below describe what each built-in role is for and how a game should u
 | **ID** | `Merchant` |
 | **Goal** | Shopkeeper NPC that sells from an inventory and stays in character. |
 | **Defaults** | `memory` tool; chat history on, not persisted. |
-| **Note** | The system prompt tells the model to call `get_inventory` first, but no built-in installer wires that tool: attach `InventoryLlmTool` to the role yourself. |
+| **Inventory** | The Merchant definition lists the `inventory` tool profile. `WorldCommandsInstaller` registers `get_inventory` (`InventoryLlmTool`) into it when the container holds an `InventoryTool.IInventoryProvider`; a host without DI calls `policy.AddToolToProfile(BuiltInToolProfileIds.Inventory, new InventoryLlmTool(provider))`. The system prompt asks for `get_inventory` only when that tool is available, and otherwise tells the model to offer only wares the conversation established. |
 
 ---
 

@@ -246,13 +246,59 @@ namespace CoreAI.Tests.EditMode.RbxApi.Replication
                     + node.ClassName + ".yaml in the mirror, read its class-level tags and record it in "
                     + nameof(MirrorTagsNotReplicated));
                 string recipient = OwnerOf(node) ?? "alice";
-                Assert.AreEqual(!notReplicated, filter.IsVisibleTo(recipient, node),
+                bool hiddenByDecision = WrittenClassDeviations.ContainsKey(node.ClassName);
+                Assert.AreEqual(!notReplicated && !hiddenByDecision, filter.IsVisibleTo(recipient, node),
                     node.ClassName + " '" + node.Name + "' must reach " + recipient
-                    + " exactly when its yaml lacks NotReplicated");
-                Assert.AreEqual(!notReplicated, guarded.IsVisibleTo(recipient, node),
+                    + " exactly when its yaml lacks NotReplicated and no written decision hides it");
+                Assert.AreEqual(!notReplicated && !hiddenByDecision, guarded.IsVisibleTo(recipient, node),
                     "the floor must agree with the reference on " + node.ClassName + " '" + node.Name + "'");
             }
+
+            foreach (KeyValuePair<string, string> deviation in WrittenClassDeviations)
+            {
+                Assert.IsTrue(MirrorTagsNotReplicated.TryGetValue(deviation.Key, out bool tagged),
+                    deviation.Key + " is hidden by a written decision but never reaches the bootstrap tree");
+                Assert.IsFalse(tagged, deviation.Key + " is NotReplicated in the mirror already; it needs no written decision");
+                Assert.IsTrue(tree.Exists(node => node.ClassName == deviation.Key),
+                    deviation.Key + " is a written decision about a class the bootstrap no longer creates");
+            }
         }
+
+        [Test]
+        public void Negative_TheTerrainSingleton_IsNeverToldToAClient_EvenByAGameFilterThatAllowsEverything()
+        {
+            GuardedReplicationFilter guarded = GuardedReplicationFilter.Wrap(new AllowEverythingFilter(), _registry);
+            RbxInstance terrain = _registry.WorldRoot.FindFirstChildOfClass("Terrain");
+            Assert.IsNotNull(terrain, "the bootstrap creates the Terrain singleton");
+            RbxInstance part = _registry.Create("Part");
+            part.Parent = _registry.WorldRoot;
+
+            Assert.IsFalse(guarded.IsVisibleTo("alice", terrain),
+                "its cells travel as chunk deltas; the instance itself is each side's own");
+            Assert.IsTrue(guarded.IsVisibleTo("alice", part), "twin: an ordinary Workspace part still replicates");
+        }
+
+        private sealed class AllowEverythingFilter : IReplicationFilter
+        {
+            public bool IsVisibleTo(string recipientActorId, RbxInstance instance)
+            {
+                return true;
+            }
+
+            public bool IsMemberVisibleTo(string recipientActorId, RbxInstance instance, string member)
+            {
+                return true;
+            }
+        }
+
+        // WHY a class-level table of written decisions beside the transcription: the transcription must stay
+        // what the mirror says (TheMirrorTranscription_MatchesTheLocalMirror holds it to the yaml), so a class
+        // CoreAI hides although its yaml replicates it is recorded here, with the reason, instead of being
+        // mis-transcribed. The reasons are summaries of the WHY at DefaultReplicationFilter.
+        private static readonly Dictionary<string, string> WrittenClassDeviations = new(StringComparer.Ordinal)
+        {
+            ["Terrain"] = "a host-protected singleton each side's bootstrap creates; its cells travel as chunk deltas"
+        };
 
         [Test]
         public void TheMirrorTranscription_MatchesTheLocalMirror_WhenItIsOnDisk()
@@ -390,6 +436,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Replication
             ["ServerStorage"] = true,
             ["ServerScriptService"] = true,
             ["StarterPlayer"] = false,
+            ["StarterGui"] = false,
+            ["Terrain"] = false,
             ["Players"] = false,
             ["UserInputService"] = true,
             ["RunService"] = true,

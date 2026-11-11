@@ -72,6 +72,28 @@ namespace CoreAI.Ai.Hub
         /// it is started or saved by hand.
         /// </summary>
         public bool SuspendedAfterBudgetTrips;
+
+        /// <summary>
+        /// The stored <see cref="LuaModManifest.LoadOrder"/> (0 when none is recorded or the mod is not
+        /// stored); a folder switched on as a whole starts its mods in this order.
+        /// </summary>
+        public long LoadOrder;
+    }
+
+    /// <summary>
+    /// Optional Hub mod-service contract for moving a mod to another folder. The folder is the
+    /// <c>category:</c> entry of the mod's <c>@coreai</c> header, so a move rewrites that one entry in the
+    /// stored package and, for a loaded mod, in the live source, without running the mod again.
+    /// </summary>
+    public interface IHubModFolderWriter
+    {
+        /// <summary>
+        /// Moves mod <paramref name="id"/> into <paramref name="folderPath"/> (a <c>/</c>-separated path, empty
+        /// for the top level). Throws <see cref="ArgumentException"/> naming the rule for an invalid path or a
+        /// header that cannot be edited, and <see cref="InvalidOperationException"/> when the mod is unknown
+        /// or the store cannot confirm the write.
+        /// </summary>
+        void SetModFolder(string id, string folderPath);
     }
 
     /// <summary>Source-store outcome, separate from successful live execution.</summary>

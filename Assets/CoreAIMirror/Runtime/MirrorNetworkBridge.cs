@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Text;
 using CoreAI.Authority;
@@ -58,11 +59,21 @@ namespace CoreAI.Net.Mirror
     /// dropped, so a slow answer cannot resolve a call that already failed.
     /// </description></item>
     /// <item><description>
-    /// <b>Budget, on the sending side.</b> Client-to-server traffic is charged against the shared
+    /// <b>Budget, on both sides.</b> Client-to-server traffic is charged against the shared
     /// <see cref="RbxNetworkRateLimiter"/> where it is SENT: a client bridge charges its own
     /// FireServer and InvokeServer, and a server bridge charges the in-process traffic of its
-    /// host-local actors. What a server RECEIVES from a remote client is not budgeted yet; that is
-    /// a known limit, and this rule is no defence against a hostile client.
+    /// host-local actors. What a server RECEIVES is metered again per connection
+    /// (<see cref="CoreAiMirrorInboundLimits"/>), because a hostile client does not run its own
+    /// limiter: past the connection's rates a remote is dropped and counted before the world
+    /// decodes or dispatches it, a RemoteFunction call is answered with a failure, and a payload
+    /// larger than its channel allows is dropped and counted whatever the rates.
+    /// </description></item>
+    /// <item><description>
+    /// <b>Host mode.</b> Mirror's host-mode local connection, bound through
+    /// <see cref="BindHostLocalConnection"/>, is the host's own player: everything addressed to it
+    /// is delivered in process, it is never sent a notice or a clock anchor and never dropped, and
+    /// when Mirror removes it — which raises no disconnect event — the next <see cref="Pump"/>
+    /// ends its session.
     /// </description></item>
     /// <item><description>
     /// <b>Client-to-server traffic never leaves a server.</b> On a server, a ClientToServer call
@@ -232,6 +243,16 @@ namespace CoreAI.Net.Mirror
         public const int MaxNoticeMessageBytes = 1024;
 
         /// <summary>
+        /// Seconds during which one connection's inbound drops are said once; the drops in between
+        /// are counted and said with the next line.
+        /// </summary>
+        public const double InboundDropLogIntervalSeconds = 10d;
+
+        /// <summary>What a client's RemoteFunction call dropped by the inbound limit is answered.</summary>
+        public const string InboundLimitedReason =
+            "the server dropped this call: this connection sent more than its inbound limit allows";
+
+        /// <summary>
         /// How much of the gap between an anchor and the current estimate one anchor closes, below
         /// <see cref="ClockStepThresholdSeconds"/>.
         /// </summary>
@@ -316,6 +337,10 @@ namespace CoreAI.Net.Mirror
         private readonly HashSet<int> _tearingDown = new();
         private readonly Dictionary<int, long> _notifyingDisconnect = new();
         private readonly List<HeldSend> _heldUntilAdmitted = new();
+        private readonly Dictionary<int, NetworkConnectionToClient> _hostLocalConnections = new();
+        private readonly HashSet<int> _admissionRecordsKept = new();
+        private readonly CoreAiMirrorInboundMeter _inboundMeter;
+        private readonly CoreAiMirrorRosterReplica _roster = new();
         private readonly RbxNetworkRateLimiter _rateLimiter;
         private readonly Func<double> _clockSeconds;
         private readonly IRbxClockSource _wallClock;
@@ -350,6 +375,7 @@ namespace CoreAI.Net.Mirror
         private bool _unadmittedSendLogged;
         private bool _admissionHoldOverflowLogged;
         private bool _malformedDropLogged;
+        private bool _oversizeDropLogged;
 
         /// <summary>
         /// Creates the bridge for one Mirror side, started or not, and registers its handlers there;
@@ -370,9 +396,15 @@ namespace CoreAI.Net.Mirror
         /// world composed without its own <see cref="IRbxClockSource"/> reads; a world that reads
         /// another clock composes its bridge with that same clock.
         /// </param>
+        /// <param name="inboundLimits">
+        /// What a server lets each admitted connection send it before dropping; null means the
+        /// defaults, <see cref="CoreAiMirrorInboundLimits.Unlimited"/> meters nothing. Copied, so
+        /// later edits to the instance passed change nothing. Unused on a client.
+        /// </param>
         public MirrorNetworkBridge(bool isServer, CoreAiMirrorAuthenticator authenticator = null,
             int maxClientRequestsPerSecond = RbxNetworkRateLimiter.DefaultMaxClientRequestsPerSecond,
-            Func<double> clockSeconds = null, Action<string> log = null, IRbxClockSource wallClock = null)
+            Func<double> clockSeconds = null, Action<string> log = null, IRbxClockSource wallClock = null,
+            CoreAiMirrorInboundLimits inboundLimits = null)
         {
             _isServer = isServer;
             _authenticator = authenticator;
@@ -380,8 +412,70 @@ namespace CoreAI.Net.Mirror
             _clockSeconds = clockSeconds ?? (() => NetworkTime.localTime);
             _wallClock = wallClock ?? new RbxSystemClockSource();
             _rateLimiter = new RbxNetworkRateLimiter(maxClientRequestsPerSecond, _clockSeconds);
+            _inboundMeter = new CoreAiMirrorInboundMeter(inboundLimits);
             AttachHandlers();
         }
+
+        /// <summary>A copy of the inbound limits this bridge enforces on a server.</summary>
+        public CoreAiMirrorInboundLimits InboundLimits => _inboundMeter.Limits;
+
+        /// <summary>Remotes a server dropped because their connection exceeded its inbound limits.</summary>
+        public int InboundMessagesDropped => _inboundMeter.MessagesDropped;
+
+        /// <summary>Payload bytes of those remotes.</summary>
+        public long InboundBytesDropped => _inboundMeter.BytesDropped;
+
+        /// <summary>
+        /// Remotes a server dropped because their payload was larger than their channel carries:
+        /// 1,000 bytes for an unreliable event, 64 KiB for a reliable event or a RemoteFunction call.
+        /// </summary>
+        public int InboundOversizeDropped { get; private set; }
+
+        /// <summary>
+        /// Host-mode local connections whose session ended because Mirror removed the connection,
+        /// which it does without a disconnect event.
+        /// </summary>
+        public int HostLocalConnectionsReleased { get; private set; }
+
+        /// <summary>Whether a connection is bound as Mirror's host-mode local connection, served in process.</summary>
+        public bool IsHostLocalConnection(int connectionId) => _hostLocalConnections.ContainsKey(connectionId);
+
+        /// <summary>
+        /// What one connection has sent a server since it was bound, as the inbound meter counted
+        /// it; false when it sent nothing metered or is no longer bound.
+        /// </summary>
+        public bool TryGetInboundTraffic(int connectionId, out CoreAiMirrorInboundTraffic traffic)
+        {
+            return _inboundMeter.TryGetTraffic(connectionId, out traffic);
+        }
+
+        /// <summary>Every bound connection's inbound traffic, as the meter counted it.</summary>
+        public List<CoreAiMirrorInboundTraffic> GetInboundTraffic()
+        {
+            return _inboundMeter.Snapshot();
+        }
+
+        /// <summary>
+        /// On a client, who the server says is in the room; empty until the server's first roster
+        /// snapshot on this connection, and cleared when the connection changes.
+        /// </summary>
+        public CoreAiMirrorRosterReplica Roster => _roster;
+
+        /// <summary>Roster messages a client applied.</summary>
+        public int RosterMessagesReceived { get; private set; }
+
+        /// <summary>
+        /// On a client, raised after each roster message is applied; a throw from a listener is
+        /// logged, never thrown into Mirror's handler.
+        /// </summary>
+        public event Action<CoreAiMirrorRosterReplica> RosterChanged;
+
+        /// <summary>
+        /// On a server, raised with a connection's id when its client acknowledges readiness — after
+        /// its first clock anchor and before what was held for it — so the session host can send it
+        /// the roster first.
+        /// </summary>
+        internal event Action<int> ConnectionReady;
 
         /// <inheritdoc />
         public RbxNetworkTopology Topology =>
@@ -400,7 +494,8 @@ namespace CoreAI.Net.Mirror
         /// Packets dropped because the envelope was malformed: from an admitted peer, a remote id
         /// that is not a server-assigned instance id, a reliability byte outside the enum, or a
         /// server-bound envelope claiming another direction; from a server, a clock anchor that is
-        /// not a positive finite time. Never delivered, never thrown.
+        /// not a positive finite time or a roster message this client cannot apply. Never delivered,
+        /// never thrown.
         /// </summary>
         public int MalformedPacketsDropped { get; private set; }
 
@@ -776,10 +871,125 @@ namespace CoreAI.Net.Mirror
             _peersByConnection[connectionId] = peer;
             _bindingGenerations[connectionId] = generation;
             _connectionsByActor[peer.ActorId] = connectionId;
+            _hostLocalConnections.Remove(connectionId);
+            _inboundMeter.Forget(connectionId);
             if (awaitClientReady && !_acknowledged.Contains(connectionId)
                                  && !_joining.ContainsKey(connectionId))
             {
                 _joining[connectionId] = new JoiningConnection { BoundAt = _clockSeconds() };
+            }
+        }
+
+        /// <summary>
+        /// Binds Mirror's host-mode local connection to the host's own actor: everything addressed
+        /// to that actor is delivered in process from then on, there is no readiness to wait for,
+        /// and no notice, clock anchor or roster is sent to it. The session host binds through this
+        /// when the host's own client is admitted.
+        /// </summary>
+        /// <remarks>
+        /// WHY in process and not over the local connection: the host has one world, and the local
+        /// client's half of Mirror has no CoreAI client bridge beside the server one — a CoreAI
+        /// message queued on the local connection would reach a client with no handler for it, and
+        /// Mirror disconnects a client for that. WHY never dropped: dropping the local connection
+        /// would take the host's player off Mirror altogether (A4-10).
+        /// </remarks>
+        /// <exception cref="InvalidOperationException">On a client bridge.</exception>
+        /// <exception cref="ArgumentException">When the connection is not Mirror's local one.</exception>
+        public void BindHostLocalConnection(int connectionId, RbxNetworkPeer peer)
+        {
+            if (!_isServer)
+            {
+                throw new InvalidOperationException(
+                    "only a server bridge has a host-mode local connection; a client has one connection, to its server");
+            }
+
+            if (!NetworkServer.connections.TryGetValue(connectionId, out NetworkConnectionToClient conn)
+                || !(conn is LocalConnectionToClient))
+            {
+                throw new ArgumentException(
+                    "connection " + connectionId + " is not Mirror's host-mode local connection; bind a "
+                    + "remote connection through BindConnection", nameof(connectionId));
+            }
+
+            ReleaseVanishedHostLocalConnections();
+            BindConnection(connectionId, peer, awaitClientReady: false);
+            _joining.Remove(connectionId);
+            _hostLocalConnections[connectionId] = conn;
+        }
+
+        /// <summary>
+        /// Ends the session of every host-local connection Mirror no longer holds: removed when the
+        /// host's client stopped, or replaced by a newer local connection on the same id. Runs on
+        /// every server <see cref="Pump"/> and before a host-local binding.
+        /// </summary>
+        /// <remarks>
+        /// WHY it exists: Mirror removes its local connection without raising the server's
+        /// disconnect event, so nothing else would ever tell the world the host's player left. WHY
+        /// a newer local connection's admission record is kept: by the time this runs for an id a
+        /// newer local client already holds, that client's own admission may be on record, and the
+        /// departing session's release must not take it with it.
+        /// </remarks>
+        internal void ReleaseVanishedHostLocalConnections()
+        {
+            if (!_isServer || _hostLocalConnections.Count == 0)
+            {
+                return;
+            }
+
+            List<KeyValuePair<int, NetworkConnectionToClient>> vanished = null;
+            foreach (KeyValuePair<int, NetworkConnectionToClient> pair in _hostLocalConnections)
+            {
+                if (!NetworkServer.connections.TryGetValue(pair.Key, out NetworkConnectionToClient live)
+                    || !ReferenceEquals(live, pair.Value))
+                {
+                    vanished ??= new List<KeyValuePair<int, NetworkConnectionToClient>>();
+                    vanished.Add(pair);
+                }
+            }
+
+            for (int index = 0; vanished != null && index < vanished.Count; index++)
+            {
+                int connectionId = vanished[index].Key;
+                if (!_hostLocalConnections.TryGetValue(connectionId, out NetworkConnectionToClient bound)
+                    || !ReferenceEquals(bound, vanished[index].Value))
+                {
+                    continue;
+                }
+
+                HostLocalConnectionsReleased++;
+                bool replaced = NetworkServer.connections.ContainsKey(connectionId);
+                if (replaced)
+                {
+                    _admissionRecordsKept.Add(connectionId);
+                }
+
+                try
+                {
+                    NotifyDisconnected(connectionId, RbxNetworkDisconnectReason.TransportLost);
+                }
+                catch (Exception exception)
+                {
+                    // WHY contained: this runs from the frame pump and from an admission, and a world
+                    // teardown that threw must not stop either.
+                    _log("[CoreAI.Mirror] the teardown of the host's local connection " + connectionId
+                         + " threw after Mirror removed it: " + exception.Message);
+                }
+                finally
+                {
+                    try
+                    {
+                        if (_hostLocalConnections.TryGetValue(connectionId, out NetworkConnectionToClient still)
+                            && ReferenceEquals(still, bound))
+                        {
+                            ReleaseConnection(connectionId, PeerDisconnectedReason);
+                            _hostLocalConnections.Remove(connectionId);
+                        }
+                    }
+                    finally
+                    {
+                        _admissionRecordsKept.Remove(connectionId);
+                    }
+                }
             }
         }
 
@@ -822,6 +1032,11 @@ namespace CoreAI.Net.Mirror
             }
 
             ReconcileWithTheLiveConnection();
+            if (_admittedActorId == null || !ReferenceEquals(_admittedOn, NetworkClient.connection))
+            {
+                _roster.Clear();
+            }
+
             _admittedActorId = actorId.Trim();
             _admittedOn = NetworkClient.connection;
             _unadmittedDropLogged = false;
@@ -849,6 +1064,7 @@ namespace CoreAI.Net.Mirror
             _admittedActorId = null;
             _admittedOn = null;
             _readyAcknowledgedOn = null;
+            _roster.Clear();
             if (!_isServer)
             {
                 DiscardHeldUntilAdmitted();
@@ -994,6 +1210,7 @@ namespace CoreAI.Net.Mirror
                             ReleaseConnection(connectionId, PeerDisconnectedReason);
                         }
                         else if (!_peersByConnection.ContainsKey(connectionId) && admission != null
+                                 && !_admissionRecordsKept.Contains(connectionId)
                                  && ReferenceEquals(_authenticator?.ResultFor(connectionId), admission)
                                  && (!NetworkServer.connections.TryGetValue(connectionId,
                                          out NetworkConnectionToClient current)
@@ -1139,6 +1356,7 @@ namespace CoreAI.Net.Mirror
             }
 
             double now = _clockSeconds();
+            ReleaseVanishedHostLocalConnections();
             PerformOwedDrops(now, all: false);
             DropConnectionsPastTheReadinessDeadline(now);
             SendDueClockAnchors(now);
@@ -1312,7 +1530,7 @@ namespace CoreAI.Net.Mirror
             }
 
             if (_isServer && (message.Direction == RbxNetworkDirection.ClientToServer
-                              || IsLocalActor(message.RecipientActorId)))
+                              || IsServedInProcess(message.RecipientActorId)))
             {
                 DeliverRequestLocally(message, response);
                 return;
@@ -1493,6 +1711,8 @@ namespace CoreAI.Net.Mirror
                 requireAuthentication: false);
             NetworkClient.ReplaceHandler<CoreAiDisconnectNoticeMessage>(OnClientDisconnectNotice,
                 requireAuthentication: false);
+            NetworkClient.ReplaceHandler<CoreAiRosterMessage>(OnClientRoster,
+                requireAuthentication: false);
         }
 
         /// <inheritdoc />
@@ -1519,6 +1739,8 @@ namespace CoreAI.Net.Mirror
             _joining.Clear();
             _acknowledged.Clear();
             _tearingDown.Clear();
+            _hostLocalConnections.Clear();
+            _roster.Clear();
             _heldUntilAdmitted.Clear();
             _heldUntilAdmittedBytes = 0;
             _heldOn = null;
@@ -1530,6 +1752,8 @@ namespace CoreAI.Net.Mirror
             RequestReceived = null;
             PeerDisconnected = null;
             DisconnectNoticeReceived = null;
+            RosterChanged = null;
+            ConnectionReady = null;
             BindingReleased = null;
             BindingReleasedWithPeer = null;
             FailAllPending(DisposedReason);
@@ -1551,6 +1775,7 @@ namespace CoreAI.Net.Mirror
             NetworkClient.UnregisterHandler<CoreAiRemoteResponseMessage>();
             NetworkClient.UnregisterHandler<CoreAiServerClockMessage>();
             NetworkClient.UnregisterHandler<CoreAiDisconnectNoticeMessage>();
+            NetworkClient.UnregisterHandler<CoreAiRosterMessage>();
         }
 
         private void OnServerEvent(NetworkConnectionToClient conn, CoreAiRemoteEventMessage wire)
@@ -1582,11 +1807,23 @@ namespace CoreAI.Net.Mirror
                 return;
             }
 
+            int bytes = wire.Payload?.Length ?? 0;
+            if (!AdmitInbound(connectionId, peer, bytes))
+            {
+                return;
+            }
+
             if (wire.Direction != (byte)RbxNetworkDirection.ClientToServer
                 || !IsKnownReliability(wire.Reliability)
                 || !IsServerAssigned(wire.RemoteId))
             {
                 DropMalformed();
+                return;
+            }
+
+            if (bytes > InboundCeiling((RbxNetworkReliability)wire.Reliability))
+            {
+                DropOversize();
                 return;
             }
 
@@ -1654,6 +1891,18 @@ namespace CoreAI.Net.Mirror
                 return;
             }
 
+            NetworkServer.connections.TryGetValue(connectionId, out NetworkConnectionToClient asked);
+            uint correlationId = wire.CorrelationId;
+            int bytes = wire.Payload?.Length ?? 0;
+            if (!AdmitInbound(connectionId, peer, bytes))
+            {
+                // WHY answered: an honest client over its limit would otherwise wait out the whole
+                // timeout for a call the server never looked at.
+                RespondTo(connectionId, asked, peer, correlationId,
+                    RbxNetworkResponse.Failure(InboundLimitedReason));
+                return;
+            }
+
             if (wire.Direction != (byte)RbxNetworkDirection.ClientToServer
                 || !IsServerAssigned(wire.RemoteId))
             {
@@ -1661,9 +1910,16 @@ namespace CoreAI.Net.Mirror
                 return;
             }
 
-            NetworkServer.connections.TryGetValue(connectionId, out NetworkConnectionToClient asked);
+            if (bytes > CodecPayloadCeilingBytes)
+            {
+                DropOversize();
+                RespondTo(connectionId, asked, peer, correlationId, RbxNetworkResponse.Failure(
+                    "the server dropped this call: its payload of " + bytes + " bytes is larger than the "
+                    + CodecPayloadCeilingBytes + " bytes a RemoteFunction call carries"));
+                return;
+            }
+
             PacketsDelivered++;
-            uint correlationId = wire.CorrelationId;
             RequestReceived?.Invoke(
                 new RbxNetworkRequestMessage(
                     new InstanceId(wire.RemoteId),
@@ -1774,6 +2030,11 @@ namespace CoreAI.Net.Mirror
                 return;
             }
 
+            if (_hostLocalConnections.ContainsKey(connectionId))
+            {
+                return;
+            }
+
             if (!_acknowledged.Add(connectionId))
             {
                 return;
@@ -1787,6 +2048,7 @@ namespace CoreAI.Net.Mirror
 
             NetworkServer.connections.TryGetValue(connectionId, out NetworkConnectionToClient conn);
             SendClockAnchor(conn, Channels.Reliable);
+            RaiseConnectionReady(connectionId);
             if (_joining.TryGetValue(connectionId, out JoiningConnection joining))
             {
                 _joining.Remove(connectionId);
@@ -2099,17 +2361,31 @@ namespace CoreAI.Net.Mirror
                 "register the actor context before using remotes");
         }
 
-        /// <summary>Whether an actor runs in this process: registered here, bound to no connection.</summary>
-        private bool IsLocalActor(string actorId)
+        /// <summary>
+        /// Whether an actor is served in this process: registered here and bound to no connection,
+        /// or bound to Mirror's host-mode local connection — the host's own player.
+        /// </summary>
+        private bool IsServedInProcess(string actorId)
         {
-            return !string.IsNullOrEmpty(actorId)
-                   && !_connectionsByActor.ContainsKey(actorId)
-                   && _actorOrder.Contains(actorId);
+            if (string.IsNullOrEmpty(actorId))
+            {
+                return false;
+            }
+
+            return _connectionsByActor.TryGetValue(actorId, out int connectionId)
+                ? _hostLocalConnections.ContainsKey(connectionId)
+                : _actorOrder.Contains(actorId);
         }
 
         private void SendEventTo(RbxNetworkEventMessage message, int channel)
         {
             string recipient = message.RecipientActorId;
+            if (IsServedInProcess(recipient))
+            {
+                DeliverEventLocally(message);
+                return;
+            }
+
             if (!string.IsNullOrEmpty(recipient)
                 && _connectionsByActor.TryGetValue(recipient, out int connectionId))
             {
@@ -2117,35 +2393,41 @@ namespace CoreAI.Net.Mirror
                 return;
             }
 
-            if (IsLocalActor(recipient))
-            {
-                DeliverEventLocally(message);
-                return;
-            }
-
             UnroutablePacketsDropped++;
         }
 
         /// <summary>
-        /// A server broadcast: every connection on the wire, every host-local actor in process.
+        /// A server broadcast: every remote connection on the wire, every actor served in process —
+        /// host-local actors and the host's own player — in process.
         /// </summary>
         /// <remarks>
-        /// WHY a host-local actor gets its copy addressed to it rather than the broadcast itself:
-        /// the world answers a broadcast by firing every registered actor's signal, remote players
-        /// included, who already receive theirs over the wire.
+        /// WHY an actor served in process gets its copy addressed to it rather than the broadcast
+        /// itself: the world answers a broadcast by firing every registered actor's signal, remote
+        /// players included, who already receive theirs over the wire.
         /// </remarks>
         private void BroadcastEvent(RbxNetworkEventMessage message, int channel)
         {
             CoreAiRemoteEventMessage wire = ToWire(message);
+            List<string> local = null;
             foreach (KeyValuePair<string, int> pair in _connectionsByActor)
             {
+                if (_hostLocalConnections.ContainsKey(pair.Value))
+                {
+                    if (!_actorOrder.Contains(pair.Key))
+                    {
+                        local ??= new List<string>();
+                        local.Add(pair.Key);
+                    }
+
+                    continue;
+                }
+
                 SendEventOnWire(pair.Value, wire, message.Payload, channel);
             }
 
-            List<string> local = null;
             for (int index = 0; index < _actorOrder.Count; index++)
             {
-                if (!_connectionsByActor.ContainsKey(_actorOrder[index]))
+                if (IsServedInProcess(_actorOrder[index]))
                 {
                     local ??= new List<string>();
                     local.Add(_actorOrder[index]);
@@ -2470,12 +2752,13 @@ namespace CoreAI.Net.Mirror
 
         /// <summary>
         /// Hands a connection's client the reason it is about to be dropped. Nothing for a
-        /// connection Mirror no longer holds.
+        /// connection Mirror no longer holds, nor for the host's own local connection, whose client
+        /// half has no CoreAI handler for it.
         /// </summary>
         private void SendNotice(NetworkConnectionToClient conn, CoreAiDisconnectNoticeKind kind,
             string message)
         {
-            if (conn == null)
+            if (conn == null || conn is LocalConnectionToClient)
             {
                 return;
             }
@@ -2496,11 +2779,12 @@ namespace CoreAI.Net.Mirror
         /// WHY "later than now" and not "the next pump": the default clock is Mirror's frame time,
         /// fixed for a whole frame, so a later reading is a later frame — after the late update that
         /// flushed the notice — wherever in the frame the kick came from, even before this frame's
-        /// own pump.
+        /// own pump. WHY never the host's own local connection: dropping it would take the host's
+        /// player off Mirror altogether (A4-10); its session is already over when this is asked.
         /// </remarks>
         private void OweDrop(NetworkConnectionToClient conn)
         {
-            if (conn == null)
+            if (conn == null || conn is LocalConnectionToClient)
             {
                 return;
             }
@@ -2744,7 +3028,12 @@ namespace CoreAI.Net.Mirror
             }
 
             _acknowledged.Remove(connectionId);
-            _authenticator?.Forget(connectionId);
+            _hostLocalConnections.Remove(connectionId);
+            _inboundMeter.Forget(connectionId);
+            if (!_admissionRecordsKept.Contains(connectionId))
+            {
+                _authenticator?.Forget(connectionId);
+            }
             List<Exception> failures = null;
             // WHY: an earlier peer listener can unregister or dispose before the session host runs.
             // NotifyDisconnected retains this notification until all peer listeners have finished.
@@ -3020,6 +3309,169 @@ namespace CoreAI.Net.Mirror
                  + "or clock anchor arrived; it and any that follow are dropped and counted");
         }
 
+        /// <summary>
+        /// Counts one inbound remote against its connection's limits; false when it must be dropped,
+        /// said at most once per <see cref="InboundDropLogIntervalSeconds"/> per connection.
+        /// </summary>
+        private bool AdmitInbound(int connectionId, RbxNetworkPeer peer, int bytes)
+        {
+            double now = _clockSeconds();
+            if (_inboundMeter.TryAdmit(connectionId, bytes, now))
+            {
+                return true;
+            }
+
+            if (_inboundMeter.TryTakeReport(connectionId, now, InboundDropLogIntervalSeconds,
+                    out long dropped, out long droppedBytes))
+            {
+                CoreAiMirrorInboundLimits limits = _inboundMeter.Limits;
+                _log("[CoreAI.Mirror] connection " + connectionId + " (actor '" + peer.ActorId
+                     + "') is over its inbound limit of "
+                     + limits.MessagesPerSecond.ToString("0.###", CultureInfo.InvariantCulture)
+                     + " remotes/s and " + limits.BytesPerSecond.ToString("0", CultureInfo.InvariantCulture)
+                     + " bytes/s (" + limits.BurstSeconds.ToString("0.###", CultureInfo.InvariantCulture)
+                     + " s burst): " + dropped + " remotes (" + droppedBytes + " bytes) were dropped "
+                     + "before decoding since the last report; MirrorNetworkBridge.TryGetInboundTraffic "
+                     + "has the totals");
+            }
+
+            return false;
+        }
+
+        /// <summary>The largest payload an inbound event of one delivery class may carry.</summary>
+        private static int InboundCeiling(RbxNetworkReliability reliability)
+        {
+            return reliability == RbxNetworkReliability.UnreliableUnordered
+                ? UnreliablePayloadCeilingBytes
+                : CodecPayloadCeilingBytes;
+        }
+
+        /// <summary>
+        /// Drops one inbound remote whose payload is larger than its channel carries: counted, never
+        /// decoded, and said once.
+        /// </summary>
+        /// <remarks>
+        /// WHY on the receive side too: a sending bridge refuses such a payload where it is fired,
+        /// so only a client that bypasses its own bridge sends one, and the world must not spend a
+        /// decode on it.
+        /// </remarks>
+        private void DropOversize()
+        {
+            InboundOversizeDropped++;
+            if (_oversizeDropLogged)
+            {
+                return;
+            }
+
+            _oversizeDropLogged = true;
+            _log("[CoreAI.Mirror] a remote arrived with a payload larger than its channel carries ("
+                 + UnreliablePayloadCeilingBytes + " bytes unreliable, " + CodecPayloadCeilingBytes
+                 + " reliable); it and any that follow are dropped and counted");
+        }
+
+        /// <summary>
+        /// Raises <see cref="ConnectionReady"/>; a listener's throw is logged and the readiness
+        /// still completes.
+        /// </summary>
+        private void RaiseConnectionReady(int connectionId)
+        {
+            List<Exception> failures = null;
+            InvokeSubscribers(ConnectionReady, connectionId, ref failures);
+            ReportCleanupFailures(failures, "announcing the readiness of connection " + connectionId);
+        }
+
+        /// <summary>
+        /// Hands one control message to a connection whose client acknowledged readiness, on the
+        /// reliable channel; false, and nothing sent, for any other connection.
+        /// </summary>
+        internal bool SendToReadyConnection<T>(int connectionId, T message) where T : struct, NetworkMessage
+        {
+            if (!_isServer || _disposed || !_acknowledged.Contains(connectionId)
+                || _hostLocalConnections.ContainsKey(connectionId)
+                || !NetworkServer.connections.TryGetValue(connectionId, out NetworkConnectionToClient conn))
+            {
+                return false;
+            }
+
+            conn.Send(message, Channels.Reliable);
+            return true;
+        }
+
+        /// <summary>
+        /// Hands one control message to every connection whose client acknowledged readiness and is
+        /// not being torn down; returns how many it reached.
+        /// </summary>
+        internal int SendToEveryReadyConnection<T>(T message) where T : struct, NetworkMessage
+        {
+            if (!_isServer || _disposed || _acknowledged.Count == 0)
+            {
+                return 0;
+            }
+
+            int sent = 0;
+            foreach (int connectionId in _acknowledged)
+            {
+                if (_tearingDown.Contains(connectionId) || _hostLocalConnections.ContainsKey(connectionId)
+                    || !NetworkServer.connections.TryGetValue(connectionId, out NetworkConnectionToClient conn))
+                {
+                    continue;
+                }
+
+                conn.Send(message, Channels.Reliable);
+                sent++;
+            }
+
+            return sent;
+        }
+
+        /// <summary>
+        /// How many roster entries one message carries on the active transport's reliable channel:
+        /// <see cref="CoreAiMirrorRoster.MaxEntriesPerMessage"/>, or fewer where one message is smaller.
+        /// </summary>
+        internal int RosterEntriesPerMessage
+        {
+            get
+            {
+                if (Transport.active == null)
+                {
+                    return CoreAiMirrorRoster.MaxEntriesPerMessage;
+                }
+
+                long content = NetworkMessages.MaxContentSize(Channels.Reliable);
+                long fit = (content - CoreAiMirrorRoster.EnvelopeWireBytes) / CoreAiMirrorRoster.MaxEntryWireBytes;
+                return (int)Math.Max(1L, Math.Min(CoreAiMirrorRoster.MaxEntriesPerMessage, fit));
+            }
+        }
+
+        /// <summary>
+        /// A client's receive path for the server's roster: applied to <see cref="Roster"/> once this
+        /// client's admission is bound, dropped and counted before that or when malformed.
+        /// </summary>
+        private void OnClientRoster(CoreAiRosterMessage wire)
+        {
+            if (!TryResolveSelf(out _))
+            {
+                return;
+            }
+
+            if (!_roster.TryApply(wire))
+            {
+                DropMalformed();
+                return;
+            }
+
+            RosterMessagesReceived++;
+            try
+            {
+                RosterChanged?.Invoke(_roster);
+            }
+            catch (Exception exception)
+            {
+                // WHY contained: this runs inside Mirror's handler, where a throw disconnects the client.
+                _log("[CoreAI.Mirror] a roster listener threw: " + exception.Message);
+            }
+        }
+
         private void Count(byte[] payload)
         {
             PacketsSent++;
@@ -3135,6 +3587,7 @@ namespace CoreAI.Net.Mirror
             _admittedActorId = null;
             _admittedOn = null;
             _readyAcknowledgedOn = null;
+            _roster.Clear();
             FailAllPending(NotConnectedReason);
         }
 

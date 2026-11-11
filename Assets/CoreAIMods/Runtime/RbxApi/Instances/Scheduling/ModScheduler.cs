@@ -2369,11 +2369,33 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             }
         }
 
+        private const int MaxCachedRootSignalChains = 256;
+
+        private readonly Dictionary<string, string[]> _rootSignalChains = new(StringComparer.Ordinal);
+
         private string[] BuildSignalChain(string signalName)
         {
             if (!_drainingSignals || _currentSignalChain == null)
             {
-                return new[] { signalName };
+                // WHY cached: a fire from outside a drain starts a chain of one name, and a fresh array for it
+                // was garbage on every handler invocation of every frame. A chain is never written after it is
+                // built (a longer one is a copy), so one array per signal name can be shared. The cache is
+                // capped because a host may name signals without bound.
+                if (signalName == null)
+                {
+                    return new string[] { null };
+                }
+
+                if (!_rootSignalChains.TryGetValue(signalName, out string[] root))
+                {
+                    root = new[] { signalName };
+                    if (_rootSignalChains.Count < MaxCachedRootSignalChains)
+                    {
+                        _rootSignalChains[signalName] = root;
+                    }
+                }
+
+                return root;
             }
 
             string[] chain = new string[_currentSignalChain.Length + 1];
@@ -2387,12 +2409,17 @@ namespace CoreAI.Mods.Rbx.Instances.Scheduling
             _completionBuffer.Clear();
             lock (_completionGate)
             {
-                foreach (KeyValuePair<long, CompletionWaitEntry> pair in _readyCompletions)
+                // WHY the count first: enumerating a SortedDictionary allocates even when it is empty, and this
+                // runs at every resumption point of every frame.
+                if (_readyCompletions.Count > 0)
                 {
-                    _completionBuffer.Add(pair.Value);
-                }
+                    foreach (KeyValuePair<long, CompletionWaitEntry> pair in _readyCompletions)
+                    {
+                        _completionBuffer.Add(pair.Value);
+                    }
 
-                _readyCompletions.Clear();
+                    _readyCompletions.Clear();
+                }
             }
 
             int nextIndex = -1;

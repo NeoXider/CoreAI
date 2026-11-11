@@ -1,5 +1,6 @@
 using CoreAI;
 using CoreAI.Ai;
+using CoreAI.Ai.Npc;
 using CoreAI.Infrastructure.Ai;
 using CoreAI.Infrastructure.AiMemory;
 using CoreAI.Infrastructure.Logging;
@@ -9,8 +10,12 @@ using CoreAI.Infrastructure.Prompts;
 using CoreAI.Infrastructure.World;
 using CoreAI.Infrastructure.Lua;
 using CoreAI.Authority;
+using CoreAI.ChatOverlay;
+using CoreAI.Decisions;
 using CoreAI.Infrastructure;
 using CoreAI.Logging;
+using CoreAI.Look;
+using CoreAI.RuntimeUi;
 using CoreAI.Unity;
 using System.IO;
 using Cysharp.Threading.Tasks;
@@ -62,6 +67,12 @@ namespace CoreAI.Composition
         [Tooltip("Optional ILlmClient routing by role. When null, legacy routing is used.")]
         [SerializeField]
         private LlmRoutingManifest llmRoutingManifest;
+
+        [Tooltip("Optional role definitions: an asset whose role id names a built-in role replaces it, a new id " +
+                 "adds a role. Applied after the prompts manifest, so a definition's universal-prefix setting " +
+                 "wins over the manifest's; a later asset for the same role wins over an earlier one.")]
+        [SerializeField]
+        private AgentRoleDefinitionAsset[] roleDefinitions = System.Array.Empty<AgentRoleDefinitionAsset>();
 
         [Header("Optional Modules")]
         [Tooltip(
@@ -162,8 +173,164 @@ namespace CoreAI.Composition
         [SerializeField]
         private int transcriptEntryCap = FileAgentMemoryStore.DefaultMaxTranscriptEntries;
 
+        [Header("Look")]
+        [Tooltip("Default look (tonemapping, Neon bloom, anti-aliasing, sky, fog) and the player's graphics " +
+                 "options. Set Mode to Off when the game owns its rendering.")]
+        [SerializeField]
+        private CoreAiLookSettings look = new();
+
+        [Header("Chat overlay")]
+        [Tooltip("The in-world chat (T, Enter or / opens it). On by default; its keys do nothing while another " +
+                 "CoreAI text field has focus. Turn Enabled off when the game has its own chat.")]
+        [SerializeField]
+        private CoreAiChatOverlaySettings chatOverlay = new();
+
+        [Header("NPCs")]
+        [Tooltip("NPC agents: their lines in the in-world chat, speech bubbles, and NPCs hearing the player's chat.")]
+        [SerializeField]
+        private CoreAiNpcSettings npcs = new();
+
         [System.NonSerialized]
         private IAgentMemoryScopeProvider runtimeAgentMemoryScopeProvider;
+
+        [System.NonSerialized]
+        private RuntimeUiHostOptions runtimeUiOptions;
+
+        [System.NonSerialized]
+        private CoreAiDecisionSettings decisionSettings;
+
+        [System.NonSerialized]
+        private System.Collections.Generic.IReadOnlyList<CoreAI.Ai.SubAgents.SubAgentDefinition> subAgents;
+
+        [System.NonSerialized]
+        private CoreAiDefaultSubAgents defaultSubAgents;
+
+        /// <summary>
+        /// The sub-agents orchestrator mode offers (with <c>CoreAISettingsAsset.EnableOrchestratorMode</c> on). Null,
+        /// the default, uses <see cref="DefaultSubAgents"/>; a list (even an empty one) replaces them. Set it while
+        /// the scope GameObject is inactive, then activate it.
+        /// </summary>
+        public System.Collections.Generic.IReadOnlyList<CoreAI.Ai.SubAgents.SubAgentDefinition> SubAgents
+        {
+            get => subAgents;
+            set
+            {
+                DemandNotBuilt(nameof(SubAgents));
+                subAgents = value;
+            }
+        }
+
+        /// <summary>
+        /// The default sub-agent set used while <see cref="SubAgents"/> is null: a builder over the world-builder
+        /// tool profile and a scripter over the lua-builder profile (<see cref="CoreAiDefaultSubAgents.CreateBuiltIn"/>).
+        /// </summary>
+        public CoreAiDefaultSubAgents DefaultSubAgents
+        {
+            get => defaultSubAgents ??= CoreAiDefaultSubAgents.CreateBuiltIn();
+            set
+            {
+                DemandNotBuilt(nameof(DefaultSubAgents));
+                defaultSubAgents = value ?? CoreAiDefaultSubAgents.CreateBuiltIn();
+            }
+        }
+
+        private void DemandNotBuilt(string member)
+        {
+            if (Container != null)
+            {
+                throw new System.InvalidOperationException(
+                    member + " must be set before CoreAILifetimeScope builds its container. " +
+                    "Configure it on an inactive GameObject, then activate the scope.");
+            }
+        }
+
+        /// <summary>
+        /// Decision-model routes and endpoints applied when this scope builds. The default has no routes, so every
+        /// consumer is refused with <c>no_route</c> and its deterministic fallback decides; a scene that runs a local
+        /// decision server sets <see cref="CoreAiDecisionSettings.LocalLlamaServer"/> here while the scope GameObject
+        /// is inactive, then activates it.
+        /// </summary>
+        public CoreAiDecisionSettings Decisions
+        {
+            get => decisionSettings ??= new CoreAiDecisionSettings();
+            set
+            {
+                if (Container != null)
+                {
+                    throw new System.InvalidOperationException(
+                        "Decisions must be set before CoreAILifetimeScope builds its container. " +
+                        "Configure it on an inactive GameObject, then activate the scope.");
+                }
+
+                decisionSettings = value ?? new CoreAiDecisionSettings();
+            }
+        }
+
+        /// <summary>
+        /// Look settings applied when this scope builds. Change them in code while the scope GameObject is
+        /// inactive, then activate it.
+        /// </summary>
+        public CoreAiLookSettings Look => look ??= new CoreAiLookSettings();
+
+        /// <summary>
+        /// Chat overlay settings applied when this scope builds. Change them in code while the scope GameObject
+        /// is inactive, then activate it.
+        /// </summary>
+        public CoreAiChatOverlaySettings ChatOverlay => chatOverlay ??= new CoreAiChatOverlaySettings();
+
+        /// <summary>
+        /// NPC agent settings applied when this scope builds. Change them in code while the scope GameObject is
+        /// inactive, then activate it.
+        /// </summary>
+        public CoreAiNpcSettings Npcs => npcs ??= new CoreAiNpcSettings();
+
+        /// <summary>
+        /// Runtime UI host options applied when this scope builds (UXML/USS screens while the game runs). Set
+        /// <see cref="RuntimeUiHostOptions.Enabled"/> to false, or replace them, while the scope GameObject is
+        /// inactive, then activate it.
+        /// </summary>
+        public RuntimeUiHostOptions RuntimeUiOptions
+        {
+            get => runtimeUiOptions ??= new RuntimeUiHostOptions();
+            set
+            {
+                if (Container != null)
+                {
+                    throw new System.InvalidOperationException(
+                        "RuntimeUiOptions must be set before CoreAILifetimeScope builds its container. " +
+                        "Configure it on an inactive GameObject, then activate the scope.");
+                }
+
+                runtimeUiOptions = value ?? new RuntimeUiHostOptions();
+            }
+        }
+
+        /// <summary>The role definition assets this scope applies when it builds.</summary>
+        public System.Collections.Generic.IReadOnlyList<AgentRoleDefinitionAsset> RoleDefinitions =>
+            roleDefinitions ?? System.Array.Empty<AgentRoleDefinitionAsset>();
+
+        /// <summary>
+        /// Replaces the role definition assets before the container is built. Call this while the scope GameObject
+        /// is inactive, then activate it.
+        /// </summary>
+        /// <exception cref="System.InvalidOperationException">The container is already built.</exception>
+        public void SetRoleDefinitions(System.Collections.Generic.IReadOnlyList<AgentRoleDefinitionAsset> definitions)
+        {
+            if (Container != null)
+            {
+                throw new System.InvalidOperationException(
+                    "SetRoleDefinitions must be called before CoreAILifetimeScope builds its container. " +
+                    "Configure it on an inactive GameObject, then activate the scope.");
+            }
+
+            AgentRoleDefinitionAsset[] copy = new AgentRoleDefinitionAsset[definitions?.Count ?? 0];
+            for (int i = 0; i < copy.Length; i++)
+            {
+                copy[i] = definitions[i];
+            }
+
+            roleDefinitions = copy;
+        }
 
         /// <summary>
         /// Effective settings asset for this scope, falling back to the Resources singleton when
@@ -328,7 +495,18 @@ namespace CoreAI.Composition
             builder.RegisterInstance<IGameLogSettings>(GameLogFilter.Settings);
 
             builder.RegisterAgentPrompts(agentPromptsManifest);
+            // WHY right after the prompts: both apply in build callbacks, in registration order, so a role
+            // definition's universal-prefix setting overrides the manifest's opt-out instead of the reverse.
+            builder.RegisterAgentRoleDefinitions(RoleDefinitions);
             builder.RegisterCore();
+            bool orchestratorMode = builder.RegisterOrchestratorMode(
+                new CoreAI.Ai.SubAgents.OrchestratorModeOptions
+                {
+                    Enabled = settings != null && settings.EnableOrchestratorMode
+                },
+                SubAgents ?? System.Array.Empty<CoreAI.Ai.SubAgents.SubAgentDefinition>());
+            builder.RegisterRuntimeUi(RuntimeUiOptions);
+            builder.RegisterCoreAiUiFocus();
 
             CoreAiLuaWorldModule module = ResolveLuaWorldModule();
             if (module != null)
@@ -344,6 +522,7 @@ namespace CoreAI.Composition
             }
 
             builder.RegisterLlmPipeline(settings, llmRoutingManifest);
+            builder.RegisterCoreAiDecisions(Decisions);
 
             if (roleSkills is { Length: > 0 })
             {
@@ -392,6 +571,15 @@ namespace CoreAI.Composition
             // WHY: Persistent uses the file-backed store on all players (WebGL flushes through IDBFS).
             // SessionOnly swaps the private backing to process memory while keeping the same scoped facades.
             RegisterAgentMemoryStore(builder, agentMemoryPersistenceMode, chatHistoryMessageCap, transcriptEntryCap);
+            builder.RegisterCoreAiLook(Look);
+            builder.RegisterCoreAiChatOverlay(ChatOverlay);
+            builder.RegisterCoreAiNpcs(Npcs);
+            if (orchestratorMode && SubAgents == null)
+            {
+                // WHY after the world commands: the default set reads its tools from the profiles those
+                // installers fill in their build callbacks, which run in registration order.
+                builder.RegisterCoreAiDefaultSubAgents(DefaultSubAgents);
+            }
 
             builder.RegisterEntryPoint<AiGameCommandRouter>();
             builder.RegisterEntryPoint<CoreAIGameEntryPoint>();

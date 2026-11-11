@@ -9,7 +9,8 @@ namespace CoreAI.Ai.LuaCs
 {
     /// <summary>
     /// Tween driver property IO over the part-property sink, the value objects, the Humanoid's
-    /// numeric members and the camera rig. Reads box the same state the Lua property getters
+    /// numeric members, the camera rig (CFrame and the lens behind FieldOfView), the Lighting
+    /// day-cycle properties, the Light properties and the GUI properties (numbers, Color3, UDim2). Reads box the same state the Lua property getters
     /// return; writes flow through the same setters Lua assignments use (part-sink and camera
     /// setters advance the revision here, value-object setters advance it themselves on real
     /// changes — mirroring TryWriteSpatial/TryWriteValue so a tweened write is
@@ -78,6 +79,23 @@ namespace CoreAI.Ai.LuaCs
                 return SampleCamera(propertyName);
             }
 
+            if (target is RbxLighting lighting)
+            {
+                return SampleLighting(lighting, propertyName);
+            }
+
+            if (target is RbxLight light)
+            {
+                return SampleLight(light, propertyName);
+            }
+
+            if (_registry != null
+                && LuaCsRbxGuiBindings.TrySampleTween(_registry.Catalog, target, propertyName,
+                    out TweenPropertySample guiSample))
+            {
+                return guiSample;
+            }
+
             return TweenPropertySample.Unknown();
         }
 
@@ -110,6 +128,24 @@ namespace CoreAI.Ai.LuaCs
             if (target.ClassName == "Camera")
             {
                 WriteCamera(target, propertyName, value);
+                return;
+            }
+
+            if (target is RbxLighting lighting)
+            {
+                WriteLighting(lighting, propertyName, value);
+                return;
+            }
+
+            if (target is RbxLight light)
+            {
+                WriteLight(light, propertyName, value);
+                return;
+            }
+
+            if (_registry != null)
+            {
+                LuaCsRbxGuiBindings.TryWriteTween(_registry, target, propertyName, value);
             }
         }
 
@@ -218,9 +254,12 @@ namespace CoreAI.Ai.LuaCs
                         ? TweenPropertySample.SupportedValue(_cameraRig.GetCFrame(), "CFrame")
                         : TweenPropertySample.Unsupported("CFrame");
                 case "FieldOfView":
-                    // WHY a known-but-unsupported member: FieldOfView is real Roblox API with no
-                    // backing in the camera rig yet, so the loud stub is the honest answer.
-                    return TweenPropertySample.Unsupported("number");
+                    // WHY the rig decides: a host rig without a lens answers NaN, and a tween of a lens
+                    // that cannot be set must fail at Create like any other untweenable member.
+                    double lens = _cameraRig != null ? _cameraRig.GetFieldOfView() : double.NaN;
+                    return double.IsNaN(lens)
+                        ? TweenPropertySample.Unsupported("number")
+                        : TweenPropertySample.SupportedValue(RbxCameraProjection.ClampFieldOfView(lens), "number");
                 case "CameraType":
                     return TweenPropertySample.Unsupported("EnumItem");
                 case "CameraSubject":
@@ -419,14 +458,122 @@ namespace CoreAI.Ai.LuaCs
 
         private void WriteCamera(RbxInstance camera, string propertyName, object value)
         {
-            if (propertyName != "CFrame" || _cameraRig == null)
+            if (_cameraRig == null)
             {
                 return;
             }
 
-            RbxCFrame cframe = (RbxCFrame)value;
-            LuaCsRbxInstanceBindings.SetCameraCFrame(_cameraRig, camera, in cframe);
-            _registry.AdvanceRevision(camera.Id);
+            if (propertyName == "CFrame")
+            {
+                RbxCFrame cframe = (RbxCFrame)value;
+                LuaCsRbxInstanceBindings.SetCameraCFrame(_cameraRig, camera, in cframe);
+                _registry.AdvanceRevision(camera.Id);
+                return;
+            }
+
+            if (propertyName == "FieldOfView"
+                && LuaCsRbxInstanceBindings.TrySetCameraFieldOfView(_cameraRig, camera, (double)value))
+            {
+                _registry.AdvanceRevision(camera.Id);
+            }
+        }
+
+        private static TweenPropertySample SampleLighting(RbxLighting lighting, string propertyName)
+        {
+            switch (propertyName)
+            {
+                case "ClockTime":
+                    return TweenPropertySample.SupportedValue((double)lighting.ClockTime, "number");
+                case "GeographicLatitude":
+                    return TweenPropertySample.SupportedValue((double)lighting.GeographicLatitude, "number");
+                case "Brightness":
+                    return TweenPropertySample.SupportedValue((double)lighting.Brightness, "number");
+                case "Ambient":
+                    return TweenPropertySample.SupportedValue(lighting.Ambient, "Color3");
+                case "OutdoorAmbient":
+                    return TweenPropertySample.SupportedValue(lighting.OutdoorAmbient, "Color3");
+                case "TimeOfDay":
+                    return TweenPropertySample.Unsupported("string");
+                default:
+                    return TweenPropertySample.Unknown();
+            }
+        }
+
+        /// <summary>Writes one interpolated Lighting value; the class advances its own revision on a real change.</summary>
+        private static void WriteLighting(RbxLighting lighting, string propertyName, object value)
+        {
+            // WHY: this runs inside the Heartbeat driver, where the setters' non-finite refusal would be
+            // nobody's to catch (see WriteIntValue); an overflowed step is skipped instead.
+            if (value is double number && (double.IsNaN(number) || double.IsInfinity(number)))
+            {
+                return;
+            }
+
+            switch (propertyName)
+            {
+                case "ClockTime":
+                    lighting.SetClockTime((double)value);
+                    break;
+                case "GeographicLatitude":
+                    lighting.SetGeographicLatitude((double)value);
+                    break;
+                case "Brightness":
+                    lighting.SetBrightness((double)value);
+                    break;
+                case "Ambient":
+                    lighting.SetAmbient((RbxColor3)value);
+                    break;
+                case "OutdoorAmbient":
+                    lighting.SetOutdoorAmbient((RbxColor3)value);
+                    break;
+            }
+        }
+
+        private static TweenPropertySample SampleLight(RbxLight light, string propertyName)
+        {
+            switch (propertyName)
+            {
+                case "Brightness":
+                    return TweenPropertySample.SupportedValue((double)light.Brightness, "number");
+                case "Color":
+                    return TweenPropertySample.SupportedValue(light.Color, "Color3");
+                case "Range" when light is RbxPointLight pointLight:
+                    return TweenPropertySample.SupportedValue((double)pointLight.Range, "number");
+                case "Enabled":
+                case "Shadows":
+                    return TweenPropertySample.Unsupported("boolean");
+                default:
+                    return TweenPropertySample.Unknown();
+            }
+        }
+
+        private void WriteLight(RbxLight light, string propertyName, object value)
+        {
+            if (value is double number && (double.IsNaN(number) || double.IsInfinity(number)))
+            {
+                return;
+            }
+
+            int before = light.StateVersion;
+            switch (propertyName)
+            {
+                case "Brightness":
+                    light.SetBrightness((double)value);
+                    break;
+                case "Color":
+                    light.SetColor((RbxColor3)value);
+                    break;
+                case "Range" when light is RbxPointLight pointLight:
+                    pointLight.SetRange((double)value);
+                    break;
+                default:
+                    return;
+            }
+
+            if (light.StateVersion != before)
+            {
+                _registry.AdvanceRevision(light.Id);
+            }
         }
     }
 }

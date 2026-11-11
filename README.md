@@ -67,7 +67,8 @@ product; your game logic stays yours.
    manual-DLL path: **[INSTALL.md](INSTALL.md)**.
 3. **Scene:** `CoreAI → Setup → Create Chat Demo Scene`.
 4. **Backend:** turn on provider-backed execution with `CoreAI → Setup → Modules → LLM Providers →
-   Enable Providers` (the `COREAI_LLM` define; without it the scene runs on scripted/stub clients), then
+   Enable Providers` (the `COREAI_LLM` define; without it only the Offline mode answers, and a request
+   to a configured HTTP or local model fails with a message that names this switch), then
    pick the backend in `CoreAI → Settings` — a local GGUF via LLMUnity, or any OpenAI-compatible
    endpoint (LM Studio, Ollama, vLLM, a hosted provider, or your own proxy).
 5. **Press Play and type.**
@@ -354,7 +355,9 @@ trace from 0 to 100. Suite **v2.0** adds an extreme tier — one very hard scena
 
 One maintainer run (2026-10-15), one repetition, reasoning effort `high`, no temperature sent; the two
 local models were resumed after an interruption, which the report records. Scores compare only inside
-suite v2.0. The top of the table is saturated, so harder scenarios are on the [TODO](TODO.md). Every raw
+suite v2.0. The current suite is **v2.1**: it changes only the G6 image-feedback twin (the agent camera
+gained `camera_orbit`, a point target and `fov`), so v2.0 scores stay comparable everywhere except a
+vision G6 score; no v2.1 run is published yet. The top of the table is saturated, so harder scenarios are on the [TODO](TODO.md). Every raw
 report, transcript and tool trace is in the [run archive](Docs/BenchmarkRuns/2026-10-15/).
 
 ### Every model gets a card

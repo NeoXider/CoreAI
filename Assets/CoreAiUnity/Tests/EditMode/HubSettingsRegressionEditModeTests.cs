@@ -153,6 +153,26 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void Apply_ClientLimited_IsASessionOverride_ThatLeavesTheAssetsOwnFields()
+        {
+            _settings.ConfigureClientLimited("http://old/v1", "key", "old-model", 5, 1000);
+            HubSettingsPage page = Own(new HubSettingsPage(_settings));
+            ScrollView root = (ScrollView)page.CreatePageContent();
+            root.Query<TextField>().AtIndex(0).value = "http://new/v1";
+            root.Query<TextField>().AtIndex(2).value = "new-model";
+
+            Invoke(page, "Apply");
+
+            Assert.IsTrue(_settings.HasSessionOverrides, "a runtime switch is a session override");
+            Assert.AreEqual(LlmExecutionMode.ClientLimited, _settings.ExecutionMode);
+            Assert.AreEqual(5, _settings.MaxClientLimitedRequestsPerSession, "the asset's request cap stays in force");
+            _settings.ClearSessionOverrides();
+            Assert.AreEqual("http://old/v1", _settings.ApiBaseUrl, "the asset itself was not written");
+            Assert.AreEqual("old-model", _settings.ModelName);
+            Assert.AreEqual(LlmExecutionMode.ClientLimited, _settings.ExecutionMode);
+        }
+
+        [Test]
         public void Apply_KeepsServerManagedMode_WhenTheUserDidNotChangeIt()
         {
             _settings.ConfigureServerManagedApi("http://proxy/v1", "old-model", "token");

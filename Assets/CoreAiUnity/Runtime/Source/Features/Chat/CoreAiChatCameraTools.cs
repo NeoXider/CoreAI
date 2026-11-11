@@ -23,7 +23,20 @@ namespace CoreAI.Chat
         internal static bool TryAttachCameraTool(
             AgentMemoryPolicy policy, IAgentCameraService cameraService, string roleId, bool enabled)
         {
-            if (!enabled || policy == null || cameraService == null || string.IsNullOrWhiteSpace(roleId))
+            return TryAttachCameraTool(policy, cameraService, roleId, enabled, true);
+        }
+
+        /// <summary>
+        /// <see cref="TryAttachCameraTool(AgentMemoryPolicy, IAgentCameraService, string, bool)"/> that also respects
+        /// the model's vision verdict: with <paramref name="visionEnabled"/> false (a text-only model) nothing is
+        /// attached, so the model is never offered a tool whose images it cannot read.
+        /// </summary>
+        internal static bool TryAttachCameraTool(
+            AgentMemoryPolicy policy, IAgentCameraService cameraService, string roleId, bool enabled,
+            bool visionEnabled)
+        {
+            if (!enabled || !visionEnabled || policy == null || cameraService == null ||
+                string.IsNullOrWhiteSpace(roleId))
             {
                 return false;
             }

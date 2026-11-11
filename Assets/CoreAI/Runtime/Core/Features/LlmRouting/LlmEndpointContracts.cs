@@ -131,6 +131,13 @@ namespace CoreAI.Ai
         /// </summary>
         public LlmToolChannel ToolChannel { get; set; } = LlmToolChannel.Auto;
 
+        /// <summary>
+        /// The decision protocol this endpoint also speaks (<c>CoreAI.Decisions</c>). The default
+        /// <see cref="LlmDecisionProtocol.None"/> keeps it chat-only: decision routing refuses it with the named
+        /// reason <c>capability_missing</c>. Chat routing ignores this member.
+        /// </summary>
+        public LlmDecisionProtocol DecisionProtocol { get; set; } = LlmDecisionProtocol.None;
+
         /// <summary>Derives a portable endpoint-id slug from a display name.</summary>
         public static string DeriveEndpointSlug(string displayName)
         {

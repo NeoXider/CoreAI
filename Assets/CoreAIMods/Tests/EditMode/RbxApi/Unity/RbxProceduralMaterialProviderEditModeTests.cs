@@ -561,12 +561,16 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
                 return "CoreAI/Rbx/Procedural Neon";
             }
 
+            if (string.Equals(materialName, "Water", StringComparison.Ordinal))
+            {
+                return "CoreAI/Rbx/Water";
+            }
+
             if (string.Equals(materialName, "ForceField", StringComparison.Ordinal)
                 || string.Equals(materialName, "Glass", StringComparison.Ordinal)
                 || string.Equals(materialName, "Ice", StringComparison.Ordinal)
                 || string.Equals(materialName, "Glacier", StringComparison.Ordinal)
-                || string.Equals(materialName, "Air", StringComparison.Ordinal)
-                || string.Equals(materialName, "Water", StringComparison.Ordinal))
+                || string.Equals(materialName, "Air", StringComparison.Ordinal))
             {
                 return "CoreAI/Rbx/Procedural Transparent";
             }

@@ -78,6 +78,7 @@ Shader "CoreAI/Rbx/Material Fallback"
 
         UsePass "Universal Render Pipeline/Lit/ShadowCaster"
         UsePass "Universal Render Pipeline/Lit/DepthOnly"
+        UsePass "Universal Render Pipeline/Lit/DepthNormals"
     }
 
     Fallback "Hidden/InternalErrorShader"

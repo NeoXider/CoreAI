@@ -1,18 +1,25 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using CoreAI.ChatMarkdown;
 using CoreAI.Hub;
 using CoreAI.Infrastructure.Lua;
+using CoreAI.Mods.Folders;
 using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace CoreAI.Ai.Hub
 {
     /// <summary>
-    /// UI Toolkit Hub page that replaces the old IMGUI mod panel. Lists every known mod grouped into a
-    /// category tree with a name/category/tags search box; each row exposes an enable/disable toggle,
-    /// Edit (opens the inline <see cref="HubModEditorPage"/>), Delete, and live status (loaded,
-    /// handlers, timers, errors). An "Add" button opens the editor with a starter template and "Paste"
+    /// UI Toolkit Hub page that replaces the old IMGUI mod panel. Lists every known mod in a virtualized
+    /// folder tree (<see cref="ModFolderTreeView"/> over <see cref="ModFolderTree"/>; a mod's folder is its
+    /// <c>category</c> path) with a name/folder/tags search that keeps matching folders open, remembered
+    /// folds, folder toggles that switch a whole branch, "Move" and folder actions (new folder, rename,
+    /// delete an empty one) run through <see cref="ModFolderService"/>; each mod row exposes an on/off
+    /// toggle, About (only for a mod with a description: opens a panel under the tree that shows the
+    /// description as Markdown through <see cref="CoreAiMarkdownView"/>, plain text without a renderer
+    /// package), Edit (opens the inline <see cref="HubModEditorPage"/>), Export, Apply update, Delete, and
+    /// its live status (loaded, handlers, timers, errors). An "Add" button opens the editor with a starter template and "Paste"
     /// creates a mod from the Lua in <see cref="GUIUtility.systemCopyBuffer"/>. The list live-refreshes
     /// on <see cref="IHubModService.ModsChanged"/> (fired when a mod is loaded/unloaded/deleted — by the
     /// UI or the AI's manage_mods tool) and via a manual Refresh button. Content is built lazily in
@@ -31,8 +38,23 @@ namespace CoreAI.Ai.Hub
         private VisualElement _listRoot;
         private VisualElement _editorRoot;
         private HubModEditorPage _editor;
-        private ScrollView _treeScroll;
+        private ModFolderTreeView _treeView;
+        private ModFolderTree _tree;
+        private ModFolderFoldState _foldState;
+        private int _savedFoldVersion;
+        private IVisualElementScheduledItem _foldSave;
+        private readonly ModFolderService _folderService;
+        private readonly IModFolderListStore _folderList;
+        private readonly IHubModFolderPreferences _folderPreferences;
+
+        // WHY cached per refresh: the tree view asks for a row's status line on every bind while scrolling,
+        // so building it there would allocate per frame.
+        private readonly Dictionary<string, string> _modDetails = new(StringComparer.Ordinal);
         private Label _status;
+        private VisualElement _about;
+        private Label _aboutTitle;
+        private CoreAiMarkdownView _aboutView;
+        private string _aboutModId;
         private TextField _searchField;
         private string _search = "";
         private bool _subscribed;
@@ -64,14 +86,57 @@ namespace CoreAI.Ai.Hub
         /// Hub-wide editor preferences handed to every editor this page opens; null uses
         /// <see cref="PlayerPrefsHubModEditorPreferences.Instance"/>.
         /// </param>
+        /// <param name="service">VM-agnostic mod CRUD/query surface.</param>
+        /// <param name="order">Sort priority for the Hub tab.</param>
+        /// <param name="folderList">
+        /// Where the persisted (created or emptied) folders are kept; null keeps them in
+        /// <paramref name="folderPreferences"/>.
+        /// </param>
+        /// <param name="folderPreferences">
+        /// Where the viewer's fold state (and, without <paramref name="folderList"/>, the folders) are kept;
+        /// null uses <see cref="PlayerPrefsHubModFolderPreferences.Instance"/>.
+        /// </param>
+        public HubModsPage(IHubModService service, int order, IModFolderListStore folderList,
+            IHubModFolderPreferences folderPreferences)
+            : this(service, order, null, null, folderList, folderPreferences)
+        {
+        }
+
         internal HubModsPage(IHubModService service, int order, Action<Action> deferToPanel,
-            IHubModEditorPreferences editorPreferences = null)
+            IHubModEditorPreferences editorPreferences = null, IModFolderListStore folderList = null,
+            IHubModFolderPreferences folderPreferences = null)
         {
             _service = service ?? throw new ArgumentNullException(nameof(service));
             Order = order;
             _deferToPanel = deferToPanel;
             _editorPreferences = editorPreferences;
+            _folderPreferences = folderPreferences ?? PlayerPrefsHubModFolderPreferences.Instance;
+            IHubModFolderPreferences preferences = _folderPreferences;
+            _folderList = folderList ?? new TextModFolderListStore(() => preferences.FoldersText,
+                text => preferences.FoldersText = text);
+            _folderService = new ModFolderService(new HubModFolderStore(_service, _folderList));
         }
+
+        /// <summary>The folder tree view (null before the page content is built).</summary>
+        internal ModFolderTreeView TreeView => _treeView;
+
+        /// <summary>The tree shown (null before the first refresh).</summary>
+        internal ModFolderTree Tree => _tree;
+
+        /// <summary>The folder operations the page runs.</summary>
+        internal ModFolderService FolderService => _folderService;
+
+        /// <summary>The viewer's fold state (null before the page content is built).</summary>
+        internal ModFolderFoldState FoldState => _foldState;
+
+        /// <summary>The About panel under the tree (null before the page content is built).</summary>
+        internal VisualElement AboutPanel => _about;
+
+        /// <summary>The description view of the About panel (null before the page content is built).</summary>
+        internal CoreAiMarkdownView AboutView => _aboutView;
+
+        /// <summary>The mod whose description the About panel shows; null while the panel is closed.</summary>
+        internal string AboutModId => _aboutModId;
 
         /// <inheritdoc />
         public string PageId => DefaultPageId;
@@ -98,12 +163,14 @@ namespace CoreAI.Ai.Hub
         /// <inheritdoc />
         public void OnDeactivated()
         {
+            SaveFoldStateIfChanged();
             Unsubscribe();
         }
 
         /// <inheritdoc />
         public void OnDestroyed()
         {
+            SaveFoldStateIfChanged();
             _destroyed = true;
             _editor?.OnDestroyed();
             _root?.SetEnabled(false);
@@ -154,7 +221,7 @@ namespace CoreAI.Ai.Hub
             _searchField.style.flexGrow = 1f;
             _searchField.style.minWidth = 140f;
             _searchField.style.marginRight = 6f;
-            SetPlaceholder(_searchField, "Search name / category / tags");
+            SetPlaceholder(_searchField, "Search name / folder / tags");
             _searchField.RegisterValueChangedCallback(evt =>
             {
                 _search = evt.newValue ?? "";
@@ -166,16 +233,131 @@ namespace CoreAI.Ai.Hub
             toolbar.Add(HubModWidgets.MakeButton("Add", OpenNewEditor));
             toolbar.Add(HubModWidgets.MakeButton("Paste", PasteFromClipboard));
             toolbar.Add(HubModWidgets.MakeButton("Import", ImportFromClipboard));
+            toolbar.Add(HubModWidgets.MakeButton("New folder", () => PromptNewFolder(ModFolderPath.Root)));
             listRoot.Add(toolbar);
 
             _status = HubModWidgets.MakeStatus();
             listRoot.Add(_status);
 
-            _treeScroll = new ScrollView(ScrollViewMode.Vertical) { name = "coreai-hub-mods-tree" };
-            _treeScroll.style.flexGrow = 1f;
-            listRoot.Add(_treeScroll);
+            _foldState ??= ModFolderStateCodec.DecodeFoldState(SafeFoldStateText()).State;
+            _savedFoldVersion = _foldState.Version;
+            _treeView = new ModFolderTreeView(new ModFolderTreeViewOptions
+            {
+                ShowSearchField = false,
+                EmptyText = "No mods yet. Use Add or Paste to create one.",
+                NoMatchText = "No mods match the search.",
+                ModActions = new[] { AboutAction, EditAction, ExportAction, UpdateAction, DeleteAction },
+                FolderActions = new[] { NewFolderAction, RenameAction, DeleteAction },
+                ModActionFilter = IsModActionShown,
+                ModDetail = DetailOf,
+                TextColor = HubModWidgets.Text,
+                MutedColor = HubModWidgets.Muted,
+                AccentColor = HubModWidgets.Accent
+            }) { name = "coreai-hub-mods-tree" };
+            _treeView.ModEnableRequested += (mod, enable) => ToggleMod(mod.Id, enable);
+            _treeView.BranchEnableRequested += OnBranchEnableRequested;
+            _treeView.MoveRequested += OnMoveRequested;
+            _treeView.ModActionRequested += OnModAction;
+            _treeView.FolderActionRequested += OnFolderAction;
+            _treeView.FoldChanged += ScheduleFoldSave;
+            listRoot.Add(_treeView);
+            listRoot.Add(BuildAboutPanel());
 
             return listRoot;
+        }
+
+        private VisualElement BuildAboutPanel()
+        {
+            _about = HubModWidgets.MakePanel();
+            _about.name = "coreai-hub-mods-about";
+            _about.style.flexShrink = 0f;
+            _about.style.marginTop = 6f;
+            _about.style.display = DisplayStyle.None;
+
+            VisualElement header = new();
+            header.style.flexDirection = FlexDirection.Row;
+            header.style.alignItems = Align.Center;
+            _aboutTitle = HubModWidgets.MakeFieldLabel("");
+            _aboutTitle.style.flexGrow = 1f;
+            _aboutTitle.style.unityFontStyleAndWeight = FontStyle.Bold;
+            header.Add(_aboutTitle);
+            header.Add(HubModWidgets.MakeButton("Close", CloseAbout));
+            _about.Add(header);
+
+            _aboutView = new CoreAiMarkdownView { name = "coreai-hub-mods-about-text" };
+            _aboutView.style.color = HubModWidgets.Text;
+            _aboutView.style.marginTop = 4f;
+            _about.Add(_aboutView);
+            return _about;
+        }
+
+        /// <summary>
+        /// Opens the About panel on <paramref name="modId"/>'s description, or closes it when it already shows
+        /// that mod or the mod has no description.
+        /// </summary>
+        internal void ToggleAbout(string modId)
+        {
+            if (_about == null || _destroyed)
+            {
+                return;
+            }
+
+            if (string.Equals(_aboutModId, modId, StringComparison.Ordinal))
+            {
+                CloseAbout();
+                return;
+            }
+
+            ShowAbout(FindCachedMod(modId));
+        }
+
+        private void ShowAbout(HubModRecord mod)
+        {
+            if (mod == null || string.IsNullOrWhiteSpace(mod.Description))
+            {
+                CloseAbout();
+                return;
+            }
+
+            _aboutModId = mod.Id;
+            _aboutTitle.text = string.IsNullOrWhiteSpace(mod.Name) ? mod.Id : mod.Name;
+            if (!string.Equals(_aboutView.Markdown, mod.Description, StringComparison.Ordinal))
+            {
+                _aboutView.Markdown = mod.Description;
+            }
+
+            _about.style.display = DisplayStyle.Flex;
+        }
+
+        private void CloseAbout()
+        {
+            _aboutModId = null;
+            if (_about != null)
+            {
+                _about.style.display = DisplayStyle.None;
+            }
+        }
+
+        /// <summary>Follows a refresh: the open About panel shows the mod's new description or closes when it is gone.</summary>
+        private void RefreshAbout()
+        {
+            if (_aboutModId != null)
+            {
+                ShowAbout(FindCachedMod(_aboutModId));
+            }
+        }
+
+        private HubModRecord FindCachedMod(string modId)
+        {
+            foreach (HubModRecord mod in _modsCache ?? Array.Empty<HubModRecord>())
+            {
+                if (mod != null && string.Equals(mod.Id, modId, StringComparison.Ordinal))
+                {
+                    return mod;
+                }
+            }
+
+            return null;
         }
 
         /// <summary>Reloads the mods cache from the service, then re-renders. Use after any mutation or
@@ -189,6 +371,7 @@ namespace CoreAI.Ai.Hub
 
             ReloadModsCache();
             RenderTree();
+            RefreshAbout();
         }
 
         private void ReloadModsCache()
@@ -197,6 +380,7 @@ namespace CoreAI.Ai.Hub
             {
                 _modsCache = _service.ListMods();
                 _modsLoadError = null;
+                CacheModDetails();
             }
             catch (Exception ex)
             {
@@ -210,142 +394,48 @@ namespace CoreAI.Ai.Hub
         private void ScheduleSearchRender()
         {
             _searchDebounce?.Pause();
-            _searchDebounce = _searchField.schedule.Execute(RenderTree).StartingIn(250);
+            _searchDebounce = _searchField.schedule.Execute(ApplySearch).StartingIn(250);
         }
 
-        /// <summary>Filters the cached mod list and rebuilds the tree. Never calls the service — callers
-        /// that need fresh data should call <see cref="RefreshList"/> instead.</summary>
+        /// <summary>
+        /// Builds the folder tree from the cached mod list and the persisted folders and shows it with the
+        /// current search. Never calls the service's listing; callers that need fresh data call
+        /// <see cref="RefreshList"/> instead.
+        /// </summary>
         private void RenderTree()
         {
-            if (_treeScroll == null)
+            if (_treeView == null)
             {
                 return;
             }
 
-            _treeScroll.Clear();
+            IReadOnlyList<string> folders;
+            try
+            {
+                folders = _folderList.Load();
+            }
+            catch (Exception ex)
+            {
+                folders = Array.Empty<string>();
+                SetStatus("Could not read the mod folders: " + ex.Message, true);
+            }
 
+            IReadOnlyList<HubModRecord> mods = _modsLoadError != null
+                ? Array.Empty<HubModRecord>()
+                : _modsCache ?? Array.Empty<HubModRecord>();
+            _tree = ModFolderTree.Build(HubModFolderStore.ToEntries(mods), folders, _foldState);
+            _treeView.SetTree(_tree);
+            _treeView.SetSearch(_search);
             if (_modsLoadError != null)
             {
-                _treeScroll.Add(HubModWidgets.MakeNote($"Failed to list mods: {_modsLoadError}"));
-                return;
-            }
-
-            IReadOnlyList<HubModRecord> mods = _modsCache ?? Array.Empty<HubModRecord>();
-            List<HubModRecord> filtered = new();
-            foreach (HubModRecord mod in mods)
-            {
-                if (Matches(mod, _search))
-                {
-                    filtered.Add(mod);
-                }
-            }
-
-            if (filtered.Count == 0)
-            {
-                _treeScroll.Add(HubModWidgets.MakeNote(
-                    mods.Count == 0 ? "No mods yet. Use Add or Paste to create one." : "No mods match the search."));
-                return;
-            }
-
-            SortedDictionary<string, List<HubModRecord>> groups =
-                new(StringComparer.OrdinalIgnoreCase);
-            foreach (HubModRecord mod in filtered)
-            {
-                string category = HubModServiceBase.CategoryOrDefault(mod.Category);
-                if (!groups.TryGetValue(category, out List<HubModRecord> bucket))
-                {
-                    bucket = new List<HubModRecord>();
-                    groups[category] = bucket;
-                }
-
-                bucket.Add(mod);
-            }
-
-            foreach (KeyValuePair<string, List<HubModRecord>> group in groups)
-            {
-                Foldout foldout = new() { text = $"{group.Key}  ({group.Value.Count})", value = true };
-                foldout.style.marginBottom = 4f;
-                HubModWidgets.StyleFoldoutTitle(foldout);
-                foreach (HubModRecord mod in group.Value)
-                {
-                    foldout.Add(BuildModRow(mod));
-                }
-
-                _treeScroll.Add(foldout);
+                SetStatus($"Failed to list mods: {_modsLoadError}", true);
             }
         }
 
-        private VisualElement BuildModRow(HubModRecord mod)
+        /// <summary>Applies the search box to the current tree without rebuilding it.</summary>
+        private void ApplySearch()
         {
-            VisualElement panel = HubModWidgets.MakePanel();
-
-            VisualElement top = new();
-            top.style.flexDirection = FlexDirection.Row;
-            top.style.alignItems = Align.Center;
-
-            Toggle toggle = new() { value = mod.IsLoaded };
-            toggle.tooltip = "Enable / disable (load / unload) the mod.";
-            toggle.style.marginRight = 4f;
-            toggle.SetEnabled(_service.IsSupported);
-            toggle.RegisterValueChangedCallback(evt => ToggleMod(mod.Id, evt.newValue));
-            top.Add(toggle);
-
-            // WHY: a bare checkbox did not read as "on/off" at a glance (the state only showed on hover
-            // or in the meta line), so label it explicitly next to the toggle.
-            Label state = HubModWidgets.MakeFieldLabel(mod.IsLoaded ? "On" : "Off");
-            state.style.unityFontStyleAndWeight = FontStyle.Bold;
-            state.style.color = mod.IsLoaded ? HubModWidgets.Accent : HubModWidgets.Muted;
-            state.style.width = 30f;
-            state.style.marginRight = 8f;
-            top.Add(state);
-
-            VisualElement nameCol = new();
-            nameCol.style.flexGrow = 1f;
-            nameCol.style.flexShrink = 1f;
-
-            Label name = HubModWidgets.MakeFieldLabel(
-                string.IsNullOrWhiteSpace(mod.Name) ? mod.Id : mod.Name);
-            name.style.unityFontStyleAndWeight = FontStyle.Bold;
-            nameCol.Add(name);
-
-            Label meta = HubModWidgets.MakeMutedLabel(BuildMetaLine(mod));
-            meta.style.fontSize = 11f;
-            nameCol.Add(meta);
-            top.Add(nameCol);
-
-            top.Add(HubModWidgets.MakeButton("Edit", () => OpenEditEditor(mod.Id)));
-            top.Add(HubModWidgets.MakeButton("Export", () => ExportMod(mod.Id)));
-            top.Add(HubModWidgets.MakeDangerButton("Delete", () => DeleteMod(mod.Id)));
-
-            panel.Add(top);
-
-            if (!string.IsNullOrWhiteSpace(mod.Description))
-            {
-                Label desc = HubModWidgets.MakeMutedLabel(mod.Description);
-                desc.style.fontSize = 11f;
-                desc.style.marginTop = 2f;
-                panel.Add(desc);
-            }
-
-            if (mod.UpdateAvailable)
-            {
-                VisualElement updateRow = new();
-                updateRow.style.flexDirection = FlexDirection.Row;
-                updateRow.style.alignItems = Align.Center;
-                updateRow.style.marginTop = 2f;
-
-                string versionSuffix = string.IsNullOrWhiteSpace(mod.SeededVersion) ? "" : $" (v{mod.SeededVersion})";
-                Label badge = HubModWidgets.MakeMutedLabel($"Update available{versionSuffix}");
-                badge.style.color = HubModWidgets.Accent;
-                badge.style.unityFontStyleAndWeight = FontStyle.Bold;
-                badge.style.marginRight = 6f;
-                updateRow.Add(badge);
-
-                updateRow.Add(HubModWidgets.MakeButton("Apply update", () => ApplyUpdate(mod.Id)));
-                panel.Add(updateRow);
-            }
-
-            return panel;
+            _treeView?.SetSearch(_search);
         }
 
         private static string BuildMetaLine(HubModRecord mod)
@@ -371,26 +461,6 @@ namespace CoreAI.Ai.Hub
             return mod != null && mod.SuspendedAfterBudgetTrips
                 ? "  suspended after repeated budget trips — start it manually"
                 : "";
-        }
-
-        private static bool Matches(HubModRecord mod, string search)
-        {
-            if (string.IsNullOrWhiteSpace(search))
-            {
-                return true;
-            }
-
-            string needle = search.Trim();
-            return Contains(mod.Name, needle) ||
-                   Contains(mod.Id, needle) ||
-                   Contains(mod.Category, needle) ||
-                   Contains(mod.Tags, needle);
-        }
-
-        private static bool Contains(string haystack, string needle)
-        {
-            return !string.IsNullOrEmpty(haystack) &&
-                   haystack.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private void ToggleMod(string id, bool enable)
@@ -663,6 +733,195 @@ namespace CoreAI.Ai.Hub
 
             _service.ModsChanged -= OnModsChanged;
             _subscribed = false;
+        }
+
+        private const string AboutAction = "About";
+        private const string EditAction = "Edit";
+        private const string ExportAction = "Export";
+        private const string UpdateAction = "Apply update";
+        private const string DeleteAction = "Delete";
+        private const string NewFolderAction = "New folder";
+        private const string RenameAction = "Rename";
+
+        private void CacheModDetails()
+        {
+            _modDetails.Clear();
+            foreach (HubModRecord mod in _modsCache ?? Array.Empty<HubModRecord>())
+            {
+                if (mod != null && !string.IsNullOrEmpty(mod.Id))
+                {
+                    _modDetails[mod.Id] = BuildMetaLine(mod);
+                }
+            }
+        }
+
+        private string DetailOf(ModFolderModEntry mod)
+        {
+            return _modDetails.TryGetValue(mod.Id, out string detail) ? detail : "";
+        }
+
+        internal static bool IsModActionShown(ModFolderModEntry mod, string action)
+        {
+            switch (action)
+            {
+                case UpdateAction:
+                    return mod.Payload is HubModRecord updatable && updatable.UpdateAvailable;
+                case AboutAction:
+                    return mod.Payload is HubModRecord described && !string.IsNullOrWhiteSpace(described.Description);
+                default:
+                    return true;
+            }
+        }
+
+        private void OnModAction(ModFolderModEntry mod, string action)
+        {
+            switch (action)
+            {
+                case AboutAction:
+                    ToggleAbout(mod.Id);
+                    break;
+                case EditAction:
+                    OpenEditEditor(mod.Id);
+                    break;
+                case ExportAction:
+                    ExportMod(mod.Id);
+                    break;
+                case UpdateAction:
+                    ApplyUpdate(mod.Id);
+                    break;
+                case DeleteAction:
+                    DeleteMod(mod.Id);
+                    break;
+            }
+        }
+
+        private void OnFolderAction(ModFolderNode folder, string action)
+        {
+            switch (action)
+            {
+                case NewFolderAction:
+                    PromptNewFolder(folder.Path);
+                    break;
+                case RenameAction:
+                    ModFolderPath renamed = folder.Path;
+                    _treeView?.BeginNamePrompt("Rename '" + renamed.Value + "' to", folder.Name,
+                        name => RunFolderOperation(() => _folderService.RenameFolder(renamed.Value, name), true));
+                    break;
+                case DeleteAction:
+                    RunFolderOperation(() => _folderService.DeleteFolder(folder.Path.Value), true);
+                    break;
+            }
+        }
+
+        private void PromptNewFolder(ModFolderPath parent)
+        {
+            string label = parent.IsRoot ? "New folder" : "New folder in '" + parent.Value + "'";
+            _treeView?.BeginNamePrompt(label, "", name =>
+                RunFolderOperation(() => _folderService.CreateFolder(parent.IsRoot ? name : parent.Value + "/" + name),
+                    false));
+        }
+
+        private void OnBranchEnableRequested(ModFolderNode folder, bool enable)
+        {
+            RunFolderOperation(() => _folderService.SetBranchEnabled(folder.Path.Value, enable), false);
+        }
+
+        private void OnMoveRequested(ModFolderMoveRequest request)
+        {
+            ModFolderResult result = RunFolderOperation(() => request.Kind == ModFolderRowKind.Mod
+                ? _folderService.MoveMod(request.ModId, request.Target.Value)
+                : _folderService.MoveFolder(request.Folder.Value, request.Target.Value),
+                request.Kind == ModFolderRowKind.Folder);
+            if (result != null && result.Succeeded && request.Kind == ModFolderRowKind.Mod)
+            {
+                _treeView?.RevealMod(request.ModId);
+            }
+        }
+
+        /// <summary>
+        /// Runs one folder operation, keeps the fold state on the moved, renamed or deleted branch when
+        /// <paramref name="followsFolder"/>, reports the result (the stable code on failure) and refreshes.
+        /// </summary>
+        internal ModFolderResult RunFolderOperation(Func<ModFolderResult> operation, bool followsFolder)
+        {
+            if (_destroyed)
+            {
+                return null;
+            }
+
+            ModFolderResult result;
+            try
+            {
+                result = operation();
+            }
+            catch (OperationCanceledException)
+            {
+                SetStatus("The folder change was cancelled; some mods may already have changed.", true);
+                RefreshList();
+                return null;
+            }
+
+            if (result.Succeeded && followsFolder && _foldState != null && !result.PreviousPath.IsRoot)
+            {
+                if (result.Path.IsRoot && result.ModsChanged == 0 && !result.CreatedFolder)
+                {
+                    _foldState.Forget(result.PreviousPath);
+                }
+                else if (!result.Path.IsRoot)
+                {
+                    _foldState.Rebase(result.PreviousPath, result.Path);
+                }
+
+                ScheduleFoldSave();
+            }
+
+            SetStatus(result.Succeeded
+                ? result.Message + (result.Warning.Length == 0 ? "" : " " + result.Warning)
+                : result.Code + ": " + result.Message, !result.Succeeded);
+            RefreshList();
+            return result;
+        }
+
+        private void ScheduleFoldSave()
+        {
+            if (_destroyed || _root == null)
+            {
+                return;
+            }
+
+            _foldSave?.Pause();
+            _foldSave = _root.schedule.Execute(SaveFoldStateIfChanged).StartingIn(500);
+        }
+
+        /// <summary>Writes the fold state when it changed since the last write.</summary>
+        internal void SaveFoldStateIfChanged()
+        {
+            if (_foldState == null || _foldState.Version == _savedFoldVersion)
+            {
+                return;
+            }
+
+            try
+            {
+                _folderPreferences.FoldStateText = ModFolderStateCodec.EncodeFoldState(_foldState);
+                _savedFoldVersion = _foldState.Version;
+            }
+            catch (Exception ex)
+            {
+                SetStatus("Could not save which folders are open: " + ex.Message, true);
+            }
+        }
+
+        private string SafeFoldStateText()
+        {
+            try
+            {
+                return _folderPreferences.FoldStateText ?? "";
+            }
+            catch (Exception)
+            {
+                return "";
+            }
         }
 
         private void SetStatus(string message, bool error)

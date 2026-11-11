@@ -124,16 +124,47 @@ namespace CoreAI.Net.Mirror.Tests
             MirrorNetworkBridge bridge = (MirrorNetworkBridge)_provider.Bridge;
             StartClientAndFrame();
 
+            List<CoreAiAdmissionRefusal> raised = new();
+            _authenticator.ClientRefused += raised.Add;
+
             OfflineMirror.DeliverToClient(new CoreAiAdmissionResponseMessage
             {
                 Admitted = false,
                 Reason = "not admitted",
-                ActorId = ""
+                ActorId = "",
+                ProtocolVersion = CoreAiMirrorProtocol.Version,
+                Refusal = (byte)CoreAiAdmissionRefusalKind.NotAdmitted
             });
 
             Assert.IsNull(_authenticator.ClientActorId);
             Assert.IsNull(bridge.AdmittedActorId);
             Assert.IsFalse(NetworkClient.connection.isAuthenticated);
+            Assert.IsTrue(_authenticator.ClientRefusal.HasValue, "the client keeps why it was refused");
+            Assert.AreEqual(CoreAiAdmissionRefusalKind.NotAdmitted, _authenticator.ClientRefusal.Value.Kind);
+            Assert.AreEqual("not admitted", _authenticator.ClientRefusal.Value.Reason);
+            Assert.IsTrue(_authenticator.ClientRefusal.Value.RefusedByServer);
+            Assert.AreEqual(1, raised.Count, "and says so once, for the game to show");
+        }
+
+        [Test]
+        public void ANewAttempt_ForgetsTheLastRefusal()
+        {
+            StartClientAndFrame();
+            OfflineMirror.DeliverToClient(new CoreAiAdmissionResponseMessage
+            {
+                Admitted = false,
+                Reason = "not admitted",
+                ActorId = "",
+                ProtocolVersion = CoreAiMirrorProtocol.Version,
+                Refusal = (byte)CoreAiAdmissionRefusalKind.NotAdmitted
+            });
+            Assert.IsTrue(_authenticator.ClientRefusal.HasValue);
+            Transport.active.OnClientConnected?.Invoke();
+
+            _authenticator.OnClientAuthenticate();
+
+            Assert.IsFalse(_authenticator.ClientRefusal.HasValue,
+                "a refusal belongs to the attempt that got it, not to the next one");
         }
 
         [Test]
@@ -190,7 +221,8 @@ namespace CoreAI.Net.Mirror.Tests
             {
                 Admitted = true,
                 Reason = "",
-                ActorId = actorId
+                ActorId = actorId,
+                ProtocolVersion = CoreAiMirrorProtocol.Version
             };
         }
 

@@ -6,6 +6,7 @@
     "CoreAI.Core",
     "CoreAI.Mods",
     "CoreAI.Editor",
+    "CoreAI.Editor.Setup",
     "CoreAI.ExampleGame",
     "CoreAI.Hub.UI",
     "CoreAI.Source",

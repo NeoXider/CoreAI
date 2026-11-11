@@ -369,6 +369,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly RbxCollectionService _collectionService;
         private readonly RbxTweenService _tweenService;
         private readonly LuaCsTweenPropertyHost _tweenPropertyHost;
+        private readonly RbxLighting _lighting;
         private readonly RbxWorldPhysics _worldPhysics;
         private Func<RbxHumanoid, IRbxCharacterMotor> _characterMotorFactory;
         private readonly Dictionary<RbxHumanoid, IRbxCharacterMotor> _characterMotors = new();
@@ -387,6 +388,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly INetworkBridge _networkBridge;
         private readonly RbxServerClockReader _serverClockReader;
         private readonly RbxPlayers _players;
+        private readonly RbxStarterGuiReplicator _starterGuiReplicator;
         private readonly LuaCsRbxNetworkCodec _networkCodec;
         private readonly RbxScriptSignal _networkRequestSignal;
         private readonly RbxScriptConnection _networkRequestConnection;
@@ -491,6 +493,7 @@ namespace CoreAI.Ai.LuaCs
                          ?? throw new ArgumentException(
                              "the game tree has no Workspace child", nameof(game));
             _enums = enums ?? RbxEnumRegistry.CreateWithBuiltins();
+            RbxGuiEnums.EnsureRegistered(_enums);
             _networkBridge = networkBridge ?? new NullNetworkBridge();
             _players = _game.FindFirstChildOfClass("Players") as RbxPlayers;
             if (_players == null && _registry.Catalog.TryGet("Players", out _))
@@ -610,6 +613,17 @@ namespace CoreAI.Ai.LuaCs
                     _scheduler, _tweenPropertyHost, ResolvePlaybackStateItem, _log);
             }
 
+            // WHY: same rationale as TweenService — a tree bootstrapped elsewhere may lack the service;
+            // its sink stays whatever the host attached (RbxWorldHost attaches the scene's).
+            _lighting = _game.FindFirstChildOfClass("Lighting") as RbxLighting;
+            if (_lighting == null && _registry.Catalog.TryGet("Lighting", out _))
+            {
+                _lighting = (RbxLighting)_registry.Create("Lighting");
+                _lighting.Parent = _game;
+            }
+
+            _lighting?.LightingChanged.BindScheduler(_scheduler);
+
             // WHY constructed unconditionally, unlike the services above: world physics is not an
             // instance in the tree, and a world with no engine adapter still has to answer
             // workspace:Raycast (with a miss) and remember a scripted Workspace.Gravity until a host
@@ -619,6 +633,11 @@ namespace CoreAI.Ai.LuaCs
             // has no scheduler silently never times out a MoveTo and never changes state, and the
             // script that created it has no way to notice.
             _registry.Registered += OnInstanceRegisteredForCharacter;
+            // WHY a poll per frame and not a CharacterAdded connection: the signal is bound to the
+            // scheduler only after the Player is registered, and its first fire can come before a
+            // deferred connection would exist; comparing Player.Character each frame sees every spawn.
+            _starterGuiReplicator = new RbxStarterGuiReplicator(_game);
+            _registry.Registered += OnInstanceRegisteredForStarterGui;
             _registry.SceneMembershipChanged += OnCharacterSceneMembershipChanged;
 
             if (_userInputService != null)
@@ -626,6 +645,8 @@ namespace CoreAI.Ai.LuaCs
                 _userInputService.InputBegan.BindScheduler(_scheduler);
                 _userInputService.InputEnded.BindScheduler(_scheduler);
                 _userInputService.InputChanged.BindScheduler(_scheduler);
+                _userInputService.TextBoxFocused.BindScheduler(_scheduler);
+                _userInputService.TextBoxFocusReleased.BindScheduler(_scheduler);
             }
 
             if (_runService != null)
@@ -671,6 +692,14 @@ namespace CoreAI.Ai.LuaCs
             // Registered wiring above never sees them. A headless host attaches no motor factory to
             // sweep them later, which left every restored Humanoid with no scheduler at all.
             WireExistingCharacterHumanoids();
+            IReadOnlyList<RbxInstance> existingPlayers = _players.GetChildren();
+            for (int index = 0; index < existingPlayers.Count; index++)
+            {
+                if (existingPlayers[index] is RbxPlayer existingPlayer)
+                {
+                    _starterGuiReplicator.Track(existingPlayer);
+                }
+            }
 
             // WHY: Roblox default; a custom enum registry without CameraType simply reads nil.
             if (_enums.TryGet("CameraType", out RbxEnum cameraType)
@@ -714,6 +743,12 @@ namespace CoreAI.Ai.LuaCs
         public RbxWorldPhysics WorldPhysics => _worldPhysics;
 
         /// <summary>
+        /// The shared Lighting service (day-cycle slice); <see cref="RbxLighting.AttachSink"/> puts its
+        /// state on screen.
+        /// </summary>
+        public RbxLighting Lighting => _lighting;
+
+        /// <summary>
         /// Supplies the character controller behind every <c>Humanoid</c>. Without one, humanoids
         /// keep their health and state but never move.
         /// </summary>
@@ -733,6 +768,47 @@ namespace CoreAI.Ai.LuaCs
                     AttachCharacterMotor(humanoid);
                 }
             }
+        }
+
+        private void OnInstanceRegisteredForStarterGui(InstanceRecord record)
+        {
+            if (record?.Instance is RbxPlayer player)
+            {
+                _starterGuiReplicator.Track(player);
+            }
+        }
+
+        /// <summary>Copies StarterGui into each player's PlayerGui when that player's character spawns.</summary>
+        public RbxStarterGuiReplicator StarterGuiReplicator => _starterGuiReplicator;
+
+        /// <summary>The player whose PlayerGui this process draws (the camera's player).</summary>
+        internal RbxPlayer ResolveScreenPlayer()
+        {
+            return ResolveLocalCameraPlayer();
+        }
+
+        /// <summary>The pointer position GUI MouseEnter and MouseLeave report, pixels.</summary>
+        internal RbxVector2 ReadMouseLocation()
+        {
+            return _userInputService != null && !_userInputService.IsDestroyed
+                ? _userInputService.GetMouseLocation()
+                : RbxVector2.Zero;
+        }
+
+        /// <summary>The InputObject a GUI click hands <c>Activated</c>: MouseButton1, ended, at the pointer.</summary>
+        internal object CreateGuiClickInput()
+        {
+            if (!_enums.TryGet("KeyCode", out RbxEnum keyCodes) || !_enums.TryGet("UserInputType", out RbxEnum types)
+                || !_enums.TryGet("UserInputState", out RbxEnum states)
+                || !keyCodes.TryGetItem("Unknown", out RbxEnumItem unknown)
+                || !types.TryGetItem("MouseButton1", out RbxEnumItem button)
+                || !states.TryGetItem("End", out RbxEnumItem ended))
+            {
+                return null;
+            }
+
+            RbxVector2 mouse = ReadMouseLocation();
+            return new RbxInputObject(unknown, button, ended, new RbxVector3(mouse.X, mouse.Y, 0f), RbxVector3.Zero);
         }
 
         private void OnInstanceRegisteredForCharacter(InstanceRecord record)
@@ -926,6 +1002,7 @@ namespace CoreAI.Ai.LuaCs
             // WHY: ownership is dropped before the host's Release can run, so a Release that
             // throws leaves nothing behind for a later attach to find and release a second time.
             _characterMotors.Remove(humanoid, out IRbxCharacterMotor previousMotor);
+            humanoid.CameraFrameProvider ??= () => _cameraRig.GetCFrame();
             humanoid.AttachHost(_scheduler, null, ResolveRootPart(humanoid));
             // WHY released here, once the Humanoid no longer forwards to it, and before the
             // factory builds a replacement: a host motor may hold a registration keyed by this
@@ -3058,11 +3135,18 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// Fires PreRender and its legacy alias RenderStepped, then completes click picking, at the
-        /// PreRender boundary. Both signals are withheld on a process that draws no frames.
+        /// Steps the default camera, then fires PreRender and its legacy alias RenderStepped, then completes
+        /// click picking, at the PreRender boundary. Both signals are withheld on a process that draws no
+        /// frames.
         /// </summary>
+        /// <remarks>
+        /// WHY the camera first: Roblox's camera scripts run at the Camera render priority, ahead of plain
+        /// RenderStepped handlers, so a handler that reads Camera.CFrame sees this frame's camera, and a
+        /// Scriptable camera written there is never overwritten because the module does not run for it.
+        /// </remarks>
         public void PumpPreRender(float dt)
         {
+            StepCameraModule(dt);
             if (_runService != null && !_runService.IsDestroyed)
             {
                 _runService.FireRenderPhase(dt);
@@ -3117,6 +3201,7 @@ namespace CoreAI.Ai.LuaCs
             switch (phase)
             {
                 case SchedulerPhase.PreAnimation:
+                    _starterGuiReplicator.Poll();
                     PumpPreAnimation(frameDelta);
                     return;
                 case SchedulerPhase.PreSimulation:
@@ -3319,12 +3404,334 @@ namespace CoreAI.Ai.LuaCs
             return value < -halfExtent ? -halfExtent : value;
         }
 
-        /// <summary>Camera.CameraType value shared by every script of this world (state only —
-        /// no behavior is derived from it yet; following is driven by <see cref="CameraSubject"/>).</summary>
+        /// <summary>Camera.CameraType value shared by every script of this world: <c>Custom</c> (the
+        /// default) runs <see cref="CameraModule"/> every rendered frame, every other type leaves the camera
+        /// to scripts.</summary>
         internal RbxEnumItem CameraTypeItem { get; set; }
 
-        /// <summary>Camera.CameraSubject; non-null while the rig follows it.</summary>
+        /// <summary>Camera.CameraSubject as assigned; null until a script assigns one, while the camera
+        /// follows the local character's Humanoid (<see cref="EffectiveCameraSubject"/>).</summary>
         internal RbxInstance CameraSubject { get; private set; }
+
+        /// <summary>
+        /// What Camera.CameraSubject reads: the assigned subject, else the local character's Humanoid,
+        /// which is what Roblox's engine assigns when the character spawns.
+        /// </summary>
+        internal RbxInstance EffectiveCameraSubject =>
+            CameraSubject != null && !CameraSubject.IsDestroyed ? CameraSubject : ResolveDefaultCameraSubject();
+
+        /// <summary>
+        /// The GUI inset between screen and viewport coordinates (Roblox's top bar). CoreAI draws no top bar,
+        /// so <c>ScreenPointToRay</c> equals <c>ViewportPointToRay</c> and <c>WorldToScreenPoint</c> equals
+        /// <c>WorldToViewportPoint</c>.
+        /// </summary>
+        internal static readonly RbxVector2 GuiInset = RbxVector2.Zero;
+
+        /// <summary>Studs above a Humanoid subject's root part that the default camera orbits (its head).</summary>
+        public static readonly RbxVector3 HumanoidCameraSubjectOffset = new(0f, 1.5f, 0f);
+
+        private IRbxCameraModule _cameraModule = new RbxDefaultCameraModule();
+        private bool _cameraModuleActive;
+        private bool _cameraModuleFaultReported;
+        private RbxMouseLock _cameraModuleMouseLock = RbxMouseLock.Default;
+        private RbxInstance _cameraInstance;
+        private CameraOcclusion _cameraOcclusion;
+
+        /// <summary>
+        /// The behaviour of <c>CameraType.Custom</c>: a <see cref="RbxDefaultCameraModule"/> unless the host
+        /// assigns its own. Null switches the default camera off, so the host or a script owns the camera
+        /// whatever CameraType says. Assigning hands the camera over on the next rendered frame.
+        /// </summary>
+        public IRbxCameraModule CameraModule
+        {
+            get => _cameraModule;
+            set
+            {
+                if (ReferenceEquals(_cameraModule, value))
+                {
+                    return;
+                }
+
+                DeactivateCameraModule();
+                _cameraModule = value;
+                _cameraModuleFaultReported = false;
+            }
+        }
+
+        /// <summary>Camera.FieldOfView: the rig's lens, or Roblox's 70 degrees when the rig has none.</summary>
+        internal double GetCameraFieldOfView()
+        {
+            return RbxCameraProjection.ClampFieldOfView(_cameraRig.GetFieldOfView());
+        }
+
+        /// <summary>
+        /// Writes Camera.FieldOfView clamped to [1, 120]; false when the host rig has no lens to set.
+        /// Changed("FieldOfView") fires on a real change.
+        /// </summary>
+        internal bool TrySetCameraFieldOfView(RbxInstance camera, double degrees)
+        {
+            return LuaCsRbxInstanceBindings.TrySetCameraFieldOfView(_cameraRig, camera, degrees);
+        }
+
+        /// <summary>Camera.ViewportSize: the rig's viewport, or Roblox's unset (1, 1).</summary>
+        internal RbxVector2 GetCameraViewportSize()
+        {
+            return RbxCameraProjection.SanitizeViewport(_cameraRig.GetViewportSize());
+        }
+
+        /// <summary>
+        /// One rendered frame of the default camera: while CameraType is Custom and a subject resolves,
+        /// the module turns, zooms and pulls in the camera and the pose is applied through the rig; any
+        /// other state hands the camera back (look angles forgotten, the module's pointer lock released).
+        /// </summary>
+        private void StepCameraModule(float dt)
+        {
+            IRbxCameraModule module = _cameraModule;
+            // WHY the render gate: a dedicated server draws nothing, so there is no camera to drive.
+            bool rendersFrames = _runService == null || _runService.Topology is not { RendersFrames: false };
+            if (module == null || !rendersFrames || CameraTypeItem == null || CameraTypeItem.Name != "Custom"
+                || !TryResolveCameraFocus(out RbxVector3 focus, out RbxInstance subjectBody))
+            {
+                DeactivateCameraModule();
+                return;
+            }
+
+            RbxPlayer player = ResolveLocalCameraPlayer();
+            RbxStarterPlayer starter = player == null ? ResolveStarterPlayer() : null;
+            RbxUserInputService input = _userInputService;
+            bool inputAlive = input != null && !input.IsDestroyed;
+            _cameraOcclusion ??= new CameraOcclusion(this);
+            _cameraOcclusion.Ignore = subjectBody;
+            RbxCameraModuleInput frame = new()
+            {
+                DeltaSeconds = dt,
+                CurrentCFrame = _cameraRig.GetCFrame(),
+                Focus = focus,
+                PointerDelta = inputAlive ? ScaleDelta(input.LastFrameMouseDelta, input.MouseDeltaSensitivity)
+                    : RbxVector2.Zero,
+                Wheel = inputAlive ? input.LastFrameWheel : 0f,
+                LookStick = inputAlive ? input.GetThumbstick(2) : RbxVector2.Zero,
+                RotateHeld = inputAlive && input.InputSource.IsMouseButtonDown(1),
+                PointerLocked = inputAlive && input.IsPointerLocked,
+                InputCaptured = inputAlive && input.IsGameInputCaptured,
+                PointerOverUi = inputAlive && input.IsPointerInputProcessed,
+                CameraMode = player?.CameraMode ?? starter?.CameraMode ?? RbxCameraMode.Classic,
+                MinZoomDistance = player?.CameraMinZoomDistance ?? starter?.CameraMinZoomDistance
+                    ?? RbxStarterPlayer.DefaultCameraMinZoomDistance,
+                MaxZoomDistance = player?.CameraMaxZoomDistance ?? starter?.CameraMaxZoomDistance
+                    ?? RbxStarterPlayer.DefaultCameraMaxZoomDistance,
+                Occlusion = _cameraOcclusion
+            };
+
+            RbxCameraModuleOutput output;
+            try
+            {
+                output = module.Update(in frame);
+            }
+            catch (Exception exception)
+            {
+                // WHY contained and reported once: the module is the host's code running every frame;
+                // an escaping throw would end the scheduler frame for every mod, and a log per frame
+                // would flood the console with one fault.
+                if (!_cameraModuleFaultReported)
+                {
+                    _cameraModuleFaultReported = true;
+                    _registry.ReportDiagnostic("[CoreAI.RbxApi] IRbxCameraModule.Update threw and the "
+                        + "camera was left where it was; further faults of this module are not reported: "
+                        + exception);
+                }
+
+                return;
+            }
+            finally
+            {
+                _cameraOcclusion.Ignore = null;
+            }
+
+            _cameraModuleActive = true;
+            if (output.HasCFrame)
+            {
+                RbxInstance camera = ResolveCameraInstance();
+                if (camera != null)
+                {
+                    LuaCsRbxInstanceBindings.SetCameraCFrame(_cameraRig, camera, in output.CFrame);
+                }
+                else
+                {
+                    _cameraRig.SetCFrame(in output.CFrame);
+                }
+            }
+
+            ApplyCameraModuleMouseLock(output.MouseLock);
+        }
+
+        private void DeactivateCameraModule()
+        {
+            if (!_cameraModuleActive)
+            {
+                return;
+            }
+
+            _cameraModuleActive = false;
+            _cameraModule?.Reset();
+            ApplyCameraModuleMouseLock(RbxMouseLock.Default);
+        }
+
+        /// <summary>
+        /// Hands the camera's pointer-lock wish to UserInputService.MouseBehavior when it changes, and only
+        /// then, so a script that set MouseBehavior itself keeps it until the camera's own wish moves.
+        /// </summary>
+        private void ApplyCameraModuleMouseLock(RbxMouseLock wanted)
+        {
+            if (wanted == _cameraModuleMouseLock || _userInputService == null || _userInputService.IsDestroyed)
+            {
+                return;
+            }
+
+            _cameraModuleMouseLock = wanted;
+            if (_enums.TryGet("MouseBehavior", out RbxEnum behavior)
+                && behavior.TryGetItemByValue((int)wanted, out RbxEnumItem item))
+            {
+                _userInputService.MouseBehavior = item;
+            }
+        }
+
+        private static RbxVector2 ScaleDelta(RbxVector2 delta, double sensitivity)
+        {
+            float factor = (float)sensitivity;
+            return new RbxVector2(delta.X * factor, delta.Y * factor);
+        }
+
+        /// <summary>
+        /// The point the default camera orbits and the body its pull-in ray ignores: a Humanoid subject's
+        /// root part plus <see cref="HumanoidCameraSubjectOffset"/> (its character ignored), or a BasePart
+        /// subject's centre (the part ignored). False when no subject resolves to a part in the world.
+        /// </summary>
+        private bool TryResolveCameraFocus(out RbxVector3 focus, out RbxInstance subjectBody)
+        {
+            RbxInstance subject = EffectiveCameraSubject;
+            if (subject is RbxHumanoid humanoid)
+            {
+                RbxInstance root = humanoid.RootPart;
+                if (root != null && !root.IsDestroyed && root.IsA("BasePart"))
+                {
+                    focus = _partSink.GetLivePositionStuds(root.Id) + HumanoidCameraSubjectOffset;
+                    subjectBody = humanoid.Parent != null && !humanoid.Parent.IsDestroyed ? humanoid.Parent : root;
+                    return true;
+                }
+            }
+            else if (subject != null && !subject.IsDestroyed && subject.IsA("BasePart"))
+            {
+                focus = _partSink.GetLivePositionStuds(subject.Id);
+                subjectBody = subject;
+                return true;
+            }
+
+            focus = RbxVector3.Zero;
+            subjectBody = null;
+            return false;
+        }
+
+        /// <summary>The local character's Humanoid, or null when there is no local player or character.</summary>
+        private RbxHumanoid ResolveDefaultCameraSubject()
+        {
+            RbxInstance character = ResolveLocalCameraPlayer()?.Character;
+            if (character == null || character.IsDestroyed)
+            {
+                return null;
+            }
+
+            return character.FindFirstChildOfClass("Humanoid") as RbxHumanoid;
+        }
+
+        /// <summary>
+        /// The player at this screen for the camera: <see cref="LocalPlayerActorId"/>'s player when set,
+        /// else the only connected player; null otherwise.
+        /// </summary>
+        private RbxPlayer ResolveLocalCameraPlayer()
+        {
+            if (!string.IsNullOrEmpty(LocalPlayerActorId))
+            {
+                return _players.TryGetByActorId(LocalPlayerActorId, out RbxPlayer named) && !named.IsDestroyed
+                    ? named
+                    : null;
+            }
+
+            return _players.GetSoleListedPlayer();
+        }
+
+        private RbxStarterPlayer ResolveStarterPlayer()
+        {
+            return _game.FindFirstChildOfClass("StarterPlayer") as RbxStarterPlayer;
+        }
+
+        /// <summary>The world's Camera instance, cached and re-resolved once it leaves Workspace.</summary>
+        private RbxInstance ResolveCameraInstance()
+        {
+            if (_cameraInstance == null || _cameraInstance.IsDestroyed
+                || !ReferenceEquals(_cameraInstance.Parent, _workspace))
+            {
+                _cameraInstance = _workspace.FindFirstChildOfClass("Camera");
+            }
+
+            return _cameraInstance;
+        }
+
+        /// <summary>
+        /// The default camera's pull-in ray over the world's physics port: the subject's own body never
+        /// blocks, and neither does a part the PlayerModule's Poppercam would see through (non-colliding,
+        /// or at least 95% transparent).
+        /// </summary>
+        private sealed class CameraOcclusion : IRbxCameraOcclusion
+        {
+            private const float SeeThroughTransparency = 0.95f;
+
+            private readonly LuaCsRbxApiBindings _owner;
+            private readonly Func<InstanceId, bool> _filter;
+
+            public CameraOcclusion(LuaCsRbxApiBindings owner)
+            {
+                _owner = owner;
+                _filter = IsOccluder;
+            }
+
+            /// <summary>The subject's body for the current frame; set only around one module update.</summary>
+            public RbxInstance Ignore { get; set; }
+
+            public bool TryFindObstruction(RbxVector3 focus, RbxVector3 camera, out double distanceStuds)
+            {
+                RbxVector3 direction = camera - focus;
+                double length = direction.Magnitude;
+                IRbxPhysicsPort port = _owner._worldPhysics.Port;
+                if (port == null || !(length > 1e-4d) || length > RbxWorldPhysics.MaxRayLengthStuds
+                    || !port.TryRaycast(focus, direction, true, _filter, out RbxPhysicsRaycastHit hit))
+                {
+                    distanceStuds = 0d;
+                    return false;
+                }
+
+                distanceStuds = hit.Distance;
+                return true;
+            }
+
+            private bool IsOccluder(InstanceId id)
+            {
+                if (!_owner._registry.TryGet(id, out RbxInstance instance) || instance.IsDestroyed
+                    || !instance.IsA("BasePart"))
+                {
+                    return false;
+                }
+
+                RbxInstance ignore = Ignore;
+                if (ignore != null && (ReferenceEquals(instance, ignore) || instance.IsDescendantOf(ignore)))
+                {
+                    return false;
+                }
+
+                PartProperties part = _owner._partSink.GetPartPropertiesOrDefault(id);
+                return part.CanCollide && part.Transparency < SeeThroughTransparency;
+            }
+        }
 
         /// <summary>Shared write path for Camera.CameraSubject and camera_follow: nil stops the
         /// follow, an instance must have a backing object in the world to be followed.</summary>
@@ -3439,6 +3846,7 @@ namespace CoreAI.Ai.LuaCs
             luaRegistry.RegisterValue("Vector3", LuaCsRbxDatatypeBindings.BuildVector3Global);
             luaRegistry.RegisterValue("Vector2", LuaCsRbxDatatypeBindings.BuildVector2Global);
             luaRegistry.RegisterValue("CFrame", LuaCsRbxDatatypeBindings.BuildCFrameGlobal);
+            luaRegistry.RegisterValue("Ray", LuaCsRbxDatatypeBindings.BuildRayGlobal);
             luaRegistry.RegisterValue("Color3", LuaCsRbxDatatypeBindings.BuildColor3Global);
             luaRegistry.RegisterValue("UDim", LuaCsRbxDatatypeBindings.BuildUDimGlobal);
             luaRegistry.RegisterValue("UDim2", LuaCsRbxDatatypeBindings.BuildUDim2Global);
@@ -3503,6 +3911,7 @@ namespace CoreAI.Ai.LuaCs
                     : RobloxTypeOf(ctx.State, ctx.GetArgument(0)))));
             luaRegistry.RegisterValue("warn", () => new LuaValue(BuildWarn(context)));
             RegisterUnimplementedGlobals(luaRegistry);
+            luaRegistry.RegisterValue("Region3", LuaCsTerrainBindings.BuildRegion3Global);
             // WHY: registered on every tier so a WorldEdit-less call fails with the actionable
             // capability message instead of "attempt to call a nil value".
             luaRegistry.RegisterValue("camera_set_cframe",
@@ -3550,6 +3959,7 @@ namespace CoreAI.Ai.LuaCs
                 case RbxVector3 _: return "Vector3";
                 case RbxVector2 _: return "Vector2";
                 case RbxCFrame _: return "CFrame";
+                case RbxRay _: return "Ray";
                 case RbxColor3 _: return "Color3";
                 case RbxUDim _: return "UDim";
                 case RbxUDim2 _: return "UDim2";
@@ -3749,9 +4159,6 @@ namespace CoreAI.Ai.LuaCs
                     "use a single Color3; nothing CoreAI binds takes a ColorSequence yet"),
                 UnimplementedGlobalMeta("NumberRange", backlog,
                     "keep the minimum and maximum in two numbers and draw with Random:NextNumber(min, max)"),
-                UnimplementedGlobalMeta("Ray", backlog,
-                    "use workspace:Raycast(origin, direction, raycastParams)"),
-                UnimplementedGlobalMeta("Region3", backlog, overlapWorkaround),
                 UnimplementedGlobalMeta("Rect", backlog,
                     "keep the Min and Max corners as two Vector2 values"),
                 UnimplementedGlobalMeta("PhysicalProperties", backlog,
@@ -3947,6 +4354,7 @@ namespace CoreAI.Ai.LuaCs
             {
                 context.RequireWorldEdit("Instance.new");
                 string className = ReadString(ctx, 0, "Instance.new");
+                LuaCsRbxGuiBindings.RequireUiForCreate(context, className);
                 LuaValue parentValue = Arg(ctx, 1);
                 RbxInstance parentInstance = null;
                 RbxInstance creationAnchor = null;

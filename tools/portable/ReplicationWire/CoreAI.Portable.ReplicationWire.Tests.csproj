@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Portable run of the replication wire fixtures: the binary delta codec, the per-tick publisher and
+    the receiver, against the engine-free CoreAI.RbxApi.Instances build, with no Unity install.
+    WHY a project of its own and not lines in ../Tests/CoreAI.Portable.Tests.csproj: the fixtures were
+    written while that list was being edited in parallel; folding them in is one ItemGroup copy (see
+    dev-docs/REPLICATION_CODEC.md, "Wiring"). Run it with an artifacts path of its own:
+      dotnet test tools/portable/ReplicationWire/CoreAI.Portable.ReplicationWire.Tests.csproj -c Release
+        artifacts-path artifacts/portable-replication-wire (as the double-dash option)
+    WHY CoreAI.Mods.Tests: the friend name CoreAI.RbxApi.Instances grants InternalsVisibleTo, exactly as
+    the Unity test asmdef of the same name gets it. WHY LangVersion 9: Unity compiles these files as C# 9.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>CoreAI.Mods.Tests</AssemblyName>
+    <RootNamespace>CoreAI.Tests</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <TestsRoot>$(MSBuildThisFileDirectory)../../../Assets/CoreAIMods/Tests/EditMode</TestsRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../CoreAI.RbxApi.Datatypes/CoreAI.RbxApi.Datatypes.csproj" />
+    <ProjectReference Include="../CoreAI.RbxApi.Instances/CoreAI.RbxApi.Instances.csproj" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="$(TestsRoot)/RbxApi/Replication/ReplicatedWorldHarness.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/ReplicatedWorldHarness.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Replication/ReplicationWireTestKit.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/ReplicationWireTestKit.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Replication/ReplicationWireCodecEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/ReplicationWireCodecEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Replication/ReplicationWireMalformedInputEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/ReplicationWireMalformedInputEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Replication/ReplicationPublisherEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/ReplicationPublisherEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Replication/ReplicationWireS2BinaryEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/ReplicationWireS2BinaryEditModeTests.cs" />
+  </ItemGroup>
+</Project>

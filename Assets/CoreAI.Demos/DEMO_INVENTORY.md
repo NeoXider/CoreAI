@@ -5,8 +5,8 @@ reading the controller scripts it references — not from the per-demo prose.
 
 Scope: `Assets/CoreAI.Demos/*/*.unity` and `Assets/CoreAiUnity/Scenes/*.unity`.
 
-The published player QA matrix is the frozen 17-scene G11 list in `CoreAIG11WebGlBuild.FrozenScenePaths`
-(`Assets/CoreAiUnity/Editor/CoreAIBuildMenu.cs`): the 16 scenes under `Assets/CoreAI.Demos` plus
+The published player QA matrix is the frozen 18-scene G11 list in `CoreAIG11WebGlBuild.FrozenScenePaths`
+(`Assets/CoreAiUnity/Editor/CoreAIBuildMenu.cs`): the 17 scenes under `Assets/CoreAI.Demos` plus
 `Assets/CoreAiUnity/Scenes/CoreAiChatDemo.unity`. It is pinned again in
 `CoreAiDemoScenesSmokePlayModeTests`, which fails if the two lists or the scenes on disk drift apart.
 Internal scenes such as `_mainCoreAI.unity` and controller-only recipes are documented below but are not
@@ -40,6 +40,7 @@ and never rehydrate in another demo.
 | Hub | `Hub/CoreAiHubDemo.unity` | The drop-in **UI Toolkit Hub** prefab: Chat, Settings (multi-endpoint switching), Statistics, Mods, World State pages. The flagship reusable UI. | UITK (Hub prefab) | Hub tab pages | Yes — `hub-demo` |
 | Full Access | `FullAccess/FullAccessDemo.unity` | **Full-tier** `unity_*` reflection access (opt-in): the Programmer inspects and moves/rotates/parents live scene objects from Lua. Also hosts the no-LLM Lua platform example (self-test + pure-Lua Tetris). | UITK — `CoreAiChatPanel` + `CoreAiHubWindow` with Full Access / Lua Platform / AI Settings (Settings, Token Budget, Statistics sub-tabs) / Mods / World tabs | Hub tabs + the chat's example-prompt menu (`EnableExamplePrompts`) | Yes — `full-access-demo` |
 | CoreAi Chat | `CoreAiUnity/Scenes/CoreAiChatDemo.unity` | The canonical **UITK chat panel** (`CoreAiChatPanel`, `CoreAiChat.uxml`/`.uss`, message-bubble elements) — the reference chat UI other demos embed. | UITK | None (bare chat); **C** opens, **Esc** closes | No |
+| Block World | `BlockWorld/BlockWorld.unity` | The M1 flagship: a Minecraft-style voxel world whose whole game is seven Lua mods (folder `Samples/Block World`): walk or fly, a hotbar, place and break at the crosshair with an outline and a reach, day and night, torches, villagers who are `AIService` agents, an autopilot, and "build a watchtower here" with `/undo`. Built by `CoreAI/Demos/Build Block World Demo` from the play world preset; the only scene that turns `AllowAgentsFromLua` on. Plays with no model; the AI features say what they need. | UITK — the HUD and hotbar are UXML/USS from the `blockworld_hud` mod on the runtime UI host, plus the chat overlay and NPC speech bubbles | The HUD's help line, the README's prompts to try; T opens the chat | Yes — `block-world-demo` |
 
 ### P2 — Strong (broad appeal)
 
@@ -103,7 +104,7 @@ and never rehydrate in another demo.
   (`AiDashboardPresenter.cs`, `CoreAiTokenBudgetOverlay.cs`, `OrchestrationDashboard.cs`) — none under
   `CoreAI.Demos`. That is exactly the `ImguiBanRatchetEditModeTests` whitelist, which may only shrink;
   nothing outside it in the scanned package and demo folders uses IMGUI.
-- **Isolated mod stores**: all eleven mods scenes with a store (Live Mechanics, both
+- **Isolated mod stores**: all twelve mods scenes with a store (Block World, Live Mechanics, both
   LiveMechanicsMods scenes, MiniRpg, Full Access, Moddable Units, Lua Mods, Hub, Multiplayer Foundation,
   Gameplay Services, Online Authority) set a distinct `CoreAiModsLifetimeScope.storeId`; an empty
   `storeId` (the main-game default) keeps the original shared location.

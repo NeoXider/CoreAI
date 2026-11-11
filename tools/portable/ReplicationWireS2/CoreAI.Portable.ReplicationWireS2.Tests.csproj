@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Spike S2 side by side: the remote codec's JSON (Scripting/LuaCs/LuaCsRbxNetworkCodec.cs, compiled by
+    ../LuaTier/CoreAI.Mods unmodified) against the binary replication codec, on the same CFrame patches.
+    WHY a project of its own: the JSON leg needs the Lua tier, the wire suite next door (../ReplicationWire)
+    must not, so a Lua-tier file that is broken for a while never stops the codec's own gate.
+    Run it with an artifacts path of its own, as ../LuaTests/README.md explains for the Lua tier.
+    WHY CoreAI.Mods.Tests: the friend name CoreAI.Mods and CoreAI.RbxApi.Instances grant internals to.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>CoreAI.Mods.Tests</AssemblyName>
+    <RootNamespace>CoreAI.Tests</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefineConstants>$(DefineConstants);COREAI_LLM;COREAI_LUA</DefineConstants>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RepoRoot>$(MSBuildThisFileDirectory)../../..</RepoRoot>
+    <TestsRoot>$(RepoRoot)/Assets/CoreAIMods/Tests/EditMode</TestsRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../CoreAI.Core.csproj" />
+    <ProjectReference Include="../CoreAI.RbxApi.Datatypes/CoreAI.RbxApi.Datatypes.csproj" />
+    <ProjectReference Include="../CoreAI.RbxApi.Instances/CoreAI.RbxApi.Instances.csproj" />
+    <ProjectReference Include="../CoreAI.LuauDownlevel/CoreAI.LuauDownlevel.csproj" />
+    <ProjectReference Include="../LuaTier/UnityEngine/UnityEngine.csproj" />
+    <ProjectReference Include="../LuaTier/CoreAI.Source/CoreAI.Source.csproj" />
+    <ProjectReference Include="../LuaTier/CoreAI.RbxApi.Unity/CoreAI.RbxApi.Unity.csproj" />
+    <ProjectReference Include="../LuaTier/CoreAI.RbxApi.Binding/CoreAI.RbxApi.Binding.csproj" />
+    <ProjectReference Include="../LuaTier/CoreAI.Mods/CoreAI.Mods.csproj" />
+    <Reference Include="Lua">
+      <HintPath>$(RepoRoot)/Assets/CoreAIMods/Plugins/Lua.dll</HintPath>
+    </Reference>
+    <PackageReference Include="UniTask" Version="2.5.11" />
+    <PackageReference Include="Microsoft.Bcl.TimeProvider" Version="8.0.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="$(TestsRoot)/RbxApi/Replication/ReplicatedWorldHarness.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/ReplicatedWorldHarness.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Replication/ReplicationWireTestKit.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/ReplicationWireTestKit.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Replication/ReplicationWireS2JsonEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Replication/ReplicationWireS2JsonEditModeTests.cs" />
+  </ItemGroup>
+</Project>

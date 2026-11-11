@@ -315,8 +315,8 @@ public:
   not of the engine-free core
 
 Lua-CSharp is a managed, AOT-safe VM and runs in WebGL player builds.
-`CoreAISettingsAsset.EnableLuaOnWebGl` exists, but no Lua runtime reads it yet, so turning it off does not
-stop Lua on WebGL. See [`LUA_SANDBOX_SECURITY.md`](LUA_SANDBOX_SECURITY.md) for platform support
+There is no WebGL Lua switch (`EnableLuaOnWebGl` is obsolete): a build without Lua leaves the mods scope
+out. See [`LUA_SANDBOX_SECURITY.md`](LUA_SANDBOX_SECURITY.md) for platform support
 details and IL2CPP/WebGL stripping requirements.
 
 ### Why does WorldCommand live in CoreAiUnity?

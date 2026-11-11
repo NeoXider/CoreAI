@@ -624,6 +624,31 @@ namespace CoreAI.Ai.LuaCs
                 mutation);
         }
 
+        /// <summary>
+        /// <see cref="ApplyServerGeneratedMutation{T}(string, Func{T})"/> for a static body with its state
+        /// passed in: inside an envelope the actor already holds (every scheduler resume of its mods) the
+        /// body runs directly, and no closure or delegate is allocated on that path.
+        /// </summary>
+        public TResult ApplyServerGeneratedMutation<TFirst, TSecond, TResult>(string operation,
+            TFirst first, TSecond second, Func<TFirst, TSecond, TResult> mutation)
+        {
+            string actorId = ActorContext.ActorId;
+            if (!_serverGeneratesMutationEnvelopes
+                || (!string.IsNullOrWhiteSpace(actorId) && Bindings.Registry.HasActiveMutationEnvelope(actorId)))
+            {
+                return mutation(first, second);
+            }
+
+            return ApplyServerGeneratedMutationWithEnvelope(operation, first, second, mutation);
+        }
+
+        /// <summary>The path that opens the envelope; the closure it builds is paid only here.</summary>
+        private TResult ApplyServerGeneratedMutationWithEnvelope<TFirst, TSecond, TResult>(string operation,
+            TFirst first, TSecond second, Func<TFirst, TSecond, TResult> mutation)
+        {
+            return ApplyServerGeneratedMutation(operation, () => mutation(first, second));
+        }
+
         public void RecordMutation(RbxInstance target)
         {
             Bindings.Registry.AdvanceRevision(target.Id);
@@ -714,6 +739,16 @@ namespace CoreAI.Ai.LuaCs
                     return method;
                 }
 
+                if (LuaCsUxmlServiceBindings.TryRead(context, self, key, out LuaValue uxmlValue))
+                {
+                    return uxmlValue;
+                }
+
+                if (LuaCsRbxGuiBindings.TryRead(context, self, key, out LuaValue guiValue))
+                {
+                    return guiValue;
+                }
+
                 if (key == "SignalBehavior" && self.IsA("Workspace"))
                 {
                     return LuaCsRbxDatatypeBindings.Wrap(deferredSignalBehavior);
@@ -741,6 +776,11 @@ namespace CoreAI.Ai.LuaCs
                     return inputValue;
                 }
 
+                if (TryReadStarterPlayer(context, self, key, out LuaValue starterValue))
+                {
+                    return starterValue;
+                }
+
                 if (TryReadRunService(context, self, key, out LuaValue runValue))
                 {
                     return runValue;
@@ -754,6 +794,16 @@ namespace CoreAI.Ai.LuaCs
                 if (TryReadMaterialVariant(context, self, key, out LuaValue variantValue))
                 {
                     return variantValue;
+                }
+
+                if (TryReadLighting(context, self, key, out LuaValue lightingValue))
+                {
+                    return lightingValue;
+                }
+
+                if (TryReadLight(self, key, out LuaValue lightValue))
+                {
+                    return lightValue;
                 }
 
                 if (TryReadValue(context, self, key, out LuaValue valueResult))
@@ -776,6 +826,11 @@ namespace CoreAI.Ai.LuaCs
                     return tweenValue;
                 }
 
+                if (LuaCsTerrainBindings.TryReadWorkspaceTerrain(context, self, key, out LuaValue terrainValue))
+                {
+                    return terrainValue;
+                }
+
                 RbxError knownMemberError = GetKnownUnimplementedMemberError(
                     context, self, key, RbxKnownUnimplementedMemberAccess.Read);
                 if (knownMemberError != null)
@@ -794,132 +849,11 @@ namespace CoreAI.Ai.LuaCs
                     "use FindFirstChild(\"" + key + "\") for children that may not exist yet");
             }, context);
 
-            meta[Metamethods.NewIndex] = Fn("Instance.__newindex", ctx =>
-            {
-                return context.ApplyServerGeneratedMutation("write instance member", () =>
-                {
-                    RbxInstance self = Self(ctx, context);
-                    string key = ReadString(ctx, 1, "Instance member assignment");
-                    LuaValue value = Arg(ctx, 2);
-                    ThrowIfStubServiceForLua(self, key);
-
-                    switch (key)
-                    {
-                        case "Name":
-                            ThrowIfDestroyedForLua(self, key);
-                            context.RequireWorldEditForWrite(self, "Name");
-                            self.Name = ReadAssignedString(value, self.ClassName, "Name");
-                            return LuaValue.Nil;
-                        case "Parent":
-                        // WHY: no destroyed pre-check here — the Domain setter raises the exact
-                        // D6 PARENT_LOCKED message for destroyed instances.
-                        RbxInstance destination = ReadAssignedOptionalInstance(
-                            value, self.ClassName, "Parent");
-                        if (self is RbxPlayer)
-                        {
-                            // WHY: a Player leaves only through the leave teardown (PlayerRemoving,
-                            // character cleanup, actor release); moving it out of Players left a
-                            // ghost that GetPlayers still returned and the actor never got back.
-                            throw RbxError.BadArgument(
-                                "Player.Parent cannot be set from a script; a Player leaves only "
-                                + "through Player:Kick()",
-                                "call player:Kick() to remove a player; parent your own objects "
-                                + "into the player instead");
-                        }
-
-                        if (!context.Bindings.Registry.IsWorldAclEnabled
-                            && IsProtectedSingleton(self))
-                        {
-                            // WHY: a service's Parent is locked in Roblox — reparenting (or nil-ing)
-                            // it would detach it so game:GetService stops resolving it for the world.
-                            throw RbxError.BadArgument(
-                                self.ClassName + ".Parent is locked — it is a shared singleton",
-                                "services, the DataModel and workspace.CurrentCamera are fixed for "
-                                + "the world's lifetime");
-                        }
-
-                            context.RequireReparent(self, destination);
-                            self.Parent = destination;
-                            return LuaValue.Nil;
-                        case "Archivable":
-                            ThrowIfDestroyedForLua(self, key);
-                            context.RequireWorldEditForWrite(self, "Archivable");
-                            self.Archivable = ReadAssignedBoolean(value, self.ClassName, "Archivable");
-                            return LuaValue.Nil;
-                    }
-
-                    ThrowIfDestroyedForLua(self, key);
-                    if (TryWriteNetworkMember(context, self, key, ctx.State, value))
-                    {
-                        return LuaValue.Nil;
-                    }
-
-                if (TryWriteCamera(context, self, key, value))
-                {
-                    return LuaValue.Nil;
-                }
-
-                if (TryWriteUserInput(context, self, key, value))
-                {
-                    return LuaValue.Nil;
-                }
-
-                if (TryWriteClickDetector(context, self, key, value))
-                {
-                    return LuaValue.Nil;
-                }
-
-                if (TryWriteMaterialVariant(context, self, key, value))
-                {
-                    return LuaValue.Nil;
-                }
-
-                if (TryWriteValue(context, self, key, value))
-                {
-                    return LuaValue.Nil;
-                }
-
-                if (TryWriteModelPivot(context, self, key, value))
-                {
-                    return LuaValue.Nil;
-                }
-
-                if (TryWriteSpatial(context, self, key, value))
-                {
-                    return LuaValue.Nil;
-                }
-
-                if (IsReadOnlyMember(self, key))
-                {
-                    throw RbxError.BadArgument(
-                        "Unable to assign property " + key + ". Property is read only",
-                        "read " + self.ClassName + "." + key + " instead; a script cannot set it");
-                }
-
-                if (key == "CurrentCamera" && self.IsA("Workspace"))
-                {
-                    context.RequireWorldEditForWrite(self, key);
-                    throw RbxError.NotImplemented(
-                        "Workspace.CurrentCamera assignment",
-                        "a later MVP",
-                        "drive the one world camera through workspace.CurrentCamera.CFrame and "
-                        + "CameraType instead of swapping it for another Camera");
-                }
-
-                RbxError knownMemberError = GetKnownUnimplementedMemberError(
-                    context, self, key, RbxKnownUnimplementedMemberAccess.Write);
-                if (knownMemberError != null)
-                {
-                    context.RequireWorldEditForWrite(self, key);
-                    throw knownMemberError;
-                }
-
-                    throw RbxError.BadArgument(
-                        key + " is not a valid member of " + self.ClassName + " \"" + self.GetFullName() + "\"",
-                        "set a writable Instance property (Name, Parent, Archivable, or a BasePart " +
-                        "spatial property like Position/Size/CFrame/Color) or use SetAttribute");
-                });
-            }, context);
+            // WHY a static body and a cached delegate: a lambda capturing ctx allocated a closure and
+            // its delegate on every member write, 176 B a Part write in the Heartbeat scenes (N10).
+            meta[Metamethods.NewIndex] = Fn("Instance.__newindex",
+                ctx => context.ApplyServerGeneratedMutation(
+                    "write instance member", context, ctx, WriteInstanceMemberBody), context);
 
             meta[Metamethods.Eq] = Fn("Instance.__eq", ctx =>
                 TryGetInstance(Arg(ctx, 0), out LuaCsRbxInstanceProxy a)
@@ -929,6 +863,155 @@ namespace CoreAI.Ai.LuaCs
             meta[Metamethods.ToString] = Fn(
                 "Instance.__tostring", ctx => Self(ctx, context).Name, context);
             return Lock(meta);
+        }
+
+        private static readonly Func<LuaCsRbxModContext, LuaFunctionExecutionContext, LuaValue>
+            WriteInstanceMemberBody = WriteInstanceMember;
+
+        /// <summary>One Lua member assignment (<c>instance.key = value</c>), inside the mutation envelope.</summary>
+        private static LuaValue WriteInstanceMember(LuaCsRbxModContext context, LuaFunctionExecutionContext ctx)
+        {
+            RbxInstance self = Self(ctx, context);
+            string key = ReadString(ctx, 1, "Instance member assignment");
+            LuaValue value = Arg(ctx, 2);
+            ThrowIfStubServiceForLua(self, key);
+
+            switch (key)
+            {
+                case "Name":
+                    ThrowIfDestroyedForLua(self, key);
+                    context.RequireWorldEditForWrite(self, "Name");
+                    self.Name = ReadAssignedString(value, self.ClassName, "Name");
+                    return LuaValue.Nil;
+                case "Parent":
+                // WHY: no destroyed pre-check here — the Domain setter raises the exact
+                // D6 PARENT_LOCKED message for destroyed instances.
+                RbxInstance destination = ReadAssignedOptionalInstance(
+                    value, self.ClassName, "Parent");
+                if (self is RbxPlayer)
+                {
+                    // WHY: a Player leaves only through the leave teardown (PlayerRemoving,
+                    // character cleanup, actor release); moving it out of Players left a
+                    // ghost that GetPlayers still returned and the actor never got back.
+                    throw RbxError.BadArgument(
+                        "Player.Parent cannot be set from a script; a Player leaves only "
+                        + "through Player:Kick()",
+                        "call player:Kick() to remove a player; parent your own objects "
+                        + "into the player instead");
+                }
+
+                if (!context.Bindings.Registry.IsWorldAclEnabled
+                    && IsProtectedSingleton(self))
+                {
+                    // WHY: a service's Parent is locked in Roblox — reparenting (or nil-ing)
+                    // it would detach it so game:GetService stops resolving it for the world.
+                    throw RbxError.BadArgument(
+                        self.ClassName + ".Parent is locked — it is a shared singleton",
+                        "services, the DataModel and workspace.CurrentCamera are fixed for "
+                        + "the world's lifetime");
+                }
+
+                    context.RequireReparent(self, destination);
+                    LuaCsRbxGuiBindings.RequireRoomForParent(context, self, destination);
+                    self.Parent = destination;
+                    return LuaValue.Nil;
+                case "Archivable":
+                    ThrowIfDestroyedForLua(self, key);
+                    context.RequireWorldEditForWrite(self, "Archivable");
+                    self.Archivable = ReadAssignedBoolean(value, self.ClassName, "Archivable");
+                    return LuaValue.Nil;
+            }
+
+            ThrowIfDestroyedForLua(self, key);
+            if (TryWriteNetworkMember(context, self, key, ctx.State, value))
+            {
+                return LuaValue.Nil;
+            }
+
+            if (LuaCsRbxGuiBindings.TryWrite(context, self, key, value))
+            {
+                return LuaValue.Nil;
+            }
+
+            if (TryWriteCamera(context, self, key, value))
+            {
+                return LuaValue.Nil;
+            }
+
+            if (TryWriteUserInput(context, self, key, value))
+            {
+                return LuaValue.Nil;
+            }
+
+            if (TryWriteStarterPlayer(context, self, key, value))
+            {
+                return LuaValue.Nil;
+            }
+
+            if (TryWriteClickDetector(context, self, key, value))
+            {
+                return LuaValue.Nil;
+            }
+
+            if (TryWriteMaterialVariant(context, self, key, value))
+            {
+                return LuaValue.Nil;
+            }
+
+            if (TryWriteLighting(context, self, key, value))
+            {
+                return LuaValue.Nil;
+            }
+
+            if (TryWriteLight(context, self, key, value))
+            {
+                return LuaValue.Nil;
+            }
+
+            if (TryWriteValue(context, self, key, value))
+            {
+                return LuaValue.Nil;
+            }
+
+            if (TryWriteModelPivot(context, self, key, value))
+            {
+                return LuaValue.Nil;
+            }
+
+            if (TryWriteSpatial(context, self, key, value))
+            {
+                return LuaValue.Nil;
+            }
+
+            if (IsReadOnlyMember(self, key))
+            {
+                throw RbxError.BadArgument(
+                    "Unable to assign property " + key + ". Property is read only",
+                    "read " + self.ClassName + "." + key + " instead; a script cannot set it");
+            }
+
+            if (key == "CurrentCamera" && self.IsA("Workspace"))
+            {
+                context.RequireWorldEditForWrite(self, key);
+                throw RbxError.NotImplemented(
+                    "Workspace.CurrentCamera assignment",
+                    "a later MVP",
+                    "drive the one world camera through workspace.CurrentCamera.CFrame and "
+                    + "CameraType instead of swapping it for another Camera");
+            }
+
+            RbxError knownMemberError = GetKnownUnimplementedMemberError(
+                context, self, key, RbxKnownUnimplementedMemberAccess.Write);
+            if (knownMemberError != null)
+            {
+                context.RequireWorldEditForWrite(self, key);
+                throw knownMemberError;
+            }
+
+            throw RbxError.BadArgument(
+                key + " is not a valid member of " + self.ClassName + " \"" + self.GetFullName() + "\"",
+                "set a writable Instance property (Name, Parent, Archivable, or a BasePart " +
+                "spatial property like Position/Size/CFrame/Color) or use SetAttribute");
         }
 
         private static LuaValue ReadWaitForChildBridge(LuaFunctionExecutionContext ctx)
@@ -1070,6 +1153,15 @@ namespace CoreAI.Ai.LuaCs
                         return true;
                     case "Character":
                         value = context.WrapInstance(player.Character);
+                        return true;
+                    case "CameraMode":
+                        value = WrapEnumValue(context, "CameraMode", (int)player.CameraMode);
+                        return true;
+                    case "CameraMaxZoomDistance":
+                        value = new LuaValue(player.CameraMaxZoomDistance);
+                        return true;
+                    case "CameraMinZoomDistance":
+                        value = new LuaValue(player.CameraMinZoomDistance);
                         return true;
                     case "CharacterAdded":
                         value = LuaCsRbxDatatypeBindings.Wrap(player.CharacterAdded, context);
@@ -1247,6 +1339,22 @@ namespace CoreAI.Ai.LuaCs
                             value, player.ClassName, "Character");
                         context.RecordMutation(player);
                         return true;
+                    case "CameraMode":
+                        context.RequireWorldEditForWrite(player, member);
+                        player.CameraMode = (RbxCameraMode)ReadAssignedEnumItem(
+                            value, context.Bindings.Enums, "CameraMode", player.ClassName, member).Value;
+                        context.RecordMutation(player);
+                        return true;
+                    case "CameraMaxZoomDistance":
+                        context.RequireWorldEditForWrite(player, member);
+                        player.CameraMaxZoomDistance = ReadAssignedNumber(value, player.ClassName, member);
+                        context.RecordMutation(player);
+                        return true;
+                    case "CameraMinZoomDistance":
+                        context.RequireWorldEditForWrite(player, member);
+                        player.CameraMinZoomDistance = ReadAssignedNumber(value, player.ClassName, member);
+                        context.RecordMutation(player);
+                        return true;
                     default:
                         return false;
                 }
@@ -1325,8 +1433,21 @@ namespace CoreAI.Ai.LuaCs
                         }
 
                         return context.ApplyServerGeneratedMutation(
-                            operation,
-                            () => body(ctx, self));
+                            operation, body, (ctx, self), (method, call) => method(call.Item1, call.Item2));
+                    }, context));
+                methods.Add(name, value, declaringClassName);
+            }
+
+            // WHY a tuple twin of Method: WorldToViewportPoint returns (Vector3, onScreen), and a single
+            // return would drop the flag a GUI marker script branches on.
+            void MethodTuple(string name, Func<LuaFunctionExecutionContext, RbxInstance, LuaValue[]> body,
+                string declaringClassName)
+            {
+                LuaValue value = new(FnMulti("Instance." + name, ctx =>
+                    {
+                        RbxInstance self = Self(ctx, context);
+                        ThrowIfDestroyedForLua(self, name);
+                        return body(ctx, self);
                     }, context));
                 methods.Add(name, value, declaringClassName);
             }
@@ -1847,28 +1968,107 @@ namespace CoreAI.Ai.LuaCs
                 ((RbxHumanoid)self).MoveTo(ReadVector3(ctx, 1, "Humanoid:MoveTo", 1));
                 return LuaValue.Nil;
             }, "Humanoid");
+            Method("Move", (ctx, self) =>
+            {
+                context.RequireWorldEditForWrite(self, "WalkToPoint");
+                RbxVector3 direction = ReadVector3(ctx, 1, "Humanoid:Move", 1);
+                bool relativeToCamera =
+                    LuaCsRbxDatatypeBindings.ReadOptionalBoolean(ctx, 2, "Humanoid:Move", 2);
+                ((RbxHumanoid)self).Move(direction, relativeToCamera);
+                return LuaValue.Nil;
+            }, "Humanoid");
             Method("GetState", (_, self) =>
                 LuaCsRbxDatatypeBindings.Wrap(ResolveHumanoidStateItem(
                     context, ((RbxHumanoid)self).GetState())), "Humanoid");
             Method("ChangeState", (ctx, self) =>
             {
                 context.RequireWorldEditForWrite(self, "Jump");
-                // WHY only Jumping: it is the one state a script can legitimately force without a
-                // rig. Anything else would be a state the machine never leaves, so it says so.
+                // WHY Jumping, Flying and Freefall only: they are the states a script can force
+                // without a rig (Flying is free flight, a DEV candidate; Freefall leaves it). Anything
+                // else would be a state the machine never leaves, so it says so.
                 RbxEnumItem requested = ReadEnumArgument(
                     ctx, 1, context.Bindings.Enums, "HumanoidStateType", "Humanoid:ChangeState", 1);
+                RbxHumanoid humanoid = (RbxHumanoid)self;
+                if (requested.Value == (int)RbxHumanoidState.Flying)
+                {
+                    if (!humanoid.SetFlying(true))
+                    {
+                        throw RbxError.BadArgument(
+                            "this character's motor cannot fly",
+                            "fly a character whose HumanoidRootPart has a body, or use a motor that flies");
+                    }
+
+                    return LuaValue.Nil;
+                }
+
+                if (requested.Value == (int)RbxHumanoidState.Freefall && humanoid.IsFlying)
+                {
+                    humanoid.SetFlying(false);
+                    return LuaValue.Nil;
+                }
+
                 if (requested.Value != (int)RbxHumanoidState.Jumping)
                 {
                     throw new RbxApiStubException(
                         "NOT_IMPLEMENTED",
                         "Humanoid:ChangeState(Enum.HumanoidStateType." + requested.Name
                         + ") is not implemented; CoreAI's character is a motor, not a full R15 rig",
-                        "force only Enum.HumanoidStateType.Jumping, or read Humanoid:GetState()");
+                        "force Enum.HumanoidStateType.Jumping or Flying (Freefall ends a flight), or read Humanoid:GetState()");
                 }
 
                 ((RbxHumanoid)self).RequestJump();
                 return LuaValue.Nil;
             }, "Humanoid");
+
+            // WHY one rig for the queries: the world has one Camera, so every query projects through the
+            // rig's live pose, field of view and viewport, exactly what the player sees this frame.
+            Method("ViewportPointToRay", (ctx, self) => LuaCsRbxDatatypeBindings.Wrap(
+                RbxCameraProjection.ViewportPointToRay(context.Bindings.CameraRig.GetCFrame(),
+                    context.Bindings.GetCameraFieldOfView(), context.Bindings.GetCameraViewportSize(),
+                    ReadDouble(ctx, 1, "Camera:ViewportPointToRay", 1),
+                    ReadDouble(ctx, 2, "Camera:ViewportPointToRay", 2),
+                    ReadDoubleOr(ctx, 3, 0d, "Camera:ViewportPointToRay", 3))), "Camera");
+            Method("ScreenPointToRay", (ctx, self) => LuaCsRbxDatatypeBindings.Wrap(
+                RbxCameraProjection.ScreenPointToRay(context.Bindings.CameraRig.GetCFrame(),
+                    context.Bindings.GetCameraFieldOfView(), context.Bindings.GetCameraViewportSize(),
+                    LuaCsRbxApiBindings.GuiInset,
+                    ReadDouble(ctx, 1, "Camera:ScreenPointToRay", 1),
+                    ReadDouble(ctx, 2, "Camera:ScreenPointToRay", 2),
+                    ReadDoubleOr(ctx, 3, 0d, "Camera:ScreenPointToRay", 3))), "Camera");
+            MethodTuple("WorldToViewportPoint", (ctx, self) =>
+            {
+                RbxVector3 point = RbxCameraProjection.WorldToViewportPoint(
+                    context.Bindings.CameraRig.GetCFrame(), context.Bindings.GetCameraFieldOfView(),
+                    context.Bindings.GetCameraViewportSize(),
+                    ReadVector3(ctx, 1, "Camera:WorldToViewportPoint", 1), out bool onScreen);
+                return new[] { LuaCsRbxDatatypeBindings.Wrap(point), new LuaValue(onScreen) };
+            }, "Camera");
+            MethodTuple("WorldToScreenPoint", (ctx, self) =>
+            {
+                RbxVector3 point = RbxCameraProjection.WorldToScreenPoint(
+                    context.Bindings.CameraRig.GetCFrame(), context.Bindings.GetCameraFieldOfView(),
+                    context.Bindings.GetCameraViewportSize(), LuaCsRbxApiBindings.GuiInset,
+                    ReadVector3(ctx, 1, "Camera:WorldToScreenPoint", 1), out bool onScreen);
+                return new[] { LuaCsRbxDatatypeBindings.Wrap(point), new LuaValue(onScreen) };
+            }, "Camera");
+
+            Method("GetFocusedTextBox", (_, self) =>
+                context.WrapInstance(((RbxUserInputService)self).GetFocusedTextBox()), "UserInputService");
+
+            LuaCsTerrainBindings.RegisterMethods(context, methods.Add);
+
+            // ---- Lighting (P9 day-cycle slice) ----
+            Method("GetMinutesAfterMidnight",
+                (_, self) => ((RbxLighting)self).GetMinutesAfterMidnight(), "Lighting");
+            Method("SetMinutesAfterMidnight", (ctx, self) =>
+            {
+                context.RequireWorldEditForWrite(self, "SetMinutesAfterMidnight");
+                ((RbxLighting)self).SetMinutesAfterMidnight(
+                    ReadDouble(ctx, 1, "Lighting:SetMinutesAfterMidnight", 1));
+                return LuaValue.Nil;
+            }, "Lighting");
+            Method("GetSunDirection",
+                (_, self) => LuaCsRbxDatatypeBindings.Wrap(((RbxLighting)self).GetSunDirection()), "Lighting");
 
             // WHY declared on WorldRoot and not Workspace: the mirror puts Raycast on WorldRoot, so
             // any future WorldModel gets it from the same declaration rather than a copy.
@@ -1940,7 +2140,9 @@ namespace CoreAI.Ai.LuaCs
                    || name == "Kick"
                    || name == "TakeDamage"
                    || name == "MoveTo"
-                   || name == "ChangeState";
+                   || name == "Move"
+                   || name == "ChangeState"
+                   || name == "SetMinutesAfterMidnight";
         }
 
         private static long ReadUserId(LuaFunctionExecutionContext ctx)
@@ -1991,7 +2193,8 @@ namespace CoreAI.Ai.LuaCs
         // game:Clone() duplicated the whole world and game:Destroy() tore it down in an ACL-off world.
         private static bool IsProtectedSingleton(RbxInstance instance)
         {
-            return instance.IsService || instance is RbxDataModel || instance.ClassName == "Camera";
+            return instance.IsService || instance is RbxDataModel || instance.ClassName == "Camera"
+                   || instance is CoreAI.Mods.Rbx.Instances.Terrain.RbxTerrain;
         }
 
         /// <summary>game.Loaded per DataModel; weak so a torn-down world takes its signal with it.</summary>
@@ -2009,15 +2212,22 @@ namespace CoreAI.Ai.LuaCs
             ("Model", Names("PrimaryPart", "WorldPivot")),
             ("BasePart", Names("Shape", "Material", "MaterialVariant", "Position", "Size", "CFrame",
                 "Orientation", "Rotation", "Color", "Transparency", "Anchored", "CanCollide")),
-            ("Camera", Names("CFrame", "CameraType", "CameraSubject")),
+            ("Camera", Names("CFrame", "CameraType", "CameraSubject", "FieldOfView", "ViewportSize")),
             ("Humanoid", Names("Health", "MaxHealth", "WalkSpeed", "JumpPower", "JumpHeight",
                 "UseJumpPower", "DisplayName", "MoveDirection", "RootPart", "Jump")),
-            ("Player", Names("UserId", "DisplayName", "Character")),
+            ("Player", Names("UserId", "DisplayName", "Character", "CameraMode", "CameraMaxZoomDistance",
+                "CameraMinZoomDistance")),
             ("Players", Names("LocalPlayer", "CharacterAutoLoads", "RespawnTime", "MaxPlayers")),
-            ("UserInputService", Names("MouseBehavior")),
+            ("UserInputService", Names("MouseBehavior", "MouseDeltaSensitivity")),
+            ("StarterPlayer", Names("DevComputerMovementMode", "CameraMode", "CameraMaxZoomDistance",
+                "CameraMinZoomDistance")),
             ("ClickDetector", Names("MaxActivationDistance")),
             ("MaterialVariant", Names("BaseMaterial", "ColorMap", "NormalMap", "RoughnessMap",
                 "MetalnessMap", "StudsPerTile")),
+            ("Lighting", Names("ClockTime", "TimeOfDay", "GeographicLatitude", "Brightness", "Ambient",
+                "OutdoorAmbient")),
+            ("Light", Names("Brightness", "Color", "Enabled", "Shadows")),
+            ("PointLight", Names("Range")),
             ("ValueBase", Names("Value")),
             ("Tween", Names("Instance", "TweenInfo", "PlaybackState"))
         };
@@ -2058,10 +2268,10 @@ namespace CoreAI.Ai.LuaCs
             "HealthChanged", "MoveToFinished", "Running", "Jumping", "FreeFalling", "StateChanged",
             "Touched", "TouchEnded", "CharacterAdded", "CharacterRemoving", "OnServerEvent",
             "OnClientEvent", "OnServerInvoke", "OnClientInvoke", "InvokeServer", "InvokeClient",
-            "InputBegan", "InputEnded", "InputChanged", "IsKeyDown", "GetKeysPressed",
-            "GetMouseLocation", "Heartbeat", "Stepped", "RenderStepped", "PreAnimation",
+            "InputBegan", "InputEnded", "InputChanged", "TextBoxFocused", "TextBoxFocusReleased",
+            "IsKeyDown", "GetKeysPressed", "GetMouseLocation", "GetMouseDelta", "Heartbeat", "Stepped", "RenderStepped", "PreAnimation",
             "PreSimulation", "PostSimulation", "PreRender", "MouseClick", "MouseHoverEnter",
-            "MouseHoverLeave", "Completed");
+            "MouseHoverLeave", "Completed", "LightingChanged");
 
         /// <summary>
         /// The names in <see cref="BoundNonProperties"/>; the drift guard in the acceptance tests
@@ -2163,12 +2373,13 @@ namespace CoreAI.Ai.LuaCs
         private static bool IsKnownPropertyName(LuaCsRbxModContext context,
             LuaCsRbxMethodTable methods, RbxInstance instance, string property)
         {
-            if (string.IsNullOrEmpty(property) || IsBoundProperty(instance, property))
+            ClassCatalog catalog = context.Bindings.Registry.Catalog;
+            if (string.IsNullOrEmpty(property) || IsBoundProperty(instance, property)
+                || LuaCsRbxGuiBindings.IsProperty(catalog, instance, property))
             {
                 return true;
             }
 
-            ClassCatalog catalog = context.Bindings.Registry.Catalog;
             if (IsCataloguedProperty(catalog, instance, property,
                     RbxKnownUnimplementedMemberAccess.Read)
                 || IsCataloguedProperty(catalog, instance, property,
@@ -2178,6 +2389,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             if (BoundNonProperties.Contains(property)
+                || LuaCsRbxGuiBindings.IsEventOrMethod(catalog, instance, property)
                 || methods.TryResolve(instance, property, out _)
                 || IsCataloguedMethod(catalog, instance, property))
             {
@@ -2187,7 +2399,8 @@ namespace CoreAI.Ai.LuaCs
                     + "GetPropertyChangedSignal(\"Name\")");
             }
 
-            string intended = FindNearMissPropertyName(catalog, instance, property);
+            string intended = FindNearMissPropertyName(catalog, instance, property)
+                              ?? LuaCsRbxGuiBindings.FindNearMissProperty(catalog, instance, property);
             if (intended != null)
             {
                 throw NotAValidPropertyName(property,
@@ -2474,6 +2687,8 @@ namespace CoreAI.Ai.LuaCs
                     return instance is RbxHumanoid;
                 case "UserId":
                     return instance is RbxPlayer;
+                case "ViewportSize":
+                    return instance.ClassName == "Camera";
                 case "LocalPlayer":
                     return instance is RbxPlayers;
                 case "Instance":
@@ -3320,6 +3535,12 @@ namespace CoreAI.Ai.LuaCs
                 case "InputChanged":
                     value = LuaCsRbxDatatypeBindings.Wrap(service.InputChanged, context);
                     return true;
+                case "TextBoxFocused":
+                    value = LuaCsRbxDatatypeBindings.Wrap(service.TextBoxFocused, context);
+                    return true;
+                case "TextBoxFocusReleased":
+                    value = LuaCsRbxDatatypeBindings.Wrap(service.TextBoxFocusReleased, context);
+                    return true;
                 case "MouseBehavior":
                     value = service.MouseBehavior != null
                         ? LuaCsRbxDatatypeBindings.Wrap(service.MouseBehavior)
@@ -3333,6 +3554,12 @@ namespace CoreAI.Ai.LuaCs
                     return true;
                 case "GetMouseLocation":
                     value = GetUserInputMethods(service, context.Bindings.Enums).GetMouseLocation;
+                    return true;
+                case "GetMouseDelta":
+                    value = GetUserInputMethods(service, context.Bindings.Enums).GetMouseDelta;
+                    return true;
+                case "MouseDeltaSensitivity":
+                    value = new LuaValue(service.MouseDeltaSensitivity);
                     return true;
                 default:
                     value = LuaValue.Nil;
@@ -3351,6 +3578,7 @@ namespace CoreAI.Ai.LuaCs
             public LuaValue IsKeyDown;
             public LuaValue GetKeysPressed;
             public LuaValue GetMouseLocation;
+            public LuaValue GetMouseDelta;
         }
 
         /// <summary>The cached UserInputService method closures of <paramref name="service"/>.</summary>
@@ -3379,26 +3607,112 @@ namespace CoreAI.Ai.LuaCs
                     return new LuaValue(list);
                 })),
                 GetMouseLocation = new LuaValue(Fn("UserInputService.GetMouseLocation",
-                    _ => LuaCsRbxDatatypeBindings.Wrap(s.GetMouseLocation())))
+                    _ => LuaCsRbxDatatypeBindings.Wrap(s.GetMouseLocation()))),
+                GetMouseDelta = new LuaValue(Fn("UserInputService.GetMouseDelta",
+                    _ => LuaCsRbxDatatypeBindings.Wrap(s.GetMouseDelta())))
             });
         }
 
-        /// <summary>UserInputService.MouseBehavior assignment guarded as a shared world property.
-        /// TODO: apply LockCenter/LockCurrentPosition to the host cursor with the pointer-lock
-        /// slice.</summary>
+        /// <summary>UserInputService.MouseBehavior and MouseDeltaSensitivity assignments, guarded as
+        /// shared world properties; MouseBehavior reaches the host cursor through the service.</summary>
         private static bool TryWriteUserInput(LuaCsRbxModContext context, RbxInstance self,
             string key, LuaValue value)
         {
-            if (!(self is RbxUserInputService service) || key != "MouseBehavior")
+            if (!(self is RbxUserInputService service)
+                || (key != "MouseBehavior" && key != "MouseDeltaSensitivity"))
             {
                 return false;
             }
 
-            context.RequireWorldEditForWrite(self, "MouseBehavior");
+            context.RequireWorldEditForWrite(self, key);
+            if (key == "MouseDeltaSensitivity")
+            {
+                service.MouseDeltaSensitivity = ReadAssignedNumber(
+                    value, self.ClassName, "MouseDeltaSensitivity");
+                context.RecordMutation(self);
+                return true;
+            }
+
             service.MouseBehavior = ReadAssignedEnumItem(
                 value, context.Bindings.Enums, "MouseBehavior", self.ClassName, "MouseBehavior");
             context.RecordMutation(self);
             return true;
+        }
+
+        // ---- StarterPlayer (player-control settings the default scripts read live) ---------------
+
+        /// <summary>StarterPlayer settings; reads are open at the Read tier.</summary>
+        private static bool TryReadStarterPlayer(LuaCsRbxModContext context, RbxInstance self, string key,
+            out LuaValue value)
+        {
+            value = LuaValue.Nil;
+            if (!(self is RbxStarterPlayer starter))
+            {
+                return false;
+            }
+
+            switch (key)
+            {
+                case "DevComputerMovementMode":
+                    value = WrapEnumValue(context, "DevComputerMovementMode", (int)starter.DevComputerMovementMode);
+                    return true;
+                case "CameraMode":
+                    value = WrapEnumValue(context, "CameraMode", (int)starter.CameraMode);
+                    return true;
+                case "CameraMaxZoomDistance":
+                    value = new LuaValue(starter.CameraMaxZoomDistance);
+                    return true;
+                case "CameraMinZoomDistance":
+                    value = new LuaValue(starter.CameraMinZoomDistance);
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>StarterPlayer assignments, guarded as shared world properties.</summary>
+        private static bool TryWriteStarterPlayer(LuaCsRbxModContext context, RbxInstance self, string key,
+            LuaValue value)
+        {
+            if (!(self is RbxStarterPlayer starter))
+            {
+                return false;
+            }
+
+            switch (key)
+            {
+                case "DevComputerMovementMode":
+                    context.RequireWorldEditForWrite(self, key);
+                    starter.DevComputerMovementMode = (RbxDevComputerMovementMode)ReadAssignedEnumItem(
+                        value, context.Bindings.Enums, "DevComputerMovementMode", self.ClassName, key).Value;
+                    break;
+                case "CameraMode":
+                    context.RequireWorldEditForWrite(self, key);
+                    starter.CameraMode = (RbxCameraMode)ReadAssignedEnumItem(
+                        value, context.Bindings.Enums, "CameraMode", self.ClassName, key).Value;
+                    break;
+                case "CameraMaxZoomDistance":
+                    context.RequireWorldEditForWrite(self, key);
+                    starter.CameraMaxZoomDistance = ReadAssignedNumber(value, self.ClassName, key);
+                    break;
+                case "CameraMinZoomDistance":
+                    context.RequireWorldEditForWrite(self, key);
+                    starter.CameraMinZoomDistance = ReadAssignedNumber(value, self.ClassName, key);
+                    break;
+                default:
+                    return false;
+            }
+
+            context.RecordMutation(self);
+            return true;
+        }
+
+        private static LuaValue WrapEnumValue(LuaCsRbxModContext context, string enumName, int itemValue)
+        {
+            return context.Bindings.Enums.TryGet(enumName, out RbxEnum rbxEnum)
+                   && rbxEnum.TryGetItemByValue(itemValue, out RbxEnumItem item)
+                ? LuaCsRbxDatatypeBindings.Wrap(item)
+                : LuaValue.Nil;
         }
 
         // ---- RunService (per-frame game-loop signals over the host Step pump) ----------------
@@ -3591,6 +3905,159 @@ namespace CoreAI.Ai.LuaCs
                 context.PartSink.RefreshMaterialVariant(variant.Name);
             }
 
+            return true;
+        }
+
+        // ---- Lighting (the P9 day-cycle slice over the engine-free service) ---------------------
+
+        /// <summary>Lighting's day-cycle properties and its LightingChanged signal. Reads are ungated;
+        /// writes take WorldEdit, like every property of shared world state.</summary>
+        private static bool TryReadLighting(LuaCsRbxModContext context, RbxInstance self, string key,
+            out LuaValue value)
+        {
+            if (!(self is RbxLighting lighting))
+            {
+                value = LuaValue.Nil;
+                return false;
+            }
+
+            switch (key)
+            {
+                case "ClockTime":
+                    value = (double)lighting.ClockTime;
+                    return true;
+                case "TimeOfDay":
+                    value = lighting.TimeOfDay;
+                    return true;
+                case "GeographicLatitude":
+                    value = (double)lighting.GeographicLatitude;
+                    return true;
+                case "Brightness":
+                    value = (double)lighting.Brightness;
+                    return true;
+                case "Ambient":
+                    value = LuaCsRbxDatatypeBindings.Wrap(lighting.Ambient);
+                    return true;
+                case "OutdoorAmbient":
+                    value = LuaCsRbxDatatypeBindings.Wrap(lighting.OutdoorAmbient);
+                    return true;
+                case "LightingChanged":
+                    value = LuaCsRbxDatatypeBindings.Wrap(lighting.LightingChanged, context);
+                    return true;
+                default:
+                    value = LuaValue.Nil;
+                    return false;
+            }
+        }
+
+        private static bool TryWriteLighting(LuaCsRbxModContext context, RbxInstance self, string key,
+            LuaValue value)
+        {
+            if (!(self is RbxLighting lighting))
+            {
+                return false;
+            }
+
+            switch (key)
+            {
+                case "ClockTime":
+                    context.RequireWorldEditForWrite(self, key);
+                    lighting.SetClockTime(ReadAssignedNumber(value, self.ClassName, key));
+                    return true;
+                case "TimeOfDay":
+                    context.RequireWorldEditForWrite(self, key);
+                    lighting.SetTimeOfDay(ReadAssignedString(value, self.ClassName, key));
+                    return true;
+                case "GeographicLatitude":
+                    context.RequireWorldEditForWrite(self, key);
+                    lighting.SetGeographicLatitude(ReadAssignedNumber(value, self.ClassName, key));
+                    return true;
+                case "Brightness":
+                    context.RequireWorldEditForWrite(self, key);
+                    lighting.SetBrightness(ReadAssignedNumber(value, self.ClassName, key));
+                    return true;
+                case "Ambient":
+                    context.RequireWorldEditForWrite(self, key);
+                    lighting.SetAmbient(ReadAssignedColor3(value, self.ClassName, key));
+                    return true;
+                case "OutdoorAmbient":
+                    context.RequireWorldEditForWrite(self, key);
+                    lighting.SetOutdoorAmbient(ReadAssignedColor3(value, self.ClassName, key));
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // ---- Light / PointLight (drawn by the host's light backend) ------------------------------
+
+        /// <summary>Light's Brightness, Color, Enabled and Shadows, and PointLight's Range (studs).</summary>
+        private static bool TryReadLight(RbxInstance self, string key, out LuaValue value)
+        {
+            if (!(self is RbxLight light))
+            {
+                value = LuaValue.Nil;
+                return false;
+            }
+
+            switch (key)
+            {
+                case "Brightness":
+                    value = (double)light.Brightness;
+                    return true;
+                case "Color":
+                    value = LuaCsRbxDatatypeBindings.Wrap(light.Color);
+                    return true;
+                case "Enabled":
+                    value = light.Enabled;
+                    return true;
+                case "Shadows":
+                    value = light.Shadows;
+                    return true;
+                case "Range" when light is RbxPointLight pointLight:
+                    value = (double)pointLight.Range;
+                    return true;
+                default:
+                    value = LuaValue.Nil;
+                    return false;
+            }
+        }
+
+        private static bool TryWriteLight(LuaCsRbxModContext context, RbxInstance self, string key,
+            LuaValue value)
+        {
+            if (!(self is RbxLight light))
+            {
+                return false;
+            }
+
+            switch (key)
+            {
+                case "Brightness":
+                    context.RequireWorldEditForWrite(self, key);
+                    light.SetBrightness(ReadAssignedNumber(value, self.ClassName, key));
+                    break;
+                case "Color":
+                    context.RequireWorldEditForWrite(self, key);
+                    light.SetColor(ReadAssignedColor3(value, self.ClassName, key));
+                    break;
+                case "Enabled":
+                    context.RequireWorldEditForWrite(self, key);
+                    light.SetEnabled(ReadAssignedBoolean(value, self.ClassName, key));
+                    break;
+                case "Shadows":
+                    context.RequireWorldEditForWrite(self, key);
+                    light.SetShadows(ReadAssignedBoolean(value, self.ClassName, key));
+                    break;
+                case "Range" when light is RbxPointLight pointLight:
+                    context.RequireWorldEditForWrite(self, key);
+                    pointLight.SetRange(ReadAssignedNumber(value, self.ClassName, key));
+                    break;
+                default:
+                    return false;
+            }
+
+            context.RecordMutation(self);
             return true;
         }
 
@@ -3907,7 +4374,13 @@ namespace CoreAI.Ai.LuaCs
                     value = type != null ? LuaCsRbxDatatypeBindings.Wrap(type) : LuaValue.Nil;
                     return true;
                 case "CameraSubject":
-                    value = context.WrapInstance(context.Bindings.CameraSubject);
+                    value = context.WrapInstance(context.Bindings.EffectiveCameraSubject);
+                    return true;
+                case "FieldOfView":
+                    value = new LuaValue(context.Bindings.GetCameraFieldOfView());
+                    return true;
+                case "ViewportSize":
+                    value = LuaCsRbxDatatypeBindings.Wrap(context.Bindings.GetCameraViewportSize());
                     return true;
                 default:
                     value = LuaValue.Nil;
@@ -3959,6 +4432,19 @@ namespace CoreAI.Ai.LuaCs
                     }
 
                     return true;
+                case "FieldOfView":
+                    context.RequireWorldEditForWrite(self, "FieldOfView");
+                    double degrees = ReadAssignedNumber(value, self.ClassName, "FieldOfView");
+                    if (!context.Bindings.TrySetCameraFieldOfView(self, degrees))
+                    {
+                        throw new RbxError(RbxErrorCode.NotImplemented,
+                            "Camera.FieldOfView cannot be set: this world's host camera has no lens",
+                            "leave FieldOfView at its value; the host supports it by implementing "
+                            + "IRbxCameraRig.TrySetFieldOfView");
+                    }
+
+                    context.RecordMutation(self);
+                    return true;
                 default:
                     return false;
             }
@@ -3977,6 +4463,28 @@ namespace CoreAI.Ai.LuaCs
             {
                 camera.NotifyPropertyChanged("CFrame");
             }
+        }
+
+        /// <summary>
+        /// Sets the rig's lens to <paramref name="degrees"/> clamped to [1, 120] and fires Camera's
+        /// FieldOfView change when the lens actually moved; false when the rig has no lens. Shared by the
+        /// property write and the tween host so both clamp and notify alike.
+        /// </summary>
+        internal static bool TrySetCameraFieldOfView(IRbxCameraRig rig, RbxInstance camera, double degrees)
+        {
+            double before = RbxCameraProjection.ClampFieldOfView(rig.GetFieldOfView());
+            double clamped = RbxCameraProjection.ClampFieldOfView(degrees, before);
+            if (!rig.TrySetFieldOfView(clamped))
+            {
+                return false;
+            }
+
+            if (!before.Equals(RbxCameraProjection.ClampFieldOfView(rig.GetFieldOfView())))
+            {
+                camera?.NotifyPropertyChanged("FieldOfView");
+            }
+
+            return true;
         }
 
         // ---- Property-assignment readers ----------------------------------------------------

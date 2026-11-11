@@ -12,7 +12,7 @@ using Lua.Standard;
 
 internal static class Program
 {
-    private const string LuaDllPath = @"D:\Git\CoreAI\Assets\CoreAIMods\Plugins\Lua.dll";
+    private static readonly string LuaDllPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Lua.dll");
     private const int ProductionBatch = 4;
     private const double TargetTrialSeconds = 0.65d;
     private const int TrialCount = 5;
@@ -65,14 +65,10 @@ end";
 
         ThroughputResult raw = throughput.Single(item => item.Batch == 0);
         ThroughputResult guarded4 = throughput.Single(item => item.Batch == ProductionBatch);
-        ThroughputResult handleThroughput = MeasureHandleThroughput(formula);
-        Console.WriteLine(
-            $"HANDLE_THROUGHPUT batch=1 N={handleThroughput.Iterations} " +
-            $"instructions={handleThroughput.Instructions} seconds={handleThroughput.MedianSeconds:F6} " +
-            $"iterations_per_s={handleThroughput.IterationsPerSecond:F0} " +
-            $"instructions_per_s={handleThroughput.InstructionsPerSecond:F0} " +
-            $"min_seconds={handleThroughput.MinSeconds:F6} max_seconds={handleThroughput.MaxSeconds:F6} " +
-            $"hook_calls={handleThroughput.MedianHookCalls} checksum={handleThroughput.Checksum:R}");
+        ThroughputResult handleThroughput = MeasureHandleThroughput(formula, 1);
+        PrintHandleThroughput(handleThroughput);
+        ThroughputResult batchedHandleThroughput = MeasureHandleThroughput(formula, ProductionBatch);
+        PrintHandleThroughput(batchedHandleThroughput);
         double yieldInstructions = MeasureYieldInstructionCount();
         Console.WriteLine($"YieldInstructionsPerResume={yieldInstructions:F6}");
 
@@ -102,6 +98,17 @@ end";
             handleThroughput.InstructionsPerSecond);
         PrintDerived("raw_control", raw, rawResume, yieldInstructions, raw.InstructionsPerSecond);
         return 0;
+    }
+
+    private static void PrintHandleThroughput(ThroughputResult result)
+    {
+        Console.WriteLine(
+            $"HANDLE_THROUGHPUT batch={result.Batch} N={result.Iterations} " +
+            $"instructions={result.Instructions} seconds={result.MedianSeconds:F6} " +
+            $"iterations_per_s={result.IterationsPerSecond:F0} " +
+            $"instructions_per_s={result.InstructionsPerSecond:F0} " +
+            $"min_seconds={result.MinSeconds:F6} max_seconds={result.MaxSeconds:F6} " +
+            $"hook_calls={result.MedianHookCalls} checksum={result.Checksum:R}");
     }
 
     private static void MeasurePrimitiveCosts()
@@ -232,24 +239,24 @@ end";
         return (int)Math.Clamp(Math.Round(scaled), 10_000d, maximum);
     }
 
-    private static ThroughputResult MeasureHandleThroughput(InstructionFormula formula)
+    private static ThroughputResult MeasureHandleThroughput(InstructionFormula formula, int batch)
     {
         int initialIterations = 20_000;
-        double probeSeconds = MeasureHandleThroughputOnce(initialIterations).Seconds;
+        double probeSeconds = MeasureHandleThroughputOnce(initialIterations, batch).Seconds;
         int iterations = ScaleIterations(initialIterations, probeSeconds, 2_000_000);
-        MeasureHandleThroughputOnce(Math.Max(1000, iterations / 10));
+        MeasureHandleThroughputOnce(Math.Max(1000, iterations / 10), batch);
 
         List<RunSample> samples = new List<RunSample>();
         for (int trial = 0; trial < TrialCount; trial++)
         {
-            samples.Add(MeasureHandleThroughputOnce(iterations));
+            samples.Add(MeasureHandleThroughputOnce(iterations, batch));
         }
 
         RunSample[] ordered = samples.OrderBy(item => item.Seconds).ToArray();
         RunSample median = ordered[ordered.Length / 2];
         long instructions = formula.ForIterations(iterations);
         return new ThroughputResult(
-            1,
+            batch,
             iterations,
             instructions,
             median.Seconds,
@@ -259,12 +266,12 @@ end";
             median.Checksum);
     }
 
-    private static RunSample MeasureHandleThroughputOnce(int iterations)
+    private static RunSample MeasureHandleThroughputOnce(int iterations, int batch)
     {
         LuaState state = CreateState(false);
         LuaClosure closure = LoadNumericLoop(state, iterations);
         HandleHook hook = new HandleHook();
-        state.SetHook(hook.Function, string.Empty, 1);
+        state.SetHook(hook.Function, string.Empty, batch);
         Stopwatch stopwatch = Stopwatch.StartNew();
         LuaValue[] values = Execute(state, closure);
         stopwatch.Stop();

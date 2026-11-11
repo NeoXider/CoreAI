@@ -249,6 +249,10 @@ namespace CoreAI.Hub.UI
             }
 
             _root.RegisterCallback<KeyDownEvent>(OnRootKeyDown, TrickleDown.TrickleDown);
+            _root.RegisterCallback<FocusInEvent>(OnRootFocusIn, TrickleDown.TrickleDown);
+            _root.RegisterCallback<FocusOutEvent>(OnRootFocusOut, TrickleDown.TrickleDown);
+            _root.RegisterCallback<PointerEnterEvent>(OnRootPointerEnter);
+            _root.RegisterCallback<PointerLeaveEvent>(OnRootPointerLeave);
 
             if (styleSheet != null)
             {
@@ -303,6 +307,21 @@ namespace CoreAI.Hub.UI
                 _collapseButton.text = _collapsed ? "+" : "–";
                 _collapseButton.tooltip = _collapsed ? "Expand CoreAI Hub" : "Collapse CoreAI Hub";
             }
+        }
+
+        /// <summary>
+        /// True while a CoreAI text field outside the Hub has focus (the in-world chat overlay, the chat panel): the
+        /// Hub's polled Escape and toggle keys then belong to that field. Pure for EditMode tests.
+        /// </summary>
+        internal static bool IsAnotherSurfaceTyping(bool anySurfaceHasTextFocus, bool hubTextFocused)
+        {
+            return anySurfaceHasTextFocus && !hubTextFocused;
+        }
+
+        private bool ResolveUiFocusForHotkeys()
+        {
+            _uiFocus ??= CoreAI.Chat.CoreAiChatPanel.FindSceneUiFocus();
+            return _uiFocus != null && _uiFocus.HasTextFocus;
         }
 
         /// <summary>
@@ -420,7 +439,7 @@ namespace CoreAI.Hub.UI
 
             bool noUitkKeyboardFocus =
                 _root.focusController == null || _root.focusController.focusedElement == null;
-            if (!noUitkKeyboardFocus)
+            if (!noUitkKeyboardFocus || IsAnotherSurfaceTyping(ResolveUiFocusForHotkeys(), _hubTextFocused))
             {
                 return;
             }
@@ -435,6 +454,54 @@ namespace CoreAI.Hub.UI
             {
                 ToggleCollapsed();
             }
+        }
+
+        private readonly string _uiFocusSurfaceId = "coreai.hub." + Guid.NewGuid().ToString("N");
+        private CoreAI.UiFocus.ICoreAiUiFocus _uiFocus;
+        private bool _hubTextFocused;
+        private bool _hubPointerOver;
+
+        /// <summary>
+        /// The UI focus service the Hub reports to while one of its text fields has focus or the pointer
+        /// is over it, so gameplay input is marked as consumed. Resolved from the scene's CoreAI scope on
+        /// first use unless a host supplies one here.
+        /// </summary>
+        public void SetUiFocus(CoreAI.UiFocus.ICoreAiUiFocus uiFocus)
+        {
+            _uiFocus?.Clear(_uiFocusSurfaceId);
+            _uiFocus = uiFocus;
+            ReportUiFocus();
+        }
+
+        private void OnRootFocusIn(FocusInEvent evt)
+        {
+            _hubTextFocused = evt.target is TextField
+                              || (evt.target as VisualElement)?.GetFirstAncestorOfType<TextField>() != null;
+            ReportUiFocus();
+        }
+
+        private void OnRootFocusOut(FocusOutEvent evt)
+        {
+            _hubTextFocused = false;
+            ReportUiFocus();
+        }
+
+        private void OnRootPointerEnter(PointerEnterEvent evt)
+        {
+            _hubPointerOver = true;
+            ReportUiFocus();
+        }
+
+        private void OnRootPointerLeave(PointerLeaveEvent evt)
+        {
+            _hubPointerOver = false;
+            ReportUiFocus();
+        }
+
+        private void ReportUiFocus()
+        {
+            _uiFocus ??= CoreAI.Chat.CoreAiChatPanel.FindSceneUiFocus();
+            _uiFocus?.Report(_uiFocusSurfaceId, _hubTextFocused, _hubPointerOver);
         }
 
         private bool HandleEscapeRequested()
@@ -485,6 +552,13 @@ namespace CoreAI.Hub.UI
             }
 
             _root?.UnregisterCallback<KeyDownEvent>(OnRootKeyDown, TrickleDown.TrickleDown);
+            _root?.UnregisterCallback<FocusInEvent>(OnRootFocusIn, TrickleDown.TrickleDown);
+            _root?.UnregisterCallback<FocusOutEvent>(OnRootFocusOut, TrickleDown.TrickleDown);
+            _root?.UnregisterCallback<PointerEnterEvent>(OnRootPointerEnter);
+            _root?.UnregisterCallback<PointerLeaveEvent>(OnRootPointerLeave);
+            _hubTextFocused = false;
+            _hubPointerOver = false;
+            _uiFocus?.Clear(_uiFocusSurfaceId);
 
             _tabButtons.Clear();
             _root = null;

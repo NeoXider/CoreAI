@@ -71,6 +71,85 @@ namespace CoreAI.Mcp.Tests
             Assert.AreEqual(ScreenshotMcpTool.DefaultMaxResolution, source.LastMaxResolution);
         }
 
+        private sealed class StubCameraSource : ICameraScreenshotSource
+        {
+            public string LastCamera { get; private set; }
+            public bool DefaultCaptured { get; private set; }
+
+            public bool TryCaptureBase64Png(int maxResolution, out string base64Png, out string error)
+            {
+                DefaultCaptured = true;
+                base64Png = "TUFJTg==";
+                error = null;
+                return true;
+            }
+
+            public bool TryCaptureBase64Png(string cameraName, int maxResolution, out string base64Png, out string error)
+            {
+                LastCamera = cameraName;
+                bool known = cameraName == "BuildCam";
+                base64Png = known ? "QlVJTEQ=" : null;
+                error = known ? null : $"no active camera is named '{cameraName}'. Active cameras: Main Camera (main), BuildCam.";
+                return known;
+            }
+        }
+
+        [Test]
+        public async Task NamedCamera_IsCapturedThroughTheCameraSource()
+        {
+            StubCameraSource source = new();
+            ScreenshotMcpTool tool = new(source);
+
+            McpToolResult result = await tool.InvokeAsync(JObject.Parse("{\"camera\":\" BuildCam \"}"), CancellationToken.None);
+
+            Assert.IsFalse(result.IsError);
+            Assert.AreEqual("BuildCam", source.LastCamera);
+            Assert.IsFalse(source.DefaultCaptured, "a named capture must not silently fall back to the main camera.");
+            Assert.AreEqual("QlVJTEQ=", result.Content[0].Data);
+        }
+
+        [Test]
+        public async Task UnknownNamedCamera_FailsAndListsTheCameras()
+        {
+            StubCameraSource source = new();
+            ScreenshotMcpTool tool = new(source);
+
+            McpToolResult result = await tool.InvokeAsync(JObject.Parse("{\"camera\":\"Missing\"}"), CancellationToken.None);
+
+            Assert.IsTrue(result.IsError, "a missing camera is a failure, not a picture of another camera.");
+            StringAssert.Contains("BuildCam", result.Content[0].Text);
+            Assert.IsFalse(source.DefaultCaptured);
+        }
+
+        [TestCase(null)]
+        [TestCase("{\"camera\":null}")]
+        [TestCase("{\"camera\":\"  \"}")]
+        public async Task AbsentCamera_CapturesTheDefaultCamera(string arguments)
+        {
+            StubCameraSource source = new();
+            ScreenshotMcpTool tool = new(source);
+
+            McpToolResult result = await tool.InvokeAsync(arguments == null ? new JObject() : JObject.Parse(arguments),
+                CancellationToken.None);
+
+            Assert.IsFalse(result.IsError);
+            Assert.IsTrue(source.DefaultCaptured);
+            Assert.IsNull(source.LastCamera);
+        }
+
+        [Test]
+        public async Task NamedCamera_WithASourceThatCannotSelect_FailsWithTheFix()
+        {
+            StubScreenshotSource source = new(true);
+            ScreenshotMcpTool tool = new(source);
+
+            McpToolResult result = await tool.InvokeAsync(JObject.Parse("{\"camera\":\"BuildCam\"}"), CancellationToken.None);
+
+            Assert.IsTrue(result.IsError);
+            StringAssert.Contains("omit 'camera'", result.Content[0].Text);
+            Assert.AreEqual(0, source.LastMaxResolution, "the plain source must not be asked for a capture.");
+        }
+
         [Test]
         public async Task MaxResolution_Supplied_IsPassedThrough()
         {

@@ -304,10 +304,11 @@ namespace CoreAI.Infrastructure.Llm
 
         [Header("Shared agent defaults")]
         [Tooltip(
-            "Universal system prefix prepended before every agent-specific system prompt.")]
+            "Universal system prefix prepended before every agent-specific system prompt. New assets start with " +
+            "the package default (the CRITICAL RULES block); clear it to send no prefix.")]
         [TextArea(3, 6)]
         [SerializeField]
-        private string universalSystemPromptPrefix = "Respond concisely and to the point. Avoid unnecessary verbosity.";
+        private string universalSystemPromptPrefix = CoreAISettings.DefaultUniversalSystemPromptPrefix;
 
         [Tooltip(
             "Optional lines appended after the built-in ## Tool Contract block when a role has tools (before the tool list). Leave empty to use only default guidance.")]
@@ -427,12 +428,16 @@ namespace CoreAI.Infrastructure.Llm
         [SerializeField]
         private bool webGlNativeStreaming = true;
 
-        [Tooltip("WebGL-only: run the Lua sandbox on the WebGL player. On by default; " +
-                 "requires link.xml stripping protection in the build (shipped). No Lua runtime reads this flag yet, " +
-                 "so turning it off does not stop Lua on WebGL. The Full unity_* tier has no WebGL-specific block: " +
-                 "only 'Enable Full Lua Access' on CoreAiModsLifetimeScope grants it, on WebGL as on every player.")]
+        // WHY kept serialized but hidden: existing settings assets carry the value; the setting itself is obsolete
+        // (see EnableLuaOnWebGl) and showing a switch that does nothing in the inspector misled every reader.
+        [HideInInspector]
         [SerializeField]
         private bool enableLuaOnWebGl = true;
+
+        [Tooltip("Folder for new mods the AI creates without one (for example AI or AI/Made); the tool writes it into the " +
+                 "mod's header as its category line. Empty keeps them at the top level with their source untouched.")]
+        [SerializeField]
+        private string aiModsDefaultFolder = "";
 
         [Tooltip(
             "WebGL only: fetch credentials mode. When true -> credentials: 'same-origin' (cookies on same host). " +
@@ -562,6 +567,10 @@ namespace CoreAI.Infrastructure.Llm
         [Min(1)]
         private int maxConcurrentOrchestrations = 2;
 
+        [Tooltip("Orchestrator mode: a lead agent plans and hands tasks to sub-agents. Off registers nothing.")]
+        [SerializeField]
+        private bool enableOrchestratorMode;
+
         [Tooltip("Emit orchestrator timing / counters to the Unity log.")]
         [SerializeField]
         private bool logOrchestrationMetrics = false;
@@ -581,18 +590,27 @@ namespace CoreAI.Infrastructure.Llm
 
         #region Properties
 
-        /// <summary>Serialized legacy backend enum.</summary>
-        public LlmBackendType BackendType => backendType;
+        /// <summary>Legacy backend enum (the session override when <see cref="HasSessionOverrides"/>).</summary>
+        public LlmBackendType BackendType => ActiveSession?.BackendType ?? backendType;
 
         /// <summary>Product-facing LLM execution mode.</summary>
-        public LlmExecutionMode ExecutionMode => ResolveExecutionMode(executionMode, backendType);
+        public LlmExecutionMode ExecutionMode
+        {
+            get
+            {
+                BackendState session = ActiveSession;
+                return session != null
+                    ? ResolveExecutionMode(session.ExecutionMode, session.BackendType)
+                    : ResolveExecutionMode(executionMode, backendType);
+            }
+        }
 
         /// <summary>True when current mode routes through OpenAI-compatible HTTP.</summary>
         public bool UseHttpApi =>
             ExecutionMode == LlmExecutionMode.ClientOwnedApi ||
             ExecutionMode == LlmExecutionMode.ClientLimited ||
             ExecutionMode == LlmExecutionMode.ServerManagedApi ||
-            backendType == LlmBackendType.OpenAiHttp;
+            BackendType == LlmBackendType.OpenAiHttp;
 
         /// <summary>True when Auto/LocalModel may bind LLMUnity.</summary>
         public bool UseLlmUnity =>
@@ -614,36 +632,49 @@ namespace CoreAI.Infrastructure.Llm
         public LlmAutoPriority AutoPriority => autoPriority;
 
         /// <summary>Whether offline replies use <see cref="OfflineCustomResponse"/>.</summary>
-        public bool OfflineUseCustomResponse => offlineUseCustomResponse;
+        public bool OfflineUseCustomResponse => ActiveSession?.OfflineUseCustomResponse ?? offlineUseCustomResponse;
 
         /// <summary>Fallback/custom assistant line for offline flows.</summary>
-        public string OfflineCustomResponse => string.IsNullOrWhiteSpace(offlineCustomResponse)
-            ? "Offline mode: LLM unavailable"
-            : offlineCustomResponse;
+        public string OfflineCustomResponse
+        {
+            get
+            {
+                string raw = ActiveSession != null ? ActiveSession.OfflineCustomResponse : offlineCustomResponse;
+                return string.IsNullOrWhiteSpace(raw) ? "Offline mode: LLM unavailable" : raw;
+            }
+        }
 
         /// <summary>Role filter list or <c>*</c> wildcard.</summary>
-        public string OfflineCustomResponseRoles =>
-            string.IsNullOrWhiteSpace(offlineCustomResponseRoles) ? "*" : offlineCustomResponseRoles;
+        public string OfflineCustomResponseRoles
+        {
+            get
+            {
+                string raw = ActiveSession != null ? ActiveSession.OfflineCustomResponseRoles : offlineCustomResponseRoles;
+                return string.IsNullOrWhiteSpace(raw) ? "*" : raw;
+            }
+        }
 
         /// <summary>Returns true when <paramref name="roleId"/> should receive custom offline copy.</summary>
         public bool ShouldUseOfflineCustomResponse(string roleId)
         {
-            if (!offlineUseCustomResponse)
+            BackendState session = ActiveSession;
+            string configuredRoles = session != null ? session.OfflineCustomResponseRoles : offlineCustomResponseRoles;
+            if (!(session?.OfflineUseCustomResponse ?? offlineUseCustomResponse))
             {
                 return false;
             }
 
-            if (offlineCustomResponseRoles == "*")
+            if (configuredRoles == "*")
             {
                 return true;
             }
 
-            if (string.IsNullOrEmpty(roleId))
+            if (string.IsNullOrEmpty(roleId) || configuredRoles == null)
             {
                 return false;
             }
 
-            string[] roles = offlineCustomResponseRoles.Split(',');
+            string[] roles = configuredRoles.Split(',');
             foreach (string r in roles)
             {
                 if (r.Trim().Equals(roleId, System.StringComparison.OrdinalIgnoreCase))
@@ -656,11 +687,17 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>OpenAI-compatible base URL without trailing slash.</summary>
-        public string ApiBaseUrl =>
-            string.IsNullOrWhiteSpace(apiBaseUrl) ? "http://localhost:1234/v1" : apiBaseUrl.TrimEnd('/');
+        public string ApiBaseUrl
+        {
+            get
+            {
+                string raw = ActiveSession != null ? ActiveSession.ApiBaseUrl : apiBaseUrl;
+                return string.IsNullOrWhiteSpace(raw) ? "http://localhost:1234/v1" : raw.TrimEnd('/');
+            }
+        }
 
-        /// <summary>Bearer-style API credential.</summary>
-        public string ApiKey => apiKey ?? "";
+        /// <summary>Bearer-style API credential (the session override when <see cref="HasSessionOverrides"/>).</summary>
+        public string ApiKey => (ActiveSession != null ? ActiveSession.ApiKey : apiKey) ?? "";
 
 
         /// <summary>Whether fallback to secondary backend is enabled.</summary>
@@ -696,16 +733,19 @@ namespace CoreAI.Infrastructure.Llm
         {
             get
             {
-                if (!string.IsNullOrWhiteSpace(modelName))
+                BackendState session = ActiveSession;
+                string model = session != null ? session.ModelName : modelName;
+                if (!string.IsNullOrWhiteSpace(model))
                 {
-                    return modelName.Trim();
+                    return model.Trim();
                 }
 
                 if (ExecutionMode == LlmExecutionMode.LocalModel || ExecutionMode == LlmExecutionMode.Auto)
                 {
-                    if (!string.IsNullOrWhiteSpace(ggufModelPath))
+                    string gguf = session != null ? session.GgufModelPath : ggufModelPath;
+                    if (!string.IsNullOrWhiteSpace(gguf))
                     {
-                        return ggufModelPath;
+                        return gguf;
                     }
                 }
 
@@ -725,20 +765,29 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         public bool IsVisionEnabled => VisionCapability.IsEnabled(visionSupport, ModelName);
 
-        /// <summary>Serialized temperature (used when <see cref="OverrideTemperature"/> is true).</summary>
-        public float Temperature => temperature;
+        /// <summary>Sampling temperature (used when <see cref="OverrideTemperature"/> is true).</summary>
+        public float Temperature => ActiveSession?.Temperature ?? temperature;
 
         /// <summary>When true, <see cref="Temperature"/> is sent on LLM requests; when false, backends use default sampling temperature.</summary>
-        public bool OverrideTemperature => enableTemperatureOverriding;
+        public bool OverrideTemperature => ActiveSession?.EnableTemperatureOverriding ?? enableTemperatureOverriding;
 
         /// <summary>When true, <see cref="MaxTokens"/> caps completions; when false, no output cap is sent.</summary>
-        public bool OverrideMaxTokens => enableMaxTokensOverriding;
+        public bool OverrideMaxTokens => ActiveSession?.EnableMaxTokensOverriding ?? enableMaxTokensOverriding;
 
         /// <summary>
         /// Global max-output cap (tokens). <c>0</c> = no cap sent (provider decides); returned whenever
         /// max-tokens overriding is disabled.
         /// </summary>
-        public int MaxTokens => enableMaxTokensOverriding && maxTokens > 0 ? maxTokens : 0;
+        public int MaxTokens
+        {
+            get
+            {
+                BackendState session = ActiveSession;
+                bool enabled = session?.EnableMaxTokensOverriding ?? enableMaxTokensOverriding;
+                int cap = session?.MaxTokens ?? maxTokens;
+                return enabled && cap > 0 ? cap : 0;
+            }
+        }
 
         /// <summary>Maximum client-limited requests allowed in the current session; zero disables this limit.</summary>
         public int MaxClientLimitedRequestsPerSession =>
@@ -749,7 +798,7 @@ namespace CoreAI.Infrastructure.Llm
             maxClientLimitedPromptChars < 0 ? 0 : maxClientLimitedPromptChars;
 
         /// <summary>HTTP adapter timeout backing field.</summary>
-        public int RequestTimeoutSeconds => System.Math.Max(0, requestTimeoutSeconds);
+        public int RequestTimeoutSeconds => System.Math.Max(0, ActiveSession?.RequestTimeoutSeconds ?? requestTimeoutSeconds);
 
         /// <summary>
         /// Single-request HTTP limit aligned with <see cref="LlmRequestTimeoutSeconds"/> so the transport
@@ -772,7 +821,7 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>Optional LLMAgent GameObject identifier.</summary>
-        public string LlmUnityAgentName => llmUnityAgentName;
+        public string LlmUnityAgentName => ActiveSession != null ? ActiveSession.LlmUnityAgentName : llmUnityAgentName;
 
         /// <summary>Spawn LLM+LLMAgent at runtime when none exists in scenes.</summary>
         public bool LlmUnityAutoCreateRuntimeHost => llmUnityAutoCreateRuntimeHost;
@@ -784,20 +833,26 @@ namespace CoreAI.Infrastructure.Llm
         public bool LlmUnityAutostartLocalServer => llmUnityAutostartLocalServer;
 
         /// <summary>Relative GGUF location for LLMUnity.</summary>
-        public string GgufModelPath => ggufModelPath ?? "";
+        public string GgufModelPath => (ActiveSession != null ? ActiveSession.GgufModelPath : ggufModelPath) ?? "";
 
         /// <summary>Persist LLMUnity host GameObject.</summary>
-        public bool LlmUnityDontDestroyOnLoad => llmUnityDontDestroyOnLoad;
+        public bool LlmUnityDontDestroyOnLoad => ActiveSession?.LlmUnityDontDestroyOnLoad ?? llmUnityDontDestroyOnLoad;
 
         /// <summary>Local model readiness timeout.</summary>
-        public float LlmUnityStartupTimeoutSeconds =>
-            llmUnityStartupTimeoutSeconds < 5f ? 120f : llmUnityStartupTimeoutSeconds;
+        public float LlmUnityStartupTimeoutSeconds
+        {
+            get
+            {
+                float seconds = ActiveSession?.LlmUnityStartupTimeoutSeconds ?? llmUnityStartupTimeoutSeconds;
+                return seconds < 5f ? 120f : seconds;
+            }
+        }
 
         /// <summary>Cooldown after daemon ready signal.</summary>
-        public float LlmUnityStartupDelaySeconds => llmUnityStartupDelaySeconds;
+        public float LlmUnityStartupDelaySeconds => ActiveSession?.LlmUnityStartupDelaySeconds ?? llmUnityStartupDelaySeconds;
 
         /// <summary>Hold LLMUnity server between prompts.</summary>
-        public bool LlmUnityKeepAlive => llmUnityKeepAlive;
+        public bool LlmUnityKeepAlive => ActiveSession?.LlmUnityKeepAlive ?? llmUnityKeepAlive;
 
         /// <summary>Provider-specific HTTP reasoning mode.</summary>
         public LlmReasoningMode ReasoningMode => reasoningMode;
@@ -871,7 +926,14 @@ namespace CoreAI.Infrastructure.Llm
         public int LlmUnityMaxConcurrentChats => llmUnityMaxConcurrentChats < 1 ? 1 : llmUnityMaxConcurrentChats;
 
         /// <summary>Exported GPU offload depth.</summary>
-        public int NumGPULayers => llmUnityNumGPULayers < 0 ? 0 : llmUnityNumGPULayers;
+        public int NumGPULayers
+        {
+            get
+            {
+                int layers = ActiveSession?.LlmUnityNumGpuLayers ?? llmUnityNumGPULayers;
+                return layers < 0 ? 0 : layers;
+            }
+        }
 
         /// <summary>
         /// Port for the LLMUnity built-in OpenAI server that CoreAI drives the local model through
@@ -931,7 +993,11 @@ namespace CoreAI.Infrastructure.Llm
         public bool WebGlNativeStreaming => webGlNativeStreaming;
 
         /// <inheritdoc cref="ICoreAISettings.EnableLuaOnWebGl"/>
+        [System.Obsolete("Read by nothing: Lua-CSharp runs on the WebGL player like on every other one, so there is no WebGL Lua switch. To ship a build without Lua, leave CoreAiModsLifetimeScope out of the scene (or build without the COREAI_LUA define); to keep mods but not AI-written Lua, leave the lua-builder tool profile off the roles.")]
         public bool EnableLuaOnWebGl => enableLuaOnWebGl;
+
+        /// <inheritdoc cref="ICoreAISettings.AiModsDefaultFolder"/>
+        public string AiModsDefaultFolder => aiModsDefaultFolder ?? "";
 
         /// <summary>WebGL-only: true sends same-origin credentials; false omits credentials.</summary>
         public bool SameOriginCredentials => sameOriginCredentials;
@@ -1008,6 +1074,12 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>Parallel orchestrator task ceiling.</summary>
         public int MaxConcurrentOrchestrations => maxConcurrentOrchestrations < 1 ? 2 : maxConcurrentOrchestrations;
+
+        /// <summary>
+        /// Whether <c>CoreAILifetimeScope</c> registers orchestrator mode (a lead agent that plans and hands tasks to
+        /// sub-agents). Off by default; off registers nothing.
+        /// </summary>
+        public bool EnableOrchestratorMode => enableOrchestratorMode;
 
         /// <summary>Orchestrator metrics logging toggle.</summary>
         public bool LogOrchestrationMetrics => logOrchestrationMetrics;
@@ -1094,8 +1166,20 @@ namespace CoreAI.Infrastructure.Llm
 
             universalSystemPromptPrefix = options.UniversalSystemPromptPrefix ?? "";
             toolContractAdditionalInstructions = options.ToolContractAdditionalInstructions ?? "";
-            temperature = Mathf.Clamp(options.Temperature, 0f, 2f);
-            enableTemperatureOverriding = options.OverrideTemperature;
+            float optionsTemperature = Mathf.Clamp(options.Temperature, 0f, 2f);
+            bool optionsOverrideTemperature = options.OverrideTemperature;
+            int optionsMaxTokens = options.MaxTokens;
+            MutateBackend(false, state =>
+            {
+                state.Temperature = optionsTemperature;
+                state.EnableTemperatureOverriding = optionsOverrideTemperature;
+                // Resolved MaxTokens: 0 = no cap (override off); positive = explicit cap (override on).
+                state.EnableMaxTokensOverriding = optionsMaxTokens > 0;
+                if (optionsMaxTokens > 0)
+                {
+                    state.MaxTokens = optionsMaxTokens;
+                }
+            });
             reasoningEffort = options.ReasoningEffort;
             reasoningDialect = options.ReasoningDialect;
             secondaryReasoningEffort = options.SecondaryReasoningEffort;
@@ -1107,13 +1191,6 @@ namespace CoreAI.Infrastructure.Llm
             logMeaiToolCallingSteps = options.LogMeaiToolCallingSteps;
             allowDuplicateToolCalls = options.AllowDuplicateToolCalls;
             enableStreaming = options.EnableStreaming;
-            // Resolved MaxTokens: 0 = no cap (override off); positive = explicit cap (override on).
-            enableMaxTokensOverriding = options.MaxTokens > 0;
-            if (options.MaxTokens > 0)
-            {
-                maxTokens = options.MaxTokens;
-            }
-
             enableLlmContextCompaction = options.EnableLlmContextCompaction;
             enableTokenCalibration = options.EnableTokenCalibration;
             enableConversationHistorySummarization = options.EnableConversationHistorySummarization;
@@ -1155,6 +1232,10 @@ namespace CoreAI.Infrastructure.Llm
         /// as empty — <see cref="ConfigureServerManagedApi"/> relies on that to hand the choice to the
         /// backend, and every other mode then fails with an explicit configuration error instead of
         /// silently calling a built-in default model.
+        /// <para>
+        /// Writes the asset itself (and an active session override, so the latest write wins). Runtime switches
+        /// that must not outlive the session go through <c>CoreAiBackend</c>, which writes only the session.
+        /// </para>
         /// </summary>
         public void ConfigureHttpApi(
             string baseUrl,
@@ -1165,34 +1246,8 @@ namespace CoreAI.Infrastructure.Llm
             int? maxTokens = null,
             bool? overrideTemperature = null)
         {
-            backendType = LlmBackendType.OpenAiHttp;
-            executionMode = LlmExecutionMode.ClientOwnedApi;
-            apiBaseUrl = string.IsNullOrWhiteSpace(baseUrl) ? "http://localhost:1234/v1" : baseUrl;
-            apiKey = key ?? "";
-            modelName = model ?? "";
-            if (temperature.HasValue)
-            {
-                this.temperature = Mathf.Clamp(temperature.Value, 0f, 2f);
-            }
-
-            if (overrideTemperature.HasValue)
-            {
-                enableTemperatureOverriding = overrideTemperature.Value;
-            }
-
-            if (timeoutSeconds.HasValue)
-            {
-                requestTimeoutSeconds = System.Math.Max(0, timeoutSeconds.Value);
-            }
-
-            if (maxTokens.HasValue)
-            {
-                enableMaxTokensOverriding = maxTokens.Value > 0;
-                if (maxTokens.Value > 0)
-                {
-                    this.maxTokens = maxTokens.Value;
-                }
-            }
+            MutateBackend(false, state => ApplyHttp(state, LlmExecutionMode.ClientOwnedApi, baseUrl, key, model,
+                temperature, timeoutSeconds, maxTokens, overrideTemperature));
         }
 
         /// <summary>Preserves the original full-parameter API and applies each explicit request setting.</summary>
@@ -1216,7 +1271,6 @@ namespace CoreAI.Infrastructure.Llm
             bool? overrideTemperature = null)
         {
             ConfigureHttpApi(baseUrl, key, model, temperature, timeoutSeconds, maxTokens, overrideTemperature);
-            executionMode = LlmExecutionMode.ClientOwnedApi;
         }
 
         /// <summary>Preserves the original full-parameter API and applies each explicit request setting.</summary>
@@ -1241,8 +1295,8 @@ namespace CoreAI.Infrastructure.Llm
             int? maxTokens = null,
             bool? overrideTemperature = null)
         {
-            ConfigureHttpApi(baseUrl, key, model, temperature, timeoutSeconds, maxTokens, overrideTemperature);
-            executionMode = LlmExecutionMode.ClientLimited;
+            MutateBackend(false, state => ApplyHttp(state, LlmExecutionMode.ClientLimited, baseUrl, key, model,
+                temperature, timeoutSeconds, maxTokens, overrideTemperature));
             maxClientLimitedRequestsPerSession = maxRequestsPerSession < 0 ? 0 : maxRequestsPerSession;
             maxClientLimitedPromptChars = maxPromptChars < 0 ? 0 : maxPromptChars;
         }
@@ -1267,9 +1321,8 @@ namespace CoreAI.Infrastructure.Llm
             int? maxTokens = null,
             bool? overrideTemperature = null)
         {
-            ConfigureHttpApi(backendBaseUrl, backendAuthToken, model, temperature, timeoutSeconds, maxTokens,
-                overrideTemperature);
-            executionMode = LlmExecutionMode.ServerManagedApi;
+            MutateBackend(false, state => ApplyHttp(state, LlmExecutionMode.ServerManagedApi, backendBaseUrl,
+                backendAuthToken, model, temperature, timeoutSeconds, maxTokens, overrideTemperature));
         }
 
         /// <summary>Force local GGUF routing via LLMUnity.</summary>
@@ -1282,15 +1335,8 @@ namespace CoreAI.Infrastructure.Llm
             bool dontDestroyOnLoad = true,
             int numGpuLayers = 99)
         {
-            backendType = LlmBackendType.LlmUnity;
-            executionMode = LlmExecutionMode.LocalModel;
-            llmUnityAgentName = agentName ?? "";
-            ggufModelPath = string.IsNullOrWhiteSpace(ggufPath) ? "Qwen3.5-2B-Q4_K_M.gguf" : ggufPath;
-            llmUnityKeepAlive = keepAlive;
-            llmUnityStartupTimeoutSeconds = startupTimeout < 5f ? 120f : startupTimeout;
-            llmUnityStartupDelaySeconds = startupDelay;
-            llmUnityDontDestroyOnLoad = dontDestroyOnLoad;
-            llmUnityNumGPULayers = numGpuLayers < 0 ? 0 : numGpuLayers;
+            MutateBackend(false, state => ApplyLlmUnity(state, agentName, ggufPath, keepAlive, startupTimeout,
+                startupDelay, dontDestroyOnLoad, numGpuLayers));
         }
 
         /// <summary>Disable networked LLMs (offline/stub).</summary>
@@ -1302,18 +1348,7 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Disable networked LLMs and optionally serve a fixed custom response for matched roles.</summary>
         public void ConfigureOffline(bool useCustomResponse, string customResponse = null, string roles = null)
         {
-            backendType = LlmBackendType.Offline;
-            executionMode = LlmExecutionMode.Offline;
-            offlineUseCustomResponse = useCustomResponse;
-            if (customResponse != null)
-            {
-                offlineCustomResponse = customResponse;
-            }
-
-            if (roles != null)
-            {
-                offlineCustomResponseRoles = roles;
-            }
+            MutateBackend(false, state => ApplyOffline(state, useCustomResponse, customResponse, roles));
         }
 
         /// <summary>Enable/disable the secondary fallback backend and set its URL/model/key.</summary>
@@ -1353,22 +1388,31 @@ namespace CoreAI.Infrastructure.Llm
             maxToolCallHistoryMessages = value < 0 ? 20 : value;
         }
 
-        /// <summary>Sets the OpenAI-compatible base URL without normalization (callers may pass raw values).</summary>
+        /// <summary>
+        /// Sets the OpenAI-compatible base URL on the asset without normalization (callers may pass raw values).
+        /// For a runtime change that must not be saved into the asset use <c>CoreAiBackend.SetApiBaseUrl</c>.
+        /// </summary>
         public void SetApiBaseUrl(string baseUrl)
         {
-            apiBaseUrl = baseUrl;
+            MutateBackend(false, state => state.ApiBaseUrl = baseUrl);
         }
 
-        /// <summary>Sets the HTTP API key for the primary backend (runtime reconfiguration).</summary>
+        /// <summary>
+        /// Sets the HTTP API key for the primary backend on the asset. A key supplied at runtime belongs in
+        /// <c>CoreAiBackend.SetApiKey</c>, which keeps it out of the asset (and out of a Resources build).
+        /// </summary>
         public void SetApiKey(string key)
         {
-            apiKey = key ?? "";
+            MutateBackend(false, state => state.ApiKey = key ?? "");
         }
 
-        /// <summary>Sets the model identifier for the primary backend (runtime reconfiguration).</summary>
+        /// <summary>
+        /// Sets the model identifier for the primary backend on the asset; <c>CoreAiBackend.SetModel</c> is the
+        /// session-only runtime counterpart.
+        /// </summary>
         public void SetModelName(string model)
         {
-            modelName = model ?? "";
+            MutateBackend(false, state => state.ModelName = model ?? "");
         }
 
         /// <summary>
@@ -1387,17 +1431,333 @@ namespace CoreAI.Infrastructure.Llm
             string model,
             string ggufPath)
         {
-            executionMode = mode;
-            backendType = backend;
-            modelName = model;
-            ggufModelPath = ggufPath;
+            MutateBackend(false, state =>
+            {
+                state.ExecutionMode = mode;
+                state.BackendType = backend;
+                state.ModelName = model;
+                state.GgufModelPath = ggufPath;
+            });
         }
 
         /// <summary>Use automatic backend resolution (respects routing manifest + priority).</summary>
         public void ConfigureAuto()
         {
-            backendType = LlmBackendType.Auto;
-            executionMode = LlmExecutionMode.Auto;
+            MutateBackend(false, ApplyAuto);
+        }
+
+        #endregion
+
+        #region Session overrides
+
+        /// <summary>
+        /// The backend fields a runtime switch may change: mode, endpoint, key, model, sampling caps, the offline
+        /// reply and the local-model host. One instance mirrors the serialized fields for a write to the asset; a
+        /// second, non-serialized one is the session override.
+        /// </summary>
+        private sealed class BackendState
+        {
+            public int Generation;
+            public LlmBackendType BackendType;
+            public LlmExecutionMode ExecutionMode;
+            public string ApiBaseUrl;
+            public string ApiKey;
+            public string ModelName;
+            public float Temperature;
+            public bool EnableTemperatureOverriding;
+            public int MaxTokens;
+            public bool EnableMaxTokensOverriding;
+            public int RequestTimeoutSeconds;
+            public bool OfflineUseCustomResponse;
+            public string OfflineCustomResponse;
+            public string OfflineCustomResponseRoles;
+            public string LlmUnityAgentName;
+            public string GgufModelPath;
+            public bool LlmUnityKeepAlive;
+            public float LlmUnityStartupTimeoutSeconds;
+            public float LlmUnityStartupDelaySeconds;
+            public bool LlmUnityDontDestroyOnLoad;
+            public int LlmUnityNumGpuLayers;
+        }
+
+        private static int s_sessionGeneration;
+
+        [System.NonSerialized]
+        private BackendState _session;
+
+        /// <summary>
+        /// True while runtime backend switches (<c>CoreAiBackend.ApplyHttpApi</c>, <c>SetApiKey</c>, ...) shadow the
+        /// asset's backend fields for this session. Those switches never write the asset, so a key supplied at
+        /// runtime neither outlives Play Mode nor reaches a build. The shadow ends with
+        /// <see cref="ClearSessionOverrides"/>, at Play Mode entry and exit, and at every domain reload. While it is
+        /// active the inspector still edits the asset, but the session values are the ones in use.
+        /// </summary>
+        public bool HasSessionOverrides => ActiveSession != null;
+
+        /// <summary>Drops the session override, so the asset's own backend fields apply again.</summary>
+        public void ClearSessionOverrides()
+        {
+            _session = null;
+        }
+
+        private BackendState ActiveSession =>
+            _session != null && _session.Generation == s_sessionGeneration ? _session : null;
+
+        /// <summary>
+        /// Ends every asset's session override at once: Play Mode entry (also with Domain Reload off) and, in the
+        /// Editor, Play Mode exit, so a runtime key never lingers into edit mode or a build.
+        /// </summary>
+        internal static void BeginNewSession()
+        {
+            s_sessionGeneration++;
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetSessionOverridesOnPlayModeEntry()
+        {
+            BeginNewSession();
+        }
+
+#if UNITY_EDITOR
+        [UnityEditor.InitializeOnLoadMethod]
+        private static void ResetSessionOverridesOnPlayModeExit()
+        {
+            UnityEditor.EditorApplication.playModeStateChanged += change =>
+            {
+                if (change == UnityEditor.PlayModeStateChange.EnteredEditMode)
+                {
+                    BeginNewSession();
+                }
+            };
+        }
+#endif
+
+        /// <summary>
+        /// Session-only HTTP switch used by <c>CoreAiBackend</c>: same normalization as
+        /// <see cref="ConfigureHttpApi(string,string,string,float?,int?,int?,bool?)"/>, but the asset stays untouched.
+        /// </summary>
+        internal void ApplySessionHttpApi(
+            LlmExecutionMode mode,
+            string baseUrl,
+            string key,
+            string model,
+            float? temperature,
+            int? timeoutSeconds,
+            int? maxTokens,
+            bool? overrideTemperature)
+        {
+            MutateBackend(true, state => ApplyHttp(state, mode, baseUrl, key, model, temperature, timeoutSeconds,
+                maxTokens, overrideTemperature));
+        }
+
+        /// <summary>Session-only counterpart of <see cref="ConfigureLlmUnity"/>.</summary>
+        internal void ApplySessionLlmUnity(
+            string agentName,
+            string ggufPath,
+            bool keepAlive,
+            float startupTimeout,
+            float startupDelay,
+            bool dontDestroyOnLoad,
+            int numGpuLayers)
+        {
+            MutateBackend(true, state => ApplyLlmUnity(state, agentName, ggufPath, keepAlive, startupTimeout,
+                startupDelay, dontDestroyOnLoad, numGpuLayers));
+        }
+
+        /// <summary>Session-only counterpart of <see cref="ConfigureOffline(bool,string,string)"/>.</summary>
+        internal void ApplySessionOffline(bool useCustomResponse, string customResponse, string roles)
+        {
+            MutateBackend(true, state => ApplyOffline(state, useCustomResponse, customResponse, roles));
+        }
+
+        /// <summary>Session-only counterpart of <see cref="ConfigureAuto"/>.</summary>
+        internal void ApplySessionAuto()
+        {
+            MutateBackend(true, ApplyAuto);
+        }
+
+        /// <summary>Session-only counterpart of <see cref="SetApiBaseUrl"/>.</summary>
+        internal void SetSessionApiBaseUrl(string baseUrl)
+        {
+            MutateBackend(true, state => state.ApiBaseUrl = baseUrl);
+        }
+
+        /// <summary>Session-only counterpart of <see cref="SetApiKey"/>.</summary>
+        internal void SetSessionApiKey(string key)
+        {
+            MutateBackend(true, state => state.ApiKey = key ?? "");
+        }
+
+        /// <summary>Session-only counterpart of <see cref="SetModelName"/>.</summary>
+        internal void SetSessionModelName(string model)
+        {
+            MutateBackend(true, state => state.ModelName = model ?? "");
+        }
+
+        /// <summary>
+        /// Applies one backend mutation. <paramref name="sessionOnly"/>: to the session override alone (created from
+        /// the asset's values on first use). Otherwise: to the asset, and to an active session override too, so the
+        /// latest explicit write wins over an earlier runtime switch of the same field.
+        /// </summary>
+        private void MutateBackend(bool sessionOnly, System.Action<BackendState> mutate)
+        {
+            BackendState session = ActiveSession;
+            if (sessionOnly)
+            {
+                if (session == null)
+                {
+                    session = CaptureSerializedBackend();
+                    _session = session;
+                }
+
+                mutate(session);
+                return;
+            }
+
+            BackendState serialized = CaptureSerializedBackend();
+            mutate(serialized);
+            StoreSerializedBackend(serialized);
+            if (session != null)
+            {
+                mutate(session);
+            }
+        }
+
+        private BackendState CaptureSerializedBackend()
+        {
+            return new BackendState
+            {
+                Generation = s_sessionGeneration,
+                BackendType = backendType,
+                ExecutionMode = executionMode,
+                ApiBaseUrl = apiBaseUrl,
+                ApiKey = apiKey,
+                ModelName = modelName,
+                Temperature = temperature,
+                EnableTemperatureOverriding = enableTemperatureOverriding,
+                MaxTokens = maxTokens,
+                EnableMaxTokensOverriding = enableMaxTokensOverriding,
+                RequestTimeoutSeconds = requestTimeoutSeconds,
+                OfflineUseCustomResponse = offlineUseCustomResponse,
+                OfflineCustomResponse = offlineCustomResponse,
+                OfflineCustomResponseRoles = offlineCustomResponseRoles,
+                LlmUnityAgentName = llmUnityAgentName,
+                GgufModelPath = ggufModelPath,
+                LlmUnityKeepAlive = llmUnityKeepAlive,
+                LlmUnityStartupTimeoutSeconds = llmUnityStartupTimeoutSeconds,
+                LlmUnityStartupDelaySeconds = llmUnityStartupDelaySeconds,
+                LlmUnityDontDestroyOnLoad = llmUnityDontDestroyOnLoad,
+                LlmUnityNumGpuLayers = llmUnityNumGPULayers
+            };
+        }
+
+        private void StoreSerializedBackend(BackendState state)
+        {
+            backendType = state.BackendType;
+            executionMode = state.ExecutionMode;
+            apiBaseUrl = state.ApiBaseUrl;
+            apiKey = state.ApiKey;
+            modelName = state.ModelName;
+            temperature = state.Temperature;
+            enableTemperatureOverriding = state.EnableTemperatureOverriding;
+            maxTokens = state.MaxTokens;
+            enableMaxTokensOverriding = state.EnableMaxTokensOverriding;
+            requestTimeoutSeconds = state.RequestTimeoutSeconds;
+            offlineUseCustomResponse = state.OfflineUseCustomResponse;
+            offlineCustomResponse = state.OfflineCustomResponse;
+            offlineCustomResponseRoles = state.OfflineCustomResponseRoles;
+            llmUnityAgentName = state.LlmUnityAgentName;
+            ggufModelPath = state.GgufModelPath;
+            llmUnityKeepAlive = state.LlmUnityKeepAlive;
+            llmUnityStartupTimeoutSeconds = state.LlmUnityStartupTimeoutSeconds;
+            llmUnityStartupDelaySeconds = state.LlmUnityStartupDelaySeconds;
+            llmUnityDontDestroyOnLoad = state.LlmUnityDontDestroyOnLoad;
+            llmUnityNumGPULayers = state.LlmUnityNumGpuLayers;
+        }
+
+        private static void ApplyHttp(
+            BackendState state,
+            LlmExecutionMode mode,
+            string baseUrl,
+            string key,
+            string model,
+            float? temperature,
+            int? timeoutSeconds,
+            int? maxTokens,
+            bool? overrideTemperature)
+        {
+            state.BackendType = LlmBackendType.OpenAiHttp;
+            state.ExecutionMode = mode;
+            state.ApiBaseUrl = string.IsNullOrWhiteSpace(baseUrl) ? "http://localhost:1234/v1" : baseUrl;
+            state.ApiKey = key ?? "";
+            state.ModelName = model ?? "";
+            if (temperature.HasValue)
+            {
+                state.Temperature = Mathf.Clamp(temperature.Value, 0f, 2f);
+            }
+
+            if (overrideTemperature.HasValue)
+            {
+                state.EnableTemperatureOverriding = overrideTemperature.Value;
+            }
+
+            if (timeoutSeconds.HasValue)
+            {
+                state.RequestTimeoutSeconds = System.Math.Max(0, timeoutSeconds.Value);
+            }
+
+            if (maxTokens.HasValue)
+            {
+                state.EnableMaxTokensOverriding = maxTokens.Value > 0;
+                if (maxTokens.Value > 0)
+                {
+                    state.MaxTokens = maxTokens.Value;
+                }
+            }
+        }
+
+        private static void ApplyLlmUnity(
+            BackendState state,
+            string agentName,
+            string ggufPath,
+            bool keepAlive,
+            float startupTimeout,
+            float startupDelay,
+            bool dontDestroyOnLoad,
+            int numGpuLayers)
+        {
+            state.BackendType = LlmBackendType.LlmUnity;
+            state.ExecutionMode = LlmExecutionMode.LocalModel;
+            state.LlmUnityAgentName = agentName ?? "";
+            state.GgufModelPath = string.IsNullOrWhiteSpace(ggufPath) ? "Qwen3.5-2B-Q4_K_M.gguf" : ggufPath;
+            state.LlmUnityKeepAlive = keepAlive;
+            state.LlmUnityStartupTimeoutSeconds = startupTimeout < 5f ? 120f : startupTimeout;
+            state.LlmUnityStartupDelaySeconds = startupDelay;
+            state.LlmUnityDontDestroyOnLoad = dontDestroyOnLoad;
+            state.LlmUnityNumGpuLayers = numGpuLayers < 0 ? 0 : numGpuLayers;
+        }
+
+        private static void ApplyOffline(BackendState state, bool useCustomResponse, string customResponse,
+            string roles)
+        {
+            state.BackendType = LlmBackendType.Offline;
+            state.ExecutionMode = LlmExecutionMode.Offline;
+            state.OfflineUseCustomResponse = useCustomResponse;
+            if (customResponse != null)
+            {
+                state.OfflineCustomResponse = customResponse;
+            }
+
+            if (roles != null)
+            {
+                state.OfflineCustomResponseRoles = roles;
+            }
+        }
+
+        private static void ApplyAuto(BackendState state)
+        {
+            state.BackendType = LlmBackendType.Auto;
+            state.ExecutionMode = LlmExecutionMode.Auto;
         }
 
         /// <summary>

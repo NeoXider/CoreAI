@@ -90,11 +90,21 @@ namespace CoreAI.Ai
             return bound.AsReadOnly();
         }
 
+        /// <summary>
+        /// Result text of a <c>call_skill_tool</c> call made by a request that carries no role id.
+        /// </summary>
+        internal const string MissingRoleError =
+            "call_skill_tool needs the agent's role id to run a skill tool, and this request has none. " +
+            "The host must send the request with a role (AgentRoleId / AiTaskRequest.RoleId); call the tool " +
+            "directly if it is offered as a top-level tool.";
+
         private static ILlmTool BindProxy(ILlmTool proxy, RoleBinding binding)
         {
+            // WHY no throw for a missing role: binding happens while the request is being built, so a throw
+            // here failed the whole turn before the model said a word. The bound proxy refuses each call with
+            // a reported tool error instead (TryResolveInvocation), which the model and the trace both see.
             if (proxy is CallSkillToolProxy skillProxy)
             {
-                binding.RequireRole();
                 return skillProxy.BindForRole(binding);
             }
 
@@ -115,6 +125,9 @@ namespace CoreAI.Ai
                 _store = store ?? throw new ArgumentNullException(nameof(store));
                 _roleId = roleId?.Trim();
             }
+
+            /// <summary>True when the binding belongs to an admitted, non-empty role id.</summary>
+            internal bool HasRole => !string.IsNullOrWhiteSpace(_roleId);
 
             internal void RequireRole()
             {
@@ -151,6 +164,14 @@ namespace CoreAI.Ai
             internal SkillToolDescriptor BindDescriptor(SkillToolDescriptor descriptor)
             {
                 if (!(descriptor?.SourceTool is CoreAI.AgentMemory.MemoryLlmTool)) return descriptor;
+                if (!HasRole)
+                {
+                    // WHY a non-invocable copy, not a throw: memory has no partition without a role, and the
+                    // catalog is still listed by read_skill and by the refusal text of call_skill_tool.
+                    return new SkillToolDescriptor(descriptor.Skill, descriptor.SourceTool, descriptor.Name,
+                        descriptor.Description, descriptor.ParametersSchema, null, null);
+                }
+
                 lock (_gate)
                 {
                     RequireRole();
@@ -313,6 +334,12 @@ namespace CoreAI.Ai
             {
                 invocation = null;
                 error = null;
+                if (_roleBinding != null && !_roleBinding.HasRole)
+                {
+                    error = MissingRoleError;
+                    return false;
+                }
+
                 if (!TryReadString(arguments, "tool_name", out string name) || string.IsNullOrWhiteSpace(name))
                 {
                     error = "tool_name must be a non-empty string.";

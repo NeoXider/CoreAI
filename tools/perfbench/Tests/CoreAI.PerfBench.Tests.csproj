@@ -1,0 +1,66 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The portable leg of the P19 tests: the allocation budgets of Assets/CoreAIMods/Tests/EditMode/Performance
+    (their counter, GC.GetAllocatedBytesForCurrentThread, answers 0 on Unity's Mono, so Unity reports them
+    Ignored) and the engine-free harness contract of Assets/CoreAIMods/Tests/PlayMode/Performance, against
+    the production Lua tier that tools/portable/LuaTier compiles from Assets/ unmodified.
+
+    Run from the repository root with an artifacts path of its own (commands in
+    dev-docs/PERF_BASELINE_2026-11.md, section "Commands").
+
+    WHY a project of its own and not lines in tools/portable/LuaTests: the P19 work was leased new files
+    only. Linking these files into the portable-lua job is a two-line change to that project, listed in
+    the baseline document; until then this project is where they run.
+    WHY CoreAI.Mods.Tests: the friend name CoreAI.Mods and CoreAI.RbxApi.Instances grant internals to,
+    exactly as the Unity test asmdef of the same name gets them (LuaCsValueMarshaller is internal).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>CoreAI.Mods.Tests</AssemblyName>
+    <RootNamespace>CoreAI.Tests</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DefineConstants>$(DefineConstants);COREAI_LLM;COREAI_LUA</DefineConstants>
+    <NoWarn>$(NoWarn);CS1591;CS0618;CS0414;CS0169;CS0649;CS0162;CS0168;CS0219;CS8632;CS0067;CS1998;CS4014;CS1574</NoWarn>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RepoRoot>$(MSBuildThisFileDirectory)../../..</RepoRoot>
+    <PortableRoot>$(RepoRoot)/tools/portable</PortableRoot>
+    <PerfRoot>$(RepoRoot)/Assets/CoreAIMods/Tests</PerfRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(PortableRoot)/CoreAI.Core.csproj" />
+    <ProjectReference Include="$(PortableRoot)/CoreAI.RbxApi.Datatypes/CoreAI.RbxApi.Datatypes.csproj" />
+    <ProjectReference Include="$(PortableRoot)/CoreAI.RbxApi.Instances/CoreAI.RbxApi.Instances.csproj" />
+    <ProjectReference Include="$(PortableRoot)/CoreAI.LuauDownlevel/CoreAI.LuauDownlevel.csproj" />
+    <ProjectReference Include="$(PortableRoot)/LuaTier/UnityEngine/UnityEngine.csproj" />
+    <ProjectReference Include="$(PortableRoot)/LuaTier/CoreAI.Source/CoreAI.Source.csproj" />
+    <ProjectReference Include="$(PortableRoot)/LuaTier/CoreAI.RbxApi.Unity/CoreAI.RbxApi.Unity.csproj" />
+    <ProjectReference Include="$(PortableRoot)/LuaTier/CoreAI.RbxApi.Binding/CoreAI.RbxApi.Binding.csproj" />
+    <ProjectReference Include="$(PortableRoot)/LuaTier/CoreAI.Mods/CoreAI.Mods.csproj" />
+    <Reference Include="Lua">
+      <HintPath>$(RepoRoot)/Assets/CoreAIMods/Plugins/Lua.dll</HintPath>
+    </Reference>
+    <PackageReference Include="UniTask" Version="2.5.11" />
+    <PackageReference Include="Microsoft.Bcl.TimeProvider" Version="8.0.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="$(PerfRoot)/EditMode/Performance/AllocationMeter.cs" Link="EditMode/Performance/AllocationMeter.cs" />
+    <Compile Include="$(PerfRoot)/EditMode/Performance/HotPathAllocationBudgetEditModeTests.cs" Link="EditMode/Performance/HotPathAllocationBudgetEditModeTests.cs" />
+    <Compile Include="$(RepoRoot)/Assets/CoreAI/Tests/EditMode/Performance/SseContentDeltaFastPathEditModeTests.cs" Link="CoreAI/EditMode/Performance/SseContentDeltaFastPathEditModeTests.cs" />
+    <Compile Include="$(PerfRoot)/PlayMode/Performance/PerfHarnessContractTests.cs" Link="PlayMode/Performance/PerfHarnessContractTests.cs" />
+    <Compile Include="$(PerfRoot)/PlayMode/Performance/Scenarios/PerfScenario.cs" Link="Scenarios/PerfScenario.cs" />
+    <Compile Include="$(PerfRoot)/PlayMode/Performance/Scenarios/PerfLuaSources.cs" Link="Scenarios/PerfLuaSources.cs" />
+    <Compile Include="$(PerfRoot)/PlayMode/Performance/Scenarios/PerfRuntimeCounters.cs" Link="Scenarios/PerfRuntimeCounters.cs" />
+    <Compile Include="$(PerfRoot)/PlayMode/Performance/Scenarios/PerfDistribution.cs" Link="Scenarios/PerfDistribution.cs" />
+    <Compile Include="$(PerfRoot)/PlayMode/Performance/Scenarios/PerfReport.cs" Link="Scenarios/PerfReport.cs" />
+    <Compile Include="$(PerfRoot)/PlayMode/Performance/Scenarios/PerfReportJson.cs" Link="Scenarios/PerfReportJson.cs" />
+    <Compile Include="$(PerfRoot)/PlayMode/Performance/Scenarios/PerfModWorld.cs" Link="Scenarios/PerfModWorld.cs" />
+    <Compile Include="$(PerfRoot)/PlayMode/Performance/Scenarios/PerfRunnerOptions.cs" Link="Scenarios/PerfRunnerOptions.cs" />
+  </ItemGroup>
+</Project>

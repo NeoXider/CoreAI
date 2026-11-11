@@ -4,7 +4,7 @@ namespace CoreAI.Mods.Rbx.Instances
     /// Builds the canonical MVP1 game tree: DataModel root (the scene root, D5 — its whole
     /// subtree mirrors into the backing hierarchy) with Workspace registered as the physical
     /// world root, plus the services so Roblox-shaped paths resolve (roadmap §5.1.3):
-    /// Lighting, ReplicatedStorage, ServerStorage, ServerScriptService, StarterPlayer,
+    /// Lighting, ReplicatedStorage, ServerStorage, ServerScriptService, StarterPlayer, StarterGui,
     /// UserInputService.
     /// </summary>
     public static class DataModelBootstrap
@@ -20,12 +20,14 @@ namespace CoreAI.Mods.Rbx.Instances
             workspace.Parent = game;
             registry.SetWorldRoot(workspace);
             EnsureCurrentCamera(registry, workspace);
+            Terrain.RbxTerrainBootstrap.EnsureTerrain(registry, workspace);
 
             CreateService(registry, game, "Lighting");
             CreateService(registry, game, "ReplicatedStorage");
             CreateService(registry, game, "ServerStorage");
             CreateService(registry, game, "ServerScriptService");
             CreateService(registry, game, "StarterPlayer");
+            CreateService(registry, game, "StarterGui");
             CreateService(registry, game, "Players");
             CreateService(registry, game, "UserInputService");
             CreateService(registry, game, "RunService");
@@ -50,6 +52,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 // WHY: snapshots taken before the camera slice have no Camera child; restoring
                 // them must still yield a resolvable workspace.CurrentCamera.
                 EnsureCurrentCamera(registry, workspace);
+                Terrain.RbxTerrainBootstrap.EnsureTerrain(registry, workspace);
             }
 
             // WHY: snapshots taken before the input slice have no UserInputService; restoring
@@ -104,6 +107,13 @@ namespace CoreAI.Mods.Rbx.Instances
             if (game.FindFirstChildOfClass("TweenService") == null)
             {
                 CreateService(registry, game, "TweenService");
+            }
+
+            // WHY: snapshots taken before the GUI slice have no StarterGui; restoring them must still
+            // yield a resolvable game:GetService("StarterGui").
+            if (game.FindFirstChildOfClass("StarterGui") == null)
+            {
+                CreateService(registry, game, "StarterGui");
             }
 
             // WHY: snapshots taken before the ScriptContext slice have no

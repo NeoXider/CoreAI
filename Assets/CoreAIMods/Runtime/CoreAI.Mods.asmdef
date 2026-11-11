@@ -9,6 +9,8 @@
     "CoreAI.RbxApi.Instances",
     "CoreAI.RbxApi.Binding",
     "CoreAI.RbxApi.Unity",
+    "CoreAI.RbxApi.Agents",
+    "CoreAI.Mods.Folders",
     "MessagePipe",
     "MessagePipe.VContainer",
     "Unity.TextMeshPro",

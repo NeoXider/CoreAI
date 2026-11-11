@@ -629,6 +629,7 @@ namespace CoreAI.Tests.EditMode
             VisualElement header = Row();
             header.Add(FixedLabel("On", 26));
             header.Add(FixedLabel("Label", 96));
+            header.Add(FixedLabel("Display name", 120));
             Label modelHead = Muted("Model");
             modelHead.style.flexGrow = 1;
             modelHead.style.flexBasis = 0;
@@ -665,8 +666,13 @@ namespace CoreAI.Tests.EditMode
             });
             line.Add(on);
 
-            line.Add(TargetText(row.label, 96, 0f, false, "Optional display name for reports and progress",
-                v => row.label = v));
+            line.Add(TargetText(row.label, 96, 0f, false,
+                "Optional short handle for artifact file names and the OnlyTargets filter; without a display name " +
+                "it also names the reports", v => row.label = v));
+            line.Add(TargetText(row.displayName, 120, 0f, false,
+                "Optional name reports, model cards and charts show (e.g. the provider's model name). Set it when " +
+                "the label is a short handle, so the handle never becomes the report's model id.",
+                v => row.displayName = v));
             line.Add(TargetText(row.model, 0f, 1f, false, "Model id the endpoint serves", v => row.model = v));
             line.Add(TargetText(row.baseUrl, 0f, 1.4f, false, "OpenAI-compatible base URL, e.g. http://127.0.0.1:8831/v1",
                 v => row.baseUrl = v));
@@ -748,6 +754,7 @@ namespace CoreAI.Tests.EditMode
                 {
                     enabled = true,
                     label = target.Label,
+                    displayName = target.ExplicitDisplayName,
                     model = target.Model,
                     baseUrl = target.BaseUrl,
                     apiKey = target.ApiKey,
@@ -1190,9 +1197,11 @@ namespace CoreAI.Tests.EditMode
             }
 
             List<string> modelIds = runs.Select(r => r.Summary.ModelId).Distinct().ToList();
-            RunEntry best = runs.OrderByDescending(r => r.Summary.SuiteBase).First();
-            _historyList.Add(Info(
-                $"{runs.Count} run(s), {modelIds.Count} model(s). Best: {best.Summary.ModelId} ({Inv(best.Summary.SuiteBase)})"));
+            RunEntry best = runs.Where(r => r.Summary.HasGradedScenarios).OrderByDescending(r => r.Summary.SuiteBase)
+                .FirstOrDefault();
+            _historyList.Add(Info(best == null
+                ? $"{runs.Count} run(s), {modelIds.Count} model(s). No run has a graded scenario."
+                : $"{runs.Count} run(s), {modelIds.Count} model(s). Best: {best.Summary.ModelId} ({Inv(best.Summary.SuiteBase)})"));
 
             VisualElement toolbar = Row();
             toolbar.style.justifyContent = Justify.FlexEnd;
@@ -1616,20 +1625,25 @@ namespace CoreAI.Tests.EditMode
                 return;
             }
 
+            int rank = 0;
             for (int i = 0; i < ranked.Count; i++)
             {
-                _modelsRows.Add(ModelLeaderboardRow(i + 1, ranked[i], maxSpeed));
+                _modelsRows.Add(ModelLeaderboardRow(ranked[i].Summary.HasGradedScenarios ? ++rank : 0, ranked[i],
+                    maxSpeed));
             }
         }
 
         private IEnumerable<RunEntry> SortModelRuns(IEnumerable<RunEntry> runs)
         {
+            // WHY: a run without a graded scenario (a dead provider route) has zero numbers that are not results;
+            // it is listed after every ranked run, unranked.
+            IOrderedEnumerable<RunEntry> graded = runs.OrderByDescending(r => r.Summary.HasGradedScenarios);
             IOrderedEnumerable<RunEntry> ordered = _modelSort switch
             {
-                "Speed" => runs.OrderByDescending(r => r.Summary.TokensPerSecond),
-                "Pass-rate" => runs.OrderByDescending(r => r.Summary.PassRate),
-                "Game-fit" => runs.OrderByDescending(r => r.Summary.GameFitOverall),
-                _ => runs.OrderByDescending(r => r.Summary.SuiteBase)
+                "Speed" => graded.ThenByDescending(r => r.Summary.TokensPerSecond),
+                "Pass-rate" => graded.ThenByDescending(r => r.Summary.PassRate),
+                "Game-fit" => graded.ThenByDescending(r => r.Summary.GameFitOverall),
+                _ => graded.ThenByDescending(r => r.Summary.SuiteBase)
             };
 
             return ordered
@@ -1649,7 +1663,7 @@ namespace CoreAI.Tests.EditMode
             row.style.borderBottomWidth = 1;
             row.style.borderBottomColor = new Color(1f, 1f, 1f, 0.06f);
 
-            row.Add(FixedLabel(rank.ToString(), 30, true));
+            row.Add(FixedLabel(rank > 0 ? rank.ToString() : "–", 30, true));
             Label model = FixedLabel(s.ModelId, 230, rank == 1);
             model.style.flexShrink = 1;
             row.Add(model);
@@ -1671,8 +1685,9 @@ namespace CoreAI.Tests.EditMode
             row.Add(value);
 
             string speed = s.TotalCompletionTokens > 0 ? $"{Inv(s.TokensPerSecond)} tok/s" : "tok/s n/a";
-            Label stats = FixedLabel(
-                $"score {Inv(s.SuiteBase)} | {speed} | pass {Inv(s.PassRate * 100)}% | fit {Inv(s.GameFitOverall)}/10 | reps {s.Repetitions}",
+            Label stats = FixedLabel(s.HasGradedScenarios
+                    ? $"score {Inv(s.SuiteBase)} | {speed} | pass {Inv(s.PassRate * 100)}% | fit {Inv(s.GameFitOverall)}/10 | reps {s.Repetitions}"
+                    : $"{BenchmarkReportFormatter.NoGradedScenarios} (dead route or every result excluded) | reps {s.Repetitions}",
                 420);
             stats.style.flexGrow = 1;
             stats.style.flexShrink = 1;
@@ -1682,6 +1697,11 @@ namespace CoreAI.Tests.EditMode
 
         private (double Percent, string Label) ModelMetricValue(ModelSummary s, double maxSpeed)
         {
+            if (!s.HasGradedScenarios && _modelSort != "Speed")
+            {
+                return (0, "n/a");
+            }
+
             return _modelSort switch
             {
                 "Speed" => (maxSpeed <= 0 ? 0 : s.TokensPerSecond / maxSpeed * 100.0,

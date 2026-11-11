@@ -62,6 +62,31 @@ namespace CoreAI.Ai.Hub
             int order = DefaultOrder,
             bool? rbxApiAvailable = null)
         {
+            RegisterWithFolderList(registry, runtime, actorContext, null, sourceStore, grant, allowFull, order,
+                rbxApiAvailable);
+        }
+
+        /// <summary>
+        /// <see cref="Register(HubPageRegistry, ILuaModRuntime, ActorContext, ILuaModSourceStore, LuaCapabilities, bool, int, bool?)"/>
+        /// over the mod store's persisted folder list, the one <c>manage_mods</c> and the world session share, so a
+        /// folder the AI creates shows in the tree. A null <paramref name="folderList"/> keeps the page's own list
+        /// in player preferences.
+        /// </summary>
+        /// <remarks>
+        /// WHY a separate name and not an optional parameter of Register: a parameter of the folder type would make
+        /// every caller of Register reference the mod-folders assembly, including hosts that never use folders.
+        /// </remarks>
+        public static void RegisterWithFolderList(
+            HubPageRegistry registry,
+            ILuaModRuntime runtime,
+            ActorContext actorContext,
+            CoreAI.Mods.Folders.IModFolderListStore folderList,
+            ILuaModSourceStore sourceStore = null,
+            LuaCapabilities grant = LuaCapabilities.All,
+            bool allowFull = false,
+            int order = DefaultOrder,
+            bool? rbxApiAvailable = null)
+        {
             if (runtime == null)
             {
                 throw new ArgumentNullException(nameof(runtime));
@@ -74,7 +99,7 @@ namespace CoreAI.Ai.Hub
 
             LuaCsModRuntimeHubService service = new(
                 runtime, actorContext, sourceStore, grant, allowFull, rbxApiAvailable);
-            RegisterService(registry, service, order, service);
+            RegisterService(registry, service, order, service, folderList);
         }
 
         /// <summary>Registers the Mods page backed by a pre-built <see cref="IHubModService"/>.</summary>
@@ -90,11 +115,12 @@ namespace CoreAI.Ai.Hub
                 throw new ArgumentNullException(nameof(service));
             }
 
-            RegisterService(registry, service, order, null);
+            RegisterService(registry, service, order, null, null);
         }
 
         private static void RegisterService(
-            HubPageRegistry registry, IHubModService service, int order, IDisposable lifetime)
+            HubPageRegistry registry, IHubModService service, int order, IDisposable lifetime,
+            CoreAI.Mods.Folders.IModFolderListStore folderList)
         {
             registry.RegisterOwned(
                 ModsPageId,
@@ -102,7 +128,7 @@ namespace CoreAI.Ai.Hub
                     ModsPageId,
                     "Mods",
                     order,
-                    new HubModsPage(service, order),
+                    folderList != null ? new HubModsPage(service, order, folderList, null) : new HubModsPage(service, order),
                     new HubModLogsPage(service, DefaultLogsOrder)),
                 lifetime,
                 order);

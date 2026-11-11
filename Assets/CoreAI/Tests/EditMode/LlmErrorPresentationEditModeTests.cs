@@ -709,6 +709,40 @@ namespace CoreAI.Core.Tests.EditMode
             Assert.AreEqual("", LlmErrorPresentation.StripHttpErrorPrefix(null));
         }
 
+        [Test]
+        public void ForErrorCode_NotConfigured_SaysTheBuildLacksTheBackend_NotThatItIsBusy()
+        {
+            string phrase = LlmErrorPresentation.ForErrorCode(LlmErrorCode.NotConfigured);
+
+            StringAssert.Contains("not set up in this build", phrase);
+            Assert.AreNotEqual(LlmErrorPresentation.DefaultUserMessage, phrase,
+                "a missing module is a configuration fault; 'try again in a moment' would never help");
+        }
+
+        [Test]
+        public void UserMessage_RequestFailedException_IsPresentedFromItsTypedFailure()
+        {
+            LlmRequestFailedException wrapped = new("turn failed",
+                new LlmClientException("HTTP error 429: slow down", LlmErrorCode.RateLimited, 429, 7));
+
+            Assert.AreEqual(LlmErrorPresentation.ForErrorCode(LlmErrorCode.RateLimited, 7),
+                LlmErrorPresentation.ToUserMessage(wrapped));
+            StringAssert.Contains("code=RateLimited", LlmErrorPresentation.ToDiagnosticText(wrapped));
+        }
+
+        [Test]
+        public void UserMessage_RequestFailedException_NeverLeaksAnAuthBody()
+        {
+            LlmRequestFailedException wrapped = new("turn failed",
+                new LlmClientException("HTTP error 401", LlmErrorCode.ProviderError, 401, null,
+                    WithEnvelope("key sk-secret is wrong")));
+
+            string message = LlmErrorPresentation.ToUserMessage(wrapped);
+
+            Assert.That(message, Does.Not.Contain("sk-secret"));
+            Assert.AreEqual(LlmErrorPresentation.ForErrorCode(LlmErrorCode.AuthExpired), message);
+        }
+
         // ---- helpers ----
 
         private static LlmClientException Envelope(string backendMessage, LlmErrorCode code, int status)

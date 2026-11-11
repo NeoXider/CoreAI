@@ -5,8 +5,10 @@ CoreAI game session** — Editor play mode or a shipped build — so an external
 game over a standard protocol instead of editing files and restarting.
 
 It is the in-game Command Bar surfaced over MCP: `execute_lua`, `get_mod_logs`, `read_skill`,
-`world_command`, `screenshot` and, with explicit host-admin configuration, `manage_mods`. Each tool is
-registered only when the current composition provides its backing service (see [Tools](#tools)).
+`world_command`, `screenshot`, the world save/load tools (`list_autosaves`, `load_world`,
+`load_autosave`, reached through `coreai_tools`) and, with explicit host-admin configuration,
+`manage_mods` and `save_world`. Each tool is registered only when the current composition provides its
+backing service (see [Tools](#tools)).
 
 ## Who this is for
 
@@ -62,14 +64,21 @@ server.StartListening(registry, listenPort: 8590);
   write that bridge yourself — this package will not do it for you.
 - **HTTP only, loopback only.** One `HttpListener` bound to `127.0.0.1`. No stdio and no WebSocket
   transport; stdio-only clients go through an external bridge such as `npx mcp-remote`.
-- **Not available in a WebGL player.** There `StartListening` logs a warning and does not start the
-  listener. The typed live catalog (`McpToolRegistry`) itself needs neither Unity nor sockets.
+- **Not available in a WebGL player.** A browser page cannot open a listening socket. There
+  `StartListening` logs a warning naming the reason and does not start the listener, and a hand-built
+  `McpHttpServer.Start()` throws `PlatformNotSupportedException` with the same explanation instead of
+  failing inside the socket layer (`McpHttpServer.IsSupportedOnThisPlatform` is `false`). The typed live
+  catalog (`McpToolRegistry`) itself needs neither Unity nor sockets.
 - **The catalog is per-composition.** A tool appears only when its backing service resolves, so
-  `tools/list` describes *this* game, not the package. `manage_mods` additionally requires explicit
-  host-admin configuration (below) and is **absent by default**.
-- **MCP surface is tools-only.** `initialize`, `notifications/initialized`, `tools/list`, `tools/call`,
-  `ping`, and the server-sent `notifications/tools/list_changed`. No `resources/*`, `prompts/*`,
-  `logging/*` or `completion/*`.
+  `tools/list` describes *this* game, not the package. `manage_mods` and `save_world` additionally
+  require explicit host-admin configuration (below) and are **absent by default**.
+- **The catalog follows the composition.** A catalog the server built from a CoreAI scope is withdrawn
+  the moment that scope is destroyed (a scene load, including `world_command` `load_scene` /
+  `reload_scene`) and rebuilt from the next built scope; see
+  [Scene loads and the automatic host](#scene-loads-and-the-automatic-host).
+- **MCP surface is tools-only.** `initialize`, `notifications/initialized`, `notifications/cancelled`,
+  `tools/list`, `tools/call`, `ping`, and the server-sent `notifications/tools/list_changed`. No
+  `resources/*`, `prompts/*`, `logging/*` or `completion/*`.
 
 ## Security model
 
@@ -161,7 +170,18 @@ clients still connect to `http://127.0.0.1:8590/mcp`.
 ## Protocol
 
 - Endpoint: **`POST http://127.0.0.1:<port>/mcp`**, JSON-RPC 2.0, MCP streamable HTTP.
-- Methods: `initialize`, `notifications/initialized` (no-op), `tools/list`, `tools/call`, `ping`.
+- Methods: `initialize`, `notifications/initialized` (no-op), `notifications/cancelled`, `tools/list`,
+  `tools/call`, `ping`.
+- `initialize` returns `instructions`: short guidance for the client's model (read the API skill
+  first, reach hidden tools through `coreai_tools`, verify with `screenshot` and `get_mod_logs`).
+  Replace it with `CoreAiMcpServer.Instructions` (or `McpRpcDispatcher.Instructions`) before start;
+  null or blank omits the field.
+- **Cancellation.** `notifications/cancelled` with the `requestId` of a `tools/call` from the same
+  session (or, for sessionless clients, from another sessionless request) cancels that call. A call
+  still waiting for the game thread is withdrawn at once and never runs; its slot is freed. A body that
+  has started receives the cancellation through its token and keeps its slot until it actually
+  finishes. The cancelled request is answered with `-32603` "… was cancelled …", which the client
+  ignores. A disconnected HTTP request is not treated as a cancellation, as the protocol requires.
 - **Response framing is negotiated by the `Accept` header:** clients that ask for `text/event-stream`
   get the single JSON-RPC response as one SSE `message` event; everyone else gets plain
   `application/json`. Both carry the same payload.
@@ -169,14 +189,17 @@ clients still connect to `http://127.0.0.1:8590/mcp`.
   for the GET tool-change subscription, but it does not replace the bearer token. Session expiry and
   protocol-version negotiation are described in
   [Protocol version and expired sessions](#protocol-version-and-expired-sessions).
-- Errors: unknown method → `-32601`, unknown/absent tool name → `-32602`, malformed JSON → `-32700`,
-  non-object JSON or an invalid request shape → `-32600`, a stalled main thread → `-32603` (message
-  names the cause). A tool that throws returns a normal result with `isError: true`.
+- Errors: unknown method → `-32601`, unknown/absent tool name → `-32602` (the message says to re-read
+  `tools/list` or ask `coreai_tools`), malformed JSON → `-32700`, non-object JSON or an invalid request
+  shape → `-32600`, a stalled main thread → `-32603` (message names the cause), a cancelled call →
+  `-32603`. A tool that throws returns a normal result with `isError: true`.
 - Request parsing preserves JSON strings exactly, including timestamp-shaped request ids, tool names,
   and arguments, including nested broker `arguments_json` objects. It does not infer dates or change
   their formatting; non-object arguments, excess nesting and trailing content are rejected.
+- `DELETE /mcp` with an `Mcp-Session-Id` terminates that session and closes its notification stream
+  (`204`); later requests with that id get `404`. Without the header it is `400`.
 - Transport rejections: `401` — token, `403` — foreign Origin/Host or non-local address,
-  `405` — a method other than GET or POST,
+  `405` — a method other than GET, POST or DELETE,
   `413` — body size exceeded in **UTF-8 bytes**, including chunked requests, `415` — not JSON,
   `408` — body not received in time, `503` — all 64 request-processing slots busy.
   The body is read for at most 10 seconds (`McpHttpServer.BodyReadTimeout`); a small rejected request
@@ -285,18 +308,55 @@ its synchronous part short, honour cancellation and use asynchronous I/O; split 
 off the game thread, keeping Unity API access on the game thread. The queue does not make a handler
 safe if it blocks the thread or ignores cancellation.
 
+`CoreAiMcpServer` implements `ICancellableMainThreadDispatcher`:
+`RunOnMainThreadAsync(work, cancellationToken)` withdraws a queued call when the token is cancelled and
+completes it as cancelled without running it. The dispatcher passes each `tools/call`'s own token, which
+is how `notifications/cancelled` frees a queue slot without waiting for a frame. A host dispatcher that
+implements only `IMainThreadDispatcher` still works: a cancelled call is then skipped when its frame
+comes.
+
+### Scene loads and the automatic host
+
+The automatic host from `StartServer()` is `DontDestroyOnLoad`; the CoreAI scopes it builds its tools
+from are not. When the server built its catalog from a scope (`StartListening()` /
+`StartServer()` without a registry), `Update` checks every frame — one reference comparison — that the
+scope still exists and still holds the same container. When it does not (a scene load destroyed it,
+or the scope rebuilt its container), the composition tools are withdrawn at once, so no call reaches
+the disposed services, and the scene is searched again at most every 0.5 s
+(`CoreAiMcpServer.CompositionProbeIntervalSeconds`). The next built scope's tools are published into
+the **same** `Registry`: sessions, the bearer token, the listener and open notification streams stay;
+each step is a `notifications/tools/list_changed`, so clients re-read `tools/list`. Only the tools the
+composition built are withdrawn and replaced; a tool the host added to the live catalog under another
+name stays. A catalog the host
+passed to `StartListening(registry)` is never touched (`CatalogFollowsComposition` is `false`). A host
+with its own loop calls `MonitorComposition(realtimeSeconds)` itself.
+
+Loading a world package (`load_world` / `load_autosave` after the player confirms) does not replace the
+scope: the Lua executor and mod runtime the tools hold are stable facades over the active world, so the
+catalog stays as it is.
+
 ### Protocol version and expired sessions
 
 An `Mcp-Session-Id` that is unknown, evicted or expired gets HTTP `404` on any request, including POST,
 and no tool body runs. The client then sends a new `initialize` **without the old header**. Sessions
-are bounded: the server keeps at most 64 (evicting the oldest first), each for one hour
-(`McpSessionStore` defaults). POST without a session id keeps working for stateless clients.
+are bounded: the server keeps at most 64, evicting the least recently used first. A session expires
+one hour after the **last** request that presented it (`McpSessionStore` defaults), so an agent that
+keeps working is never cut off mid-session; an open notification stream counts as use. POST without a
+session id keeps working for stateless clients.
 
-The server supports protocol versions `2025-06-18` and `2025-03-26`. `initialize` always answers with
-`2025-06-18`, whatever version the client requested; the client decides whether it can work with it.
-Any other `MCP-Protocol-Version` header value gets HTTP `400` before the request is routed. When the
-header is absent, a request with a session is treated as `2025-06-18` and one without a session as
-`2025-03-26`.
+`initialize` negotiates the handshake-based revisions `2025-11-25` and `2025-06-18`
+(`McpServerInfo.NegotiatedProtocolVersions`): a client that requests one of them gets it back unchanged.
+Any other requested version — including none — is answered with `2025-06-18`
+(`McpServerInfo.DefaultProtocolVersion`). `2025-03-26` is deliberately not negotiated: that revision
+requires receiving JSON-RPC batches, which this server does not; a `2025-03-26` client is answered
+`2025-06-18`, and requests that carry no `MCP-Protocol-Version` header (which `2025-03-26` clients never
+send) are still served. A header naming any other version gets HTTP `400` before the request is
+routed; its plain-text body lists the negotiated versions.
+
+The current MCP revision, `2026-07-28`, is stateless (no `initialize`, per-request `_meta`,
+`server/discover`). This server does not implement it. A dual-era client that probes with a modern
+request receives that plain-text `400` — not a modern JSON-RPC error — and falls back to `initialize`,
+which is the interoperability path the revision defines.
 
 ## Tools
 
@@ -310,8 +370,18 @@ Tools are registered **only when their backing service resolves** in the current
 | `get_mod_logs` | an `ILuaLogService` resolves | Reads mod `print`/`warn`/`error`/runtime-error output, independent of the Unity console. Optional `mod_id`, `level` (minimum severity), `since_sequence` and `max_entries` (default 50). |
 | `read_skill` | the Programmer role has skills | Returns a registered skill by `name` (e.g. `Lua Modding`, `Rbx API`) — the same reference the on-board agent reads. A multi-document skill returns its entry document and a section index; `section` reads one document, `all: true` reads all of them. |
 | `world_command` | a world-command executor resolves | Spawn / move / edit scene objects (meters; Euler degrees). |
-| `screenshot` | always | Captures the main camera to a PNG (base64), downscaled to `max_resolution` (default 1024, `0` = no cap). Missing camera / capture failure is reported per call, with the real reason. |
+| `screenshot` | always | Captures the main camera — or the active camera named in `camera` — to a PNG (base64), downscaled to `max_resolution` (default 1024, `0` = no cap). An unknown camera name fails and lists the active cameras; it never falls back to another camera. Missing camera / capture failure is reported per call, with the real reason. Screen-space overlay UI is not part of a camera render. |
+| `list_autosaves` | an `IRbxWorldRuntimeService` and an actor identity resolve; **brokered** | Lists the autosave ring (name, trigger, UTC timestamp, size). Read-only. |
+| `load_world` / `load_autosave` | as above; **brokered** | Requests loading a manual slot / a listed autosave. Nothing is applied until the player confirms in the game UI: a staged request is `isError: false` with status `player_confirmation_required` and a `request_id`; a missing or unreadable package is `isError: true`. |
+| `save_world` | as above **and** host-admin authority; **brokered** — **absent by default** | Saves the live world to a new create-once manual slot that survives a restart. |
 | `coreai_tools` | always (see [Tool residency](#tool-residency-what-the-model-pays-for)) | Broker over Dynamic tools: `list`, `describe`, `call`. |
+
+**Brokered** tools are Dynamic by default: they cost no `tools/list` context and are reached through
+`coreai_tools` (`list`, `describe`, then `call`) or by direct name. `COREAI_MCP_NATIVE=save_world,...`
+or a host residency policy lists them. The world tools wrap the in-game `save_world` / `load_world` /
+`list_autosaves` / `load_autosave` tools, so validation, refusals and JSON are the ones the in-game
+agent sees; they act as the composition's `IActorIdentityProvider` (the same identity the in-game
+Programmer tools use), and `save_world` as the host-admin identity.
 
 Each tool ships a real JSON Schema in `tools/list` so clients validate arguments before calling.
 
@@ -321,10 +391,11 @@ actions and executor refusals therefore return `isError: true`, directly and thr
 An `OperationCanceledException` reaching the dispatcher remains a protocol error (`-32603`) without
 a tool-result payload; ordinary tool failures keep their normal content.
 
-### `manage_mods` and host-admin authority
+### `manage_mods`, `save_world` and host-admin authority
 
-`manage_mods` writes mods that survive a restart, so it is not published to an anonymous caller.
-`CoreAiMcpToolProvider` registers it only when it receives a host identity, and `CoreAiMcpServer`
+`manage_mods` writes mods that survive a restart, and `save_world` writes a world slot that does, so
+neither is published to an anonymous caller. Both appear only with the host identity described here.
+`CoreAiMcpToolProvider` registers `manage_mods` only when it receives a host identity, and `CoreAiMcpServer`
 supplies one (once the mod runtime resolves) only when **all** of the following hold; it logs a
 distinct warning naming the reason whenever one does not:
 
@@ -352,12 +423,14 @@ Turning it on logs a warning at start, and the warning is the accurate descripti
 builds from the CoreAI composition always lists the broker; a registry you build yourself lists it only
 while at least one tool is Dynamic.
 
-The component's composition uses `McpToolResidencyPolicies.Default` (everything Native).
+The component's composition lists every tool Native except the brokered world tools (above);
+`CoreAiMcpToolProvider.Build(..., brokeredTools: ...)` is how a host adds its own tools that way.
 `McpToolResidencyPolicies.LeanDefault` keeps only the discovery tools
 (`McpToolResidencyPolicies.DiscoveryToolNames`: `read_skill` and `memory`) resident and routes the rest
 through the broker. This package registers no `memory` tool; that name matters only to a host that adds
-one. The source records the measurement behind that choice on the real six-tool composition:
-**9,324 B all-Native versus 768 B lean**. `McpToolResidencyPolicies.Lean(...)` keeps extra names
+one. The source records the measurement behind that choice on the real six-tool composition of the
+time (before the world tools and the `screenshot` camera argument): **9,324 B all-Native versus 768 B
+lean**. `McpToolResidencyPolicies.Lean(...)` keeps extra names
 resident. A host applies a policy with `new McpToolRegistry(tools, policy)` (or the `residencyPolicy`
 argument of `CoreAiMcpToolProvider.Build`) and starts the server with `StartListening(registry)`.
 
@@ -476,6 +549,13 @@ particular varies between client versions — check yours if the connection retu
 | Windows startup guidance reserves the canonical listener prefix | `CoreAiMcpServerMainThreadEditModeTests.BindDenied_GuidanceReservesExactCanonicalListeningPrefix_AndDisposesTransport` (fake bind denial, no URLACL mutation) |
 | `serverInfo.version` never drifts from `package.json` | `McpPackageVersionEditModeTests` |
 | The protocol core stays engine-free | `McpArchitectureFitnessEditModeTests` |
+| `notifications/cancelled` withdraws a queued call, cancels a running body, and only within its session | `McpCancellationEditModeTests`, `McpHttpServerIntegrationEditModeTests.CancelledNotification_OverHttp_WithdrawsTheQueuedCallOfTheSameSession`, `CoreAiMcpServerMainThreadEditModeTests.CancelledWhileQueued_IsWithdrawnAtOnce_NeverRuns_AndFreesItsSlot`, `CancelledAfterItStarted_KeepsRunningAndKeepsItsSlotUntilItFinishes` |
+| A supported requested version is echoed; `2025-03-26` and unknown versions get the default; the version header and its plain-text rejection | `McpProtocolNegotiationEditModeTests`, `McpHttpServerIntegrationEditModeTests.UnsupportedProtocolHeader_RejectionIsPlainTextNamingTheNegotiatedVersions` |
+| Sessions slide while used and evict the least recently used; `DELETE` terminates a session and its stream | `McpSessionStoreEditModeTests`, `McpHttpServerIntegrationEditModeTests.Delete_TerminatesTheSession_AndClosesItsNotificationStream` |
+| A destroyed or rebuilt scope withdraws its tools at once and the same catalog is rebuilt from the next scope; a host catalog is never touched | `CoreAiMcpServerCompositionEditModeTests` |
+| WebGL refuses the listener with an actionable reason | `McpHttpServerPlatformEditModeTests`, `CoreAiMcpServerWebGlEditModeTests` |
+| World tools: honest `isError`, `save_world` only with host-admin authority | `WorldPackageMcpToolsEditModeTests` |
+| `screenshot` captures a named camera exactly or fails listing the cameras; no error log outside play mode | `ScreenshotMcpToolEditModeTests`, `MainCameraScreenshotSourceEditModeTests` |
 
 ## Worked example session
 
@@ -503,6 +583,12 @@ $ claude mcp add --transport http coreai http://127.0.0.1:8590/mcp \
 # 6. And sees the result
 -> tools/call screenshot { "max_resolution": 768 }
 <- image/png (base64)
+
+# 7. It finds the brokered world tools and lists the autosaves
+-> tools/call coreai_tools { "action": "list", "query": "autosave" }
+<- { "success": true, "tools": [ { "name": "list_autosaves", ... }, { "name": "load_autosave", ... } ] }
+-> tools/call coreai_tools { "action": "call", "tool": "list_autosaves", "arguments_json": "{}" }
+<- { "autosaves": [ { "name": "20261111T100000000Z-0000-execute_lua.world", "trigger": "execute_lua", ... } ] }
 ```
 
 ## Architecture note (ARCHITECTURE_RULES §1 deviation)

@@ -56,7 +56,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             string filter = Environment.GetEnvironmentVariable(OnlyTargetsEnvironment);
             if (string.IsNullOrWhiteSpace(filter)) return;
             foreach (string label in filter.Split(',').Select(s => s.Trim()))
-                if (!targets.Any(t => t.DisplayName == label))
+                if (!targets.Any(t => t.Handle == label))
                     throw new InvalidOperationException($"No benchmark target matches OnlyTargets label '{label}'.");
         }
 
@@ -114,10 +114,11 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     if (originalSource.BaseUrl != saved.BaseUrl || string.IsNullOrEmpty(originalSource.ApiKey))
                         throw new InvalidOperationException("Cannot resume: restore the original local configuration secret source or supply the target explicitly.");
                     external = new BenchmarkTarget(saved.Model, saved.BaseUrl, originalSource.ApiKey, saved.Label,
-                        saved.ReasoningEffort, saved.ExtraBodyJson, saved.Temperature);
+                        saved.ReasoningEffort, saved.ExtraBodyJson, saved.Temperature, saved.DisplayName);
                 }
                 BenchmarkTarget resolved = needed ? saved.Resolve(external) : new BenchmarkTarget(saved.Model,
-                    saved.BaseUrl, saved.KeyReference, saved.Label, saved.ReasoningEffort, saved.ExtraBodyJson, saved.Temperature);
+                    saved.BaseUrl, saved.KeyReference, saved.Label, saved.ReasoningEffort, saved.ExtraBodyJson, saved.Temperature,
+                    saved.DisplayName);
                 targets.Add(external ?? resolved);
             }
             ValidateTargetFilter(targets);

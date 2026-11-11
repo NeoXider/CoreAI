@@ -1,0 +1,24 @@
+{
+  "name": "CoreAI.Mods.PerformanceScenarios",
+  "rootNamespace": "CoreAI.Mods.Performance",
+  "references": [
+    "CoreAI.Core",
+    "CoreAI.Source",
+    "CoreAI.Mods",
+    "CoreAI.RbxApi.Datatypes",
+    "CoreAI.RbxApi.Instances",
+    "CoreAI.RbxApi.Binding",
+    "CoreAI.RbxApi.Unity"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS || COREAI_PERF_SCENARIOS"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

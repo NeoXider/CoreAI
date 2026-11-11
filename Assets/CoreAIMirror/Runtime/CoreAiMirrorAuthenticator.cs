@@ -28,6 +28,20 @@ namespace CoreAI.Net.Mirror
     /// <see cref="AdmissionTimeoutSeconds"/> is dropped: Mirror has no authentication timeout of its
     /// own, so without this a peer that never speaks holds its connection slot for ever.
     /// </para>
+    /// <para>
+    /// The protocol first. A request names the CoreAI Mirror protocol its client speaks
+    /// (<see cref="CoreAiMirrorProtocol.Version"/>); one of another protocol — or none, from a client
+    /// older than the field — is refused before the host's provider is asked, with a reason that
+    /// names both protocols. A client refuses, the same way, an admission from a server that speaks
+    /// another protocol or names none.
+    /// </para>
+    /// <para>
+    /// A refused client learns why. The refusal is sent, and the connection is dropped on a later
+    /// frame: Mirror discards what a connection has not flushed when it is dropped, and kcp2k drops
+    /// before the call returns, so a drop made with the refusal would have sent nothing. Meanwhile
+    /// the connection reaches nothing — it is not authenticated, and its one attempt is spent. The
+    /// client keeps the reason after the connection closes (<see cref="ClientRefusal"/>).
+    /// </para>
     /// </remarks>
     [AddComponentMenu("CoreAI/CoreAI Mirror Authenticator")]
     public sealed class CoreAiMirrorAuthenticator : NetworkAuthenticator
@@ -57,6 +71,20 @@ namespace CoreAI.Net.Mirror
             public bool IgnoredLogged;
         }
 
+        /// <summary>A refused connection whose drop waits for its refusal to be flushed.</summary>
+        private readonly struct OwedRefusal
+        {
+            public OwedRefusal(NetworkConnectionToClient connection, double refusedAt)
+            {
+                Connection = connection;
+                RefusedAt = refusedAt;
+            }
+
+            public NetworkConnectionToClient Connection { get; }
+
+            public double RefusedAt { get; }
+        }
+
         [Tooltip("Seconds a connection has to send its admission request before it is dropped. "
             + "Mirror has no authentication timeout of its own; without this a peer that never "
             + "speaks keeps its connection slot for ever.")]
@@ -65,6 +93,7 @@ namespace CoreAI.Net.Mirror
 
         private readonly Dictionary<int, ActorAdmissionResult> _admitted = new();
         private readonly Dictionary<int, AdmissionAttempt> _attempts = new();
+        private readonly List<OwedRefusal> _owedRefusals = new();
         private IActorAdmissionProvider _provider;
         private string _worldId = "";
         private Func<byte[]> _clientCredential = Array.Empty<byte>;
@@ -85,6 +114,31 @@ namespace CoreAI.Net.Mirror
 
         /// <summary>Connections dropped because they sent no admission request in time.</summary>
         public int AdmissionTimeouts { get; private set; }
+
+        /// <summary>
+        /// Admission requests refused because their client speaks another CoreAI Mirror protocol, or
+        /// names none; the host's provider never saw them. Counted in <see cref="RejectedCount"/> too.
+        /// </summary>
+        public int ProtocolMismatchRefusals { get; private set; }
+
+        /// <summary>
+        /// Refused connections this server dropped a frame after their refusal was sent; a client
+        /// that disconnected on its refusal first is not counted.
+        /// </summary>
+        public int RefusalDropsPerformed { get; private set; }
+
+        /// <summary>
+        /// On a client, why the last admission failed — refused by the server, or the server
+        /// refused by this client for its protocol; null until one fails, kept after the
+        /// connection closes so the game can show it, and cleared when the next attempt starts.
+        /// </summary>
+        public CoreAiAdmissionRefusal? ClientRefusal { get; private set; }
+
+        /// <summary>
+        /// On a client, raised when an admission fails, before the connection closes; a listener's
+        /// throw is logged and the connection still closes.
+        /// </summary>
+        public event Action<CoreAiAdmissionRefusal> ClientRefused;
 
         /// <summary>
         /// Seconds a connection has, from connecting, to send its admission request. Values that
@@ -160,6 +214,7 @@ namespace CoreAI.Net.Mirror
             NetworkServer.UnregisterHandler<CoreAiAdmissionRequestMessage>();
             _admitted.Clear();
             _attempts.Clear();
+            _owedRefusals.Clear();
         }
 
         /// <inheritdoc />
@@ -179,9 +234,11 @@ namespace CoreAI.Net.Mirror
         /// <inheritdoc />
         public override void OnClientAuthenticate()
         {
+            ClientRefusal = null;
             NetworkClient.Send(new CoreAiAdmissionRequestMessage
             {
-                Credential = _clientCredential() ?? Array.Empty<byte>()
+                Credential = _clientCredential() ?? Array.Empty<byte>(),
+                ProtocolVersion = CoreAiMirrorProtocol.Version
             });
         }
 
@@ -316,11 +373,49 @@ namespace CoreAI.Net.Mirror
             return result;
         }
 
+        /// <summary>
+        /// Drops every refused connection whose refusal was sent on an earlier frame, while Mirror
+        /// still holds that same connection. Runs every frame from <c>Update</c>.
+        /// </summary>
+        /// <remarks>
+        /// WHY "an earlier frame" is read as a later clock reading: Mirror's frame clock is fixed
+        /// within a frame, so a later reading comes after the late update that flushed the refusal.
+        /// WHY the connection object is compared: kcp2k reuses connection ids, and a refused client
+        /// that left on its own may have a stranger on its id by now.
+        /// </remarks>
+        internal void PerformDueRefusalDrops()
+        {
+            PerformRefusalDrops(Now(), all: false);
+        }
+
+        /// <summary>
+        /// Drops every refused connection at once, without waiting for a later frame: for a
+        /// composition that stops updating this component. A refusal sent in this same frame may
+        /// be lost; the connection is closed either way.
+        /// </summary>
+        public void PerformOwedRefusalDropsNow()
+        {
+            PerformRefusalDrops(0d, all: true);
+        }
+
         private void Update()
         {
             if (NetworkServer.active)
             {
+                PerformDueRefusalDrops();
                 EnforceAdmissionDeadline();
+            }
+        }
+
+        /// <remarks>
+        /// WHY here as well as in Update: a disabled component runs no Update, and a refused
+        /// connection must not stay open for as long as it is off.
+        /// </remarks>
+        private void OnDisable()
+        {
+            if (NetworkServer.active)
+            {
+                PerformOwedRefusalDropsNow();
             }
         }
 
@@ -337,6 +432,12 @@ namespace CoreAI.Net.Mirror
                 return;
             }
 
+            if (message.ProtocolVersion != CoreAiMirrorProtocol.Version)
+            {
+                RefuseProtocol(conn, message.ProtocolVersion);
+                return;
+            }
+
             ActorAdmissionResult result =
                 Decide(conn.connectionId, conn.address, message.Credential);
             conn.Send(Respond(result));
@@ -347,7 +448,71 @@ namespace CoreAI.Net.Mirror
                 return;
             }
 
-            ServerReject(conn);
+            OweRefusalDrop(conn);
+        }
+
+        /// <summary>
+        /// Refuses a client of another protocol without asking the host's provider: counted, logged
+        /// for the host, answered with both protocols, and dropped on a later frame.
+        /// </summary>
+        /// <remarks>
+        /// WHY before the provider: a client that cannot read what follows an admission must not be
+        /// admitted whatever its credential, and the provider — the host's own authentication,
+        /// perhaps a web call — has no reason to run for it.
+        /// </remarks>
+        private void RefuseProtocol(NetworkConnectionToClient conn, int clientVersion)
+        {
+            ProtocolMismatchRefusals++;
+            RejectedCount++;
+            _log?.Invoke("[CoreAI.Mirror] admission refused for connection " + conn.connectionId + ": "
+                         + CoreAiMirrorProtocol.MismatchReason(CoreAiMirrorProtocol.Version, clientVersion,
+                             localIsServer: true));
+            conn.Send(RespondProtocolMismatch(clientVersion));
+            OweRefusalDrop(conn);
+        }
+
+        private void OweRefusalDrop(NetworkConnectionToClient conn)
+        {
+            for (int index = 0; index < _owedRefusals.Count; index++)
+            {
+                if (ReferenceEquals(_owedRefusals[index].Connection, conn))
+                {
+                    return;
+                }
+            }
+
+            _owedRefusals.Add(new OwedRefusal(conn, Now()));
+        }
+
+        private void PerformRefusalDrops(double now, bool all)
+        {
+            if (_owedRefusals.Count == 0)
+            {
+                return;
+            }
+
+            List<NetworkConnectionToClient> due = null;
+            for (int index = _owedRefusals.Count - 1; index >= 0; index--)
+            {
+                OwedRefusal owed = _owedRefusals[index];
+                if (all || now > owed.RefusedAt)
+                {
+                    due ??= new List<NetworkConnectionToClient>();
+                    due.Add(owed.Connection);
+                    _owedRefusals.RemoveAt(index);
+                }
+            }
+
+            for (int index = due == null ? -1 : due.Count - 1; index >= 0; index--)
+            {
+                NetworkConnectionToClient conn = due[index];
+                if (NetworkServer.connections.TryGetValue(conn.connectionId, out NetworkConnectionToClient live)
+                    && ReferenceEquals(live, conn))
+                {
+                    RefusalDropsPerformed++;
+                    ServerReject(conn);
+                }
+            }
         }
 
         /// <summary>
@@ -414,7 +579,23 @@ namespace CoreAI.Net.Mirror
             {
                 Admitted = admitted,
                 Reason = admitted ? "" : ClientFacingRejection,
-                ActorId = admitted ? result.Context.ActorId : ""
+                ActorId = admitted ? result.Context.ActorId : "",
+                ProtocolVersion = CoreAiMirrorProtocol.Version,
+                Refusal = (byte)(admitted ? CoreAiAdmissionRefusalKind.None : CoreAiAdmissionRefusalKind.NotAdmitted)
+            };
+        }
+
+        /// <summary>What a client of another protocol is told: both protocols, and nothing about anyone.</summary>
+        internal static CoreAiAdmissionResponseMessage RespondProtocolMismatch(int clientVersion)
+        {
+            return new CoreAiAdmissionResponseMessage
+            {
+                Admitted = false,
+                Reason = CoreAiMirrorProtocol.MismatchReason(CoreAiMirrorProtocol.Version, clientVersion,
+                    localIsServer: true),
+                ActorId = "",
+                ProtocolVersion = CoreAiMirrorProtocol.Version,
+                Refusal = (byte)CoreAiAdmissionRefusalKind.ProtocolMismatch
             };
         }
 
@@ -435,19 +616,59 @@ namespace CoreAI.Net.Mirror
             return ClockSeconds?.Invoke() ?? NetworkTime.localTime;
         }
 
+        /// <remarks>
+        /// WHY a client refuses an admission itself: a server of another protocol — or one too old to
+        /// name its protocol — admitted a client whose messages it cannot read, and the two would
+        /// half-work until the first message one of them does not know; closing here says why.
+        /// </remarks>
         private void OnAdmissionResponse(CoreAiAdmissionResponseMessage message)
         {
-            if (message.Admitted)
+            if (!message.Admitted)
             {
-                // WHY stored before ClientAccept: the composition binds the bridge from the
-                // OnClientAuthenticated listener that ClientAccept fires, and reads the id here.
-                ClientActorId = message.ActorId;
-                ClientAccept();
+                ClientActorId = null;
+                bool mismatch = message.Refusal == (byte)CoreAiAdmissionRefusalKind.ProtocolMismatch;
+                RecordClientRefusal(new CoreAiAdmissionRefusal(
+                    mismatch ? CoreAiAdmissionRefusalKind.ProtocolMismatch : CoreAiAdmissionRefusalKind.NotAdmitted,
+                    string.IsNullOrWhiteSpace(message.Reason) ? ClientFacingRejection : message.Reason,
+                    message.ProtocolVersion, refusedByServer: true));
+                ClientReject();
                 return;
             }
 
-            ClientActorId = null;
-            ClientReject();
+            if (message.ProtocolVersion != CoreAiMirrorProtocol.Version)
+            {
+                ClientActorId = null;
+                RecordClientRefusal(new CoreAiAdmissionRefusal(CoreAiAdmissionRefusalKind.ProtocolMismatch,
+                    CoreAiMirrorProtocol.MismatchReason(CoreAiMirrorProtocol.Version, message.ProtocolVersion,
+                        localIsServer: false),
+                    message.ProtocolVersion, refusedByServer: false));
+                ClientReject();
+                return;
+            }
+
+            // WHY stored before ClientAccept: the composition binds the bridge from the
+            // OnClientAuthenticated listener that ClientAccept fires, and reads the id here.
+            ClientActorId = message.ActorId;
+            ClientAccept();
+        }
+
+        /// <summary>Keeps, says and raises a failed admission on a client, before the connection closes.</summary>
+        private void RecordClientRefusal(CoreAiAdmissionRefusal refusal)
+        {
+            ClientRefusal = refusal;
+            Debug.LogWarning("[CoreAI.Mirror] admission failed (" + refusal.Kind + ", "
+                             + (refusal.RefusedByServer ? "refused by the server" : "this client refused the server")
+                             + "): " + refusal.Reason);
+            try
+            {
+                ClientRefused?.Invoke(refusal);
+            }
+            catch (Exception exception)
+            {
+                // WHY contained: this runs inside Mirror's handler, and the connection must close
+                // whatever a listener does.
+                Debug.LogWarning("[CoreAI.Mirror] a ClientRefused listener threw: " + exception.Message);
+            }
         }
     }
 }

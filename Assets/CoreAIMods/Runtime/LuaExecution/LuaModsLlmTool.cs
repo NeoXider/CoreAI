@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using CoreAI.Mods.WorldPackages;
 using CoreAI.Authority;
 using CoreAI.Logging;
+using CoreAI.Mods.Folders;
 using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
 
@@ -52,7 +53,17 @@ namespace CoreAI.Ai
         /// <summary>Stable autosave trigger for reverting a mod.</summary>
         public const string RevertBackupTrigger = "manage_mods-revert";
 
+        /// <summary>Stable autosave trigger for moving a mod to another folder.</summary>
+        public const string MoveBackupTrigger = "manage_mods-move";
+
+        /// <summary>Stable autosave trigger for creating, renaming, moving or deleting a mod folder.</summary>
+        public const string FolderBackupTrigger = "manage_mods-folder";
+
         private static readonly ConditionalWeakTable<ILuaModRuntime, object> AuthorizationGates = new();
+
+        // WHY keyed by runtime like the authorization gate: every tool instance built over one runtime (one per
+        // role) must see the same persisted folders when the host passes no folder list of its own.
+        private static readonly ConditionalWeakTable<ILuaModRuntime, IModFolderListStore> DefaultFolderLists = new();
 
         private readonly ILuaModRuntime _runtime;
         private readonly ICoreAISettings _settings;
@@ -63,6 +74,8 @@ namespace CoreAI.Ai
         private readonly object _authorizationGate;
         private readonly string _roleId;
         private readonly IConfirmedWorldMutationGate _worldMutationGate;
+        private readonly LuaGenerationRateLimiter _rateLimiter;
+        private readonly IModFolderListStore _folderList;
 
         /// <summary>Creates an actor-aware mod tool that resolves identity at every call boundary.</summary>
         /// <param name="runtime">Mod runtime to manage.</param>
@@ -101,6 +114,64 @@ namespace CoreAI.Ai
             IActorIdentityProvider actorIdentityProvider,
             string roleId,
             IConfirmedWorldMutationGate worldMutationGate)
+            : this(
+                runtime,
+                settings,
+                logger,
+                grantedCapabilities,
+                allowModManagement,
+                actorIdentityProvider,
+                roleId,
+                worldMutationGate,
+                null)
+        {
+        }
+
+        /// <summary>
+        /// Creates the tool with a rate limit on its mutating actions. Pass the limiter
+        /// <c>execute_lua</c> uses so both tools spend one budget of AI world changes; null leaves
+        /// <c>manage_mods</c> unlimited.
+        /// </summary>
+        public LuaModsLlmTool(
+            ILuaModRuntime runtime,
+            ICoreAISettings settings,
+            ILog logger,
+            LuaCapabilities grantedCapabilities,
+            bool allowModManagement,
+            IActorIdentityProvider actorIdentityProvider,
+            string roleId,
+            IConfirmedWorldMutationGate worldMutationGate,
+            LuaGenerationRateLimiter rateLimiter)
+            : this(
+                runtime,
+                settings,
+                logger,
+                grantedCapabilities,
+                allowModManagement,
+                actorIdentityProvider,
+                roleId,
+                worldMutationGate,
+                rateLimiter,
+                null)
+        {
+        }
+
+        /// <summary>
+        /// Creates the tool with a rate limit and the store of persisted mod folders. Pass the folder list the
+        /// Hub Mods page uses, so a folder the AI creates shows there too; null keeps one in-memory list per
+        /// runtime.
+        /// </summary>
+        public LuaModsLlmTool(
+            ILuaModRuntime runtime,
+            ICoreAISettings settings,
+            ILog logger,
+            LuaCapabilities grantedCapabilities,
+            bool allowModManagement,
+            IActorIdentityProvider actorIdentityProvider,
+            string roleId,
+            IConfirmedWorldMutationGate worldMutationGate,
+            LuaGenerationRateLimiter rateLimiter,
+            IModFolderListStore folderList)
         {
             _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
@@ -112,7 +183,12 @@ namespace CoreAI.Ai
             _authorizationGate = AuthorizationGates.GetValue(_runtime, CreateAuthorizationGate);
             _roleId = string.IsNullOrWhiteSpace(roleId) ? BuiltInAgentRoleIds.Programmer : roleId.Trim();
             _worldMutationGate = worldMutationGate;
+            _rateLimiter = rateLimiter;
+            _folderList = folderList ?? DefaultFolderLists.GetValue(_runtime, _ => new InMemoryModFolderListStore());
         }
+
+        /// <summary>The limiter the mutating actions spend; null when they are not limited.</summary>
+        public LuaGenerationRateLimiter RateLimiter => _rateLimiter;
 
         /// <inheritdoc />
         public override string Name => "manage_mods";
@@ -138,6 +214,12 @@ namespace CoreAI.Ai
             "versions (list a mod's saved revisions; revision 0 is the original, newest last), " +
             "revert (roll a mod back to an earlier revision, passed in the 'revision' param), " +
             "diagnostics (read recent runtime errors thrown by mod hooks/timers so you can repair the mod). " +
+            "Mods live in folders: a mod's folder is the 'category:' path in its @coreai header (category: Games/Arcade); " +
+            "no category = top level. load with 'folder' puts the new mod in that folder; move (mod_id + folder) moves a " +
+            "loaded mod without restarting it; create_folder, delete_folder (empty folders only), rename_folder (folder + " +
+            "target = new name) and move_folder (folder + target = new parent) manage folders; list shows each mod's " +
+            "folder and the folders, and with 'folder' only that branch. A refused folder call returns a code such as " +
+            "FOLDER_NOT_EMPTY or INVALID_CHARACTER. " +
             "load/reload auto-persist mods so they survive an app restart; export/import move mods between players. " +
             "Each load/reload records a new revision; use versions then revert to undo a bad edit. " +
             "A hook or timer that starts throwing at runtime is reported via diagnostics (not as an error on the " +
@@ -156,8 +238,7 @@ namespace CoreAI.Ai
 
         /// <inheritdoc />
         public override string ParametersSchema => JsonParams(
-            ("action", "string", true,
-                "One of: list, get_source, load, reload, unload, export, import, forget, versions, revert, diagnostics"),
+            ("action", "string", true, ActionDescription),
             ("mod_id", "string", false,
                 "Mod id (required for get_source, load, reload, unload, export, forget, versions, revert; optional filter for diagnostics)"),
             ("code", "string", false,
@@ -167,8 +248,23 @@ namespace CoreAI.Ai
             ("revision", "integer", false,
                 "Revision index to roll back to for the revert action (as listed by versions; 0 is the original)."),
             ("keep_objects", "boolean", false,
-                KeepObjectsDescription)
+                KeepObjectsDescription),
+            ("folder", "string", false, FolderDescription),
+            ("target", "string", false, TargetDescription)
         );
+
+        private const string ActionDescription =
+            "One of: list, get_source, load, reload, unload, export, import, forget, versions, revert, diagnostics, " +
+            "move, create_folder, rename_folder, move_folder, delete_folder";
+
+        private const string FolderDescription =
+            "Mod folder path like Games/Arcade (letters, digits, spaces and _ - . ( ) & + ! ' , #; up to 8 levels of " +
+            "64 characters). Empty = top level. load: the folder the new mod goes in (written into its header as " +
+            "category). move: the destination. list: only this branch. create_folder, delete_folder, rename_folder, " +
+            "move_folder: the folder acted on.";
+
+        private const string TargetDescription =
+            "rename_folder: the new name (one folder name, no '/'). move_folder: the new parent folder (empty = top level).";
 
         private const string KeepObjectsDescription =
             "reload only. false (default): the objects the previous run's main chunk built are removed before " +
@@ -177,7 +273,8 @@ namespace CoreAI.Ai
         /// <summary>Creates the MEAI function surface for <c>manage_mods</c>.</summary>
         public AIFunction CreateAIFunction()
         {
-            Func<string, string, string, string, int, CancellationToken, bool, Task<string>> func = ExecuteAsync;
+            Func<string, string, string, string, int, CancellationToken, bool, string, string, Task<string>> func =
+                ExecuteAsync;
             AIFunctionFactoryOptions options = new()
             {
                 Name = Name,
@@ -191,8 +288,7 @@ namespace CoreAI.Ai
         // the result must be published with the host SynchronizationContext cleared, or the model turn
         // never resumes after an asynchronously completed body (see MeaiToolTaskBridge).
         public Task<string> ExecuteAsync(
-            [Description(
-                "One of: list, get_source, load, reload, unload, export, import, forget, versions, revert, diagnostics")]
+            [Description(ActionDescription)]
             string action,
             [Description(
                 "Mod id (required for get_source, load, reload, unload, export, forget, versions, revert; optional filter for diagnostics)")]
@@ -207,12 +303,17 @@ namespace CoreAI.Ai
             int revision = -1,
             CancellationToken cancellationToken = default,
             [Description(KeepObjectsDescription)]
-            bool keep_objects = false) =>
+            bool keep_objects = false,
+            [Description(FolderDescription)]
+            string folder = null,
+            [Description(TargetDescription)]
+            string target = null) =>
             MeaiToolTaskBridge.Publish(
-                ExecuteBodyAsync(action, mod_id, code, bundle, revision, keep_objects, cancellationToken));
+                ExecuteBodyAsync(action, mod_id, code, bundle, revision, keep_objects, folder, target,
+                    cancellationToken));
 
         private async Task<string> ExecuteBodyAsync(string action, string mod_id, string code, string bundle,
-            int revision, bool keepObjects, CancellationToken cancellationToken)
+            int revision, bool keepObjects, string folder, string target, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             string normalized = (action ?? "").Trim().ToLowerInvariant();
@@ -231,10 +332,18 @@ namespace CoreAI.Ai
                     throw new InvalidOperationException("Actor identity provider returned an untrusted context.");
                 }
 
-                if (TryGetConfirmedBackupTrigger(normalized, out string trigger))
+                if (_allowModManagement
+                    && _rateLimiter != null
+                    && IsMutatingAction(normalized)
+                    && !_rateLimiter.TryAcquire(out LuaRateLimitBudget budget))
                 {
-                    result = await _worldMutationGate.ExecuteAsync(
+                    result = FailRateLimited(normalized, budget);
+                }
+                else if (TryGetConfirmedBackupTrigger(normalized, out string trigger))
+                {
+                    result = await _worldMutationGate.ExecuteAttributedAsync(
                         trigger,
+                        actor.ActorId,
                         token =>
                         {
                             token.ThrowIfCancellationRequested();
@@ -247,6 +356,8 @@ namespace CoreAI.Ai
                                 bundle,
                                 revision,
                                 keepObjects,
+                                folder,
+                                target,
                                 cancellationToken));
                         },
                         cancellationToken);
@@ -261,6 +372,8 @@ namespace CoreAI.Ai
                         bundle,
                         revision,
                         keepObjects,
+                        folder,
+                        target,
                         cancellationToken);
                 }
             }
@@ -282,6 +395,34 @@ namespace CoreAI.Ai
             return result;
         }
 
+        private static bool IsMutatingAction(string normalizedAction)
+        {
+            return normalizedAction == "load"
+                   || normalizedAction == "reload"
+                   || normalizedAction == "unload"
+                   || normalizedAction == "import"
+                   || normalizedAction == "forget"
+                   || normalizedAction == "revert"
+                   || normalizedAction == "move"
+                   || normalizedAction == "create_folder"
+                   || normalizedAction == "rename_folder"
+                   || normalizedAction == "move_folder"
+                   || normalizedAction == "delete_folder";
+        }
+
+        /// <summary>The refusal of a mutating action past the rate limit; it names when the next one is accepted.</summary>
+        private static string FailRateLimited(string normalizedAction, LuaRateLimitBudget budget)
+        {
+            return JsonConvert.SerializeObject(new
+            {
+                success = false,
+                status = "rate_limited",
+                message = "manage_mods '" + normalizedAction + "' was NOT executed: " + budget.Describe()
+                          + " Wait, then retry.",
+                retry_after_seconds = Math.Round(budget.SecondsUntilNextSlot, 1)
+            });
+        }
+
         private bool TryGetConfirmedBackupTrigger(
             string normalizedAction,
             out string trigger)
@@ -294,6 +435,11 @@ namespace CoreAI.Ai
                 "import" => ImportBackupTrigger,
                 "forget" => ForgetBackupTrigger,
                 "revert" => RevertBackupTrigger,
+                "move" => MoveBackupTrigger,
+                "create_folder" => FolderBackupTrigger,
+                "rename_folder" => FolderBackupTrigger,
+                "move_folder" => FolderBackupTrigger,
+                "delete_folder" => FolderBackupTrigger,
                 _ => null
             };
             return _worldMutationGate != null
@@ -309,6 +455,8 @@ namespace CoreAI.Ai
             string bundle,
             int revision,
             bool keepObjects,
+            string folder,
+            string target,
             CancellationToken cancellationToken)
         {
             lock (_authorizationGate)
@@ -316,9 +464,9 @@ namespace CoreAI.Ai
                 cancellationToken.ThrowIfCancellationRequested();
                 return normalized switch
                 {
-                    "list" => ListMods(actor),
+                    "list" => ListMods(actor, folder),
                     "get_source" => GetSource(actor, modId),
-                    "load" => Mutate(() => Load(modId, code, actor)),
+                    "load" => Mutate(() => Load(modId, code, actor, folder)),
                     "reload" => Mutate(() => Reload(actor, modId, code, keepObjects)),
                     "unload" => Mutate(() => Unload(actor, modId)),
                     "export" => Export(actor, modId),
@@ -327,8 +475,17 @@ namespace CoreAI.Ai
                     "versions" => Versions(actor, modId),
                     "revert" => Mutate(() => Revert(actor, modId, revision)),
                     "diagnostics" => Diagnostics(modId, actor),
+                    "move" => Mutate(() => MoveMod(actor, modId, folder)),
+                    "create_folder" => Mutate(() => FolderOperation(actor, "create_folder", folder, null,
+                        service => service.CreateFolder(folder))),
+                    "rename_folder" => Mutate(() => FolderOperation(actor, "rename_folder", folder, target,
+                        service => service.RenameFolder(folder, target))),
+                    "move_folder" => Mutate(() => FolderOperation(actor, "move_folder", folder, "",
+                        service => service.MoveFolder(folder, target ?? ""))),
+                    "delete_folder" => Mutate(() => FolderOperation(actor, "delete_folder", folder, null,
+                        service => service.DeleteFolder(folder))),
                     _ => Fail(
-                        $"Unknown action '{normalized}'. Valid: list, get_source, load, reload, unload, export, import, forget, versions, revert, diagnostics.")
+                        $"Unknown action '{normalized}'. Valid: list, get_source, load, reload, unload, export, import, forget, versions, revert, diagnostics, move, create_folder, rename_folder, move_folder, delete_folder.")
                 };
             }
         }
@@ -349,13 +506,26 @@ namespace CoreAI.Ai
             return action();
         }
 
-        private string ListMods(ActorContext actor)
+        private string ListMods(ActorContext actor, string folder)
         {
             IReadOnlyList<LuaModInfo> mods = _runtime.ListMods(actor);
+            ModFolderPath branch = ModFolderPath.FromStored(folder);
+            ModFolderTree tree = ModFolderTree.Build(ToFolderEntries(mods), SafeLoadFolders(), new ModFolderFoldState());
+            if (!branch.IsRoot && !tree.TryFindFolder(branch.Value, out _))
+            {
+                return Fail(ModFolderErrors.Code(ModFolderErrorCode.FolderNotFound) + ": list: no folder '" +
+                            branch.Value + "' exists.");
+            }
+
             List<object> items = new(mods.Count);
             int quarantined = 0;
             foreach (LuaModInfo mod in mods)
             {
+                if (!ModFolderPath.FromStored(mod.Category).IsSameOrDescendantOf(branch))
+                {
+                    continue;
+                }
+
                 if (mod.Quarantined)
                 {
                     quarantined++;
@@ -370,15 +540,101 @@ namespace CoreAI.Ai
                     errors = mod.ErrorCount,
                     quarantined = mod.Quarantined,
                     log_reports = mod.LogReports,
-                    loaded_at_utc = mod.LoadedAtUtc.ToString("O")
+                    loaded_at_utc = mod.LoadedAtUtc.ToString("O"),
+                    folder = ModFolderPath.FromStored(mod.Category).Value
                 });
             }
 
+            List<object> folders = new();
+            for (int i = 1; i < tree.FolderCount; i++)
+            {
+                ModFolderNode node = tree.GetFolder(i);
+                if (node.Path.IsSameOrDescendantOf(branch))
+                {
+                    folders.Add(new { path = node.Path.Value, mods = node.ModCount });
+                }
+            }
+
+            string scope = branch.IsRoot ? "" : $" in '{branch.Value}'";
             string message = quarantined == 0
-                ? $"{items.Count} mod(s) loaded."
-                : $"{items.Count} mod(s) loaded; {quarantined} quarantined (still loaded, dispatch suspended " +
+                ? $"{items.Count} mod(s) loaded{scope}."
+                : $"{items.Count} mod(s) loaded{scope}; {quarantined} quarantined (still loaded, dispatch suspended " +
                   "after repeated errors - check diagnostics, fix the code, and reload to resume).";
-            return Ok(message, items);
+            return JsonConvert.SerializeObject(new { success = true, message, data = items, folders });
+        }
+
+        private static List<ModFolderModEntry> ToFolderEntries(IReadOnlyList<LuaModInfo> mods)
+        {
+            List<ModFolderModEntry> entries = new(mods.Count);
+            foreach (LuaModInfo mod in mods)
+            {
+                entries.Add(new ModFolderModEntry(mod.Id, mod.Id, mod.Category, "", true));
+            }
+
+            return entries;
+        }
+
+        private IReadOnlyList<string> SafeLoadFolders()
+        {
+            try
+            {
+                return _folderList.Load();
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"[manage_mods] The mod folder list could not be read: {ex.Message}");
+                return Array.Empty<string>();
+            }
+        }
+
+        private ModFolderService FolderService(ActorContext actor)
+        {
+            return new ModFolderService(new ToolModFolderStore(_runtime, actor, _folderList));
+        }
+
+        private string MoveMod(ActorContext actor, string modId, string folder)
+        {
+            if (string.IsNullOrWhiteSpace(modId) || folder == null)
+            {
+                return Fail("move: mod_id and folder are required (folder may be empty for the top level).");
+            }
+
+            return FolderResult("move", FolderService(actor).MoveMod(modId, folder));
+        }
+
+        private string FolderOperation(ActorContext actor, string action, string folder, string target,
+            Func<ModFolderService, ModFolderResult> operation)
+        {
+            if (string.IsNullOrWhiteSpace(folder) || target == null && action == "rename_folder")
+            {
+                return Fail(action == "rename_folder"
+                    ? "rename_folder: folder and target (the new name) are required."
+                    : action + ": folder is required.");
+            }
+
+            return FolderResult(action, operation(FolderService(actor)));
+        }
+
+        private static string FolderResult(string action, ModFolderResult result)
+        {
+            if (!result.Succeeded)
+            {
+                return Fail(result.Code + ": " + action + ": " + result.Message);
+            }
+
+            return JsonConvert.SerializeObject(new
+            {
+                success = true,
+                message = result.Warning.Length == 0 ? result.Message : result.Message + " " + result.Warning,
+                data = new
+                {
+                    path = result.Path.Value,
+                    previous_path = result.PreviousPath.Value,
+                    mods_changed = result.ModsChanged,
+                    changed = result.Changed,
+                    created_folder = result.CreatedFolder
+                }
+            });
         }
 
         private string GetSource(ActorContext actor, string modId)
@@ -408,15 +664,67 @@ namespace CoreAI.Ai
             return Ok($"Source of mod '{modId.Trim()}'.", source);
         }
 
-        private string Load(string modId, string code, ActorContext actor)
+        private string Load(string modId, string code, ActorContext actor, string folder)
         {
             if (string.IsNullOrWhiteSpace(modId) || string.IsNullOrWhiteSpace(code))
             {
                 return Fail("load: mod_id and code are required.");
             }
 
-            _runtime.LoadMod(actor, modId, code, _grantedCapabilities);
-            return Ok($"Mod '{modId.Trim()}' loaded (capabilities={_grantedCapabilities}).");
+            // WHY blank reads as no folder here (move takes empty as the top level): a caller that forwards an
+            // absent argument as an empty string must not clear the category the mod's own header declares.
+            string requested = string.IsNullOrWhiteSpace(folder) ? null : folder;
+            if (requested == null && ModFolderHeaderEditor.ReadCategory(code).Length == 0)
+            {
+                requested = DefaultFolder();
+            }
+
+            string source = code;
+            string placed = "";
+            if (requested != null)
+            {
+                ModFolderResult resolved = FolderService(actor).ResolveFolder(requested);
+                if (!resolved.Succeeded)
+                {
+                    return Fail(resolved.Code + ": load: " + resolved.Message);
+                }
+
+                ModFolderHeaderEdit edit = ModFolderHeaderEditor.SetCategory(code, resolved.Path.Value);
+                if (!edit.Succeeded)
+                {
+                    return Fail(ModFolderErrors.Code(edit.Error) + ": load: " + edit.Message);
+                }
+
+                source = edit.Source;
+                placed = resolved.Path.IsRoot ? "" : $" in folder '{resolved.Path.Value}'";
+            }
+
+            _runtime.LoadMod(actor, modId, source, _grantedCapabilities);
+            return Ok($"Mod '{modId.Trim()}' loaded (capabilities={_grantedCapabilities}){placed}.");
+        }
+
+        /// <summary>
+        /// The configured folder for new AI mods (<see cref="ICoreAISettings.AiModsDefaultFolder"/>), or null
+        /// for the top level, which leaves the source untouched. A value the folder rules refuse is logged and
+        /// treated as the top level.
+        /// </summary>
+        private string DefaultFolder()
+        {
+            string configured = _settings.AiModsDefaultFolder;
+            if (string.IsNullOrWhiteSpace(configured))
+            {
+                return null;
+            }
+
+            ModFolderPathParse parse = ModFolderPath.Parse(configured);
+            if (!parse.Succeeded)
+            {
+                _logger.Warn($"[manage_mods] AiModsDefaultFolder '{configured}' is not a valid folder path " +
+                             $"({ModFolderErrors.Code(parse.Error)}); new mods stay at the top level.");
+                return null;
+            }
+
+            return parse.Path.Value;
         }
 
         private string Reload(ActorContext actor, string modId, string code, bool keepObjects)
@@ -587,6 +895,75 @@ namespace CoreAI.Ai
                   "A mod past its error threshold is quarantined (still loaded, dispatch suspended) - " +
                   "reload clears the quarantine.";
             return Ok(message, items);
+        }
+
+        /// <summary>
+        /// The folder operations' view of the runtime for one caller: the loaded mods it lists, moves through
+        /// <see cref="ILuaModSourceRetitler"/> (the mod keeps running), off through unload. It cannot switch a
+        /// dormant mod on, because the tool does not list dormant mods.
+        /// </summary>
+        private sealed class ToolModFolderStore : IModFolderStore
+        {
+            private readonly ILuaModRuntime _runtime;
+            private readonly ActorContext _actor;
+            private readonly IModFolderListStore _folders;
+
+            public ToolModFolderStore(ILuaModRuntime runtime, ActorContext actor, IModFolderListStore folders)
+            {
+                _runtime = runtime;
+                _actor = actor;
+                _folders = folders;
+            }
+
+            public IReadOnlyList<ModFolderModEntry> ListMods()
+            {
+                return ToFolderEntries(_runtime.ListMods(_actor));
+            }
+
+            public IReadOnlyList<string> LoadFolders()
+            {
+                return _folders.Load();
+            }
+
+            public void SaveFolders(IReadOnlyList<string> folders)
+            {
+                _folders.Save(folders);
+            }
+
+            public void SetModFolder(string modId, string folderPath)
+            {
+                if (!_runtime.TryGetModSource(_actor, modId, out string source))
+                {
+                    throw new InvalidOperationException($"mod '{modId}' is not loaded.");
+                }
+
+                ModFolderHeaderEdit edit = ModFolderHeaderEditor.SetCategory(source, folderPath);
+                if (!edit.Succeeded)
+                {
+                    throw new ArgumentException(ModFolderErrors.Code(edit.Error) + ": " + edit.Message);
+                }
+
+                if (string.Equals(edit.Source, source, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                if (!(_runtime is ILuaModSourceRetitler retitler) ||
+                    !retitler.TryRetitleModSource(_actor, modId, edit.Source))
+                {
+                    throw new InvalidOperationException($"this mod runtime cannot move the running mod '{modId}'.");
+                }
+            }
+
+            public void SetModEnabled(string modId, bool enabled)
+            {
+                if (enabled)
+                {
+                    throw new NotSupportedException("manage_mods cannot switch a stored mod on; load it instead.");
+                }
+
+                _runtime.UnloadMod(_actor, modId);
+            }
         }
 
         private static string Ok(string message, object data = null)

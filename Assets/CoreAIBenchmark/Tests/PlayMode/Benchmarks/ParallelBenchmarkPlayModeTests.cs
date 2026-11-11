@@ -943,6 +943,36 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         }
 
         [UnityTest, Timeout(15000)]
+        public IEnumerator CameraTool_HasNoFreeCameraUnlessAsked_AndEveryServiceIsDisposedWithItsScenario()
+        {
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null)
+            {
+                Assert.Ignore("The camera tool exists only in the visual world, which needs a graphics device.");
+            }
+
+            CoreAISettingsAsset settings = GameCreationBenchmarkPlayModeTests.CreateBenchmarkSettings();
+            _ownedAssets.Add(settings);
+            CameraProbeScenario probe = new();
+            ScenarioResult result = null;
+
+            yield return RunScenario(probe, new ProbeLlmClient("bench-camera-", 10), settings, new BpeTokenCounter(),
+                "camera-probe", probe.TimeoutSeconds, r => result = r);
+            yield return null;
+
+            Assert.IsNotNull(result);
+            Assert.IsTrue(string.IsNullOrEmpty(result.Failure), result.Failure);
+            Assert.AreEqual(2, probe.ServicesDuringScenario, "the scenario created one default and one opted-in service");
+            Assert.AreEqual(CameraMoveDenialReason.FreeCameraDisabled, probe.DefaultFreeCameraDenial,
+                "a benchmark camera tool gives the model no free camera unless the scenario asks for one");
+            Assert.IsTrue(probe.OptedInFreeCameraCreated, "an opted-in service creates its free camera");
+            Assert.IsTrue(probe.FreeCamera == null, "the free camera outlived its scenario: the service was not disposed");
+            CollectionAssert.IsEmpty(probe.Environment.CameraServices);
+            Assert.IsFalse(UnityEngine.Object.FindObjectsByType<CoreAiAgentCamera>(FindObjectsSortMode.None)
+                    .Any(marker => marker.name.StartsWith(AgentCameraOptions.DefaultFreeCameraName, StringComparison.Ordinal)),
+                "no free agent camera is left in the scene for the next scenario");
+        }
+
+        [UnityTest, Timeout(15000)]
         public IEnumerator StoppingOneTarget_EndsOnlyThatRun()
         {
             ProbeLog log = new();
@@ -1835,6 +1865,66 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             {
                 GradeCalls++;
                 _log?.End(this, env);
+                ScenarioGrading grading = new();
+                grading.Add("answered", "the model answered", 10, run.Turns >= 1);
+                return grading;
+            }
+        }
+
+        /// <summary>
+        /// A visual scenario that takes the default camera tool and an opted-in one, and while it runs records whether
+        /// each service grants a free agent camera. The test then checks that the scenario teardown disposed both.
+        /// </summary>
+        private sealed class CameraProbeScenario : GameBenchmarkScenario
+        {
+            public BenchmarkEnvironment Environment { get; private set; }
+            public int ServicesDuringScenario { get; private set; }
+            public CameraMoveDenialReason? DefaultFreeCameraDenial { get; private set; }
+            public bool OptedInFreeCameraCreated { get; private set; }
+            public Camera FreeCamera { get; private set; }
+            public override string Id => "probe-camera";
+            public override string Name => "Probe camera";
+            public override string Group => "G2";
+            public override string Goal => "Reply with the single word done.";
+            public override float TimeoutSeconds => 20f;
+            public override int? RepsOverride => 1;
+            public override bool CaptureScene => true;
+            public override bool UsesSharedScene => true;
+
+            public override void Prepare(BenchmarkEnvironment env)
+            {
+                Environment = env;
+            }
+
+            public override AgentConfig BuildAgent(BenchmarkEnvironment env)
+            {
+                AgentBuilder builder = new AgentBuilder(RoleId).WithSystemPrompt(SystemPrompt).WithTool(env.LuaTool());
+                CameraLlmTool camera = env.CameraTool(RoleId);
+                if (camera != null)
+                {
+                    builder.WithTool(camera);
+                }
+
+                env.CameraTool(RoleId, true);
+                return builder.BuildDetached();
+            }
+
+            public override ScenarioGrading Grade(BenchmarkEnvironment env, RunObservation run)
+            {
+                IReadOnlyList<AgentCameraService> services = env.CameraServices;
+                ServicesDuringScenario = services.Count;
+                if (services.Count == 2)
+                {
+                    if (!services[0].TryResolveMovableCamera(AgentCameraService.FreeCameraAlias, RoleId, out Camera _,
+                            out CameraMoveDenial denial))
+                    {
+                        DefaultFreeCameraDenial = denial.Reason;
+                    }
+
+                    OptedInFreeCameraCreated = services[1].TryGetFreeCamera(RoleId, true, out Camera free);
+                    FreeCamera = free;
+                }
+
                 ScenarioGrading grading = new();
                 grading.Add("answered", "the model answered", 10, run.Turns >= 1);
                 return grading;

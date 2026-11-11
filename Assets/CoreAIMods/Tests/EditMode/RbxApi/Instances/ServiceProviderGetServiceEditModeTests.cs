@@ -79,12 +79,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         public void GetService_PlannedService_ReturnsCachedStubWithoutThrowing()
         {
             // WHY: TweenService landed as a live tree-backed service (MVP8 slice 8.4), so
-            // DataStoreService (MVP9) stands in as the planned-service probe now.
+            // DataStoreService (MVP16) stands in as the planned-service probe now.
             RbxInstance service = null;
             Assert.DoesNotThrow(() => service = _game.GetService("DataStoreService"));
             RbxStubService stub = service as RbxStubService;
             Assert.IsNotNull(stub);
-            Assert.AreEqual("MVP9", stub.PlannedMvp);
+            Assert.AreEqual("MVP16", stub.PlannedMvp);
             Assert.AreSame(stub, _game.GetService("DataStoreService"));
         }
 
@@ -107,11 +107,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         }
 
         [Test]
-        public void BindToClose_IsALoudStubUntilMvp5()
+        public void BindToClose_IsALoudStubUntilMvp16()
         {
             RbxError error = Assert.Throws<RbxError>(() => _game.BindToClose(null));
             Assert.AreEqual(RbxErrorCode.NotImplemented, error.Code);
-            StringAssert.Contains("MVP5", error.RawMessage);
+            StringAssert.Contains("MVP16", error.RawMessage);
         }
 
         /// <summary>
@@ -142,7 +142,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         /// stub, so the top-of-file lookup succeeds and the first member access names the verdict.
         /// "X is not a valid Service name" was a false statement for every one of them.
         /// </summary>
-        [TestCase("StarterGui")]
+        [TestCase("GuiService")]
         [TestCase("StarterPack")]
         [TestCase("ReplicatedFirst")]
         [TestCase("Teams")]
@@ -176,7 +176,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         {
             RbxStubService planned = (RbxStubService)_game.GetService("DataStoreService");
             Assert.AreEqual(RbxKnownUnimplementedMemberStatus.Planned, planned.Status);
-            Assert.AreEqual("DataStoreService:GetDataStore is planned for MVP9.",
+            Assert.AreEqual("DataStoreService:GetDataStore is planned for MVP16.",
                 planned.MemberAccessError("GetDataStore").RawMessage);
 
             RbxStubService unsupported = (RbxStubService)_game.GetService("PathfindingService");
@@ -233,17 +233,17 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         public void KnownServiceStub_IsReplacedByTheRealServiceOnceAttached()
         {
             ClassCatalog classCatalog = ClassCatalog.CreateMvp1();
-            classCatalog.Register(new ClassDescriptor("StarterGui", "Instance", false, false, true));
+            classCatalog.Register(new ClassDescriptor("Teams", "Instance", false, false, true));
             InstanceRegistry registry = new(classCatalog);
             RbxDataModel game = DataModelBootstrap.CreateGame(registry);
-            Assert.IsInstanceOf<RbxStubService>(game.GetService("StarterGui"),
-                "precondition: StarterGui starts as the known-service stub");
+            Assert.IsInstanceOf<RbxStubService>(game.GetService("Teams"),
+                "precondition: Teams starts as the known-service stub");
 
-            RbxInstance real = registry.Create("StarterGui");
+            RbxInstance real = registry.Create("Teams");
             real.Parent = game;
 
-            Assert.AreSame(real, game.GetService("StarterGui"));
-            Assert.AreSame(real, game.FindService("StarterGui"));
+            Assert.AreSame(real, game.GetService("Teams"));
+            Assert.AreSame(real, game.FindService("Teams"));
         }
     }
 }

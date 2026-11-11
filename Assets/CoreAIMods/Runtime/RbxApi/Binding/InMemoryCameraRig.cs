@@ -11,10 +11,22 @@ namespace CoreAI.Mods.Rbx.Binding
     /// </summary>
     public sealed class InMemoryCameraRig : IRbxCameraRig
     {
+        /// <summary>Viewport a headless camera reports until a test sets another, pixels.</summary>
+        public static readonly RbxVector2 DefaultViewportSize = new(1920f, 1080f);
+
         private RbxCFrame _cframe = RbxCFrame.Identity;
 
         /// <summary>Followed instance recorded by the last successful Follow; null when idle.</summary>
         public InstanceId? FollowTarget { get; private set; }
+
+        /// <summary>Vertical field of view, degrees.</summary>
+        public double FieldOfView { get; set; } = RbxCameraProjection.DefaultFieldOfView;
+
+        /// <summary>The viewport the camera queries project into, pixels.</summary>
+        public RbxVector2 ViewportSize { get; set; } = DefaultViewportSize;
+
+        /// <summary>How many times <see cref="SetCFrame"/> ran.</summary>
+        public int SetCount { get; private set; }
 
         public RbxCFrame GetCFrame()
         {
@@ -24,6 +36,7 @@ namespace CoreAI.Mods.Rbx.Binding
         public void SetCFrame(in RbxCFrame cframe)
         {
             _cframe = cframe;
+            SetCount++;
         }
 
         public bool Follow(InstanceId id)
@@ -35,6 +48,25 @@ namespace CoreAI.Mods.Rbx.Binding
         public void StopFollowing()
         {
             FollowTarget = null;
+        }
+
+        /// <inheritdoc />
+        public double GetFieldOfView()
+        {
+            return FieldOfView;
+        }
+
+        /// <inheritdoc />
+        public bool TrySetFieldOfView(double degrees)
+        {
+            FieldOfView = degrees;
+            return true;
+        }
+
+        /// <inheritdoc />
+        public RbxVector2 GetViewportSize()
+        {
+            return ViewportSize;
         }
     }
 }

@@ -36,6 +36,10 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
     /// </summary>
     public sealed partial class GameCreationBenchmarkPlayModeTests
     {
+        // WHY: Suite 2.1 changes only the G6 image-feedback twin (g6_free_build_vision): its camera tool gains a
+        // fifth function, camera_orbit, a point target and fov on camera_look, and new descriptions, so a vision G6
+        // score is not comparable with 2.0. The text G6 and every other group are untouched; their 2.0 results
+        // stay comparable and tools/benchmark_chart.py carries them over (CHANGED_SCENARIOS).
         // WHY: Suite 2.0 adds one extreme scenario to every group except G6 (reported as a separate extreme
         // sub-score), regrades G6 on build geometry and closes grader loopholes in G1-G5, G7 and G8, so no
         // 2.0 score is comparable with 1.x.
@@ -47,7 +51,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
         // new grader, and the free-build prompt now describes that runtime honestly (section size, the
         // writable Part surface, how Color really composes). The versioning policy says scores compare
         // only within a suite version; every published v1.7 G6 number is the old world_command build.
-        private const string SuiteVersion = "2.0";
+        private const string SuiteVersion = "2.1";
         private const float FreeBuildTotalBudgetSeconds = 600f;
 
         /// <summary>

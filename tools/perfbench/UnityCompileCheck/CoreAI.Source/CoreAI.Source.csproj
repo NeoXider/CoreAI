@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The slice of CoreAI.Source the Lua tier uses: the same files tools/portable/LuaTier/CoreAI.Source
+    compiles, here against the real engine. See ../UnityCompileCheck.props.
+  -->
+  <Import Project="../UnityCompileCheck.props" />
+  <PropertyGroup>
+    <AssemblyName>CoreAI.Source</AssemblyName>
+    <SourceRoot>$(RepoRoot)/Assets/CoreAiUnity/Runtime/Source</SourceRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(SourceRoot)/AssemblyInfo.cs" Link="Source/AssemblyInfo.cs" />
+    <Compile Include="$(SourceRoot)/Features/Chat/CoreAiChatExamples.cs" Link="Source/Features/Chat/CoreAiChatExamples.cs" />
+    <Compile Include="$(SourceRoot)/Infrastructure/CoreAiPersistentPaths.cs" Link="Source/Infrastructure/CoreAiPersistentPaths.cs" />
+    <Compile Include="$(SourceRoot)/Infrastructure/CoreAiStorageRoot.cs" Link="Source/Infrastructure/CoreAiStorageRoot.cs" />
+    <Compile Include="$(SourceRoot)/Infrastructure/CoreAiWebGlPersistence.cs" Link="Source/Infrastructure/CoreAiWebGlPersistence.cs" />
+    <Compile Include="$(SourceRoot)/Features/Logging/UnityLog.cs" Link="Source/Features/Logging/UnityLog.cs" />
+    <Compile Include="$(SourceRoot)/Features/Logging/Infrastructure/IGameLogger.cs" Link="Source/Features/Logging/Infrastructure/IGameLogger.cs" />
+    <Compile Include="$(SourceRoot)/Features/Logging/Infrastructure/IGameLogSink.cs" Link="Source/Features/Logging/Infrastructure/IGameLogSink.cs" />
+    <Compile Include="$(SourceRoot)/Features/Logging/Infrastructure/NullGameLogger.cs" Link="Source/Features/Logging/Infrastructure/NullGameLogger.cs" />
+    <Compile Include="$(SourceRoot)/Features/Logging/Infrastructure/FilteringGameLogger.cs" Link="Source/Features/Logging/Infrastructure/FilteringGameLogger.cs" />
+    <Compile Include="$(SourceRoot)/Features/Logging/Infrastructure/UnityGameLogSink.cs" Link="Source/Features/Logging/Infrastructure/UnityGameLogSink.cs" />
+    <Compile Include="$(SourceRoot)/Features/Logging/Infrastructure/GameLoggerUnscopedFallback.cs" Link="Source/Features/Logging/Infrastructure/GameLoggerUnscopedFallback.cs" />
+    <Compile Include="$(SourceRoot)/Features/World/IWorldStateManager.cs" Link="Source/Features/World/IWorldStateManager.cs" />
+    <Compile Include="$(SourceRoot)/Features/World/Infrastructure/ICoreAiWorldCommandExecutor.cs" Link="Source/Features/World/Infrastructure/ICoreAiWorldCommandExecutor.cs" />
+    <Compile Include="$(SourceRoot)/Features/World/Infrastructure/ICoreAiComponentCommandExecutor.cs" Link="Source/Features/World/Infrastructure/ICoreAiComponentCommandExecutor.cs" />
+    <Compile Include="$(SourceRoot)/Features/World/Infrastructure/CoreAiWorldCommandEnvelope.cs" Link="Source/Features/World/Infrastructure/CoreAiWorldCommandEnvelope.cs" />
+    <Compile Include="$(SourceRoot)/Features/World/Infrastructure/CoreAiComponentCommandEnvelope.cs" Link="Source/Features/World/Infrastructure/CoreAiComponentCommandEnvelope.cs" />
+    <Compile Include="$(SourceRoot)/Features/World/Infrastructure/CoreAiPrefabRegistryAsset.cs" Link="Source/Features/World/Infrastructure/CoreAiPrefabRegistryAsset.cs" />
+    <Compile Include="$(RepoRoot)/tools/portable/LuaTier/CoreAI.Source/CoreServicesInstaller.Portable.cs" Link="CoreServicesInstaller.Portable.cs" />
+  </ItemGroup>
+</Project>

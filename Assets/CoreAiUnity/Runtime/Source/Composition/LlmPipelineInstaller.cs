@@ -42,6 +42,8 @@ namespace CoreAI.Composition
         {
             float llmTimeout = settings != null ? settings.LlmRequestTimeoutSeconds : 15f;
             ILlmAsyncMarshaler asyncMarshaler = UnityMainThreadLlmAsyncMarshaler.Instance;
+            LlmModuleGate.WarnWhenLlmModuleMissing(settings, LlmModuleGate.IsLlmModuleCompiled,
+                GameLoggerUnscopedFallback.Instance);
 #if COREAI_LLM
             // WHY: every OpenAI-compatible client built by the static factories (and hot-swapped ones)
             // must back off and time out through the player loop; a Task.Delay is dead on WebGL.
@@ -309,12 +311,7 @@ namespace CoreAI.Composition
             }
 
 #if !COREAI_LLM
-            if (settings != null && settings.ExecutionMode == LlmExecutionMode.Offline)
-            {
-                return BuildOfflineClient(settings);
-            }
-
-            return new StubLlmClient();
+            return ResolveClientWithoutLlmModule(settings);
 #else
             if (settings != null)
             {
@@ -339,6 +336,24 @@ namespace CoreAI.Composition
             return new StubLlmClient();
 #endif
 #endif
+        }
+
+        /// <summary>
+        /// The primary client of a build without <c>COREAI_LLM</c>: the offline client for Offline, and for Auto with
+        /// no model (the module would serve the same offline client there); a <see cref="NotConfiguredLlmClient"/>
+        /// that names the fix for every mode that needs the module. Compiled in both configurations, so the define-off
+        /// branch is testable in a define-on build. A missing asset keeps the legacy stub.
+        /// </summary>
+        internal static ILlmClient ResolveClientWithoutLlmModule(CoreAISettingsAsset settings)
+        {
+            if (settings == null)
+            {
+                return new StubLlmClient();
+            }
+
+            return LlmModuleGate.RequiresLlmModule(settings)
+                ? new NotConfiguredLlmClient(settings.ExecutionMode)
+                : BuildOfflineClient(settings);
         }
 
         internal static bool ShouldRegisterLocalModelProvider(RuntimePlatform platform)
@@ -401,7 +416,10 @@ namespace CoreAI.Composition
             IAgentMemoryStore memoryStore = null)
         {
 #if !COREAI_LLM
-            return null;
+            return settings != null && !string.IsNullOrEmpty(settings.ApiBaseUrl) &&
+                   !string.IsNullOrEmpty(settings.ModelName)
+                ? new NotConfiguredLlmClient(mode == LlmExecutionMode.Auto ? settings.ExecutionMode : mode)
+                : null;
 #else
             if (settings != null && !string.IsNullOrEmpty(settings.ApiBaseUrl) &&
                 !string.IsNullOrEmpty(settings.ModelName))
@@ -418,7 +436,7 @@ namespace CoreAI.Composition
             IAgentMemoryStore memoryStore = null, IUnityGatewayClientBinding gatewayBinding = null)
         {
 #if !COREAI_LLM
-            return new StubLlmClient();
+            return new NotConfiguredLlmClient(mode);
 #else
             if (mode == LlmExecutionMode.ServerManagedApi)
             {
@@ -451,7 +469,9 @@ namespace CoreAI.Composition
         internal static ILlmClient BuildSecondaryHttpClient(CoreAISettingsAsset settings, IAgentMemoryStore memoryStore)
         {
 #if !COREAI_LLM
-            return new StubLlmClient();
+            // WHY: without the module there is no fallback backend either; a stub here would answer any failover
+            // with canned Ok = true text.
+            return new NotConfiguredLlmClient(LlmExecutionMode.ClientOwnedApi);
 #else
             // WHY: the role's system prompt keeps listing `memory` after a failover; a store-less secondary
             // client would advertise the tool and then strip every call to it without execution.

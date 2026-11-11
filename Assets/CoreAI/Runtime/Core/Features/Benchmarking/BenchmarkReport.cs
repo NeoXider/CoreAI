@@ -160,6 +160,13 @@ namespace CoreAI.Benchmarking
         public int ScenarioCount => Scenarios().Count;
 
         /// <summary>
+        /// False when no result measured the model (every one was Environment, Framework, NotGraded, excluded or
+        /// interrupted). Such a run has no score: <see cref="SuiteBaseScore"/> reads 0 only because the mean of
+        /// nothing is reported as 0, so renderers show it unrated instead of as a model that scored zero.
+        /// </summary>
+        public bool HasGradedScenarios => GradedResults.Any();
+
+        /// <summary>
         /// Regular-tier score: mean of the per-scenario mean base over the graded scenarios that are not
         /// extreme. 0 when the run graded none.
         /// </summary>
@@ -228,6 +235,9 @@ namespace CoreAI.Benchmarking
 
         public int FrameworkFailures => Results.Count(r => r.Attribution == FailureAttribution.Framework);
         public int EnvironmentFailures => Results.Count(r => r.Attribution == FailureAttribution.Environment);
+
+        /// <summary>Results kept out of the score for any reason: the complement of the graded results.</summary>
+        public int UngradedResults => Results.Count - GradedResults.Count();
 
         public long TotalTokens => Results.Sum(r => (long)r.TotalTokens);
         public long TotalPromptTokens => Results.Sum(r => (long)r.PromptTokens);

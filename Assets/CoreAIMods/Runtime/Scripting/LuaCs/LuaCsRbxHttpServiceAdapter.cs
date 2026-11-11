@@ -586,14 +586,18 @@ namespace CoreAI.Ai.LuaCs
             pending.Dispose();
         }
 
+        // WHY the lists are built only when something goes into them: this drain is a PhaseReached subscriber,
+        // so it runs six times a frame in every world, almost always with no request outstanding, and two fresh
+        // lists per phase were half of the idle frame's garbage.
         private void RemoveCanceledRequestsLocked()
         {
-            List<PendingRequest> canceled = new();
+            List<PendingRequest> canceled = null;
             foreach (PendingRequest request in _requests.Values)
             {
-                if (request.Token.IsCancellationRequested) { canceled.Add(request); }
+                if (request.Token.IsCancellationRequested) { (canceled ??= new List<PendingRequest>()).Add(request); }
             }
 
+            if (canceled == null) { return; }
             foreach (PendingRequest request in canceled)
             {
                 _requests.Remove(request.Id);
@@ -603,16 +607,18 @@ namespace CoreAI.Ai.LuaCs
 
         private void DrainPendingCompletions(SchedulerPhase phase, double deltaSeconds)
         {
-            List<PendingRequest> completed = new();
+            List<PendingRequest> completed = null;
             lock (_gate)
             {
+                if (_requests.Count == 0) { return; }
                 RemoveCanceledRequestsLocked();
                 if (_disposed) { return; }
                 foreach (PendingRequest request in _requests.Values)
                 {
-                    if (request.Completed) { completed.Add(request); }
+                    if (request.Completed) { (completed ??= new List<PendingRequest>()).Add(request); }
                 }
 
+                if (completed == null) { return; }
                 foreach (PendingRequest request in completed) { _requests.Remove(request.Id); }
             }
 

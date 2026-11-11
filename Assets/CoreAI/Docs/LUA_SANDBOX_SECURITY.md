@@ -302,8 +302,8 @@ When the limiter is saturated, `execute_lua` returns `Lua rate limit exceeded (.
 ## Platform Support
 
 When `COREAI_LUA` is compiled in, runtime Lua execution is supported on all platforms,
-including WebGL player builds. On WebGL, execution is **on by default** — toggle with
-`CoreAISettingsAsset.EnableLuaOnWebGl`. CoreAI has no WebGL-specific switch for the Full `unity_*`
+including WebGL player builds, with no WebGL-specific switch (`EnableLuaOnWebGl` is obsolete; leave the
+mods scope out for a build without Lua, see "Optional Module"). CoreAI has no WebGL-specific switch for the Full `unity_*`
 reflection tier: it follows the host's **Enable Full Lua Access** grant on every platform, and in an
 IL2CPP player it reaches only the members stripping kept. IL2CPP stripping protection (a `link.xml`
 preserving `Lua.dll` / `Lua.Annotations.dll` and the CoreAI Lua assemblies) ships in the

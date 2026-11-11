@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- CoreAI.RbxApi.Binding, every runtime file of the asmdef folder (GameObject binder, RbxWorldHost). See ../UnityCompileCheck.props. -->
+  <Import Project="../UnityCompileCheck.props" />
+  <PropertyGroup>
+    <AssemblyName>CoreAI.RbxApi.Binding</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(ModsRuntime)/RbxApi/Binding/**/*.cs" LinkBase="Binding" />
+    <ProjectReference Include="../CoreAI.RbxApi.Unity/CoreAI.RbxApi.Unity.csproj" />
+  </ItemGroup>
+</Project>

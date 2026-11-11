@@ -241,6 +241,36 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// Ratchet, P1 camera stage: the camera members that left the ClassCatalog stub tables must be
+        /// named in the skill, and the skill must stop listing them (and the Ray global) as unimplemented.
+        /// </summary>
+        [Test]
+        public void RbxApiInstructions_DocumentsEveryShippedCameraMember()
+        {
+            string text = BuiltInRbxApiSkillText.Instructions;
+            ClassCatalog catalog = ClassCatalog.CreateMvp1();
+            (string ClassName, string MemberName)[] shipped =
+            {
+                ("Camera", "FieldOfView"), ("Camera", "ViewportSize"), ("Camera", "ScreenPointToRay"),
+                ("Camera", "ViewportPointToRay"), ("Camera", "WorldToScreenPoint"),
+                ("Camera", "WorldToViewportPoint"), ("Player", "CameraMode"),
+                ("Player", "CameraMaxZoomDistance"), ("Player", "CameraMinZoomDistance")
+            };
+
+            foreach ((string className, string memberName) in shipped)
+            {
+                Assert.IsFalse(catalog.TryGetKnownUnimplementedMember(
+                        className, memberName, RbxKnownUnimplementedMemberAccess.Read, out _, out _),
+                    className + "." + memberName + " ships and must leave the stub table");
+                StringAssert.Contains(memberName, text, className + "." + memberName + " ships but the skill never names it");
+            }
+
+            StringAssert.Contains("Ray.new(origin, direction)", text);
+            StringAssert.DoesNotContain("`Ray` (use `workspace:Raycast`)", text, "Ray is no longer a loud stub");
+            StringAssert.DoesNotContain("`Camera.FieldOfView`,", text, "FieldOfView is no longer a loud stub");
+        }
+
         [Test]
         public async Task ReadSkillTool_ReturnsRbxApiInstructions()
         {

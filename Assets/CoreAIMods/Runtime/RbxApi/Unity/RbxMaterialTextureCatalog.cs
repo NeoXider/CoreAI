@@ -139,6 +139,9 @@ namespace CoreAI.Mods.Rbx.Rendering
             [SerializeField, Min(0f)] private float _normalStrength = 1f;
             [SerializeField, Range(0f, 1f)] private float _cavityStrength;
             [SerializeField, Range(0f, 1f)] private float _metalAlbedoLift;
+            [SerializeField] private RbxEmissionMode _emissionMode = RbxEmissionMode.MaterialDefault;
+            [SerializeField, ColorUsage(false, true)] private Color _emissionColor = Color.black;
+            [SerializeField, Range(0f, 1f)] private float _emissionThreshold = 0.5f;
 
             /// <summary>Canonical Enum.Material name.</summary>
             public string MaterialName
@@ -259,6 +262,38 @@ namespace CoreAI.Mods.Rbx.Rendering
             {
                 get => _metalAlbedoLift;
                 set => _metalAlbedoLift = Mathf.Clamp01(value);
+            }
+
+            /// <summary>
+            /// How the material emits. <see cref="RbxEmissionMode.MaterialDefault"/> (the value of every
+            /// entry saved before emission existed) lets <see cref="RbxMaterialEmissionDefaults"/> decide,
+            /// so CrackedLava glows without the catalog asset being rebuilt.
+            /// </summary>
+            public RbxEmissionMode EmissionMode
+            {
+                get => _emissionMode;
+                set => _emissionMode = value;
+            }
+
+            /// <summary>HDR emission colour used by <see cref="RbxEmissionMode.FromAlbedo"/>.</summary>
+            public Color EmissionColor
+            {
+                get => _emissionColor;
+                set => _emissionColor = value;
+            }
+
+            /// <summary>Linear red level of the colour map where the glow starts, 0..1.</summary>
+            public float EmissionThreshold
+            {
+                get => _emissionThreshold;
+                set => _emissionThreshold = Mathf.Clamp01(value);
+            }
+
+            /// <summary>The effective emission of this entry.</summary>
+            public RbxMaterialEmission ResolveEmission()
+            {
+                return RbxMaterialEmissionDefaults.Resolve(_materialName, _emissionMode, _emissionColor,
+                    _emissionThreshold);
             }
 
             /// <summary>Whether any texture reference is assigned.</summary>

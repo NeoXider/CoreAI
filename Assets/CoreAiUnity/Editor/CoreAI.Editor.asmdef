@@ -4,6 +4,7 @@
   "references": [
     "CoreAI.Core",
     "CoreAI.Source",
+    "CoreAI.Editor.Setup",
     "VContainer",
     "undream.llmunity.Runtime",
     "Unity.TextMeshPro",

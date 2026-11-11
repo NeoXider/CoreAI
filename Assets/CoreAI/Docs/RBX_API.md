@@ -40,15 +40,15 @@ sees "attempt to call a nil value".
 | `wait`, `spawn`, `delay` | Roblox's legacy scheduler globals |
 | `time`, `tick` | `time()` is scaled game time; `tick()` is deprecated (logs once per mod) |
 | `os` | Only `os.time([dateTable])` and `os.clock()` — the stock `os` library stays removed by the sandbox |
-| `typeof` | Roblox type names: `"Instance"`, `"Vector3"`, `"CFrame"`, `"EnumItem"`, `"RBXScriptSignal"`, … |
+| `Ray` | `Ray.new(origin, direction)` with `Origin`, `Direction`, `Unit`, `ClosestPoint(point)` and `Distance(point)` (both expect a unit ray, as in the mirror) |
+| `typeof` | Roblox type names: `"Instance"`, `"Vector3"`, `"CFrame"`, `"Ray"`, `"EnumItem"`, `"RBXScriptSignal"`, … |
 | `warn` | Like `print`, into the mod's log at `Warn` level (`get_mod_logs`) |
 | `script` | The running mod's own script instance (mods only, not one-off `execute_lua`) |
 | `camera_set_cframe`, `camera_follow` | CoreAI convenience shorthands for camera control (both fire the camera's `Changed`); in a world whose `Camera` a script destroyed they raise `BAD_ARGUMENT` before anything moves |
 
-`BrickColor`, `NumberSequence`, `ColorSequence`, `NumberRange`, `Ray`, `Region3`, `Rect`,
+`BrickColor`, `NumberSequence`, `ColorSequence`, `NumberRange`, `Rect`,
 `PhysicalProperties`, `OverlapParams`, `DateTime` and `shared` exist as **loud stubs**: any use raises
-`NOT_IMPLEMENTED` with a workaround (`Color3.fromRGB` for `BrickColor`, `workspace:Raycast` for `Ray`,
-`os.time()` or `workspace:GetServerTimeNow()` for `DateTime`, `mods_export`/`mods_get` for `shared`)
+`NOT_IMPLEMENTED` with a workaround (`Color3.fromRGB` for `BrickColor`, `os.time()` or `workspace:GetServerTimeNow()` for `DateTime`, `mods_export`/`mods_get` for `shared`)
 instead of "attempt to index a nil value".
 
 ### Tasks and coroutines
@@ -147,8 +147,8 @@ backward step, a client's holds too: the server sends the value its own scripts 
 ## Classes
 
 `Instance.new` accepts: **`Part`**, **`Folder`**, **`Model`**, **`ClickDetector`**, **`MaterialVariant`**,
-**`RemoteEvent`**, **`UnreliableRemoteEvent`**, **`RemoteFunction`**, **`Humanoid`**, **`Backpack`**, and
-the value objects **`IntValue`**, **`NumberValue`**, **`StringValue`**, **`BoolValue`**,
+**`RemoteEvent`**, **`UnreliableRemoteEvent`**, **`RemoteFunction`**, **`Humanoid`**, **`Backpack`**, the
+GUI classes of [Roblox GUI](#roblox-gui), and the value objects **`IntValue`**, **`NumberValue`**, **`StringValue`**, **`BoolValue`**,
 **`ObjectValue`**, **`Vector3Value`**, **`CFrameValue`** and **`Color3Value`** (each with one
 type-checked `Value`). `Camera` is not creatable — the world's one camera is
 `workspace.CurrentCamera`. About ninety real Roblox classes CoreAI does not build yet (`WedgePart`,
@@ -160,10 +160,9 @@ so `IsA` works the way it does in Roblox.
 
 Services `game:GetService` returns as working instances: `Workspace`, `RunService`,
 `UserInputService`, `Players`, `CollectionService`, `TweenService`, `Lighting`, `Debris`,
-`HttpService`, `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`,
-`MaterialService` and `ScriptContext`. `DataStoreService`, `ContextActionService`, `SoundService` and
-CoreAI's reserved `AIService` are planned; `PathfindingService` and `MarketplaceService` are not
-planned. They and twenty-eight more real Roblox services (`StarterGui`, `Teams`, `PhysicsService`,
+`HttpService`, `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`, `StarterGui`,
+`MaterialService` and `ScriptContext`. `DataStoreService` (MVP16), `ContextActionService` (MVP7) and
+`SoundService` (MVP17) are planned; `PathfindingService` and `MarketplaceService` are not planned. They and twenty-seven more real Roblox services (`Teams`, `PhysicsService`,
 `ReplicatedFirst`, `TeleportService`, `BadgeService`, …) resolve to loud placeholders whose first
 member access raises `NOT_IMPLEMENTED` with a workaround, instead of the false `X is not a valid
 Service name`; `GetService("")` is `UNKNOWN_SERVICE`.
@@ -270,7 +269,8 @@ Solo and host both render, so both keep firing: the gate is "does anything get d
 
 ### `Players`
 
-`Players.LocalPlayer` (nil in a server context), `PlayerAdded(player)`,
+`Players.LocalPlayer` (the `Player` of the actor a mod was loaded for, as the bundled control script is;
+nil for a mod the host loads, which is a server script), `PlayerAdded(player)`,
 `PlayerRemoving(player, exitReason)`, `GetPlayers()`, `GetPlayerByUserId(userId)` and
 `GetPlayerFromCharacter(character)` (the lookups see only live Players under `Players`), plus
 `CharacterAutoLoads` (default true), `RespawnTime`
@@ -339,13 +339,181 @@ the scene has an `RbxWorldHost`: every Humanoid whose root part has a body gets 
 Humanoid with no body — a headless world, storage-only trees, a root part not yet materialized —
 keeps the null motor and does not move, and `MoveTo` then reports arrival immediately because the
 null motor's position never changes. `Enum.HumanoidStateType` ships its full Roblox item set, but the state machine only enters
-`Running`, `Jumping`, `Freefall`, `Landed` and `Dead`; `ChangeState` accepts only `Jumping` and says
-so loudly otherwise. Seats, ragdoll, swimming, climbing, accessories and animation raise the loud
-stub — they need a character rig CoreAI does not model.
+`Running`, `Jumping`, `Freefall`, `Landed`, `Flying` and `Dead`; `ChangeState` accepts `Jumping`,
+`Flying` and `Freefall` (which ends a flight) and says so loudly otherwise. Seats, ragdoll, swimming,
+climbing, accessories and animation raise the loud stub — they need a character rig CoreAI does not model.
+
+`Humanoid:Move(direction, relativeToCamera)` walks along a direction until it is called again;
+with `relativeToCamera` the direction is read in the camera's frame flattened to the ground, so
+`Vector3.new(0, 0, -1)` walks where the camera looks. Its length is capped at 1. A non-zero `Move`
+ends a `MoveTo` in progress with `MoveToFinished(false)` (OURS: player input overrides a scripted
+walk); a zero `Move` leaves it running. Host motors that predate `Move` still answer it through
+`MoveTo`. `ChangeState(Enum.HumanoidStateType.Flying)` enters free flight: no gravity, and `Move` keeps
+its vertical part (a DEV candidate — Roblox lists the state but gives it no locomotion). A motor that
+cannot fly refuses with `BAD_ARGUMENT`. Noclip during flight is a framework switch
+(`RbxHumanoid.Noclip`, off by default), not a Lua member.
+
+**Default controls.** The bundled, active `coreai_player_controls` mod is the counterpart of Roblox's
+PlayerModule controls: WASD or the arrow keys (or the gamepad left thumbstick, dead zone 0.2, or the
+D-pad) call `Humanoid:Move(dir, true)`,
+Space or gamepad A jumps, a double-tapped jump (within 0.3 s) toggles flight, and while flying Space
+rises and Left Shift descends. It ignores input whose `gameProcessedEvent` is `true`. A game turns it
+off with `StarterPlayer.DevComputerMovementMode = Enum.DevComputerMovementMode.Scriptable` (live; set
+it from Lua or on the `RbxStarterPlayer` instance from C#), or unloads the mod and ships its own.
+`StarterPlayer` also carries `CameraMode`, `CameraMaxZoomDistance` (400) and `CameraMinZoomDistance`
+(0.5) with the mirror's defaults; each `Player` copies them when it joins and the default camera reads
+the player's copy (see "The camera").
+
+**Input focus and the pointer.** `gameProcessedEvent` is `true` for keys while CoreAI UI (the chat
+panel, the Hub, any surface reporting to `ICoreAiUiFocus`) has text focus, and for mouse input while
+the pointer is over it. A host game's own UI claims input through `RbxWorldHost.InputFocus`.
+`UserInputService.MouseBehavior` locks the host cursor through a replaceable cursor port
+(`LockCurrentPosition` recentres it — Unity cannot lock in place, a DEV candidate; on WebGL the
+browser applies the lock on the next click), `GetMouseDelta()` answers the last frame's device delta
+in pixels only while the pointer is locked, scaled by `MouseDeltaSensitivity` (0..10, default 1), and
+the wheel fires `InputChanged` with `UserInputType.MouseWheel` and the direction in `Position.Z`.
+The gamepad thumbsticks fire `InputChanged` with `KeyCode.Thumbstick1`/`Thumbstick2`,
+`UserInputType.Gamepad1` and the stick in `Position` (each axis in [-1, 1], y up) whenever they move.
+`TextBoxFocused` and `TextBoxFocusReleased` fire when CoreAI's own text field (the chat, the Hub) takes
+and returns the keyboard; those fields are not script-visible `TextBox`es, so the argument is `nil` and
+`GetFocusedTextBox()` returns `nil` (a DEV candidate) — branch on `gameProcessedEvent` instead.
 
 **Passive regeneration is not built in**, exactly as in Roblox: the mirror inserts a regeneration
 *script* into humanoids and documents disabling it with an empty `Script` named `Health`, so
 regeneration belongs to the character template rather than the class.
+
+### The camera
+
+`workspace.CurrentCamera` is the world's one camera. With `CameraType = Enum.CameraType.Custom` (the
+default) the **default camera** runs every rendered frame, the counterpart of Roblox's PlayerModule
+camera: it orbits `CameraSubject` — by default the local character's `Humanoid` (its head, 1.5 studs
+above the root part), and `camera.CameraSubject` reads that Humanoid until a script assigns another
+subject (a `Humanoid` or a `BasePart`). The mouse turns it while the pointer is locked or while the
+right button is held (the camera asks for `MouseBehavior.LockCurrentPosition` while you drag), the right
+thumbstick turns it too, and the pitch stops at ±80°. The wheel zooms on the PlayerModule curve (12.5
+studs to start), clamped to the local `Player.CameraMinZoomDistance`/`CameraMaxZoomDistance`; below one
+stud it snaps to first person (0.5 studs) and locks the pointer to the centre, and
+`Player.CameraMode = Enum.CameraMode.LockFirstPerson` holds first person. A wall between the subject and
+the camera pulls the camera in front of it (the subject's own character, non-colliding parts and parts
+at least 95% transparent never block it) without changing the zoom you chose. While the chat or the Hub
+holds the input the camera neither turns nor zooms and frees the pointer; with the pointer over a panel
+the wheel and the right button belong to the panel.
+
+`CameraType = Enum.CameraType.Scriptable` hands the camera to scripts: the default camera stops and
+`camera.CFrame` stays where a script puts it, exactly as in Roblox. In `Custom`, a `CFrame` written by a
+script is overwritten on the next frame while there is a subject. Other `CameraType` values leave the
+camera to scripts as well (a DEV candidate: only `Custom` and `Scriptable` have behaviour). A world with
+no local character leaves the camera where it is. The default camera is a replaceable block: a host
+assigns its own `IRbxCameraModule` to `LuaCsRbxApiBindings.CameraModule`, tunes the default one through
+`RbxCameraModuleOptions`, or assigns `null` to switch it off.
+
+`camera.FieldOfView` is the vertical field of view in degrees (default 70, clamped to [1, 120]) and
+drives the host camera's lens (it is tweenable through the same lens; a host rig without one refuses the
+tween at `Create`); `camera.ViewportSize` is read-only and reports the rendered viewport in
+pixels (`(1, 1)` when the host camera has none). `camera:ViewportPointToRay(x, y, depth)` and
+`camera:ScreenPointToRay(x, y, depth)` return a unit `Ray` through a pixel (top-left origin) whose origin
+sits `depth` studs in front of the camera, and `camera:WorldToViewportPoint(point)` /
+`camera:WorldToScreenPoint(point)` return the pixel position with the depth in `Z`, plus whether the
+point is on screen (no raycast). CoreAI draws no top bar, so the screen and viewport variants agree.
+The ray through `ViewportSize / 2` matches `camera.CFrame.LookVector`. `FieldOfViewMode`,
+`DiagonalFieldOfView`, `MaxAxisFieldOfView`, `NearPlaneZ` and `Focus` stay loud stubs.
+
+### `Lighting`: day and night
+
+The day-cycle slice of P9, with Roblox's names and the class defaults of the API dump:
+
+| Member | Default | Notes |
+|---|---|---|
+| `ClockTime` | 14 | hours; any finite number wraps into [0, 24) |
+| `TimeOfDay` | `"14:00:00"` | the same clock as text; accepts `"H"`, `"H:M"`, `"H:M:S"`; a malformed time is `BAD_ARGUMENT` |
+| `GetMinutesAfterMidnight()` / `SetMinutesAfterMidnight(m)` | 840 | minutes into the day; past 1,440 lands in the next day |
+| `GeographicLatitude` | 41.7332993 | degrees north |
+| `Brightness` | 1 | the sun's intensity |
+| `Ambient` / `OutdoorAmbient` | (0.5, 0.5, 0.5) | the sky-occluded hue and the outdoor hue |
+| `GetSunDirection()` | | unit `Vector3` towards the sun, below the horizon at night |
+| `LightingChanged(skyChanged)` | | fires once per real change with `false` |
+
+A real change fires `Changed`, `GetPropertyChangedSignal` (a `ClockTime` change fires `TimeOfDay`'s too) and
+`LightingChanged`; an equal write fires nothing. Writes need WorldEdit; a non-finite value is `BAD_ARGUMENT`.
+`ClockTime` and the colours are tweenable.
+
+The sun model: solar noon at 12:00, 15 degrees an hour, the observer at `GeographicLatitude`, and the sun on
+the celestial equator, so it rises due east (+X) at 06:00 and sets due west at 18:00 at every latitude. The
+mirror does not document Roblox's own model (DEV candidate P9-f).
+
+Lua never touches an engine type: the state goes to a replaceable `IRbxLightingSink`
+(`RbxLighting.AttachSink`). `RbxWorldHost` attaches the Unity default, `UnityRbxLightingSink`, which points
+the scene's sun light along `GetSunDirection`, sets its intensity to `Brightness` times daylight (a smooth
+step from -6 to +6 degrees of elevation; the light is switched off below), makes it `RenderSettings.sun` so
+the sky follows, and sets a trilight ambient: sky and equator from `OutdoorAmbient` scaled by daylight down
+to 15% at night, ground from `Ambient` (DEV candidates P9-a and P9-g). Until a script, a tween or a saved
+world sets a Lighting property, nothing is applied and the host scene keeps its authored lighting; switch the
+sink off with **Drive Scene Lighting** on `RbxWorldHost`. The rest of P9 (fog, `ColorShift_*`, environment
+and exposure, shadows, the moon, `Sky`, `Atmosphere`, the post effects, `SpotLight`, `SurfaceLight`) are loud
+stubs planned for P9; `LightingStyle`, `PrioritizeLightingQuality` and `Technology` are
+`RobloxScriptSecurity` and unsupported.
+
+### Roblox GUI
+
+`ScreenGui`, `Frame`, `TextLabel`, `TextButton`, `TextBox`, `ImageLabel`, `ImageButton`, `ScrollingFrame`,
+`UICorner`, `UIPadding`, `UIStroke`, `UIScale`, `UIListLayout`, `UIGridLayout`, `UIAspectRatioConstraint` and
+`UISizeConstraint` are creatable and work as in Roblox: the properties, defaults (`Full-API-Dump.json`), enums,
+layout and signals (`MouseButton1Click`, `Activated(input, clickCount)`, `MouseEnter`/`MouseLeave(x, y)`,
+`TextBox.Focused`/`FocusLost(enterPressed, input)`, `CaptureFocus`/`ReleaseFocus`/`IsFocused`,
+`GetPropertyChangedSignal`) of the mirror, with `AbsolutePosition`/`AbsoluteSize`/`AbsoluteRotation` read from
+the real layout at once. `StarterGui` and `PlayerGui` are real; TweenService tweens UDim2, Color3 and number
+properties. Creating a GUI object needs the `Ui` capability. They draw through the same runtime UI host as
+`UxmlService` screens and share its per-mod budgets: [RUNTIME_UI.md](../../CoreAiUnity/Docs/RUNTIME_UI.md#the-roblox-gui-entrance).
+
+Deviations (each a DEV candidate):
+
+- **Whose GUI is drawn.** The `PlayerGui` of the player at this screen. A mod loaded as that player's actor
+  reaches it through `Players.LocalPlayer`; a mod the host loads reads `LocalPlayer` as nil (it is a server
+  script) and reaches the same `PlayerGui` through `Players:GetPlayers()` / `PlayerAdded`, or uses `StarterGui`.
+- **StarterGui.** Copied into `PlayerGui` when the character spawns; `ResetOnSpawn = false` is copied once and
+  kept. Because a mod loads into a running session and does not re-run on respawn: a respawn replaces only the
+  copies (a ScreenGui a script parented into `PlayerGui` stays); a child added after the spawn is copied on the
+  next frame; destroying an original removes its copies (a hot reload leaves one copy, not two). Scripts are
+  not copied (a CoreAI script is a mod). `SetCoreGuiEnabled`/`GetCoreGuiEnabled` are recorded per
+  `Enum.CoreGuiType`: CoreAI draws no Roblox core GUI and no top bar, so the GUI inset is always zero.
+- **Text.** Every font family draws in the host font, bold or italic by the font's name. `TextScaled` estimates
+  the size from the box and the character count, and `AutomaticSize` fits children, not text: text is not
+  measured, so `TextBounds` and `TextFits` raise `NOT_IMPLEMENTED`. `RichText` draws the host's tags
+  (`<b> <i> <u> <s>`), not Roblox's `<font ...>` or `<stroke>`.
+- **Images.** `Image` is a URL or path the host loads; `rbxassetid://` ids are never downloaded and draw
+  nothing. Nine-slice (`SliceCenter`) and `UIGradient` are not drawn; `HoverImage`/`PressedImage` are recorded.
+- **Stacking.** `ZIndexBehavior.Global` is recorded and drawn as `Sibling` (elements nest like the instances).
+- **Scrolling.** A `ScrollingFrame` clips its canvas and moves it by `CanvasPosition`; the player's wheel or
+  drag does not scroll it yet and the scroll bar is not drawn.
+- **Input.** A GUI object whose `MouseEnter`/`MouseLeave` a script listens to takes the pointer, so input over
+  it is `gameProcessed` as over an `Active` one. `UserInputService.TextBoxFocused` does not fire for a GUI
+  `TextBox` yet, and `GetFocusedTextBox()` returns nil.
+- **Not yet.** `InputBegan/InputChanged/InputEnded`, `MouseMoved`, the wheel, `MouseButton1Down/Up`,
+  `MouseButton2*`, `SecondaryActivated`, the Touch signals and `TweenPosition`/`TweenSize`/`TweenSizeAndPosition`
+  raise `NOT_IMPLEMENTED` (planned MVP15); gamepad selection, `BillboardGui`, `SurfaceGui`, `ViewportFrame`,
+  `VideoFrame` and `CanvasGroup` are backlog.
+
+### `PointLight`
+
+`Instance.new("PointLight")` (an `IsA("Light")`; `Light` itself is not creatable) has `Brightness` (1),
+`Color` (white), `Enabled` (true), `Shadows` (false) and `Range` in studs (8, held to [0, 60]: the dump's
+`ExtendLightRangeTo120` flag names the 60-stud cap). It lights while it is the direct child of a `BasePart` in
+the Workspace (PointLight.yaml); anywhere else it gives no light. `RbxWorldHost` draws each one as a Unity
+point light on a child of the part's GameObject (`UnityRbxLightBackend`, replaceable through
+`IRbxLightBackend`), reconciled once a frame by `RbxLightReconciler`. The light budget keeps the nearest
+lights to the camera on: 64 on desktop (the PC renderer is Forward+, clustered per tile), 8 in a WebGL player
+(the Mobile renderer is plain Forward, 4 additional lights per object, 32 visible). When the budget switches
+lights off, the world log says so once, with the counts. `Brightness`, `Color` and `Range` are tweenable.
+
+### Luau `math` extensions
+
+The sandbox adds Luau's `math.noise(x, y?, z?)` (Ken Perlin's improved noise in single precision, bit for bit
+the mirror's values: `math.noise(1.158, 5.723)` is 0.48397532105446; 0 at whole-number points, repeating every
+256 units on each axis; omitted or nil axes are 0), `math.clamp(x, min, max)` (`max` below `min`, or a NaN
+bound, is the bad-argument error "max must be greater than or equal to min"), `math.round(x)` (halves away from
+zero, the sign of zero kept) and `math.sign(x)` (-1, 0 or 1; NaN gives 0). Numeric strings convert like
+`tonumber`; anything else raises the sandbox's `bad argument #n to 'name' (number expected, got type)`. The
+same noise is `RbxPerlinNoise.Noise` for C# generators.
 
 ### Physics: gravity, raycasts, contacts
 

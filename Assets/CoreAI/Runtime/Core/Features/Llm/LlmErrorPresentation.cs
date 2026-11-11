@@ -64,6 +64,11 @@ namespace CoreAI.Ai
         /// <summary>One readable sentence for the chat bubble. Never returns null or empty.</summary>
         public static string ToUserMessage(Exception exception, string fallback = null)
         {
+            if (exception is LlmRequestFailedException requestFailed)
+            {
+                return ToUserMessage(requestFailed.Failure, fallback);
+            }
+
             if (exception is LlmClientException llmException)
             {
                 return ToUserMessage(llmException, fallback);
@@ -143,6 +148,8 @@ namespace CoreAI.Ai
                     return "No assistant backend is configured. Please tell the maintainer.";
                 case LlmErrorCode.ContextLengthExceeded:
                     return "The conversation got too long for the model. Start a new chat or shorten the message.";
+                case LlmErrorCode.NotConfigured:
+                    return "The assistant is not set up in this build. Please tell the maintainer.";
                 default:
                     return DefaultUserMessage;
             }
@@ -154,6 +161,11 @@ namespace CoreAI.Ai
         /// </summary>
         public static string ToDiagnosticText(Exception exception)
         {
+            if (exception is LlmRequestFailedException requestFailed)
+            {
+                exception = requestFailed.Failure;
+            }
+
             if (!(exception is LlmClientException llmException))
             {
                 return exception == null ? "" : exception.ToString();

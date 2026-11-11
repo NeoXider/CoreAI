@@ -448,6 +448,16 @@ namespace CoreAI.Tests.EditMode
                 return new List<AiAttachment>();
             }
 
+            if (type == typeof(IReadOnlyList<ILlmTool>))
+            {
+                return new List<ILlmTool>();
+            }
+
+            if (type == typeof(LlmRequestProgress))
+            {
+                return new LlmRequestProgress();
+            }
+
             Assert.Fail("AiTaskRequest." + property.Name + " has type " + type.FullName +
                         ", which the clone guard does not know how to probe. Extend CreateProbeValue.");
             return null;

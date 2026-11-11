@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using CoreAI.Ai;
 using CoreAI.Authority;
@@ -140,26 +141,64 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         [Test]
-        public void KnownLimitation_HostMode_AServerBridgeDoesNotServeTheLocalClient()
+        public void HostMode_AServerBridgeServesTheLocalClient_AsTheHostsOwnPlayer_WithItsRemotesInProcess()
         {
+            // WHY: this replaces the known limitation it was before MVP5 — a Mirror HOST (server and
+            // local client in one process, the most common Mirror topology) had no client-side
+            // remotes, and its own local client was refused as a player. The host's client is now
+            // admitted through the real authenticator over Mirror's real local connection pair and is
+            // the host's Player, whose remotes run in process both ways.
+            CoreAiMirrorAuthenticator authenticator = _go.AddComponent<CoreAiMirrorAuthenticator>();
+            authenticator.Configure(new HostCredentialProvider(), "world-a");
+            authenticator.ConfigureClientCredential(() => Encoding.UTF8.GetBytes("host"));
+            _provider.Authenticator = authenticator;
+            List<string> connected = new();
+            _provider.AttachWorld(context =>
+            {
+                connected.Add(context.ActorId);
+                return true;
+            }, _ => true);
             MirrorNetworkBridge bridge = (MirrorNetworkBridge)_provider.Bridge;
-            OfflineMirror.StartServer();
-            OfflineMirror.StartClient();
+            List<RbxNetworkEventMessage> delivered = new();
+            bridge.EventReceived += delivered.Add;
+            bridge.RequestReceived += (_, responder) => responder.Complete(new byte[] { 42 });
+            authenticator.OnServerAuthenticated.AddListener(conn => conn.isAuthenticated = true);
+            authenticator.OnClientAuthenticated.AddListener(() => NetworkClient.connection.isAuthenticated = true);
+            LocalConnectionToClient local = OfflineMirror.StartHost();
+            authenticator.OnStartServer();
+            authenticator.OnStartClient();
+            authenticator.OnServerAuthenticate(local);
+            authenticator.OnClientAuthenticate();
+            OfflineMirror.PumpHost();
             Frame();
-            OfflineMirror.ExpectNoClientHandler();
+            using SentMessages<CoreAiRemoteEventMessage> eventsOnMirror = new();
+            using SentMessages<CoreAiRemoteRequestMessage> requestsOnMirror = new();
+            List<RbxNetworkResponse> answered = new();
 
-            OfflineMirror.DeliverToClient(OfflineMirror.Event(1UL));
+            bridge.SendEvent(new RbxNetworkEventMessage(new InstanceId(5UL), RbxNetworkDirection.ServerToClient,
+                RbxNetworkReliability.ReliableOrdered, null, "actor-host", new byte[] { 1 }));
+            bridge.SendEvent(new RbxNetworkEventMessage(new InstanceId(5UL), RbxNetworkDirection.ClientToServer,
+                RbxNetworkReliability.ReliableOrdered, "actor-host", null, new byte[] { 2 }));
+            bridge.SendRequest(new RbxNetworkRequestMessage(new InstanceId(6UL), RbxNetworkDirection.ClientToServer,
+                "actor-host", null, new byte[] { 3 }), answered.Add);
+            OfflineMirror.PumpHost();
+            Frame();
 
-            Assert.AreEqual(0, bridge.PacketsDelivered,
-                "KNOWN LIMITATION, not a contract: a server bridge installs server handlers only, and "
-                + "the provider refuses a client bridge while the server is active, so a Mirror HOST - "
-                + "server and local client in one process, the most common Mirror topology - has no "
-                + "client-side remotes at all. The host's own local client connection is refused as a "
-                + "world player, loudly, and left on Mirror (A4-10; "
-                + "MirrorProviderAdmissionFailureEditModeTests proves it); the host's player is a "
-                + "host-local actor served in process. This test pins today's behaviour so a change is "
-                + "noticed; it does NOT say the behaviour is right. When host mode is fixed this test "
-                + "must be rewritten, not kept green. Tracked in TODO.md under the MVP2.5 transport gaps.");
+            CollectionAssert.AreEqual(new[] { "actor-host" }, connected, "the host's local client is the host's Player");
+            Assert.AreEqual("actor-host", authenticator.ClientActorId,
+                "the host's client half learned who it is from the real admission response");
+            Assert.IsTrue(NetworkClient.connection.isAuthenticated);
+            Assert.IsTrue(bridge.IsHostLocalConnection(local.connectionId));
+            Assert.AreEqual(2, delivered.Count, "FireClient to the host's player and its FireServer both arrive");
+            Assert.AreEqual(RbxNetworkDirection.ServerToClient, delivered[0].Direction);
+            Assert.AreEqual("actor-host", delivered[0].RecipientActorId);
+            Assert.AreEqual(RbxNetworkDirection.ClientToServer, delivered[1].Direction);
+            Assert.AreEqual("actor-host", delivered[1].SenderActorId);
+            Assert.AreEqual(1, answered.Count, "the host's InvokeServer is answered at once");
+            Assert.IsTrue(answered[0].Succeeded);
+            CollectionAssert.IsEmpty(eventsOnMirror.Messages, "nothing the host's player does touches Mirror");
+            CollectionAssert.IsEmpty(requestsOnMirror.Messages);
+            Assert.AreEqual(0, bridge.ReadinessTimeouts);
         }
 
         [Test]
@@ -322,6 +361,20 @@ namespace CoreAI.Net.Mirror.Tests
 
             Assert.AreEqual(1, disconnects.Count,
                 "CoreAI's teardown ran first, so another listener's throw cannot leave a Player behind");
+        }
+
+        /// <summary>Admits any credential as the actor <c>actor-&lt;credential&gt;</c>.</summary>
+        private sealed class HostCredentialProvider : IActorAdmissionProvider
+        {
+            public ActorAdmissionResult TryAdmit(in ActorCredential credential, string worldId)
+            {
+                string name = Encoding.UTF8.GetString(credential.Opaque);
+                ActorContext context = new LocalActorIdentityProvider(
+                        "actor-" + name, "session-" + name, worldId, ActorGrantSet.Create(new[] { "read" }),
+                        AgentMemoryScope.Empty)
+                    .GetActorContext(BuiltInAgentRoleIds.SmartChat);
+                return ActorAdmissionResult.Admit(context, 1001L, name, name);
+            }
         }
 
         private static ActorAdmissionResult AdmittedAs(string actorId)

@@ -105,9 +105,15 @@ extreme and regular columns, per-dimension columns, scores by group, extreme-tie
 chart, best model per dimension and for the extreme tier), `COMPARISON.svg` (suite ranking with
 extreme diamonds, models x groups heatmap with an Extreme column, extreme ranking),
 `COMPARISON_groups.svg` and `COMPARISON_extreme.svg`. Models rank by suite score; ties go to the higher
-extreme score. `tools/benchmark_chart.py` builds the leaderboard SVG and Markdown rows from the archived
-run JSONs; it shows the extreme column when the reports carry the `extreme` flag and charts pre-2.0
-suites as before.
+extreme score. With two or more graded models the table adds a like-for-like mean (group scores averaged
+over the groups every compared model graded, named above the table). A run with no graded scenario
+(`BenchmarkReport.HasGradedScenarios` false, e.g. a dead provider route) is unrated everywhere: its cards
+and Markdown say "no graded scenarios", and comparisons list it last without a rank or score.
+`tools/benchmark_chart.py` builds the leaderboard SVG and Markdown rows from the archived run JSONs; it
+ranks only full runs (every scenario slot of G1-G8 graded, the G6 image-feedback build filling the G6
+slot), prints each row's graded count next to its score, marks partial rows "not ranked", shows the
+extreme column when the reports carry the `extreme` flag and charts pre-2.0 suites as before. Its
+fixtures (`tools/benchmark_chart_fixtures`) pin those rules.
 
 **Extending:** add a new scenario group (its scenarios just set `Group => "G9"` and are listed in
 `BenchmarkSuiteCatalog`) and, if needed, a new `BenchmarkDimension` value; the aggregation, bars,
@@ -187,7 +193,8 @@ to the constants. A `COREAI_BENCHMARK_FREEBUILD_SUBJECT` build replaces the cast
 subject-neutral ones (spread, at least 16 studs of height, at least 6 separate objects). Colour is not
 scored, and the 1.x `material_breadth` (20+ materials) checkpoint is gone. A world that holds parts but
 cannot be read back throws, so the run is attributed to the framework, not the model. G6 is one scenario
-plus its image-feedback twin and has no extreme tier; its 2.0 scores are not comparable with 1.x. The
+plus its image-feedback twin and has no extreme tier; its 2.0 scores are not comparable with 1.x, and a
+vision G6 score from 2.0 is not comparable with 2.1 (see [Vision G6 camera](#vision-g6-camera-suite-21)). The
 screenshot preserves the model's layout (no grid normalisation, no ghosts) and is embedded as the **hero
 image at the top of the report**.
 
@@ -233,6 +240,18 @@ The recording executor answers `list_objects` with each object's real position (
 `spawn_batch` item inherits the batch-level rotation, scale, parent and `worldPositionStays` when it sets
 none, exactly like `CoreAiWorldCommandExecutor.TrySpawnBatch`; at most `MaxSpawnBatchSize` items are
 recorded.
+
+### Vision G6 camera (suite 2.1)
+Suite 2.1 changes only `g6_free_build_vision`. Its camera tool (`CoreAI.Vision.CameraLlmTool`) has five
+functions: `camera_capture` (alias `screenshot`), `camera_look` (now with a point target `targetX/Y/Z` and
+`fov`), the new `camera_orbit`, and `camera_list`, all with new descriptions; the prompt's tool list names
+`camera_orbit`. `BenchmarkEnvironment.CameraTool(roleId, allowFreeCamera = false)` builds the service with
+`AgentCameraOptions.AllowFreeCamera = false`, so the model moves only the preview camera the visual world
+marks with `CoreAiAgentCamera`, as in 2.0, and a scene keeps one agent camera (the parallel probes check
+it). Every service a scenario creates is disposed in the scenario teardown (`DisposeCameraServices`),
+which destroys any free camera a scenario that opted in has created. The text G6 and the other groups are
+unchanged, so 2.0 results other than a vision G6 stay comparable (`CHANGED_SCENARIOS` in
+`tools/benchmark_chart.py`).
 
 ## Recorded ideas (not yet implemented)
 
@@ -289,7 +308,9 @@ With `COREAI_BENCHMARK_TARGETS` set (or `-coreAiBenchmarkTargets`, or enabled ro
 **Parallel targets** foldout), the same test runs several targets at once
 (`GameCreationBenchmarkParallelSuite.cs`). `BenchmarkTargetList` (core) parses a JSON array, compact
 `label|model|baseUrl|apiKey|effort` entries separated by `;` or new lines, or `@file`; `env:VAR` keys are read
-from the environment, and duplicate display names get `#2`, `#3` labels. `COREAI_BENCHMARK_PARALLEL`
+from the environment, and duplicate handles get `#2`, `#3` labels. A target's optional JSON `displayName`
+names its reports (their `modelId`) while the label stays the handle for artifacts and the OnlyTargets
+filter; without one the label names the report, as before. `COREAI_BENCHMARK_PARALLEL`
 (`-coreAiBenchmarkParallel`) caps concurrency; empty or `0` runs all targets. Each target gets its own
 HTTP client (`PlayModeProductionLikeLlmFactory.TryCreateForEndpoint`), settings asset, report, progress
 handle (`BenchmarkProgress.BeginRun`, with a per-target stop) and artifacts named

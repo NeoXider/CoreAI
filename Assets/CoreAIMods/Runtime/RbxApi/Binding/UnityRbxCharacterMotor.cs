@@ -43,7 +43,20 @@ namespace CoreAI.Mods.Rbx.Binding
         private readonly float _groundProbeOrigin;
         private readonly Func<float> _worldGravityMetresPerSecondSquared;
         private float _walkSpeedMetres = RbxSpace.LengthToUnity((float)RbxHumanoid.DefaultWalkSpeed);
+        private double _walkSpeedStuds = RbxHumanoid.DefaultWalkSpeed;
         private Vector3? _targetMetres;
+        private RbxVector3 _moveDirectionStuds = RbxVector3.Zero;
+        private bool _flying;
+        private bool _noclip;
+
+        /// <summary>Flight speed as a multiple of <c>WalkSpeed</c> (default 2, creative-mode feel).</summary>
+        public double FlySpeedMultiplier { get; set; } = 2d;
+
+        /// <summary>How fast flight reaches its target velocity, in studs per second squared.</summary>
+        public double FlightAccelerationStuds { get; set; } = RbxCharacterControlMath.DefaultFlightAccelerationStuds;
+
+        /// <inheritdoc />
+        public bool IsFlying => _flying;
 
         /// <summary>Drives an existing Rigidbody as a character.</summary>
         /// <param name="body">The Rigidbody this motor moves.</param>
@@ -131,7 +144,55 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <inheritdoc />
         public void SetWalkSpeed(double studsPerSecond)
         {
+            _walkSpeedStuds = studsPerSecond;
             _walkSpeedMetres = RbxSpace.LengthToUnity((float)studsPerSecond);
+        }
+
+        /// <inheritdoc />
+        /// <remarks>
+        /// WHY a direction cancels the walk target: Move is the player's input and MoveTo a scripted
+        /// destination; the Humanoid already ends the MoveTo, and the motor must not keep chasing it.
+        /// </remarks>
+        public void Move(RbxVector3 directionStuds)
+        {
+            bool wasMoving = _moveDirectionStuds.Magnitude > 1e-4f;
+            _moveDirectionStuds = directionStuds;
+            bool moving = directionStuds.Magnitude > 1e-4f;
+            if (moving)
+            {
+                _targetMetres = null;
+                return;
+            }
+
+            if (wasMoving && !_flying && _body != null && !_body.isKinematic)
+            {
+                Vector3 stopped = _body.linearVelocity;
+                stopped.x = 0f;
+                stopped.z = 0f;
+                _body.linearVelocity = stopped;
+            }
+        }
+
+        /// <inheritdoc />
+        public bool SetFlying(bool flying)
+        {
+            _flying = flying;
+            if (!flying)
+            {
+                SetNoclip(false);
+            }
+
+            return true;
+        }
+
+        /// <inheritdoc />
+        public void SetNoclip(bool noclip)
+        {
+            _noclip = noclip && _flying;
+            if (_body != null)
+            {
+                _body.detectCollisions = !_noclip;
+            }
         }
 
         /// <inheritdoc />
@@ -191,12 +252,43 @@ namespace CoreAI.Mods.Rbx.Binding
         /// position, so the physics step itself does the integrating. The parameter exists for
         /// host motors that do integrate.
         /// </remarks>
-        public void Step(double deltaSeconds) => Step();
+        public void Step(double deltaSeconds)
+        {
+            if (_flying)
+            {
+                StepFlight(deltaSeconds);
+                return;
+            }
+
+            Step();
+        }
 
         /// <summary>Advances the walk by one fixed step. Call from the fixed-step pump.</summary>
         public void Step()
         {
-            if (_body == null || _body.isKinematic || !_targetMetres.HasValue)
+            if (_flying)
+            {
+                StepFlight(Time.fixedDeltaTime);
+                return;
+            }
+
+            if (_body == null || _body.isKinematic)
+            {
+                return;
+            }
+
+            if (_moveDirectionStuds.Magnitude > 1e-4f)
+            {
+                Vector3 direction = RbxSpace.DirectionToUnity(
+                    new RbxVector3(_moveDirectionStuds.X, 0f, _moveDirectionStuds.Z));
+                Vector3 walking = _body.linearVelocity;
+                walking.x = direction.x * _walkSpeedMetres;
+                walking.z = direction.z * _walkSpeedMetres;
+                _body.linearVelocity = walking;
+                return;
+            }
+
+            if (!_targetMetres.HasValue)
             {
                 return;
             }
@@ -210,6 +302,31 @@ namespace CoreAI.Mods.Rbx.Binding
             velocity.x = planar.x;
             velocity.z = planar.z;
             _body.linearVelocity = velocity;
+        }
+
+        /// <summary>
+        /// One flight step: the velocity eases toward the Move direction times the flight speed, and
+        /// the world's gravity on this body is cancelled for the step.
+        /// </summary>
+        /// <remarks>
+        /// WHY gravity is cancelled with an opposite acceleration instead of being skipped: the
+        /// physics port adds gravity to every bound body in the same fixed step, in an order this
+        /// motor does not control; equal and opposite accelerations sum to zero whichever runs first.
+        /// </remarks>
+        private void StepFlight(double deltaSeconds)
+        {
+            if (_body == null || _body.isKinematic)
+            {
+                return;
+            }
+
+            float flySpeed = (float)(_walkSpeedStuds * FlySpeedMultiplier);
+            RbxVector3 current = RbxSpace.VelocityFromUnity(_body.linearVelocity);
+            RbxVector3 next = RbxCharacterControlMath.StepFlightVelocity(
+                current, _moveDirectionStuds * flySpeed, FlightAccelerationStuds, deltaSeconds);
+            _body.linearVelocity = RbxSpace.VelocityToUnity(next);
+            float gravity = _worldGravityMetresPerSecondSquared();
+            _body.AddForce(new Vector3(0f, Mathf.Abs(gravity), 0f), ForceMode.Acceleration);
         }
     }
 }

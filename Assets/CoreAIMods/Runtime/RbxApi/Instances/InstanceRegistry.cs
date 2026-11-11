@@ -168,6 +168,7 @@ namespace CoreAI.Mods.Rbx.Instances
         private IInstanceRegistrationAdmission[] _registrationAdmissions =
             Array.Empty<IInstanceRegistrationAdmission>();
         private MutationEnvelopeScope _mutationEnvelopeScope;
+        private readonly Stack<MutationEnvelopeScope> _pooledEnvelopeScopes = new();
         private ReplicationApplyScope _replicationApplyScope;
         private readonly List<PendingRevisionAdvance> _pendingRevisionAdvances = new();
         private int _mutationGateDepth;
@@ -641,10 +642,50 @@ namespace CoreAI.Mods.Rbx.Instances
                 anchor.Id,
                 ServerGeneratedOperationId,
                 anchor.Revision);
-            using (BeginMutationEnvelopeScope(
-                       envelope, actorIsUnrestricted, actorWorldId))
+            // WHY a pooled scope here and not BeginMutationEnvelopeScope: every scheduler resume and legacy
+            // dispatch of an actor's mods opens one, and a fresh scope object per resume was most of what an
+            // event dispatch still allocated; this scope never leaves the method, so reusing it is safe.
+            MutationEnvelopeScope scope = RentEnvelopeScope(envelope, actorIsUnrestricted, actorWorldId);
+            try
             {
                 return ApplyMutationCore(envelope, mutation, true);
+            }
+            finally
+            {
+                scope.Dispose();
+                ReturnEnvelopeScope(scope);
+            }
+        }
+
+        private const int MaxPooledEnvelopeScopes = 8;
+
+        private MutationEnvelopeScope RentEnvelopeScope(MutationEnvelope envelope, bool actorIsUnrestricted,
+            string actorWorldId)
+        {
+            MutationEnvelopeScope scope;
+            if (_pooledEnvelopeScopes.Count > 0)
+            {
+                scope = _pooledEnvelopeScopes.Pop();
+                scope.Reset(this, envelope, actorIsUnrestricted, actorWorldId, _mutationEnvelopeScope);
+            }
+            else
+            {
+                scope = new MutationEnvelopeScope(this, envelope, actorIsUnrestricted, actorWorldId,
+                    _mutationEnvelopeScope);
+            }
+
+            _mutationEnvelopeScope = scope;
+            return scope;
+        }
+
+        private void ReturnEnvelopeScope(MutationEnvelopeScope scope)
+        {
+            // WHY only a scope the dispose really closed: one left on the ambient stack (a nested scope that
+            // broke LIFO) is still referenced there and must not be re-armed under it.
+            if (!ReferenceEquals(_mutationEnvelopeScope, scope)
+                && _pooledEnvelopeScopes.Count < MaxPooledEnvelopeScopes)
+            {
+                _pooledEnvelopeScopes.Push(scope);
             }
         }
 
@@ -1687,8 +1728,18 @@ namespace CoreAI.Mods.Rbx.Instances
             return ReferenceEquals(instance, _sceneRoot) || instance.IsDescendantOf(_sceneRoot);
         }
 
+        /// <summary>
+        /// Raised synchronously after an instance's Parent changed (the GUI presenter re-reads which ScreenGuis
+        /// are on screen from it); no Lua code runs here.
+        /// </summary>
+        internal event Action<RbxInstance> ParentChanged;
+
+        /// <summary>The GUI layout of this world (its presenter), or null when nothing draws GUI.</summary>
+        internal IRbxGuiLayoutSource GuiLayout { get; set; }
+
         internal void OnParentChanged(RbxInstance instance, bool wasInScene)
         {
+            ParentChanged?.Invoke(instance);
             bool isInScene = IsInScene(instance);
             if (wasInScene == isInScene)
             {

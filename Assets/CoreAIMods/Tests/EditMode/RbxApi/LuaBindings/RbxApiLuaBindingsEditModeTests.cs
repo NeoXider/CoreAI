@@ -1164,7 +1164,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             // WHY: top-of-file GetService calls must not block unrelated script initialization;
             // the loud failure belongs to the line that first uses the missing service surface.
-            // TweenService landed in MVP8 slice 8.4, so DataStoreService (MVP9) is the
+            // TweenService landed in MVP8 slice 8.4, so DataStoreService (MVP16) is the
             // deferred-stub probe now.
             stack.Runtime.LoadMod("resolve-only", @"
                 local DataStoreService = game:GetService('DataStoreService')
@@ -1176,7 +1176,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 DataStoreService:GetDataStore()");
             StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
             StringAssert.Contains("DataStoreService:GetDataStore", FullText(ex));
-            StringAssert.Contains("MVP9", FullText(ex));
+            StringAssert.Contains("MVP16", FullText(ex));
         }
 
         [Test]
@@ -1904,8 +1904,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             "local part = Instance.new('Part'); part.Massless = true",
             "BasePart.Massless")]
         [TestCase(
-            "local value = game:GetService('Lighting').ClockTime",
-            "Lighting.ClockTime")]
+            "local part = Instance.new('Part'); local value = part.CenterOfMass",
+            "BasePart.CenterOfMass")]
         public void Lua_BacklogMember_RaisesUnassignedRungStatus(string code, string feature)
         {
             LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
@@ -1914,19 +1914,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             StringAssert.Contains("NOT_IMPLEMENTED", fullText);
             StringAssert.Contains(
                 feature + " is a known Rbx member, but no roadmap rung is assigned.", fullText);
-            StringAssert.DoesNotContain("is planned for", fullText);
-        }
-
-        [Test]
-        public void Lua_UnsupportedTerrain_RaisesDistinctUnsupportedStatus()
-        {
-            LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
-            Exception ex = LoadFails(stack, "m", "local value = workspace.Terrain");
-            string fullText = FullText(ex);
-            StringAssert.Contains("NOT_IMPLEMENTED", fullText);
-            StringAssert.Contains(
-                "Workspace.Terrain is a known Rbx member deliberately unsupported by CoreAI.",
-                fullText);
             StringAssert.DoesNotContain("is planned for", fullText);
         }
 
@@ -2137,7 +2124,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 notImplementedStack, "stub", "game:BindToClose(function() end)");
             StringAssert.Contains("NOT_IMPLEMENTED", FullText(notImplemented));
             StringAssert.Contains("game:BindToClose", FullText(notImplemented));
-            StringAssert.Contains("MVP5", FullText(notImplemented));
+            StringAssert.Contains("MVP16", FullText(notImplemented));
         }
 
         [Test]
@@ -2489,8 +2476,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         [TestCase("NumberSequence")]
         [TestCase("ColorSequence")]
         [TestCase("NumberRange")]
-        [TestCase("Ray")]
-        [TestCase("Region3")]
         [TestCase("Rect")]
         [TestCase("PhysicalProperties")]
         [TestCase("OverlapParams")]
@@ -2718,6 +2703,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 { "Workspace.CurrentCamera", "the one world camera; assigning another is the loud stub" },
                 { "Workspace.SignalBehavior", "Deferred is the only mode" },
                 { "Player.UserId", "fixed when the player is admitted" },
+                { "Camera.ViewportSize", "read-only; follows the host viewport" },
                 { "Players.LocalPlayer", "fixed for the reading mod context" },
                 { "Tween.Instance", "fixed by TweenService:Create" },
                 { "Tween.TweenInfo", "fixed by TweenService:Create" }
@@ -2776,6 +2762,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                     "t.CameraType = Enum.CameraType.Scriptable; t.CameraType = Enum.CameraType.Scriptable", 1),
                 ("Camera.CameraSubject", "workspace.CurrentCamera",
                     "local s = " + AnchoredPartLua + "; t.CameraSubject = s; t.CameraSubject = s", 1),
+                ("Camera.FieldOfView", "workspace.CurrentCamera",
+                    "t.FieldOfView = 40; t.FieldOfView = 40", 1),
                 ("Humanoid.Health", "Instance.new('Humanoid')", "t.Health = 50; t.Health = 50", 1),
                 ("Humanoid.MaxHealth", "Instance.new('Humanoid')", "t.MaxHealth = 150; t.MaxHealth = 150", 1),
                 ("Humanoid.WalkSpeed", "Instance.new('Humanoid')", "t.WalkSpeed = 20; t.WalkSpeed = 20", 1),
@@ -2798,6 +2786,13 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                     "t.DisplayName = 'Renamed'; t.DisplayName = 'Renamed'", 1),
                 ("Player.Character", "game:GetService('Players'):GetPlayers()[1]",
                     "local m = Instance.new('Model'); t.Character = m; t.Character = m", 1),
+                ("Player.CameraMode", "game:GetService('Players'):GetPlayers()[1]",
+                    "t.CameraMode = Enum.CameraMode.LockFirstPerson; "
+                    + "t.CameraMode = Enum.CameraMode.LockFirstPerson", 1),
+                ("Player.CameraMaxZoomDistance", "game:GetService('Players'):GetPlayers()[1]",
+                    "t.CameraMaxZoomDistance = 50; t.CameraMaxZoomDistance = 50", 1),
+                ("Player.CameraMinZoomDistance", "game:GetService('Players'):GetPlayers()[1]",
+                    "t.CameraMinZoomDistance = 2; t.CameraMinZoomDistance = 2", 1),
                 ("Players.CharacterAutoLoads", "game:GetService('Players')",
                     "t.CharacterAutoLoads = false; t.CharacterAutoLoads = false", 1),
                 ("Players.RespawnTime", "game:GetService('Players')",
@@ -2806,6 +2801,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 ("UserInputService.MouseBehavior", "game:GetService('UserInputService')",
                     "t.MouseBehavior = Enum.MouseBehavior.LockCenter; "
                     + "t.MouseBehavior = Enum.MouseBehavior.LockCenter", 1),
+                ("UserInputService.MouseDeltaSensitivity", "game:GetService('UserInputService')",
+                    "t.MouseDeltaSensitivity = 2; t.MouseDeltaSensitivity = 2", 1),
+                ("StarterPlayer.DevComputerMovementMode", "game:GetService('StarterPlayer')",
+                    "t.DevComputerMovementMode = Enum.DevComputerMovementMode.Scriptable; "
+                    + "t.DevComputerMovementMode = Enum.DevComputerMovementMode.Scriptable", 1),
+                ("StarterPlayer.CameraMode", "game:GetService('StarterPlayer')",
+                    "t.CameraMode = Enum.CameraMode.LockFirstPerson; "
+                    + "t.CameraMode = Enum.CameraMode.LockFirstPerson", 1),
+                ("StarterPlayer.CameraMaxZoomDistance", "game:GetService('StarterPlayer')",
+                    "t.CameraMaxZoomDistance = 50; t.CameraMaxZoomDistance = 50", 1),
+                ("StarterPlayer.CameraMinZoomDistance", "game:GetService('StarterPlayer')",
+                    "t.CameraMinZoomDistance = 2; t.CameraMinZoomDistance = 2", 1),
                 ("ClickDetector.MaxActivationDistance", "Instance.new('ClickDetector')",
                     "t.MaxActivationDistance = 10; t.MaxActivationDistance = 10", 1),
                 ("MaterialVariant.BaseMaterial", "Instance.new('MaterialVariant')",
@@ -2820,6 +2827,23 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                     "t.MetalnessMap = 'rbxassetid://4'; t.MetalnessMap = 'rbxassetid://4'", 1),
                 ("MaterialVariant.StudsPerTile", "Instance.new('MaterialVariant')",
                     "t.StudsPerTile = 4; t.StudsPerTile = 4", 1),
+                // WHY 2: the ClockTime row below moves the same clock, so TimeOfDay changes again then.
+                ("Lighting.TimeOfDay", "game:GetService('Lighting')",
+                    "t.TimeOfDay = '05:00:00'; t.TimeOfDay = '05:00:00'", 2),
+                ("Lighting.ClockTime", "game:GetService('Lighting')", "t.ClockTime = 3; t.ClockTime = 3", 1),
+                ("Lighting.GeographicLatitude", "game:GetService('Lighting')",
+                    "t.GeographicLatitude = 10; t.GeographicLatitude = 10", 1),
+                ("Lighting.Brightness", "game:GetService('Lighting')", "t.Brightness = 2; t.Brightness = 2", 1),
+                ("Lighting.Ambient", "game:GetService('Lighting')",
+                    "t.Ambient = Color3.new(0, 0, 1); t.Ambient = Color3.new(0, 0, 1)", 1),
+                ("Lighting.OutdoorAmbient", "game:GetService('Lighting')",
+                    "t.OutdoorAmbient = Color3.new(1, 0, 0); t.OutdoorAmbient = Color3.new(1, 0, 0)", 1),
+                ("Light.Brightness", "Instance.new('PointLight')", "t.Brightness = 3; t.Brightness = 3", 1),
+                ("Light.Color", "Instance.new('PointLight')",
+                    "t.Color = Color3.new(1, 0.5, 0); t.Color = Color3.new(1, 0.5, 0)", 1),
+                ("Light.Enabled", "Instance.new('PointLight')", "t.Enabled = false; t.Enabled = false", 1),
+                ("Light.Shadows", "Instance.new('PointLight')", "t.Shadows = true; t.Shadows = true", 1),
+                ("PointLight.Range", "Instance.new('PointLight')", "t.Range = 12; t.Range = 12", 1),
                 ("ValueBase.Value", "Instance.new('IntValue')", "t.Value = 5; t.Value = 5", 1),
                 ("Tween.PlaybackState",
                     "game:GetService('TweenService'):Create(" + AnchoredPartLua

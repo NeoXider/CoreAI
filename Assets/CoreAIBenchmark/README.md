@@ -23,7 +23,7 @@ The benchmark answers the practical production question: is this model usable fo
 
 Groups are implemented as real PlayMode benchmark scenarios under `Assets/CoreAIBenchmark/Tests/PlayMode/Benchmarks`. Only G6 (the free-build castle) captures a hero scene screenshot, because the built scene is itself the result; all other groups — including G7 and the extreme scenarios — are graded purely through world state, logic execution and tool-call traces, so no screenshot is taken for them.
 
-Suite v2.0 has 35 scenarios (36 with the G6 image-feedback twin): 28 regular scenarios and 7 extreme ones.
+Suite v2.1 has 35 scenarios (36 with the G6 image-feedback twin): 28 regular scenarios and 7 extreme ones.
 
 ### Extreme Tier
 
@@ -103,6 +103,8 @@ Suite v2.0 adds the [extreme tier](#extreme-tier), regrades G6 on build geometry
 - **G8.** A scale-only change that also sets a single position or rotation axis is rejected. `list_animations` counts as observation. Extra or wrong mutations are charged per occurrence instead of once.
 - **Recorder.** `list_objects` reports each object's real position (seeded or last recorded) instead of the origin, and seeded described scenes carry positions. A `spawn_batch` item inherits the batch-level rotation, scale, parent and `worldPositionStays` when it sets none, as the production executor does.
 
+Suite v2.1 changes only the G6 image-feedback twin (`g6_free_build_vision`). Its camera tool has five functions instead of four: the new `camera_orbit` (yaw, pitch and distance around an object or a point), and `camera_look` also takes a point target (`targetX`, `targetY`, `targetZ`) and `fov`. Every camera function and the tool have new descriptions, and the prompt's list of available tools names `camera_orbit`. Captures keep their size and JPEG quality. The benchmark keeps the free agent camera off (`BenchmarkEnvironment.CameraTool` builds its service with `AllowFreeCamera = false` unless a scenario asks for one), so the model still moves only the preview camera the visual world marks for it, and every camera service is disposed with its scenario. The text G6 and all other groups are untouched, so a v2.0 score stays comparable with v2.1 except a vision G6 score; `tools/benchmark_chart.py --carry-over 2.0` charts v2.0 rows in a v2.1 leaderboard with their vision G6 result excluded.
+
 Bonus is separate from the comparable base score. A scenario can earn up to 20 bonus points only when its base score is at least 90, and the bonus rewards **correctness only** — being more right than the pass bar. Speed/efficiency (tokens and time) is **reported as a tok/s metric, never scored**, so a merely-faster model (e.g. a "spark" tier) cannot look smarter than an equally-correct but slower one. Reports show `Total = Base + Bonus`, but suite rankings compare base score.
 
 Verdicts:
@@ -155,9 +157,9 @@ The window has four tabs, plus toolbar **Open folder** / **Open report** shortcu
 
 | Tab | Purpose |
 |---|---|
-| Run | Choose model/base URL overrides, scenario groups (G1-G8), repetitions, retries, timeout override, and start a run. The **Parallel targets (multi-model run)** foldout holds a list of targets (label, model, base URL, API key or `env:VAR`), an import box for the compact or JSON list, and a **Parallel (0 = all)** cap; with at least one enabled target, **Run** benchmarks every target at once. While a run is active a **Stop (save partial)** button appears: it takes effect at retry boundaries (no waiting out every timeout attempt), saves a partial report, and stop-aborted attempts are never scored as model failures. In a multi-target run each target has its own progress row and **Stop** button. |
+| Run | Choose model/base URL overrides, scenario groups (G1-G8), repetitions, retries, timeout override, and start a run. The **Parallel targets (multi-model run)** foldout holds a list of targets (label, display name, model, base URL, API key or `env:VAR`), an import box for the compact or JSON list, and a **Parallel (0 = all)** cap; with at least one enabled target, **Run** benchmarks every target at once. While a run is active a **Stop (save partial)** button appears: it takes effect at retry boundaries (no waiting out every timeout attempt), saves a partial report, and stop-aborted attempts are never scored as model failures. In a multi-target run each target has its own progress row and **Stop** button. |
 | History | Browse past runs grouped by model, inspect dimension/role scores, open reports, and view captured scene thumbnails. |
-| Models | A sortable leaderboard of the newest run per model, ranked by suite score, speed, pass-rate, or game-fit. |
+| Models | A sortable leaderboard of the newest run per model, ranked by suite score, speed, pass-rate, or game-fit. A run with no graded scenario is listed last, unranked, with "no graded scenarios" instead of a score. |
 | Compare | Select the newest JSON reports per model, optionally pin one model first, and build `COMPARISON.md`, `COMPARISON.svg`, `COMPARISON_groups.svg` and `COMPARISON_extreme.svg`. |
 
 For a one-click run, use:
@@ -165,6 +167,8 @@ For a one-click run, use:
 `CoreAI/Benchmarks/Run Game-Creation Benchmark`
 
 The one-click menu reuses the last saved benchmark-window settings. Results are written to `TestResults/CoreAI/Benchmarks/BENCHMARK_<yyyyMMdd_HHmmss>_<model>.md` and `.json`. In a multi-target run all targets share the run id, and a target whose label differs from its model id gets the stem `BENCHMARK_<runId>_<model>__<label>`.
+
+A target has three names. The **model id** is what the provider is asked for. The **label** is a short handle: file names, checkpoint slugs and the `OnlyTargets` filter use it (the model id when there is none). The optional **display name** is what a reader sees: the report records it as its `modelId`, and model cards, comparisons and the leaderboard chart print it, while the backend field keeps the provider's model id (`OpenAiCompatibleHttp (model opencode/beam-free)`). Without a display name the label names the report, exactly as before display names existed, so existing target lists and resumed runs are unchanged; give one whenever the label is a short handle (`beam`), or that handle becomes the report's model id.
 
 Set `COREAI_BENCHMARK_REASONING_EFFORT` or batchmode `-coreAiBenchmarkReasoningEffort` to
 `none`, `low`, `medium`, `high`, or `xhigh`. Unset means the provider default. Reports record the
@@ -207,7 +211,7 @@ Environment shaping is also supported:
 | `COREAI_BENCHMARK_REPS` | Repetitions per scenario (averaged). Use 3-5 to smooth out a noisy local-model run. G1's extreme scenario, G6 and G7 always run once. |
 | `COREAI_BENCHMARK_RETRIES` | Retries after a hard failure that produced no measurement (provider crash, timeout, dropped connection), 0-3; default `1`. G6 is never retried. |
 | `COREAI_BENCHMARK_SUITE_BUDGET` | Soft time budget for the whole run, in seconds. A scenario repetition starts only when its worst case (every attempt at its full timeout) still fits; otherwise the run stops and writes the report for what finished. Default `6000` for a single model; a multi-target run shares one clock and defaults to the ceiling. The value is clamped to the 6-hour NUnit timeout minus a report margin of 300 seconds plus 30 seconds per extra target. |
-| `COREAI_BENCHMARK_TARGETS` | Target list for a parallel multi-model run; empty means the single configured model. A JSON array (`[{"label":"q4","model":"qwen3.5-4b","baseUrl":"http://127.0.0.1:8831/v1","apiKey":"env:KEY","reasoningEffort":"high","extraBody":{"top_k":20}}]`, `"enabled": false` skips an entry), compact `label\|model\|baseUrl\|apiKey\|effort` entries separated by `;` or new lines (label, key and effort optional), or `@path` to read either form from a file. Without a key, retain the empty field: `local\|model\|http://127.0.0.1:8831/v1\|\|high` (`baseUrl\|\|high`). `env:VAR` reads the key from an environment variable. A target without a key reuses the configured test key (`COREAI_TEST_API_KEY` or the local config file) only when its base URL is the configured one. Optional JSON-only `temperature` (alias `temp`, number 0..2) sets an explicit temperature; omitted or `null` uses the provider/model default. The compact form has no sixth field. Streaming and native tools follow `COREAI_TEST_STREAMING` / `COREAI_TEST_NATIVE_TOOLS`. Same as `-coreAiBenchmarkTargets`. |
+| `COREAI_BENCHMARK_TARGETS` | Target list for a parallel multi-model run; empty means the single configured model. A JSON array (`[{"label":"q4","model":"qwen3.5-4b","baseUrl":"http://127.0.0.1:8831/v1","apiKey":"env:KEY","reasoningEffort":"high","extraBody":{"top_k":20}}]`, `"enabled": false` skips an entry), compact `label\|model\|baseUrl\|apiKey\|effort` entries separated by `;` or new lines (label, key and effort optional), or `@path` to read either form from a file. Without a key, retain the empty field: `local\|model\|http://127.0.0.1:8831/v1\|\|high` (`baseUrl\|\|high`). `env:VAR` reads the key from an environment variable. A target without a key reuses the configured test key (`COREAI_TEST_API_KEY` or the local config file) only when its base URL is the configured one. Optional JSON-only `temperature` (alias `temp`, number 0..2) sets an explicit temperature; omitted or `null` uses the provider/model default. Optional JSON-only `displayName` (alias `display_name`) is the name reports show, e.g. `{"label":"beam","displayName":"Beam Free","model":"opencode/beam-free",...}`; targets sharing a display name get `#2`, `#3`. The compact form has no sixth field. Streaming and native tools follow `COREAI_TEST_STREAMING` / `COREAI_TEST_NATIVE_TOOLS`. Same as `-coreAiBenchmarkTargets`. |
 | `COREAI_BENCHMARK_REASONING_EFFORT` | Suite-wide reasoning effort: `none`, `low`, `medium`, `high`, or `xhigh`; unset uses the provider default. Same as `-coreAiBenchmarkReasoningEffort`. A target's `reasoningEffort` overrides this default. |
 | `COREAI_BENCHMARK_PARALLEL` | How many targets run at the same time; empty, `0` or invalid means all. Same as `-coreAiBenchmarkParallel`. |
 | `COREAI_BENCHMARK_TIMEOUT` | Model timeout override in seconds for non-extreme scenarios, including G6; extreme scenarios retain their own timeout. `0`/unset uses the per-scenario default. G6 model turns are capped at 570 seconds even when this value is higher. After that the runner waits up to 5 seconds for cancellation and plans 30 seconds for capture/export (an allowance, not an enforced cap), so the suite start-gate reserves 605 seconds for a G6 build and adds the 5-second grace to every attempt of the other scenarios. |
@@ -274,8 +278,16 @@ The benchmark sets no typed values for these `extraBody` sampling fields, so the
 
 The comparison report is built from the per-model JSON files. It emits:
 
-- `COMPARISON.md` with a ranked table (suite, extreme and regular scores, pass-rate, dimension columns, efficiency/tool-error metrics), a "Scores by group" table with each group's extreme score beside its mean, an extreme-tier ranking, a Mermaid chart, and best-per-dimension highlights including the extreme tier. It warns when the reports come from different suite versions.
+- `COMPARISON.md` with a ranked table (suite, like-for-like, extreme and regular scores, pass-rate, dimension columns, efficiency/tool-error metrics), a "Scores by group" table with each group's extreme score beside its mean, an extreme-tier ranking, a Mermaid chart, and best-per-dimension highlights including the extreme tier. It warns when the reports come from different suite versions.
 - `COMPARISON.svg`, the composite chart: suite-score ranking with each model's extreme score as a diamond on the same row, a models x groups heatmap with an Extreme column, and the extreme-tier ranking.
+
+The suite score is a mean over the scenarios a run graded, so a run that lost a group to Environment failures
+is averaged over a different, usually easier, mix. When two or more models are compared, the
+**Like-for-like** column is the mean of each model's group scores over the groups every compared model
+graded, and a note above the table names those groups; compare such runs by it. A run with no graded
+scenario at all (a dead provider route, or every result excluded) is listed last with a dash for its rank
+and "no graded scenarios" for its score, and it takes no part in the like-for-like groups or the Mermaid
+chart. `ModelComparison.SharedGroups` and `ModelComparison.LikeForLikeMean` expose the same numbers to code.
 - `COMPARISON_groups.svg`, the models x groups heatmap on its own.
 - `COMPARISON_extreme.svg`, the extreme-tier ranking on its own.
 
@@ -321,6 +333,13 @@ The suite 2.0 model card is one 1600x900 image (a 3200x1800 PNG, plus its SVG tw
 
 The results card embedded in each Markdown report (`<stem>.svg`) is a smaller card with the same four tiles and group rows, dimension bars instead of the dot plot, and no role bars. The SVG cards follow the viewer's light or dark colour scheme; the PNG model card is dark.
 
+A group row reads "not graded" when the group ran but none of its results counts (Environment, Framework
+or NotGraded), and "not run" when it produced no result. A run in which no scenario was graded has no score:
+both cards, the Markdown report and the `INDEX.md` row say "no graded scenarios", every tile is unrated
+(a dash instead of `0.0/100`, no grade, no `0/0` verdicts), and the footer names the excluded results by
+cause. A run that was graded and scored zero keeps its `0.0/100` and its grade; `BenchmarkReport.HasGradedScenarios`
+tells the two apart.
+
 ![Model card radar and role bars](../../Docs/Images/example_modelcard.png)
 
 _A pre-2.0 model card (radar layout). Suite 2.0 cards use the layout described above._
@@ -344,7 +363,7 @@ _A pre-2.0 comparison chart (suite base scores only). The current `COMPARISON.sv
 
 The [README benchmark section](../../README.md#game-creation-benchmark) shows the historical suite v1.7
 frontier sweep (the same run as the frontier section below). The local-model table here is a historical
-suite v1.6 / G1-G7 baseline. Suite v2.0 runs start a separate leaderboard and must not be mixed with those
+suite v1.6 / G1-G7 baseline. Suite v2.x runs start a separate leaderboard and must not be mixed with those
 scores, with the v1.15 runs, or with the v1.7 frontier sweep, whose G6 was the earlier `world_command` castle.
 Historical example (local models, 2026-07-02 sweep):
 
@@ -473,7 +492,7 @@ per-scenario breakdown and transcript example.
 
 ## Community Leaderboard
 
-Ranked results with version-separated sections (current suite v2.0 with its first six-model run; historical v1.15 back to v1.6)
+Ranked results with version-separated sections (current suite v2.1, whose rows so far are the v2.0 runs that stay comparable except vision G6; historical v1.15 back to v1.6)
 and a public submission workflow live on the
 [community leaderboard page](../../Docs/BENCHMARK_LEADERBOARD.md). Run the suite as described in
 [How To Run](#how-to-run) above, then open a PR adding your row with the report JSON, run id,

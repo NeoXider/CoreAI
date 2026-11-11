@@ -75,6 +75,13 @@ namespace CoreAI.Ai.LuaCs
                 return;
             }
 
+            // WHY: a sub-agent's reply is a report for the lead, not a script; running Lua found in it would act
+            // outside the plan's scope and budget and schedule repair turns that Stop cannot reach.
+            if (CoreAI.Ai.SubAgents.SubAgentRequestFactory.IsSubAgentSourceTag(cmd.SourceTag))
+            {
+                return;
+            }
+
             if (!AiLuaPayloadParser.TryGetExecutableLua(cmd.JsonPayload ?? "", out string lua))
             {
                 return;

@@ -67,19 +67,18 @@ Impact: warning debt only; not a runtime regression.
 
 Fix: enable a nullable context in the affected files, or remove the nullable annotations.
 
-## `EnableLuaOnWebGl` has no effect
+## `EnableLuaOnWebGl` is obsolete
 
-Symptom: setting `enableLuaOnWebGl` to `false` on `CoreAISettingsAsset` (the field is serialized but not
-shown in the settings inspector; code reads it as `ICoreAISettings.EnableLuaOnWebGl` /
-`CoreAISettings.EnableLuaOnWebGl`) does not stop Lua in a WebGL player.
+`ICoreAISettings.EnableLuaOnWebGl`, `CoreAISettings.EnableLuaOnWebGl`, `CoreAISettingsOptions.EnableLuaOnWebGl`
+and `CoreAISettingsAsset.EnableLuaOnWebGl` are marked `[Obsolete]` (a warning, not an error) and the field is
+hidden in the settings inspector. Nothing ever read them: Lua runs through Lua-CSharp
+(`LuaCsSecureEnvironment`, `com.neoxider.coreaimods`), a managed AOT-safe runtime, in any scene that composes
+`CoreAiModsLifetimeScope` (or calls `CoreAiModsInstaller.RegisterCoreAiMods`), on WebGL as on every other
+player, so there is no WebGL Lua switch.
 
-Cause: no Lua runtime reads the setting. Lua runs through Lua-CSharp (`LuaCsSecureEnvironment`,
-`com.neoxider.coreaimods`), a managed AOT-safe runtime, in any scene that composes
-`CoreAiModsLifetimeScope` (or calls `CoreAiModsInstaller.RegisterCoreAiMods`), on WebGL as on every
-other player.
-
-Workaround: a WebGL scene that must not run Lua should not compose the mods scope (see
-[LUA_SANDBOX_SECURITY.md](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md), "Optional Module").
+To ship a WebGL build without Lua, leave the mods scope out of the scene or build without the `COREAI_LUA`
+define (see [LUA_SANDBOX_SECURITY.md](../../CoreAI/Docs/LUA_SANDBOX_SECURITY.md), "Optional Module"); to keep
+mods but stop the AI writing Lua, take the `lua-builder` tool profile off the roles.
 
 ## CAIU001 ConfigureAwait warnings in CoreAiUnity
 

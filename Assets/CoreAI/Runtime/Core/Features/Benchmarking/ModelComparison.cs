@@ -58,6 +58,14 @@ namespace CoreAI.Benchmarking
         /// <summary>True when the run graded at least one extreme-tier scenario.</summary>
         public bool HasExtreme => ExtremeScenarios > 0;
 
+        /// <summary>
+        /// False for a run in which no scenario was graded (a dead provider route, or every result excluded): its
+        /// zero numbers are absent measurements, so comparisons list it unranked instead of as a score of 0. A
+        /// summary built by hand counts as graded when it carries any count, group or positive score.
+        /// </summary>
+        public bool HasGradedScenarios =>
+            Scenarios > 0 || Pass + Partial + Fail > 0 || Groups.Count > 0 || SuiteBase > 0;
+
         /// <summary>Client-turn throughput including internal tools; legacy generation timer or session fallback.</summary>
         public double TokensPerSecond
         {
@@ -172,6 +180,9 @@ namespace CoreAI.Benchmarking
             List<string> dimKeys = DimensionOrder.Where(d => ranked.Any(m => m.Dimensions.ContainsKey(d))).ToList();
             List<string> groupKeys = GroupKeys(ranked);
             bool anyExtreme = ranked.Any(m => m.HasExtreme);
+            IReadOnlyList<string> shared = SharedGroups(ranked);
+            bool likeForLike = ranked.Count(m => m.HasGradedScenarios) >= 2;
+            int unrated = ranked.Count(m => !m.HasGradedScenarios);
 
             sb.AppendLine($"{ranked.Count} model(s), ranked by suite score; ties are broken by the extreme-tier " +
                           "score, the sub-score that still separates models once the regular tier saturates.");
@@ -184,18 +195,33 @@ namespace CoreAI.Benchmarking
                               "scores are only comparable within one suite version.");
             }
 
+            if (likeForLike)
+            {
+                sb.AppendLine();
+                sb.AppendLine(LikeForLikeNote(shared));
+            }
+
+            if (unrated > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine($"> ⚠ {unrated} model(s) have {BenchmarkReportFormatter.NoGradedScenarios} (a dead " +
+                              "provider route or every result excluded): they are listed unranked, never as a score of 0.");
+            }
+
             sb.AppendLine();
             sb.AppendLine("![Game-Creation Benchmark](COMPARISON.svg)");
             sb.AppendLine();
 
-            sb.Append("| # | Model | Suite | Extreme | Regular | Pass-rate | P/PA/F |");
+            sb.Append(likeForLike
+                ? "| # | Model | Suite | Like-for-like | Extreme | Regular | Pass-rate | P/PA/F |"
+                : "| # | Model | Suite | Extreme | Regular | Pass-rate | P/PA/F |");
             foreach (string d in dimKeys)
             {
                 sb.Append($" {Short(d)} |");
             }
 
             sb.AppendLine(" Eff | Tool-err | Tokens | Run |");
-            sb.Append("|---:|---|---:|---:|---:|---:|---|");
+            sb.Append(likeForLike ? "|---:|---|---:|---:|---:|---:|---:|---|" : "|---:|---|---:|---:|---:|---:|---|");
             foreach (string _ in dimKeys)
             {
                 sb.Append("---:|");
@@ -203,14 +229,21 @@ namespace CoreAI.Benchmarking
 
             sb.AppendLine("---:|---:|---:|---|");
 
+            int rank = 0;
             for (int i = 0; i < ranked.Count; i++)
             {
                 ModelSummary m = ranked[i];
                 // WHY: a summary built without tier data (an older host parser) has no regular count; a dash
                 // there is honest where 0 would read as a failed tier.
                 string regular = m.RegularScenarios > 0 ? F(m.RegularBase) : "–";
-                sb.Append($"| {i + 1} | `{m.ModelId}` | **{F(m.SuiteBase)}** | {ExtremeCell(m)} | " +
-                          $"{regular} | {F(m.PassRate * 100)}% | {m.Pass}/{m.Partial}/{m.Fail} |");
+                string rankCell = m.HasGradedScenarios ? (++rank).ToString(CultureInfo.InvariantCulture) : "–";
+                string suiteCell = m.HasGradedScenarios
+                    ? $"**{F(m.SuiteBase)}**"
+                    : $"n/a ({BenchmarkReportFormatter.NoGradedScenarios})";
+                string passRate = m.HasGradedScenarios ? $"{F(m.PassRate * 100)}%" : "–";
+                string likeCell = likeForLike ? $" {LikeForLikeCell(m, shared)} |" : string.Empty;
+                sb.Append($"| {rankCell} | `{m.ModelId}` | {suiteCell} |{likeCell} {ExtremeCell(m)} | " +
+                          $"{regular} | {passRate} | {m.Pass}/{m.Partial}/{m.Fail} |");
                 foreach (string d in dimKeys)
                 {
                     sb.Append($" {(m.Dimensions.TryGetValue(d, out double v) ? F(v) : "–")} |");
@@ -268,8 +301,10 @@ namespace CoreAI.Benchmarking
                 for (int i = 0; i < byExtreme.Count; i++)
                 {
                     ModelSummary m = byExtreme[i];
-                    sb.AppendLine($"| {i + 1} | `{m.ModelId}` | **{F(m.ExtremeBase)}** | " +
-                                  $"{m.ExtremePass}/{m.ExtremeScenarios} | {F(m.SuiteBase)} |");
+                    string extremeCell = m.HasExtreme ? $"**{F(m.ExtremeBase)}**" : "–";
+                    string suiteCell = m.HasGradedScenarios ? F(m.SuiteBase) : "n/a";
+                    sb.AppendLine($"| {i + 1} | `{m.ModelId}` | {extremeCell} | " +
+                                  $"{m.ExtremePass}/{m.ExtremeScenarios} | {suiteCell} |");
                 }
             }
 
@@ -303,6 +338,74 @@ namespace CoreAI.Benchmarking
             }
 
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// The groups every compared model graded at least one scenario of, canonical G1–G8 order first. Models
+        /// without a graded scenario take no part (they have no groups to share). Empty when no model is graded
+        /// or no group is common to all of them.
+        /// </summary>
+        public static IReadOnlyList<string> SharedGroups(IReadOnlyList<ModelSummary> models)
+        {
+            List<ModelSummary> rated = (models ?? Array.Empty<ModelSummary>())
+                .Where(m => m != null && m.HasGradedScenarios).ToList();
+            if (rated.Count == 0)
+            {
+                return Array.Empty<string>();
+            }
+
+            HashSet<string> shared = new(rated[0].Groups.Keys, StringComparer.Ordinal);
+            foreach (ModelSummary m in rated.Skip(1))
+            {
+                shared.IntersectWith(m.Groups.Keys);
+            }
+
+            List<string> ordered = BenchmarkInfo.Groups.Where(shared.Contains).ToList();
+            ordered.AddRange(shared.Where(g => !BenchmarkInfo.Groups.Contains(g)).OrderBy(g => g, StringComparer.Ordinal));
+            return ordered;
+        }
+
+        /// <summary>
+        /// The like-for-like mean of <paramref name="model"/>: the mean of its group scores over
+        /// <paramref name="sharedGroups"/> (each group weighs the same, as on the leaderboard). Null when the model
+        /// has no graded scenario, the list is empty, or the model lacks one of the groups.
+        /// </summary>
+        public static double? LikeForLikeMean(ModelSummary model, IReadOnlyList<string> sharedGroups)
+        {
+            if (model == null || !model.HasGradedScenarios || sharedGroups == null || sharedGroups.Count == 0)
+            {
+                return null;
+            }
+
+            double sum = 0;
+            foreach (string group in sharedGroups)
+            {
+                if (!model.Groups.TryGetValue(group, out double score))
+                {
+                    return null;
+                }
+
+                sum += score;
+            }
+
+            return sum / sharedGroups.Count;
+        }
+
+        /// <summary>The sentence that names the groups behind the like-for-like column.</summary>
+        public static string LikeForLikeNote(IReadOnlyList<string> sharedGroups)
+        {
+            return sharedGroups == null || sharedGroups.Count == 0
+                ? "> ⚠ No group was graded by every compared model, so there is no like-for-like mean; the suite " +
+                  "scores below are means over different scenario sets."
+                : $"> Like-for-like = the mean of the group scores over {string.Join(", ", sharedGroups)}, the " +
+                  "groups every compared model graded. Compare models that ran different groups by it, not by " +
+                  "the suite score.";
+        }
+
+        private static string LikeForLikeCell(ModelSummary m, IReadOnlyList<string> shared)
+        {
+            double? value = LikeForLikeMean(m, shared);
+            return value.HasValue ? F(value.Value) : "–";
         }
 
         public static string ToComparisonSvg(IReadOnlyList<ModelSummary> models)
@@ -398,7 +501,10 @@ namespace CoreAI.Benchmarking
             return y + 56;
         }
 
-        /// <summary>Model label column: id (bold) above a muted sub-line; an ink rule marks the pinned model.</summary>
+        /// <summary>
+        /// Model label column: id (bold) above a muted sub-line; an ink rule marks the pinned model. A
+        /// <paramref name="rank"/> of 0 prints a dash: the row is listed but not ranked.
+        /// </summary>
         private static void ModelLabel(BenchmarkCardScene sc, ModelSummary m, int rank, double top, double rowH,
             bool pinned, string sub)
         {
@@ -407,8 +513,8 @@ namespace CoreAI.Benchmarking
                 sc.Rect(Pad - 10, top + 5, 3, rowH - 10, CardInk.Ink, 1.5);
             }
 
-            sc.Text(Pad + 18, top + rowH / 2 - 2, rank.ToString(CultureInfo.InvariantCulture), 12, CardInk.Muted,
-                CardAnchor.End).Tabular = true;
+            sc.Text(Pad + 18, top + rowH / 2 - 2, rank > 0 ? rank.ToString(CultureInfo.InvariantCulture) : "–", 12,
+                CardInk.Muted, CardAnchor.End).Tabular = true;
             sc.Text(Pad + 28, top + rowH / 2 - 2, m.ModelId, 13, CardInk.Ink, CardAnchor.Start, true, LabelW - 36);
             sc.Text(Pad + 28, top + rowH / 2 + 13, pinned ? "pinned · " + sub : sub, 11, CardInk.Muted,
                 CardAnchor.Start, false, LabelW - 36);
@@ -441,14 +547,29 @@ namespace CoreAI.Benchmarking
             }
 
             double top = y + 24;
+            IReadOnlyList<string> shared = SharedGroups(ranked);
+            bool likeForLike = ranked.Count(m => m.HasGradedScenarios) >= 2;
             for (int i = 0; i < ranked.Count; i++)
             {
                 ModelSummary m = ranked[i];
                 double rowTop = top + i * rowH;
                 double cy = rowTop + rowH / 2;
                 bool pinned = IsPinned(m, pinnedModelId);
+                string suiteTag = string.IsNullOrEmpty(m.SuiteVersion) ? "" : $" · suite v{m.SuiteVersion}";
+                if (!m.HasGradedScenarios)
+                {
+                    ModelLabel(sc, m, 0, rowTop, rowH, pinned, BenchmarkReportFormatter.NoGradedScenarios + suiteTag);
+                    sc.Rect(barX, cy - barH / 2, barW, barH, CardInk.Track, barH / 2);
+                    sc.Text(barX + 8, cy + 4, "unrated: " + BenchmarkReportFormatter.NoGradedScenarios, 11.5,
+                        CardInk.Muted);
+                    sc.Text(colX + suiteColW, cy + 4.5, "–", 13, CardInk.Muted, CardAnchor.End);
+                    continue;
+                }
+
+                double? like = likeForLike ? LikeForLikeMean(m, shared) : null;
                 ModelLabel(sc, m, i + 1, rowTop, rowH, pinned, $"P/PA/F {m.Pass}/{m.Partial}/{m.Fail}" +
-                                                         (string.IsNullOrEmpty(m.SuiteVersion) ? "" : $" · suite v{m.SuiteVersion}"));
+                                                         (like.HasValue ? $" · like-for-like {F1(like.Value)}" : "") +
+                                                         suiteTag);
                 MeterRow(sc, barX, cy, barW, barH, m.SuiteBase, CardInk.Series, CardInk.SeriesTrack,
                     $"{m.ModelId}: suite {F(m.SuiteBase)}");
                 if (m.HasExtreme)
@@ -526,8 +647,8 @@ namespace CoreAI.Benchmarking
             {
                 ModelSummary m = ranked[i];
                 double rowTop = top + i * rowH;
-                ModelLabel(sc, m, i + 1, rowTop, rowH, IsPinned(m, pinnedModelId),
-                    $"suite {F1(m.SuiteBase)}");
+                ModelLabel(sc, m, m.HasGradedScenarios ? i + 1 : 0, rowTop, rowH, IsPinned(m, pinnedModelId),
+                    SuiteSubLine(m));
                 for (int c = 0; c < groups.Count; c++)
                 {
                     string g = groups[c];
@@ -596,7 +717,7 @@ namespace CoreAI.Benchmarking
                 ModelSummary m = byExtreme[i];
                 double rowTop = top + i * rowH;
                 double cy = rowTop + rowH / 2;
-                ModelLabel(sc, m, i + 1, rowTop, rowH, IsPinned(m, pinnedModelId), $"suite {F1(m.SuiteBase)}");
+                ModelLabel(sc, m, i + 1, rowTop, rowH, IsPinned(m, pinnedModelId), SuiteSubLine(m));
                 if (!m.HasExtreme)
                 {
                     sc.Text(barX, cy + 4, "no extreme tier in this run", 11.5, CardInk.Muted);
@@ -629,7 +750,24 @@ namespace CoreAI.Benchmarking
             sc.Text(Pad, y + 18, suiteNote + " Bars are blue meters (notches at 50 and 90 = pass); speed is " +
                                  "reported in the table, never scored.", 11, CardInk.Muted, CardAnchor.Start, false,
                 ChartWidth - 2 * Pad);
-            return y + 32;
+            if (ranked.Count(m => m.HasGradedScenarios) < 2)
+            {
+                return y + 32;
+            }
+
+            IReadOnlyList<string> shared = SharedGroups(ranked);
+            string like = shared.Count == 0
+                ? "No group was graded by every model, so there is no like-for-like mean."
+                : $"Like-for-like = mean of the group scores over {string.Join(", ", shared)}, the groups every " +
+                  "model graded.";
+            sc.Text(Pad, y + 34, like, 11, CardInk.Muted, CardAnchor.Start, false, ChartWidth - 2 * Pad);
+            return y + 48;
+        }
+
+        /// <summary>The muted sub-line under a model's name: its suite score, or that it has none.</summary>
+        private static string SuiteSubLine(ModelSummary m)
+        {
+            return m.HasGradedScenarios ? $"suite {F1(m.SuiteBase)}" : BenchmarkReportFormatter.NoGradedScenarios;
         }
 
         private static string DescribeRanking(List<ModelSummary> ranked)
@@ -638,6 +776,12 @@ namespace CoreAI.Benchmarking
             for (int i = 0; i < ranked.Count; i++)
             {
                 ModelSummary m = ranked[i];
+                if (!m.HasGradedScenarios)
+                {
+                    sb.Append($"{m.ModelId}: {BenchmarkReportFormatter.NoGradedScenarios}. ");
+                    continue;
+                }
+
                 sb.Append($"{i + 1}. {m.ModelId}: suite {F1(m.SuiteBase)}");
                 if (m.HasExtreme)
                 {
@@ -666,9 +810,12 @@ namespace CoreAI.Benchmarking
                 return new List<ModelSummary>();
             }
 
+            // WHY: a run without a graded scenario has SuiteBase 0 by construction; ranking it by that number would
+            // place a dead provider route among real zero scores, so unrated rows always sort last.
             List<ModelSummary> ranked = models
                 .Where(m => m != null)
-                .OrderByDescending(m => m.SuiteBase)
+                .OrderByDescending(m => m.HasGradedScenarios)
+                .ThenByDescending(m => m.SuiteBase)
                 .ThenByDescending(m => m.HasExtreme ? m.ExtremeBase : -1)
                 .ThenBy(m => m.ModelId, StringComparer.Ordinal)
                 .ToList();
@@ -713,7 +860,13 @@ namespace CoreAI.Benchmarking
         {
             StringBuilder x = new();
             StringBuilder y = new();
-            for (int i = 0; i < ranked.Count; i++)
+            List<ModelSummary> rated = ranked.Where(m => m.HasGradedScenarios).ToList();
+            if (rated.Count == 0)
+            {
+                return $"_No model to chart: every report has {BenchmarkReportFormatter.NoGradedScenarios}._";
+            }
+
+            for (int i = 0; i < rated.Count; i++)
             {
                 if (i > 0)
                 {
@@ -721,8 +874,8 @@ namespace CoreAI.Benchmarking
                     y.Append(", ");
                 }
 
-                x.Append($"\"{Trunc(ranked[i].ModelId, 14)}\"");
-                y.Append(F(ranked[i].SuiteBase));
+                x.Append($"\"{Trunc(rated[i].ModelId, 14)}\"");
+                y.Append(F(rated[i].SuiteBase));
             }
 
             StringBuilder sb = new();

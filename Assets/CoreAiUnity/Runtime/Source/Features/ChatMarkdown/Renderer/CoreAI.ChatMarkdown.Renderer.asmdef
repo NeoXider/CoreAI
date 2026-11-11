@@ -1,0 +1,28 @@
+{
+  "name": "CoreAI.ChatMarkdown.Renderer",
+  "rootNamespace": "CoreAI.ChatMarkdown",
+  "references": [
+    "CoreAI.Core",
+    "CoreAI.Source",
+    "Rtl.MarkdownRenderer.Runtime",
+    "Markdig"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "COREAI_HAS_MARKDOWN_RENDERER",
+    "!COREAI_DISABLE_MARKDOWN_RENDERER"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.neoxider.markdownrenderer",
+      "expression": "1.2.0",
+      "define": "COREAI_HAS_MARKDOWN_RENDERER"
+    }
+  ],
+  "noEngineReferences": false
+}

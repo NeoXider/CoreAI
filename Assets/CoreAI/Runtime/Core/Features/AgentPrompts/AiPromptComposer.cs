@@ -40,7 +40,9 @@ namespace CoreAI.Ai
 
         /// <summary>
         /// Builds the final system prompt for a role from global prefix, role base prompt,
-        /// and per-role prompt additions.
+        /// and per-role prompt additions. The base prompt is the request override, else the inline prompt of
+        /// the role's definition, else the prompt chain looked up under the definition's prompt reference
+        /// (<see cref="AgentMemoryPolicy.ResolvePromptRoleId"/>, the role itself by default).
         /// </summary>
         public string GetSystemPrompt(string roleId, string overrideBasePrompt = null)
         {
@@ -51,12 +53,17 @@ namespace CoreAI.Ai
                 ? ""
                 : _settings?.UniversalSystemPromptPrefix ?? CoreAISettings.UniversalSystemPromptPrefix;
 
+            string promptRoleId = _memoryPolicy?.ResolvePromptRoleId(roleId) ?? roleId;
             string basePrompt;
             if (!string.IsNullOrWhiteSpace(overrideBasePrompt))
             {
                 basePrompt = overrideBasePrompt.Trim();
             }
-            else if (_systemPrompts.TryGetSystemPrompt(roleId, out string s) && !string.IsNullOrWhiteSpace(s))
+            else if (_memoryPolicy != null && _memoryPolicy.TryGetInlineSystemPrompt(roleId, out string inline))
+            {
+                basePrompt = inline;
+            }
+            else if (_systemPrompts.TryGetSystemPrompt(promptRoleId, out string s) && !string.IsNullOrWhiteSpace(s))
             {
                 basePrompt = s.Trim();
             }

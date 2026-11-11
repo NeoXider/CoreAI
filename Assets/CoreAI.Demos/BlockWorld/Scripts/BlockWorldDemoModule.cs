@@ -1,0 +1,183 @@
+using System;
+using System.Collections.Generic;
+using CoreAI.Ai;
+using CoreAI.Ai.LuaCs;
+using CoreAI.Authority;
+using CoreAI.Composition;
+using CoreAI.Infrastructure.Lua;
+using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.WorldPackages;
+using UnityEngine;
+using VContainer;
+
+namespace CoreAI.Demos.BlockWorld
+{
+    /// <summary>
+    /// The Block World scene's own play world module: it turns the framework setting that lets mods create agents
+    /// (<c>CoreAiLuaAiOptions.AllowAgentsFromLua</c>) on for this scene's mods scope only, and switches the bundled
+    /// <c>Samples/Block World</c> mod folder on in this scene's mods store, so the seven mods run in the published
+    /// world and every later start rehydrates them. The game itself is the Lua in that folder; this module holds no
+    /// rule of it.
+    /// </summary>
+    /// <remarks>
+    /// WHY after the first world frame: the mods scope seeds the bundled mods and rehydrates the active ones in its
+    /// startup sequence, and the session's store takes writes only once that world is published. The first frame of
+    /// the published world is the earliest point both are true; on a fresh store the folder is then switched on and
+    /// loaded at once, on every later start the rehydrate has already loaded it and this finds nothing to do.
+    /// </remarks>
+    [DisallowMultipleComponent]
+    public sealed class BlockWorldDemoModule : MonoBehaviour, ICoreAiPlayWorldModule
+    {
+        /// <summary>The mod folder (the <c>category:</c> of the bundled Block World mods) this scene switches on.</summary>
+        public const string DefaultFolder = "Samples/Block World";
+
+        [Tooltip("Mod folder switched on in this scene's mods store at every start; its sub-folders are included.")]
+        [SerializeField]
+        private string modFolder = DefaultFolder;
+
+        [Tooltip("Let this scene's mods create agents (AIService) and call models: the villagers need it. Off by "
+                 + "default in every other scene.")]
+        [SerializeField]
+        private bool allowAgentsFromLua = true;
+
+        [Tooltip("Columns (64 studs each) the world streams around the player in a WebGL player; 0 keeps the mod's "
+                 + "own default. Set before the world mod loads, as the workspace attribute BlockWorldViewRadius.")]
+        [SerializeField]
+        [Range(0, 8)]
+        private int webGlViewRadius = 3;
+
+        private readonly List<string> _switchedOn = new();
+        private CoreAiPlayWorldComposition _composition;
+        private LuaCsRbxApiBindings _handledWorld;
+
+        /// <summary>The mod folder switched on at every start.</summary>
+        public string ModFolder => string.IsNullOrWhiteSpace(modFolder) ? DefaultFolder : modFolder.Trim();
+
+        /// <summary>The folder's mod ids the last published world was given, in bundle order.</summary>
+        public IReadOnlyList<string> SwitchedOn => _switchedOn;
+
+        /// <summary>How many of them that world had to load itself (0 when the startup rehydrate already had).</summary>
+        public int LoadedByThisModule { get; private set; }
+
+        /// <summary>The one line that says why the folder could not be switched on; empty when it was.</summary>
+        public string Failure { get; private set; } = "";
+
+        /// <inheritdoc />
+        public void OnComposing(CoreAiPlayWorldComposition composition)
+        {
+            CoreAiModsLifetimeScope mods = composition?.ModsScope;
+            if (mods != null && mods.Container == null)
+            {
+                mods.SetAllowAgentsFromLua(allowAgentsFromLua);
+            }
+        }
+
+        /// <inheritdoc />
+        public void OnComposed(CoreAiPlayWorldComposition composition)
+        {
+            _composition = composition;
+            IObjectResolver container = composition?.ModsScope?.Container;
+            if (container == null)
+            {
+                Fail("the mods scope did not build, so there is no mods store to switch the folder on in.");
+                return;
+            }
+
+            ApplyViewRadius(container.Resolve<RbxWorldRuntimeSessionController>().CurrentRbxApi);
+        }
+
+        private void Update()
+        {
+            IObjectResolver container = _composition?.ModsScope?.Container;
+            if (container == null)
+            {
+                return;
+            }
+
+            RbxWorldRuntimeSessionController session = container.Resolve<RbxWorldRuntimeSessionController>();
+            LuaCsRbxApiBindings world = session.CurrentRbxApi;
+            if (world == null || ReferenceEquals(world, _handledWorld) || world.Scheduler == null
+                || world.Scheduler.FrameIndex == 0)
+            {
+                return;
+            }
+
+            _handledWorld = world;
+            // WHY contained: a store that refuses a write must not throw out of Update every frame; the reason is
+            // said once and the world plays on without the folder.
+            try
+            {
+                SwitchFolderOn(container.Resolve<ILuaModSourceStore>());
+                IActorIdentityProvider identity = container.ResolveOrDefault<IActorIdentityProvider>()
+                                                  ?? CoreServicesInstaller.DefaultLocalHostIdentityProvider;
+                ActorContext player = identity.GetActorContext(BuiltInAgentRoleIds.Programmer);
+                LoadedByThisModule = session.CurrentConcreteRuntime.RehydrateFromStore(player, LuaCapabilities.All);
+            }
+            catch (Exception ex)
+            {
+                Fail("switching the folder '" + ModFolder + "' on failed: " + ex.Message);
+            }
+        }
+
+        private void SwitchFolderOn(ILuaModSourceStore store)
+        {
+            _switchedOn.Clear();
+            string folder = ModFolder;
+            List<string> unstored = new();
+            foreach (BundledMod mod in new ResourcesBundledModSource().Load())
+            {
+                if (!IsInFolder(LuaModHeader.Parse(mod.Source ?? "", mod.Id).Category, folder))
+                {
+                    continue;
+                }
+
+                if (!store.TryLoad(mod.Id, out _, out LuaModManifest manifest) || manifest == null)
+                {
+                    unstored.Add(mod.Id);
+                    continue;
+                }
+
+                if (!manifest.Active)
+                {
+                    store.SetActive(mod.Id, true);
+                }
+
+                _switchedOn.Add(mod.Id);
+            }
+
+            if (_switchedOn.Count == 0 || unstored.Count > 0)
+            {
+                Fail("the folder '" + folder + "' is not complete in this scene's mods store (not stored: "
+                     + (unstored.Count == 0 ? "every bundled mod of it" : string.Join(", ", unstored))
+                     + "); the bundled Block World mods ship in Assets/CoreAIMods/Runtime/Resources/CoreAIMods/BlockWorld/.");
+            }
+        }
+
+        private void ApplyViewRadius(LuaCsRbxApiBindings world)
+        {
+            if (webGlViewRadius <= 0 || Application.platform != RuntimePlatform.WebGLPlayer)
+            {
+                return;
+            }
+
+            RbxInstance workspace = world?.Game?.FindFirstChildOfClass("Workspace");
+            if (workspace != null && workspace.GetAttribute("BlockWorldViewRadius") == null)
+            {
+                workspace.SetAttribute("BlockWorldViewRadius", (double)webGlViewRadius);
+            }
+        }
+
+        private static bool IsInFolder(string category, string folder)
+        {
+            string value = (category ?? "").Trim();
+            return string.Equals(value, folder, StringComparison.OrdinalIgnoreCase)
+                   || value.StartsWith(folder + "/", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void Fail(string reason)
+        {
+            Failure = "Block World: " + reason;
+            Debug.LogError("[CoreAI] " + Failure, this);
+        }
+    }
+}

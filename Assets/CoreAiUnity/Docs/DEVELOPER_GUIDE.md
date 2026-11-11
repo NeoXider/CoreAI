@@ -301,7 +301,7 @@ CoreAI composes a byte-stable, role-wide prefix from four layers:
 
 | Layer | Source | Configured by | Purpose |
 |------|--------|---------------|---------|
-| **1 — Universal Prefix** | `ICoreAISettings.UniversalSystemPromptPrefix` (asset default: `Respond concisely and to the point. Avoid unnecessary verbosity.`; the 4-rule text is the portable default used only when no settings asset is loaded) | `CoreAISettingsAsset` Inspector → **General → Universal Prompt Prefix** | Project-wide guard rails that apply to every role (style, safety, output format). |
+| **1 — Universal Prefix** | `ICoreAISettings.UniversalSystemPromptPrefix` (default: the 4-rule `CRITICAL RULES FOR ALL AGENTS` block, the same for a new settings asset and for the portable core; an asset saved earlier keeps its stored text) | `CoreAISettingsAsset` Inspector → **General → Universal Prompt Prefix** | Project-wide guard rails that apply to every role (style, safety, output format). |
 | **2 — Role base prompt** | `AgentPromptsManifest` ScriptableObject **OR** `Resources/AgentPrompts/System/{RoleId}.txt` **OR** built-in fallback string for `BuiltInAgentRoleIds` | `AgentPromptsManifest` asset | Stable per-role instructions (Creator, Programmer, PlainChat, SmartChat, Merchant, etc.). |
 | **3 — Builder additional role prompt** | `AgentBuilder.WithSystemPrompt(...)` text stored in `AgentMemoryPolicy` | Code | Stable refinement of this registered role/NPC. |
 | **4 — Full role tool contract** | All tools registered for the role, rendered in canonical name/schema order | `AgentBuilder.WithTool(...)`, skills, built-ins | Stable role capability definitions shared across requests. |

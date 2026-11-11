@@ -199,8 +199,10 @@ namespace CoreAI.Net.Mirror.Tests
         [Test]
         public void Negative_ARefusedConnection_CannotRetryBeforeItsDropTakesEffect()
         {
-            // WHY: a refusal disconnects, but a transport may report the drop later than the next
-            // packet; a second credential in that window must not reach the provider.
+            // WHY: a refusal's drop waits a frame so the refusal can leave, and a second credential
+            // in that window must not reach the provider.
+            double now = 0d;
+            _authenticator.ClockSeconds = () => now;
             TokenProvider provider = new("open-sesame");
             _authenticator.Configure(provider, "world-a");
             OfflineMirror mirror = new();
@@ -215,8 +217,105 @@ namespace CoreAI.Net.Mirror.Tests
                 Assert.AreEqual(0, _authenticator.AdmittedCount, "the retry admitted nobody");
                 Assert.AreEqual(1, provider.Calls);
                 Assert.AreEqual(1, _authenticator.IgnoredAdmissionRequests);
+                CollectionAssert.IsEmpty(mirror.ServerDisconnectRequests,
+                    "the drop waits for a later frame, or Mirror would discard the refusal with it");
+
+                now = 0.02d;
+                _authenticator.PerformDueRefusalDrops();
+                _authenticator.PerformDueRefusalDrops();
+
                 CollectionAssert.AreEqual(new[] { 8 }, mirror.ServerDisconnectRequests,
                     "the refused connection is dropped once, for its one attempt");
+                Assert.AreEqual(1, _authenticator.RefusalDropsPerformed);
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void ARefusal_IsSentBeforeTheDrop_AndTheDropLandsOnTheNextFrame_NotTheSameOne()
+        {
+            double now = 5d;
+            _authenticator.ClockSeconds = () => now;
+            _authenticator.Configure(new TokenProvider("open-sesame"), "world-a");
+            OfflineMirror mirror = new();
+            try
+            {
+                StartServer();
+                NetworkConnectionToClient refused = OfflineMirror.OpenServerConnection(8);
+                using SentMessages<CoreAiAdmissionResponseMessage> told = new();
+
+                RequestAdmission(8, "guess");
+                _authenticator.PerformDueRefusalDrops();
+
+                Assert.AreEqual(1, told.Messages.Count, "the refusal is handed to Mirror at once");
+                Assert.IsFalse(told.Messages[0].Admitted);
+                Assert.AreEqual((byte)CoreAiAdmissionRefusalKind.NotAdmitted, told.Messages[0].Refusal);
+                Assert.AreEqual(CoreAiMirrorProtocol.Version, told.Messages[0].ProtocolVersion);
+                CollectionAssert.IsEmpty(mirror.ServerDisconnectRequests,
+                    "a drop in the refusal's own frame would discard it unflushed");
+                Assert.IsTrue(NetworkServer.connections.TryGetValue(8, out NetworkConnectionToClient live)
+                              && ReferenceEquals(live, refused));
+                Assert.IsFalse(refused.isAuthenticated, "the refused connection reaches nothing meanwhile");
+
+                now = 5.016d;
+                _authenticator.PerformDueRefusalDrops();
+
+                CollectionAssert.AreEqual(new[] { 8 }, mirror.ServerDisconnectRequests);
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void Negative_ARefusedConnectionThatLeftFirst_IsNotDropped_NorIsAStrangerOnItsId()
+        {
+            double now = 0d;
+            _authenticator.ClockSeconds = () => now;
+            _authenticator.Configure(new TokenProvider("open-sesame"), "world-a");
+            OfflineMirror mirror = new();
+            try
+            {
+                StartServer();
+                OfflineMirror.OpenServerConnection(8);
+                RequestAdmission(8, "guess");
+                OfflineMirror.DropServerConnection(8);
+                NetworkConnectionToClient stranger = OfflineMirror.OpenServerConnection(8);
+
+                now = 1d;
+                _authenticator.PerformDueRefusalDrops();
+
+                CollectionAssert.IsEmpty(mirror.ServerDisconnectRequests,
+                    "kcp2k reuses ids: the drop owed to the refused client is not the stranger's");
+                Assert.AreSame(stranger, NetworkServer.connections[8]);
+                Assert.AreEqual(0, _authenticator.RefusalDropsPerformed);
+            }
+            finally
+            {
+                mirror.Dispose();
+            }
+        }
+
+        [Test]
+        public void PerformOwedRefusalDropsNow_DropsWithoutWaitingForAFrame()
+        {
+            _authenticator.ClockSeconds = () => 0d;
+            _authenticator.Configure(new TokenProvider("open-sesame"), "world-a");
+            OfflineMirror mirror = new();
+            try
+            {
+                StartServer();
+                OfflineMirror.OpenServerConnection(8);
+                RequestAdmission(8, "guess");
+
+                _authenticator.PerformOwedRefusalDropsNow();
+
+                CollectionAssert.AreEqual(new[] { 8 }, mirror.ServerDisconnectRequests,
+                    "a composition that stops updating the authenticator still closes what it refused");
             }
             finally
             {
@@ -368,7 +467,8 @@ namespace CoreAI.Net.Mirror.Tests
         {
             OfflineMirror.DeliverToServer(connectionId, new CoreAiAdmissionRequestMessage
             {
-                Credential = Encoding.UTF8.GetBytes(credential)
+                Credential = Encoding.UTF8.GetBytes(credential),
+                ProtocolVersion = CoreAiMirrorProtocol.Version
             });
         }
 

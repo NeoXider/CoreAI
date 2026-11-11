@@ -8,6 +8,36 @@ using UnityEngine;
 
 namespace CoreAI.Net.Mirror
 {
+    /// <summary>What a session host does with Mirror's host-mode local client connection.</summary>
+    public enum CoreAiMirrorHostModePolicy
+    {
+        /// <summary>
+        /// The host's own local client is admitted like any other connection and becomes the host's
+        /// Player, served in process: its remotes never touch the wire and it has no readiness to
+        /// wait for.
+        /// </summary>
+        ServeAsHostPlayer = 0,
+
+        /// <summary>
+        /// The host's own local client is refused as a world player, loudly, and left connected to
+        /// Mirror; the host's player is then a host-local actor the composition connects itself.
+        /// </summary>
+        Refuse = 1
+    }
+
+    /// <summary>How a <see cref="CoreAiMirrorSessionHost"/> runs its sessions.</summary>
+    public sealed class CoreAiMirrorSessionOptions
+    {
+        /// <summary>What happens to Mirror's host-mode local client; served as the host's Player by default.</summary>
+        public CoreAiMirrorHostModePolicy HostMode { get; set; } = CoreAiMirrorHostModePolicy.ServeAsHostPlayer;
+
+        /// <summary>
+        /// Whether ready clients are sent the roster — a snapshot at readiness, then every join and
+        /// leave. The session host keeps the roster either way.
+        /// </summary>
+        public bool PublishRoster { get; set; } = true;
+    }
+
     /// <summary>
     /// Turns an admitted connection into a world citizen, and a lost connection back into nothing.
     /// </summary>
@@ -30,9 +60,17 @@ namespace CoreAI.Net.Mirror
     /// already torn the actor down, and the bridge ends the connection (A4-09).
     /// </para>
     /// <para>
-    /// Mirror host mode is not supported: the host's own local client connection is refused as a
-    /// world player, loudly, and left to Mirror (A4-10). Its player is a host-local actor, served in
-    /// process.
+    /// Mirror host mode: the host's own local client connection is admitted like any other and
+    /// becomes the host's Player, bound as a host-local connection, so the bridge serves it in
+    /// process (<see cref="MirrorNetworkBridge.BindHostLocalConnection"/>). Mirror removes that
+    /// connection without a disconnect event when the host's client stops, so the bridge notices
+    /// it gone on its next pump and the session ends then. <see cref="CoreAiMirrorHostModePolicy.Refuse"/>
+    /// keeps the older behaviour: the connection is refused as a player, loudly, and left to Mirror.
+    /// </para>
+    /// <para>
+    /// The roster — who is in the room — is kept here, one member per admitted actor, and sent to
+    /// every client that acknowledged readiness: the whole roster when it does, then each join and
+    /// each leave (<see cref="CoreAiMirrorSessionOptions.PublishRoster"/>).
     /// </para>
     /// </remarks>
     public sealed class CoreAiMirrorSessionHost : IRbxActorIdentitySource, IDisposable
@@ -40,22 +78,27 @@ namespace CoreAI.Net.Mirror
         private readonly Dictionary<string, ActorAdmissionResult> _identitiesByActor =
             new(StringComparer.Ordinal);
         private readonly Dictionary<int, ConnectionSession> _actorsByConnection = new();
+        private readonly CoreAiMirrorRoster _roster = new();
         private readonly MirrorNetworkBridge _bridge;
         private readonly Func<ActorContext, bool> _connectActor;
         private readonly Func<ActorContext, bool> _disconnectActor;
         private readonly Action<string> _log;
+        private readonly CoreAiMirrorHostModePolicy _hostMode;
+        private readonly bool _publishRoster;
         private bool _disposed;
 
         private readonly struct ConnectionSession
         {
-            public ConnectionSession(ActorContext context, long bindingGeneration)
+            public ConnectionSession(ActorContext context, long bindingGeneration, bool isHostLocal)
             {
                 Context = context;
                 BindingGeneration = bindingGeneration;
+                IsHostLocal = isHostLocal;
             }
 
             public ActorContext Context { get; }
             public long BindingGeneration { get; }
+            public bool IsHostLocal { get; }
         }
 
         /// <summary>
@@ -65,17 +108,22 @@ namespace CoreAI.Net.Mirror
         /// <param name="connectActor">The world's entry point that creates a player.</param>
         /// <param name="disconnectActor">The world's entry point that removes one.</param>
         /// <param name="log">Where a refused host-mode connection is said; null means a Unity error.</param>
+        /// <param name="options">How sessions run; null means the defaults.</param>
         public CoreAiMirrorSessionHost(MirrorNetworkBridge bridge,
             Func<ActorContext, bool> connectActor, Func<ActorContext, bool> disconnectActor,
-            Action<string> log = null)
+            Action<string> log = null, CoreAiMirrorSessionOptions options = null)
         {
             _bridge = bridge ?? throw new ArgumentNullException(nameof(bridge));
             _connectActor = connectActor ?? throw new ArgumentNullException(nameof(connectActor));
             _disconnectActor = disconnectActor
                                ?? throw new ArgumentNullException(nameof(disconnectActor));
             _log = log ?? Debug.LogError;
+            CoreAiMirrorSessionOptions chosen = options ?? new CoreAiMirrorSessionOptions();
+            _hostMode = chosen.HostMode;
+            _publishRoster = chosen.PublishRoster;
             _bridge.PeerDisconnected += OnPeerDisconnected;
             _bridge.BindingReleasedWithPeer += OnBindingReleased;
+            _bridge.ConnectionReady += OnConnectionReady;
         }
 
         /// <summary>How many connections currently hold a live actor.</summary>
@@ -90,11 +138,30 @@ namespace CoreAI.Net.Mirror
         /// <summary>Whether one connection currently holds a live actor.</summary>
         public bool HasLiveSession(int connectionId) => _actorsByConnection.ContainsKey(connectionId);
 
+        /// <summary>What this host does with Mirror's host-mode local client.</summary>
+        public CoreAiMirrorHostModePolicy HostMode => _hostMode;
+
+        /// <summary>Whether ready clients are sent the roster.</summary>
+        public bool PublishesRoster => _publishRoster;
+
         /// <summary>
-        /// Admissions refused because the connection is Mirror's host-mode local client, which this
-        /// host never turns into a world player.
+        /// Admissions refused because the connection is Mirror's host-mode local client and
+        /// <see cref="HostMode"/> is <see cref="CoreAiMirrorHostModePolicy.Refuse"/>.
         /// </summary>
         public int HostModeConnectionsRefused { get; private set; }
+
+        /// <summary>Host-mode local client connections admitted as the host's own Player.</summary>
+        public int HostPlayerSessions { get; private set; }
+
+        /// <summary>Who is in the room: one member per admitted actor, in join order.</summary>
+        public CoreAiMirrorRoster Roster => _roster;
+
+        /// <summary>Roster messages handed to the transport: snapshots, their continuations, joins and leaves.</summary>
+        public int RosterMessagesSent { get; private set; }
+
+        /// <summary>Whether a connection's live session is the host's own local client.</summary>
+        public bool IsHostLocalSession(int connectionId) =>
+            _actorsByConnection.TryGetValue(connectionId, out ConnectionSession session) && session.IsHostLocal;
 
         /// <summary>
         /// Admits one connection into the world. Returns false when the decision was a refusal, in
@@ -112,6 +179,8 @@ namespace CoreAI.Net.Mirror
         /// Player the new session is carrying over. WHY the binding waits for the client's
         /// readiness: this runs one round trip before the client has read its admission, so the
         /// bridge holds server remotes for the connection until the client says it can route them.
+        /// The host's own local client is the exception: it is served in process and has nothing
+        /// to acknowledge.
         /// </remarks>
         public bool Admit(int connectionId, ActorAdmissionResult admission, string sessionId)
         {
@@ -120,21 +189,24 @@ namespace CoreAI.Net.Mirror
                 return false;
             }
 
-            if (IsHostModeLocalConnection(connectionId))
+            bool hostLocal = IsHostModeLocalConnection(connectionId);
+            if (hostLocal && _hostMode == CoreAiMirrorHostModePolicy.Refuse)
             {
-                // WHY refused, loudly, and left connected: the host's own client has no CoreAI client
-                // bridge beside a server one, so it never acknowledges readiness — admitted, it was a
-                // Player for ten seconds and was then dropped from its own host with a line blaming
-                // an old client (A4-10). Dropping it instead would take the host's local player off
-                // Mirror altogether; refused, it keeps Mirror's own features and CoreAI serves the
-                // host's player in process.
+                // WHY refused, loudly, and left connected: dropping the host's own local client would
+                // take the host's player off Mirror altogether (A4-10).
                 HostModeConnectionsRefused++;
-                _log("[CoreAI.Mirror] host mode is not supported: connection " + connectionId
-                     + " is this host's own local Mirror client, which the CoreAI Mirror bridge "
-                     + "cannot serve as a remote player; it is not admitted to the world and stays "
-                     + "connected to Mirror. Run the host's player as a host-local actor "
-                     + "(LuaCsRbxApiBindings.ConnectActor), which is served in process");
+                _log("[CoreAI.Mirror] connection " + connectionId + " is this host's own local Mirror "
+                     + "client and the session host's HostMode is Refuse: it is not admitted to the "
+                     + "world and stays connected to Mirror. Run the host's player as a host-local "
+                     + "actor (LuaCsRbxApiBindings.ConnectActor), or set HostMode to ServeAsHostPlayer");
                 return false;
+            }
+
+            if (hostLocal)
+            {
+                // WHY first: Mirror replaces a host's local connection without a disconnect event, so
+                // the session a previous local client held on this id is released before it is read.
+                _bridge.ReleaseVanishedHostLocalConnections();
             }
 
             ActorContext context = admission.Context;
@@ -150,11 +222,18 @@ namespace CoreAI.Net.Mirror
             }
 
             _identitiesByActor[context.ActorId] = admission;
-            _bridge.BindConnection(connectionId,
-                new RbxNetworkPeer(context.ActorId, sessionId ?? context.SessionId,
-                    connectionId.ToString(CultureInfo.InvariantCulture)),
-                awaitClientReady: true);
-            ConnectionSession session = new(context, _bridge.GetBindingGeneration(connectionId));
+            RbxNetworkPeer peer = new(context.ActorId, sessionId ?? context.SessionId,
+                connectionId.ToString(CultureInfo.InvariantCulture));
+            if (hostLocal)
+            {
+                _bridge.BindHostLocalConnection(connectionId, peer);
+            }
+            else
+            {
+                _bridge.BindConnection(connectionId, peer, awaitClientReady: true);
+            }
+
+            ConnectionSession session = new(context, _bridge.GetBindingGeneration(connectionId), hostLocal);
             _bridge.RegisterActor(context.ActorId);
 
             bool connected;
@@ -191,6 +270,12 @@ namespace CoreAI.Net.Mirror
             }
 
             _actorsByConnection[connectionId] = session;
+            if (hostLocal)
+            {
+                HostPlayerSessions++;
+            }
+
+            PublishJoined(context.ActorId, admission, hostLocal);
             return true;
         }
 
@@ -233,6 +318,7 @@ namespace CoreAI.Net.Mirror
             _disposed = true;
             _bridge.PeerDisconnected -= OnPeerDisconnected;
             _bridge.BindingReleasedWithPeer -= OnBindingReleased;
+            _bridge.ConnectionReady -= OnConnectionReady;
             _actorsByConnection.Clear();
             _identitiesByActor.Clear();
         }
@@ -283,6 +369,68 @@ namespace CoreAI.Net.Mirror
             if (!TryFindSession(session.Context.ActorId, out _))
             {
                 _identitiesByActor.Remove(session.Context.ActorId);
+            }
+
+            PublishLeftIfGone(session.Context.ActorId);
+        }
+
+        /// <summary>
+        /// Sends the whole roster to a connection whose client just acknowledged readiness, naming
+        /// the member it is.
+        /// </summary>
+        private void OnConnectionReady(int connectionId)
+        {
+            if (!_publishRoster || !_actorsByConnection.TryGetValue(connectionId, out ConnectionSession session))
+            {
+                return;
+            }
+
+            List<CoreAiRosterMessage> snapshot =
+                _roster.SnapshotFor(session.Context.ActorId, _bridge.RosterEntriesPerMessage);
+            for (int index = 0; index < snapshot.Count; index++)
+            {
+                if (_bridge.SendToReadyConnection(connectionId, snapshot[index]))
+                {
+                    RosterMessagesSent++;
+                }
+            }
+        }
+
+        private void PublishJoined(string actorId, ActorAdmissionResult admission, bool isHost)
+        {
+            if (!_roster.TryAddOrUpdate(actorId, admission, isHost, out CoreAiRosterMember member)
+                || !_publishRoster)
+            {
+                return;
+            }
+
+            RosterMessagesSent += _bridge.SendToEveryReadyConnection(
+                _roster.Delta(CoreAiRosterChange.Joined, member));
+        }
+
+        /// <summary>Takes an actor out of the roster once its last session is gone, and tells every ready client.</summary>
+        /// <remarks>
+        /// WHY contained: this runs inside a teardown whose other steps must still happen, and a
+        /// roster that failed to publish is a stale list on the clients, not a reason to keep a
+        /// connection bound.
+        /// </remarks>
+        private void PublishLeftIfGone(string actorId)
+        {
+            if (TryFindSession(actorId, out _) || !_roster.TryRemove(actorId, out CoreAiRosterMember member)
+                                                || !_publishRoster)
+            {
+                return;
+            }
+
+            try
+            {
+                RosterMessagesSent += _bridge.SendToEveryReadyConnection(
+                    _roster.Delta(CoreAiRosterChange.Left, member));
+            }
+            catch (Exception exception)
+            {
+                _log("[CoreAI.Mirror] the roster could not tell clients that actor '" + actorId
+                     + "' left: " + exception.Message);
             }
         }
 
@@ -345,9 +493,16 @@ namespace CoreAI.Net.Mirror
                 }
                 finally
                 {
-                    if (marked)
+                    try
                     {
-                        _bridge.EndTeardown(connectionId);
+                        PublishLeftIfGone(context.ActorId);
+                    }
+                    finally
+                    {
+                        if (marked)
+                        {
+                            _bridge.EndTeardown(connectionId);
+                        }
                     }
                 }
             }

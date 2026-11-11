@@ -1,0 +1,36 @@
+{
+  "name": "CoreAI.ChatMarkdown.Renderer.Tests",
+  "rootNamespace": "CoreAI.Tests.EditMode.ChatMarkdown",
+  "references": [
+    "CoreAI.Core",
+    "CoreAI.Source",
+    "CoreAI.ChatMarkdown.Renderer",
+    "Rtl.MarkdownRenderer.Runtime",
+    "Markdig",
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS",
+    "COREAI_HAS_MARKDOWN_RENDERER",
+    "!COREAI_DISABLE_MARKDOWN_RENDERER"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.neoxider.markdownrenderer",
+      "expression": "1.2.0",
+      "define": "COREAI_HAS_MARKDOWN_RENDERER"
+    }
+  ],
+  "noEngineReferences": false
+}

@@ -1,0 +1,71 @@
+<Project>
+  <!--
+    Compile gate for the Unity-side P19 files (the PerformanceScenarios and PerformanceTests assemblies)
+    when no Unity-generated project can build: those are compiled from the editor's Library folder, and a
+    checkout the editor has not opened has none. Each project here compiles one Unity assembly from
+    Assets/ unmodified, under its Unity name (InternalsVisibleTo grants are by name), against the REAL
+    UnityEngine module assemblies of the installed editor, as a player build sees them: UNITY_EDITOR is not
+    defined. The engine-free assemblies (CoreAI.Core, CoreAI.RbxApi.Datatypes, CoreAI.RbxApi.Instances,
+    CoreAI.LuauDownlevel) are referenced as the binaries the portable build produced.
+
+    Properties (pass on the command line when the defaults do not fit):
+      UnityEditorDir   the editor install, default the 6000.6.0f1 Hub path.
+      UnityLibraryDir  a Library folder compiled by that editor version, for UniTask, Unity.InputSystem,
+                       UnityEngine.TestRunner and nunit; default this checkout's Library.
+      PortableBinDir   where the engine-free portable assemblies were built (an artifacts bin folder).
+    It is a compile gate only: nothing here runs, and it proves nothing about behaviour in Unity.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CS1591;CS0618;CS0414;CS0169;CS0649;CS0162;CS0168;CS0219;CS8632;CS0067;CS1998;CS4014;CS0436;MSB3277;NU1702</NoWarn>
+    <DefineConstants>$(DefineConstants);COREAI_LLM;COREAI_LUA;COREAI_HAS_INPUT_SYSTEM;UNITY_5_3_OR_NEWER;UNITY_2019_1_OR_NEWER;UNITY_2020_1_OR_NEWER;UNITY_2021_1_OR_NEWER;UNITY_2022_1_OR_NEWER;UNITY_2023_1_OR_NEWER;UNITY_6000_0_OR_NEWER;UNITY_6000_6_OR_NEWER;UNITY_STANDALONE;UNITY_STANDALONE_WIN;ENABLE_MONO;ENABLE_PROFILER;NET_STANDARD_2_0;NET_STANDARD;NET_STANDARD_2_1;NETSTANDARD;NETSTANDARD2_1</DefineConstants>
+    <RepoRoot>$(MSBuildThisFileDirectory)../../..</RepoRoot>
+    <ModsRuntime>$(RepoRoot)/Assets/CoreAIMods/Runtime</ModsRuntime>
+    <UnityEditorDir Condition="'$(UnityEditorDir)' == ''">C:/Program Files/Unity/Hub/Editor/6000.6.0f1</UnityEditorDir>
+    <UnityLibraryDir Condition="'$(UnityLibraryDir)' == ''">$(RepoRoot)/Library</UnityLibraryDir>
+    <PortableBinDir Condition="'$(PortableBinDir)' == ''">$(RepoRoot)/artifacts/perfbench/bin</PortableBinDir>
+    <UnityManagedDir>$(UnityEditorDir)/Editor/Data/Managed/UnityEngine</UnityManagedDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="$(UnityManagedDir)/UnityEngine*.dll" Private="false" />
+    <Reference Include="CoreAI.Core">
+      <HintPath>$(PortableBinDir)/CoreAI.Core/release/CoreAI.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="CoreAI.RbxApi.Datatypes">
+      <HintPath>$(PortableBinDir)/CoreAI.RbxApi.Datatypes/release/CoreAI.RbxApi.Datatypes.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="CoreAI.RbxApi.Instances">
+      <HintPath>$(PortableBinDir)/CoreAI.RbxApi.Instances/release/CoreAI.RbxApi.Instances.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="CoreAI.LuauDownlevel">
+      <HintPath>$(PortableBinDir)/CoreAI.LuauDownlevel/release/CoreAI.LuauDownlevel.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Lua">
+      <HintPath>$(RepoRoot)/Assets/CoreAIMods/Plugins/Lua.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UniTask">
+      <HintPath>$(UnityLibraryDir)/ScriptAssemblies/UniTask.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.InputSystem">
+      <HintPath>$(UnityLibraryDir)/ScriptAssemblies/Unity.InputSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <PackageReference Include="Microsoft.Bcl.TimeProvider" Version="8.0.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="Microsoft.Extensions.AI" Version="9.10.2" />
+    <PackageReference Include="System.Text.Json" Version="8.0.6" />
+  </ItemGroup>
+</Project>

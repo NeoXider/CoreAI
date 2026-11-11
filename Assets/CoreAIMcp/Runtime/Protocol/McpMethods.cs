@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+
 namespace CoreAI.Mcp.Protocol
 {
     /// <summary>The JSON-RPC method names the MCP server understands.</summary>
@@ -8,6 +11,13 @@ namespace CoreAI.Mcp.Protocol
 
         /// <summary>Post-handshake notification from the client; a no-op with no response.</summary>
         public const string InitializedNotification = "notifications/initialized";
+
+        /// <summary>
+        /// Client notification asking the server to stop a request it sent earlier
+        /// (<c>params.requestId</c>, optional <c>params.reason</c>). A queued call is withdrawn before it
+        /// reaches the game thread; a running body receives the cancellation through its token.
+        /// </summary>
+        public const string CancelledNotification = "notifications/cancelled";
 
         /// <summary>Lists the available tools with their JSON Schemas.</summary>
         public const string ToolsList = "tools/list";
@@ -35,11 +45,65 @@ namespace CoreAI.Mcp.Protocol
         public const string Version = "7.56.0";
 
         /// <summary>
-        /// Supported protocol version returned during negotiation, including when a client requests an unsupported version.
+        /// Protocol version answered when the client requests one this server does not negotiate (or none).
+        /// A requested version listed in <see cref="NegotiatedProtocolVersions"/> is echoed instead.
         /// </summary>
         public const string DefaultProtocolVersion = "2025-06-18";
 
+        /// <summary>Newest handshake-based protocol revision this server negotiates.</summary>
+        public const string LatestProtocolVersion = "2025-11-25";
+
+        /// <summary>
+        /// Revision assumed for a request without an <c>MCP-Protocol-Version</c> header and without a session.
+        /// It is accepted on the wire but never negotiated: that revision requires receiving JSON-RPC
+        /// batches, which this server does not, so a client asking for it is answered
+        /// <see cref="DefaultProtocolVersion"/>.
+        /// </summary>
+        public const string HeaderlessProtocolVersion = "2025-03-26";
+
         /// <summary>HTTP header carrying the MCP session id across calls.</summary>
         public const string SessionHeader = "Mcp-Session-Id";
+
+        /// <summary>HTTP header carrying the negotiated protocol version on every request after initialize.</summary>
+        public const string ProtocolVersionHeader = "MCP-Protocol-Version";
+
+        /// <summary>
+        /// Default <c>instructions</c> returned by <c>initialize</c>: how an external agent should start
+        /// working with a live game. Hosts replace it through <c>CoreAiMcpServer.Instructions</c>.
+        /// </summary>
+        public const string DefaultInstructions =
+            "This server runs inside a live CoreAI game. Every tool acts on the running world on the game's " +
+            "main thread. Before writing Lua, call read_skill (for example name 'Rbx API' or 'Lua Modding') " +
+            "when it is listed. Tools missing from tools/list are reachable through coreai_tools " +
+            "(action list, describe, call). Verify each change with screenshot and get_mod_logs. A result " +
+            "with isError=true means the action did not happen as asked; its text says what to do next.";
+
+        /// <summary>Revisions answered by echoing them back from <c>initialize</c>, newest first.</summary>
+        public static IReadOnlyList<string> NegotiatedProtocolVersions { get; } =
+            Array.AsReadOnly(new[] { LatestProtocolVersion, DefaultProtocolVersion });
+
+        /// <summary>
+        /// The version <c>initialize</c> answers: the requested one when this server negotiates it,
+        /// otherwise <see cref="DefaultProtocolVersion"/>.
+        /// </summary>
+        public static string NegotiateProtocolVersion(string requested)
+        {
+            foreach (string supported in NegotiatedProtocolVersions)
+            {
+                if (string.Equals(requested, supported, StringComparison.Ordinal))
+                {
+                    return supported;
+                }
+            }
+
+            return DefaultProtocolVersion;
+        }
+
+        /// <summary>True when an <c>MCP-Protocol-Version</c> header value names a revision this server serves.</summary>
+        public static bool IsAcceptedProtocolVersionHeader(string value)
+        {
+            return string.Equals(value, HeaderlessProtocolVersion, StringComparison.Ordinal) ||
+                   string.Equals(NegotiateProtocolVersion(value), value, StringComparison.Ordinal);
+        }
     }
 }

@@ -580,7 +580,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     Environment.GetEnvironmentVariable("COREAI_TEST_API_KEY") == resolved.ApiKey)
                     keySource = "env:COREAI_TEST_API_KEY";
                 durableTargets.Add(new BenchmarkTarget(resolved.Model, resolved.BaseUrl, keySource, target.Label,
-                    resolved.ReasoningEffort, resolved.ExtraBodyJson, target.Temperature));
+                    resolved.ReasoningEffort, resolved.ExtraBodyJson, target.Temperature, target.ExplicitDisplayName));
             }
             Dictionary<string, BenchmarkStoredTarget> frozenTargets = priorManifest?.Targets
                 .Where(target => inactiveTargets.Contains(target.Slug)).ToDictionary(target => target.Slug, StringComparer.Ordinal);
@@ -676,7 +676,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                     CoreAISettingsAsset settings = CreateBenchmarkSettings();
                     settingsAssets.Add(settings);
                     GameBenchmarkScenario[] scenarios = AllScenarios();
-                    string backend = target.HasDistinctLabel
+                    string backend = target.HasDistinctDisplayName
                         ? $"{handle.ResolvedBackend} (model {target.Model})"
                         : handle.ResolvedBackend.ToString();
                     BenchmarkReport report = new()

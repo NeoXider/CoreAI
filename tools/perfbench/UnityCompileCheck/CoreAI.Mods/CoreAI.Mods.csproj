@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    CoreAI.Mods without the folders that need VContainer, MessagePipe, TextMeshPro or the Hub package
+    (Composition, Presentation, Diagnostics/G10, HubIntegration); every other runtime file compiles
+    unmodified against the real engine and the real UniTask. See ../UnityCompileCheck.props.
+  -->
+  <Import Project="../UnityCompileCheck.props" />
+  <PropertyGroup>
+    <AssemblyName>CoreAI.Mods</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(ModsRuntime)/AssemblyInfo.cs" Link="Mods/AssemblyInfo.cs" />
+    <Compile Include="$(ModsRuntime)/Scripting/**/*.cs" LinkBase="Mods/Scripting" />
+    <Compile Include="$(ModsRuntime)/LuaExecution/**/*.cs" LinkBase="Mods/LuaExecution" />
+    <Compile Include="$(ModsRuntime)/LuaAssets/**/*.cs" LinkBase="Mods/LuaAssets" />
+    <Compile Include="$(ModsRuntime)/Logging/**/*.cs" LinkBase="Mods/Logging" />
+    <Compile Include="$(ModsRuntime)/Infrastructure/**/*.cs" LinkBase="Mods/Infrastructure" />
+    <Compile Include="$(ModsRuntime)/WorldBindings/**/*.cs" LinkBase="Mods/WorldBindings" />
+    <ProjectReference Include="../CoreAI.RbxApi.Unity/CoreAI.RbxApi.Unity.csproj" />
+    <ProjectReference Include="../CoreAI.RbxApi.Binding/CoreAI.RbxApi.Binding.csproj" />
+    <ProjectReference Include="../CoreAI.Source/CoreAI.Source.csproj" />
+  </ItemGroup>
+</Project>

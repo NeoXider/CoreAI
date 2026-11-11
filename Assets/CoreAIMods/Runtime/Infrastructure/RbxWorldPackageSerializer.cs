@@ -3,12 +3,16 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text;
 using CoreAI.Ai;
 using CoreAI.Authority;
+using CoreAI.Mods.Folders;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Replication;
+using CoreAI.Mods.Rbx.Instances.Terrain;
 using Newtonsoft.Json;
 
 namespace CoreAI.Mods.WorldPackages
@@ -20,21 +24,79 @@ namespace CoreAI.Mods.WorldPackages
     public static class RbxWorldPackageSerializer
     {
         public const int CurrentFormatVersion = 1;
+
+        /// <summary>
+        /// The newest <c>minimum_reader_version</c> this reader accepts. Readers up to 7.56.0 accept 1 only;
+        /// 2 is format 1 with a <see cref="TerrainEntryName"/> entry.
+        /// </summary>
+        public const int CurrentReaderVersion = 2;
+
+        /// <summary>
+        /// The <c>minimum_reader_version</c> of a package that carries Terrain cells, so a reader that does not
+        /// know the entry refuses the package instead of loading the world without its cells. A package without
+        /// cells keeps version 1 and is byte-identical to one written before the entry existed.
+        /// </summary>
+        public const int TerrainMinimumReaderVersion = 2;
+
+        /// <summary>The entry that carries the Terrain cells (<see cref="TerrainVoxelCodec"/>); present only when there are cells.</summary>
+        public const string TerrainEntryName = TerrainVoxelCodec.PackageEntryName;
+
+        /// <summary>
+        /// Most bytes one chunk takes in <see cref="TerrainEntryName"/>: three coordinate varints of at most
+        /// three bytes, a run-count varint of two, and 4,096 runs of a one-byte length, slot and occupancy.
+        /// </summary>
+        private const long TerrainChunkUpperBoundBytes = 3L * 3L + 2L + 4096L * 3L;
+
+        /// <summary>Most bytes the Terrain entry header takes: signature, version, edge, palette and chunk count.</summary>
+        private const long TerrainHeaderUpperBoundBytes = 4L + 2L + 2L + 1L + 2L * 255L + 4L;
         public const int CurrentWorldSchemaVersion = 1;
         public const string CurrentApiVersion = "MVP2";
         public const string PackageFormat = "coreai-rbx-world";
         public const string ManifestEntryName = "manifest.json";
         public const string WorldEntryName = "world.json";
         public const int MaximumPackageBytes = 64 * 1024 * 1024;
-        public const int MaximumEntryBytes = 16 * 1024 * 1024;
+
+        /// <summary>
+        /// Largest expanded entry the format allows (see <see cref="RbxWorldPackageLimits"/> for the
+        /// measurement behind it); readers up to 7.56.0 enforce <see cref="Version1BaselineMaximumEntryBytes"/>.
+        /// </summary>
+        public const int MaximumEntryBytes = 64 * 1024 * 1024;
+
+        /// <summary>The entry limit of every reader up to 7.56.0, and of WebGL players.</summary>
+        public const int Version1BaselineMaximumEntryBytes = 16 * 1024 * 1024;
+
         public const int MaximumExpandedPackageBytes = 128 * 1024 * 1024;
         public const int MaximumEntries = 2048;
         public const int MaximumMods = 256;
+
+        /// <summary>
+        /// Most persisted mod folders one package holds (<c>mod_folders</c>): 1,024 folders of at most 255 characters
+        /// are 261,120 characters, 13% of the WebGL text budget.
+        /// </summary>
+        public const int MaximumModFolders = 1024;
+
+        /// <summary>
+        /// Bytes a ZIP adds around one deflated entry at most (local header, central directory record and
+        /// their extra fields), not counting the entry name, which appears twice.
+        /// </summary>
+        private const long ZipEntryOverheadBytes = 30 + 46 + 64;
+
+        /// <summary>Bytes the end records of a ZIP take at most (end of central directory, ZIP64 record and locator).</summary>
+        private const long ZipEndOverheadBytes = 128;
 
         private static readonly DateTimeOffset StableZipTimestamp =
             new(1980, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
         private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+
+        /// <summary>The built-in Enum.Material every Part and MaterialVariant is validated against.</summary>
+        /// <remarks>
+        /// WHY one shared instance: validation built a whole enum registry per Part (136 KB and about
+        /// 140 us each), which made capture plus encode of a 2,048-Part world cost 577 ms and 572 MB of
+        /// garbage before every AI edit (dev-docs/PERF_BASELINE_2026-11.md, N1). The built-in registry is
+        /// fixed data and only read here.
+        /// </remarks>
+        private static readonly RbxEnum BuiltInMaterialEnum = RbxEnumRegistry.CreateWithBuiltins().Get("Material");
 
         /// <summary>
         /// Diagnostic reason for a member whose non-finite live value the payload replaced with the
@@ -62,6 +124,12 @@ namespace CoreAI.Mods.WorldPackages
 
         /// <summary>The replacement for every lone UTF-16 surrogate the writer meets.</summary>
         private const char ReplacementCharacter = '\uFFFD';
+
+        private const string PointLightClassName = "PointLight";
+
+        private const string LightingClassName = "Lighting";
+
+        private const string StarterPlayerClassName = "StarterPlayer";
 
         /// <summary>Captures the supported world-owned DataModel projection plus settings and mods.</summary>
         public static RbxWorldPackagePayload Capture(RbxWorldPackageCaptureContext context)
@@ -146,9 +214,201 @@ namespace CoreAI.Mods.WorldPackages
                 parts,
                 cameraCFrame,
                 mods,
-                diagnostics);
+                diagnostics,
+                new RbxWorldPackageOptionalState
+                {
+                    Terrain = CaptureTerrain(context.Game),
+                    PointLights = CapturePointLights(tree, context.Registry),
+                    Lighting = CaptureLighting(tree, context.Game),
+                    StarterPlayer = CaptureStarterPlayer(tree, context.Game),
+                    ModFolders = CaptureModFolders(context.ModFolderListStore)
+                });
             ValidatePayload(payload, context.Registry.Catalog);
             return payload;
+        }
+
+        /// <summary>
+        /// A copy-on-write snapshot of the Workspace Terrain's cells (one reference per chunk), or null when
+        /// the world has no Terrain or no cell: an empty Terrain writes no entry.
+        /// </summary>
+        private static TerrainSnapshot CaptureTerrain(RbxDataModel game)
+        {
+            RbxTerrain terrain = RbxTerrainBootstrap.Find(game.FindFirstChildOfClass("Workspace"));
+            return terrain != null && TerrainVoxelCodec.HasContent(terrain.Store)
+                ? terrain.Store.CaptureSnapshot()
+                : null;
+        }
+
+        /// <summary>The properties of every retained PointLight, or null when the tree holds none.</summary>
+        private static Dictionary<InstanceId, RbxWorldPackagePointLight> CapturePointLights(
+            InstanceTreeSnapshot tree,
+            InstanceRegistry registry)
+        {
+            Dictionary<InstanceId, RbxWorldPackagePointLight> lights = null;
+            foreach (InstanceSnapshot node in tree.Instances)
+            {
+                if (!string.Equals(node.ClassName, PointLightClassName, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                InstanceId id = new(node.Id);
+                if (registry.TryGet(id, out RbxInstance instance) && instance is RbxPointLight light)
+                {
+                    lights ??= new Dictionary<InstanceId, RbxWorldPackagePointLight>();
+                    lights.Add(id, RbxWorldPackagePointLight.Of(light));
+                }
+            }
+
+            return lights;
+        }
+
+        /// <summary>
+        /// The day-cycle state of the Lighting service when the world drives its lighting and the service is in
+        /// the captured tree; null otherwise, so a world that never touched Lighting keeps the scene's own.
+        /// </summary>
+        private static RbxLightingDurableState? CaptureLighting(InstanceTreeSnapshot tree, RbxDataModel game)
+        {
+            if (!(game.FindFirstChildOfClass(LightingClassName) is RbxLighting lighting) || !lighting.IsDriven)
+            {
+                return null;
+            }
+
+            foreach (InstanceSnapshot node in tree.Instances)
+            {
+                if (node.Id == lighting.Id.Value)
+                {
+                    return lighting.CaptureDurableState();
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// The StarterPlayer service's settings when it is in the captured tree and any of them differs from the
+        /// class defaults; null otherwise, so a world that kept the defaults writes no block.
+        /// </summary>
+        private static RbxWorldPackageStarterPlayer? CaptureStarterPlayer(InstanceTreeSnapshot tree, RbxDataModel game)
+        {
+            if (!(game.FindFirstChildOfClass(StarterPlayerClassName) is RbxStarterPlayer starterPlayer))
+            {
+                return null;
+            }
+
+            RbxWorldPackageStarterPlayer settings = RbxWorldPackageStarterPlayer.Of(starterPlayer);
+            if (settings.Equals(RbxWorldPackageStarterPlayer.Defaults))
+            {
+                return null;
+            }
+
+            foreach (InstanceSnapshot node in tree.Instances)
+            {
+                if (node.Id == starterPlayer.Id.Value)
+                {
+                    return settings;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// The persisted mod folders as the package writes them (canonical, deduplicated, sorted); a folder the
+        /// format refuses fails the capture, so a world never saves a list its reader would refuse.
+        /// </summary>
+        private static IReadOnlyList<string> CaptureModFolders(IModFolderListStore store)
+        {
+            if (store == null)
+            {
+                return null;
+            }
+
+            IReadOnlyList<string> folders = store.Load()
+                ?? throw new RbxWorldPackageException("The mod folder list store returned a nil list.");
+            return BuildModFolders(folders);
+        }
+
+        /// <summary>
+        /// <paramref name="folders"/> in the form <c>mod_folders</c> holds: each one a valid non-top-level path in its
+        /// normalized spelling, case-insensitive duplicates kept once in the first casing, sorted by
+        /// <see cref="ModFolderTree.ComparePaths"/>; null for none.
+        /// </summary>
+        private static List<string> BuildModFolders(IReadOnlyList<string> folders)
+        {
+            if (folders == null || folders.Count == 0)
+            {
+                return null;
+            }
+
+            List<string> result = new(folders.Count);
+            HashSet<string> seen = new(ModFolderPath.Comparer);
+            foreach (string folder in folders)
+            {
+                ModFolderPathParse parse = ModFolderPath.Parse(folder);
+                if (!parse.Succeeded || parse.Path.IsRoot)
+                {
+                    throw new RbxWorldPackageException(
+                        "A persisted mod folder '" + folder + "' is not a valid folder path ("
+                        + (parse.Succeeded ? "top level" : ModFolderErrors.Code(parse.Error)) + "): " + parse.Message);
+                }
+
+                if (seen.Add(parse.Path.Value))
+                {
+                    result.Add(parse.Path.Value);
+                }
+            }
+
+            if (result.Count > MaximumModFolders)
+            {
+                throw new RbxWorldPackageFormatLimitException(
+                    "The live world persists " + result.Count.ToString(CultureInfo.InvariantCulture)
+                    + " mod folders; world package format version " + CurrentFormatVersion + " holds at most "
+                    + MaximumModFolders.ToString(CultureInfo.InvariantCulture) + ". Delete empty folders that are "
+                    + "no longer needed so the world can be captured again.");
+            }
+
+            result.Sort(ModFolderTree.ComparePaths);
+            return result.Count == 0 ? null : result;
+        }
+
+        private static bool HasTerrainCells(RbxWorldPackagePayload payload)
+        {
+            return payload.Terrain != null && payload.Terrain.ChunkCount > 0;
+        }
+
+        /// <summary>The canonical <see cref="TerrainEntryName"/> bytes of <paramref name="snapshot"/>.</summary>
+        private static byte[] EncodeTerrain(TerrainSnapshot snapshot)
+        {
+            TerrainChunkStore scratch = new();
+            scratch.RestoreSnapshot(snapshot);
+            return TerrainVoxelCodec.Encode(scratch);
+        }
+
+        /// <summary>
+        /// Decodes <see cref="TerrainEntryName"/> into a scratch store held to this platform's Terrain bounds
+        /// and budgets, so a refused entry has no side effect; the reader never repairs it.
+        /// </summary>
+        private static TerrainSnapshot DecodeTerrain(byte[] bytes)
+        {
+            TerrainChunkStore scratch = new(TerrainLimits.Default);
+            try
+            {
+                TerrainVoxelCodec.DecodeInto(bytes, scratch);
+            }
+            catch (Exception ex) when (ex is FormatException || ex is RbxError || ex is ArgumentException)
+            {
+                throw new RbxWorldPackageException(
+                    "World package entry '" + TerrainEntryName + "' is invalid: " + ex.Message, ex);
+            }
+
+            if (scratch.ChunkCount == 0)
+            {
+                throw new RbxWorldPackageException(
+                    "World package entry '" + TerrainEntryName + "' holds no cell; a writer leaves the entry out instead.");
+            }
+
+            return scratch.CaptureSnapshot();
         }
 
         /// <summary>
@@ -568,7 +828,7 @@ namespace CoreAI.Mods.WorldPackages
             List<RbxWorldPackageDiagnostic> diagnostics)
         {
             PartProperties defaults = PartProperties.CreateDefault();
-            if (!AreFinite(properties.CFrame.GetComponents()))
+            if (!IsFinite(properties.CFrame))
             {
                 properties.CFrame = defaults.CFrame;
                 diagnostics.Add(NonFiniteValueDiagnostic(id.Value, "CFrame"));
@@ -650,6 +910,22 @@ namespace CoreAI.Mods.WorldPackages
             return new RbxWorldPackageDiagnostic(instanceId, 0UL, NonFiniteValueReason, member);
         }
 
+        /// <summary>True when the position and all nine rotation components of <paramref name="cframe"/> are finite.</summary>
+        /// <remarks>
+        /// WHY not <c>GetComponents()</c>: it allocates a 12-float array, and capture and validation ask
+        /// once per Part, so a 16,384-Part world paid 16,384 arrays twice per backup.
+        /// </remarks>
+        private static bool IsFinite(in RbxCFrame cframe)
+        {
+            return IsFinite(cframe.X) && IsFinite(cframe.Y) && IsFinite(cframe.Z)
+                   && IsFinite(cframe.XVector) && IsFinite(cframe.YVector) && IsFinite(cframe.ZVector);
+        }
+
+        private static bool IsFinite(in RbxVector3 vector)
+        {
+            return IsFinite(vector.X) && IsFinite(vector.Y) && IsFinite(vector.Z);
+        }
+
         private static bool AreFinite(IReadOnlyList<float> values)
         {
             for (int index = 0; index < values.Count; index++)
@@ -677,88 +953,263 @@ namespace CoreAI.Mods.WorldPackages
         /// <summary>Encodes a validated payload as one deterministic-entry-order ZIP artifact.</summary>
         public static byte[] WritePackage(RbxWorldPackagePayload payload)
         {
+            return WritePackage(payload, RbxWorldPackageLimits.Format);
+        }
+
+        /// <summary>
+        /// Encodes a validated payload held to <paramref name="limits"/> (a platform's budget, at most the
+        /// format's); a payload past one of them is refused with <see cref="RbxWorldPackageException"/>.
+        /// </summary>
+        public static byte[] WritePackage(RbxWorldPackagePayload payload, RbxWorldPackageLimits limits)
+        {
+            if (limits == null)
+            {
+                throw new ArgumentNullException(nameof(limits));
+            }
+
             ValidatePayload(payload, ClassCatalog.CreateMvp1());
             PackageManifestDto manifest = BuildManifest(payload);
             byte[] manifestBytes = SerializeJson(manifest);
-            byte[] worldBytes = SerializeJson(BuildWorldDto(payload));
-            long expandedBytes = manifestBytes.LongLength + worldBytes.LongLength;
-            ValidateWritableEntry(ManifestEntryName, manifestBytes.LongLength);
-            ValidateWritableEntry(WorldEntryName, worldBytes.LongLength);
+            ValidateWritableEntry(ManifestEntryName, manifestBytes.LongLength, limits);
+            long worldBound = RbxWorldPackageWorldJson.MeasureUpperBound(payload);
+            using MemoryStream world = RbxWorldPackageWorldJson.Write(
+                payload, Math.Min(worldBound, (long)limits.MaximumEntryBytes + 1L));
+            long expandedBytes = manifestBytes.LongLength + world.Length;
+            ValidateWritableEntry(WorldEntryName, world.Length, limits);
+            ValidateExpandedSize(expandedBytes, limits);
+            byte[][] modManifests = new byte[payload.Mods.Count][];
             for (int index = 0; index < payload.Mods.Count; index++)
             {
                 RbxWorldModSource mod = payload.Mods[index];
                 PackageModIndexDto modIndex = manifest.Mods[index];
                 byte[] modManifestBytes = SerializeJson(mod.Manifest);
                 int sourceByteCount = StrictUtf8.GetByteCount(ReplaceLoneSurrogates(mod.Source));
-                ValidateWritableEntry(modIndex.ManifestEntry, modManifestBytes.LongLength);
-                ValidateWritableEntry(modIndex.SourceEntry, sourceByteCount);
+                ValidateWritableEntry(modIndex.ManifestEntry, modManifestBytes.LongLength, limits);
+                ValidateWritableEntry(modIndex.SourceEntry, sourceByteCount, limits);
                 expandedBytes += modManifestBytes.LongLength + sourceByteCount;
-                if (expandedBytes > MaximumExpandedPackageBytes)
-                {
-                    throw new RbxWorldPackageException(
-                        "World package expands to " + expandedBytes
-                        + " bytes; format version 1 limit is "
-                        + MaximumExpandedPackageBytes + " bytes.");
-                }
+                ValidateExpandedSize(expandedBytes, limits);
+                modManifests[index] = modManifestBytes;
+            }
+
+            byte[] terrainBytes = HasTerrainCells(payload) ? EncodeTerrain(payload.Terrain) : null;
+            if (terrainBytes != null)
+            {
+                ValidateWritableEntry(TerrainEntryName, terrainBytes.LongLength, limits);
+                expandedBytes += terrainBytes.LongLength;
+                ValidateExpandedSize(expandedBytes, limits);
             }
 
             using MemoryStream output = new();
             using (ZipArchive archive = new(output, ZipArchiveMode.Create, true))
             {
-                WriteEntry(archive, ManifestEntryName, manifestBytes);
-                WriteEntry(archive, WorldEntryName, worldBytes);
+                WriteEntry(archive, ManifestEntryName, manifestBytes, manifestBytes.Length, limits);
+                WriteEntry(archive, WorldEntryName, world.GetBuffer(), (int)world.Length, limits);
                 for (int index = 0; index < payload.Mods.Count; index++)
                 {
                     RbxWorldModSource mod = payload.Mods[index];
                     PackageModIndexDto modIndex = manifest.Mods[index];
-                    WriteEntry(archive, modIndex.ManifestEntry, SerializeJson(mod.Manifest));
-                    WriteEntry(
-                        archive,
-                        modIndex.SourceEntry,
-                        StrictUtf8.GetBytes(ReplaceLoneSurrogates(mod.Source)));
+                    WriteEntry(archive, modIndex.ManifestEntry, modManifests[index], modManifests[index].Length, limits);
+                    byte[] source = StrictUtf8.GetBytes(ReplaceLoneSurrogates(mod.Source));
+                    WriteEntry(archive, modIndex.SourceEntry, source, source.Length, limits);
+                }
+
+                if (terrainBytes != null)
+                {
+                    WriteEntry(archive, TerrainEntryName, terrainBytes, terrainBytes.Length, limits);
                 }
             }
 
-            byte[] bytes = output.ToArray();
-            if (bytes.Length > MaximumPackageBytes)
+            if (output.Length > limits.MaximumPackageBytes)
             {
                 throw new RbxWorldPackageException(
-                    "World package is " + bytes.Length + " bytes; format version 1 limit is "
-                    + MaximumPackageBytes + " bytes.");
+                    "World package is " + output.Length + " bytes; format version 1 limit is "
+                    + limits.MaximumPackageBytes + " bytes.");
             }
 
-            return bytes;
+            return output.ToArray();
+        }
+
+        /// <summary>
+        /// Decides before encoding whether <see cref="WritePackage(RbxWorldPackagePayload, RbxWorldPackageLimits)"/>
+        /// can fail: validates <paramref name="payload"/> exactly as the writer does (and throws what it
+        /// would throw), then bounds every entry, the expanded total and the compressed package from above
+        /// without formatting a number or deflating a byte. True proves the encode cannot fail; false means
+        /// the bound is not tight enough to prove it, and only the encode itself can tell.
+        /// </summary>
+        /// <param name="packageBytesUpperBound">The compressed package can never be larger than this.</param>
+        internal static bool TryProveEncodable(
+            RbxWorldPackagePayload payload,
+            RbxWorldPackageLimits limits,
+            out long packageBytesUpperBound)
+        {
+            if (limits == null)
+            {
+                throw new ArgumentNullException(nameof(limits));
+            }
+
+            packageBytesUpperBound = 0L;
+            ValidatePayload(payload, ClassCatalog.CreateMvp1());
+            PackageManifestDto manifest = BuildManifest(payload);
+            long manifestBytes = SerializeJson(manifest).LongLength;
+            long worldBytes = RbxWorldPackageWorldJson.MeasureUpperBound(payload);
+            if (manifestBytes > limits.MaximumEntryBytes || worldBytes > limits.MaximumEntryBytes)
+            {
+                return false;
+            }
+
+            long expandedBytes = manifestBytes + worldBytes;
+            long compressedBytes = ZipEndOverheadBytes
+                                   + ZipEntryUpperBound(ManifestEntryName, manifestBytes)
+                                   + ZipEntryUpperBound(WorldEntryName, worldBytes);
+            for (int index = 0; index < payload.Mods.Count; index++)
+            {
+                RbxWorldModSource mod = payload.Mods[index];
+                PackageModIndexDto modIndex = manifest.Mods[index];
+                long modManifestBytes = SerializeJson(mod.Manifest).LongLength;
+                long sourceBytes = StrictUtf8.GetByteCount(ReplaceLoneSurrogates(mod.Source));
+                if (modManifestBytes > limits.MaximumEntryBytes || sourceBytes > limits.MaximumEntryBytes)
+                {
+                    return false;
+                }
+
+                expandedBytes += modManifestBytes + sourceBytes;
+                compressedBytes += ZipEntryUpperBound(modIndex.ManifestEntry, modManifestBytes)
+                                   + ZipEntryUpperBound(modIndex.SourceEntry, sourceBytes);
+            }
+
+            if (HasTerrainCells(payload))
+            {
+                long terrainBytes = TerrainHeaderUpperBoundBytes + payload.Terrain.ChunkCount * TerrainChunkUpperBoundBytes;
+                if (terrainBytes > limits.MaximumEntryBytes)
+                {
+                    return false;
+                }
+
+                expandedBytes += terrainBytes;
+                compressedBytes += ZipEntryUpperBound(TerrainEntryName, terrainBytes);
+            }
+
+            if (expandedBytes > limits.MaximumExpandedPackageBytes || compressedBytes > limits.MaximumPackageBytes)
+            {
+                return false;
+            }
+
+            packageBytesUpperBound = compressedBytes;
+            return true;
+        }
+
+        /// <summary>
+        /// The most bytes one entry of <paramref name="expandedBytes"/> can take inside the ZIP: zlib's
+        /// conservative deflate bound for any compression parameters (stored blocks included), plus the
+        /// entry's headers.
+        /// </summary>
+        private static long ZipEntryUpperBound(string name, long expandedBytes)
+        {
+            long deflated = expandedBytes + ((expandedBytes + 7L) >> 3) + ((expandedBytes + 63L) >> 6) + 5L;
+            return deflated + ZipEntryOverheadBytes + 2L * StrictUtf8.GetByteCount(name);
+        }
+
+        /// <summary>
+        /// A SHA-256 digest of every entry <see cref="WritePackage(RbxWorldPackagePayload)"/> would write for
+        /// <paramref name="payload"/>, in entry order with names and lengths, without deflating: two payloads
+        /// with the same digest encode to the same package.
+        /// </summary>
+        internal static byte[] ComputeEntryDigest(RbxWorldPackagePayload payload)
+        {
+            ValidatePayload(payload, ClassCatalog.CreateMvp1());
+            PackageManifestDto manifest = BuildManifest(payload);
+            using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            byte[] manifestBytes = SerializeJson(manifest);
+            AppendEntry(hash, ManifestEntryName, manifestBytes, manifestBytes.Length);
+            using (MemoryStream world = RbxWorldPackageWorldJson.Write(payload, 0L))
+            {
+                AppendEntry(hash, WorldEntryName, world.GetBuffer(), (int)world.Length);
+            }
+
+            for (int index = 0; index < payload.Mods.Count; index++)
+            {
+                RbxWorldModSource mod = payload.Mods[index];
+                PackageModIndexDto modIndex = manifest.Mods[index];
+                byte[] modManifestBytes = SerializeJson(mod.Manifest);
+                AppendEntry(hash, modIndex.ManifestEntry, modManifestBytes, modManifestBytes.Length);
+                byte[] source = StrictUtf8.GetBytes(ReplaceLoneSurrogates(mod.Source));
+                AppendEntry(hash, modIndex.SourceEntry, source, source.Length);
+            }
+
+            if (HasTerrainCells(payload))
+            {
+                byte[] terrain = EncodeTerrain(payload.Terrain);
+                AppendEntry(hash, TerrainEntryName, terrain, terrain.Length);
+            }
+
+            return hash.GetHashAndReset();
+        }
+
+        private static void AppendEntry(IncrementalHash hash, string name, byte[] bytes, int count)
+        {
+            byte[] header = StrictUtf8.GetBytes(name + "\n" + count.ToString(CultureInfo.InvariantCulture) + "\n");
+            hash.AppendData(header);
+            hash.AppendData(bytes, 0, count);
+        }
+
+        private static void ValidateExpandedSize(long expandedBytes, RbxWorldPackageLimits limits)
+        {
+            if (expandedBytes > limits.MaximumExpandedPackageBytes)
+            {
+                throw new RbxWorldPackageException(
+                    "World package expands to " + expandedBytes
+                    + " bytes; format version 1 limit is "
+                    + limits.MaximumExpandedPackageBytes + " bytes.");
+            }
         }
 
         /// <summary>Decodes and validates every ZIP entry before returning a canonical payload.</summary>
         public static RbxWorldPackagePayload ReadPackage(byte[] packageBytes)
         {
+            return ReadPackage(packageBytes, RbxWorldPackageLimits.Format);
+        }
+
+        /// <summary>
+        /// Decodes a package held to <paramref name="limits"/>: a package, entry or expanded total past one
+        /// of them is refused before it is inflated (by the sizes the ZIP declares) and again while
+        /// inflating (by the bytes it actually yields).
+        /// </summary>
+        public static RbxWorldPackagePayload ReadPackage(byte[] packageBytes, RbxWorldPackageLimits limits)
+        {
+            if (limits == null)
+            {
+                throw new ArgumentNullException(nameof(limits));
+            }
+
             if (packageBytes == null || packageBytes.Length == 0)
             {
                 throw new RbxWorldPackageException("World package is empty.");
             }
 
-            if (packageBytes.Length > MaximumPackageBytes)
+            if (packageBytes.Length > limits.MaximumPackageBytes)
             {
                 throw new RbxWorldPackageException(
                     "World package is " + packageBytes.Length + " bytes; format version 1 limit is "
-                    + MaximumPackageBytes + " bytes.");
+                    + limits.MaximumPackageBytes + " bytes.");
             }
 
             try
             {
                 using MemoryStream input = new(packageBytes, false);
                 using ZipArchive archive = new(input, ZipArchiveMode.Read, false);
-                Dictionary<string, ZipArchiveEntry> entries = IndexEntries(archive);
+                Dictionary<string, ZipArchiveEntry> entries = IndexEntries(archive, limits);
                 PackageManifestDto manifest = DeserializeJson<PackageManifestDto>(
-                    ReadRequiredEntry(entries, ManifestEntryName), ManifestEntryName);
+                    ReadRequiredEntry(entries, ManifestEntryName, limits), ManifestEntryName);
                 ValidateManifest(manifest);
                 ValidateEntryIndex(entries, manifest);
 
                 WorldFileDto world = DeserializeJson<WorldFileDto>(
-                    ReadRequiredEntry(entries, manifest.WorldEntry), manifest.WorldEntry);
-                List<RbxWorldModSource> mods = ReadMods(entries, manifest);
-                RbxWorldPackagePayload payload = BuildPayload(manifest, world, mods);
+                    ReadRequiredEntry(entries, manifest.WorldEntry, limits), manifest.WorldEntry);
+                List<RbxWorldModSource> mods = ReadMods(entries, manifest, limits);
+                TerrainSnapshot terrain = entries.ContainsKey(TerrainEntryName)
+                    ? DecodeTerrain(ReadRequiredEntry(entries, TerrainEntryName, limits))
+                    : null;
+                RbxWorldPackagePayload payload = BuildPayload(manifest, world, mods, terrain);
                 ValidatePayload(payload, ClassCatalog.CreateMvp1());
                 return payload;
             }
@@ -780,6 +1231,13 @@ namespace CoreAI.Mods.WorldPackages
         {
             ClassCatalog catalog = options?.ClassCatalog ?? ClassCatalog.CreateMvp1();
             ValidatePayload(payload, catalog);
+            if (HasTerrainCells(payload) && !catalog.TryGet(RbxTerrain.ClassNameValue, out ClassDescriptor _))
+            {
+                throw new RbxWorldPackageException(
+                    "World package carries Terrain cells, but this composition's class catalog has no Terrain "
+                    + "class to restore them into.");
+            }
+
             if (payload.CameraCFrame.HasValue && options?.CameraRig == null)
             {
                 throw new RbxWorldPackageException(
@@ -803,14 +1261,22 @@ namespace CoreAI.Mods.WorldPackages
                 IPartPropertySink partSink = options?.PartSink
                     ?? (backingBinder as IPartPropertySink)
                     ?? new InMemoryPartPropertySink();
+                RegistryAuthority authority = options?.RegistryAuthority ?? RegistryAuthority.Authoritative;
                 InstanceRegistry registry = new(
                     catalog,
                     backingBinder,
                     worldAclVersion: null,
-                    worldId: payload.Settings.WorldId);
+                    worldId: payload.Settings.WorldId,
+                    authority: authority);
                 string hostActorId = string.IsNullOrWhiteSpace(options?.HostActorId)
                     ? LocalActorIdentityProvider.DefaultActorId
                     : options.HostActorId.Trim();
+                // WHY one scope around the whole restore: a replica's revisions are the server's, so every
+                // write the restore makes must count as applied replication; outside the scope each would
+                // mark its instance diverged.
+                using ReplicationApplyScope replication = authority == RegistryAuthority.Replica
+                    ? registry.BeginReplicationApply()
+                    : null;
                 game = (RbxDataModel)InstanceTreeSerializer.Restore(
                     payload.Tree, registry, hostActorId);
 
@@ -820,11 +1286,38 @@ namespace CoreAI.Mods.WorldPackages
                     partSink.SetPartProperties(entry.Key, in properties);
                 }
 
+                foreach (KeyValuePair<InstanceId, RbxWorldPackagePointLight> entry in payload.PointLights)
+                {
+                    if (registry.TryGet(entry.Key, out RbxInstance instance) && instance is RbxPointLight light)
+                    {
+                        entry.Value.ApplyTo(light);
+                    }
+                }
+
                 registry.SetSceneRoot(game);
                 RbxInstance workspace = game.FindFirstChildOfClass("Workspace")
                     ?? throw new RbxWorldPackageException(
                         "World package DataModel has no Workspace service.");
                 registry.SetWorldRoot(workspace);
+                // WHY only with cells: a world without them gets its Terrain from the host's
+                // DataModelBootstrap.AttachWorldRoot, and creating one here would hand it the next id.
+                if (HasTerrainCells(payload))
+                {
+                    RbxTerrainBootstrap.EnsureTerrain(registry, workspace).Store.RestoreSnapshot(payload.Terrain);
+                }
+
+                if (payload.StarterPlayer.HasValue
+                    && game.FindFirstChildOfClass(StarterPlayerClassName) is RbxStarterPlayer starterPlayer)
+                {
+                    payload.StarterPlayer.Value.ApplyTo(starterPlayer);
+                }
+
+                if (payload.Lighting.HasValue && game.FindFirstChildOfClass(LightingClassName) is RbxLighting lighting)
+                {
+                    RbxLightingDurableState state = payload.Lighting.Value;
+                    lighting.RestoreDurableState(in state);
+                }
+
                 if (payload.CameraCFrame.HasValue)
                 {
                     RbxCFrame cameraCFrame = payload.CameraCFrame.Value;
@@ -925,12 +1418,13 @@ namespace CoreAI.Mods.WorldPackages
             {
                 Format = PackageFormat,
                 FormatVersion = CurrentFormatVersion,
-                MinimumReaderVersion = CurrentFormatVersion,
+                MinimumReaderVersion = HasTerrainCells(payload) ? TerrainMinimumReaderVersion : CurrentFormatVersion,
                 ApiVersion = CurrentApiVersion,
                 CreatedUtc = payload.CapturedAtUtc.ToString("O", CultureInfo.InvariantCulture),
                 WorldEntry = WorldEntryName,
                 Mods = new List<PackageModIndexDto>(payload.Mods.Count),
-                Diagnostics = BuildDiagnosticDtos(payload.Diagnostics)
+                Diagnostics = BuildDiagnosticDtos(payload.Diagnostics),
+                ModFolders = BuildModFolders(payload.ModFolders)
             };
             for (int index = 0; index < payload.Mods.Count; index++)
             {
@@ -988,6 +1482,15 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// <c>world.json</c> as the serializer writes the reader's DTO graph: the reference the direct writer
+        /// (<see cref="RbxWorldPackageWorldJson"/>) must match byte for byte. Tests only.
+        /// </summary>
+        internal static byte[] SerializeWorldThroughDtosForTests(RbxWorldPackagePayload payload)
+        {
+            return SerializeJson(BuildWorldDto(payload));
         }
 
         private static WorldFileDto BuildWorldDto(RbxWorldPackagePayload payload)
@@ -1080,6 +1583,18 @@ namespace CoreAI.Mods.WorldPackages
                     };
                 }
 
+                if (payload.PointLights.TryGetValue(new InstanceId(node.Id), out RbxWorldPackagePointLight light))
+                {
+                    dto.Light = new WorldLightDto
+                    {
+                        Brightness = light.Brightness,
+                        Color = new[] { light.Color.R, light.Color.G, light.Color.B },
+                        Enabled = light.Enabled,
+                        Shadows = light.Shadows,
+                        Range = light.Range
+                    };
+                }
+
                 if (node.Humanoid != null)
                 {
                     dto.Humanoid = new WorldHumanoidDto
@@ -1099,6 +1614,31 @@ namespace CoreAI.Mods.WorldPackages
                 }
 
                 world.Instances.Add(dto);
+            }
+
+            if (payload.StarterPlayer.HasValue)
+            {
+                RbxWorldPackageStarterPlayer starterPlayer = payload.StarterPlayer.Value;
+                world.StarterPlayer = new WorldStarterPlayerDto
+                {
+                    DevComputerMovementMode = starterPlayer.DevComputerMovementMode.ToString(),
+                    CameraMode = starterPlayer.CameraMode.ToString(),
+                    CameraMaxZoomDistance = starterPlayer.CameraMaxZoomDistance,
+                    CameraMinZoomDistance = starterPlayer.CameraMinZoomDistance
+                };
+            }
+
+            if (payload.Lighting.HasValue)
+            {
+                RbxLightingDurableState lighting = payload.Lighting.Value;
+                world.Lighting = new WorldLightingDto
+                {
+                    ClockTime = lighting.ClockTime,
+                    GeographicLatitude = lighting.GeographicLatitude,
+                    Brightness = lighting.Brightness,
+                    Ambient = new[] { lighting.Ambient.R, lighting.Ambient.G, lighting.Ambient.B },
+                    OutdoorAmbient = new[] { lighting.OutdoorAmbient.R, lighting.OutdoorAmbient.G, lighting.OutdoorAmbient.B }
+                };
             }
 
             return world;
@@ -1147,7 +1687,8 @@ namespace CoreAI.Mods.WorldPackages
         private static RbxWorldPackagePayload BuildPayload(
             PackageManifestDto manifest,
             WorldFileDto world,
-            IReadOnlyList<RbxWorldModSource> mods)
+            IReadOnlyList<RbxWorldModSource> mods,
+            TerrainSnapshot terrain)
         {
             if (world == null)
             {
@@ -1172,6 +1713,7 @@ namespace CoreAI.Mods.WorldPackages
                 WorldAclVersion = world.Settings.WorldAclVersion
             };
             Dictionary<InstanceId, PartProperties> parts = new();
+            Dictionary<InstanceId, RbxWorldPackagePointLight> lights = null;
             foreach (WorldInstanceDto dto in world.Instances)
             {
                 InstanceSnapshot node = BuildInstanceSnapshot(dto);
@@ -1179,6 +1721,15 @@ namespace CoreAI.Mods.WorldPackages
                 if (dto.Part != null)
                 {
                     parts.Add(new InstanceId(node.Id), BuildPartProperties(dto.Part));
+                }
+
+                if (dto.Light != null)
+                {
+                    lights ??= new Dictionary<InstanceId, RbxWorldPackagePointLight>();
+                    if (!lights.TryAdd(new InstanceId(node.Id), BuildPointLight(dto.Light)))
+                    {
+                        throw new RbxWorldPackageException("world.json repeats instance id " + node.Id + ".");
+                    }
                 }
             }
 
@@ -1206,7 +1757,17 @@ namespace CoreAI.Mods.WorldPackages
                 : (RbxCFrame?)null;
             IReadOnlyList<RbxWorldPackageDiagnostic> diagnostics = BuildDiagnostics(manifest.Diagnostics);
             return new RbxWorldPackagePayload(
-                NormalizeUtc(capturedAtUtc), settings, tree, parts, cameraCFrame, mods, diagnostics);
+                NormalizeUtc(capturedAtUtc), settings, tree, parts, cameraCFrame, mods, diagnostics,
+                new RbxWorldPackageOptionalState
+                {
+                    Terrain = terrain,
+                    PointLights = lights,
+                    Lighting = world.Lighting == null ? (RbxLightingDurableState?)null : BuildLighting(world.Lighting),
+                    StarterPlayer = world.StarterPlayer == null
+                        ? (RbxWorldPackageStarterPlayer?)null
+                        : BuildStarterPlayer(world.StarterPlayer),
+                    ModFolders = manifest.ModFolders
+                });
         }
 
         private static InstanceSnapshot BuildInstanceSnapshot(WorldInstanceDto dto)
@@ -1342,6 +1903,47 @@ namespace CoreAI.Mods.WorldPackages
             return result;
         }
 
+        private static RbxWorldPackagePointLight BuildPointLight(WorldLightDto dto)
+        {
+            RequireLength(dto.Color, 3, "light.color");
+            return new RbxWorldPackagePointLight(
+                dto.Brightness, new RbxColor3(dto.Color[0], dto.Color[1], dto.Color[2]), dto.Enabled, dto.Shadows, dto.Range);
+        }
+
+        private static RbxWorldPackageStarterPlayer BuildStarterPlayer(WorldStarterPlayerDto dto)
+        {
+            if (!Enum.TryParse(dto.DevComputerMovementMode, false, out RbxDevComputerMovementMode movement)
+                || !Enum.IsDefined(typeof(RbxDevComputerMovementMode), movement)
+                || !string.Equals(movement.ToString(), dto.DevComputerMovementMode, StringComparison.Ordinal))
+            {
+                throw new RbxWorldPackageException(
+                    "starter_player has unsupported dev_computer_movement_mode '" + dto.DevComputerMovementMode + "'.");
+            }
+
+            if (!Enum.TryParse(dto.CameraMode, false, out RbxCameraMode cameraMode)
+                || !Enum.IsDefined(typeof(RbxCameraMode), cameraMode)
+                || !string.Equals(cameraMode.ToString(), dto.CameraMode, StringComparison.Ordinal))
+            {
+                throw new RbxWorldPackageException(
+                    "starter_player has unsupported camera_mode '" + dto.CameraMode + "'.");
+            }
+
+            return new RbxWorldPackageStarterPlayer(
+                movement, cameraMode, dto.CameraMaxZoomDistance, dto.CameraMinZoomDistance);
+        }
+
+        private static RbxLightingDurableState BuildLighting(WorldLightingDto dto)
+        {
+            RequireLength(dto.Ambient, 3, "lighting.ambient");
+            RequireLength(dto.OutdoorAmbient, 3, "lighting.outdoor_ambient");
+            return new RbxLightingDurableState(
+                dto.ClockTime,
+                dto.GeographicLatitude,
+                dto.Brightness,
+                new RbxColor3(dto.Ambient[0], dto.Ambient[1], dto.Ambient[2]),
+                new RbxColor3(dto.OutdoorAmbient[0], dto.OutdoorAmbient[1], dto.OutdoorAmbient[2]));
+        }
+
         private static PartProperties BuildPartProperties(WorldPartDto dto)
         {
             if (!Enum.TryParse(dto.Shape, false, out RbxPartShape shape)
@@ -1375,15 +1977,16 @@ namespace CoreAI.Mods.WorldPackages
 
         private static List<RbxWorldModSource> ReadMods(
             IReadOnlyDictionary<string, ZipArchiveEntry> entries,
-            PackageManifestDto manifest)
+            PackageManifestDto manifest,
+            RbxWorldPackageLimits limits)
         {
             List<RbxWorldModSource> mods = new(manifest.Mods.Count);
             foreach (PackageModIndexDto modIndex in manifest.Mods)
             {
                 LuaModManifest modManifest = DeserializeJson<LuaModManifest>(
-                    ReadRequiredEntry(entries, modIndex.ManifestEntry), modIndex.ManifestEntry);
+                    ReadRequiredEntry(entries, modIndex.ManifestEntry, limits), modIndex.ManifestEntry);
                 string source = StrictUtf8.GetString(
-                    ReadRequiredEntry(entries, modIndex.SourceEntry));
+                    ReadRequiredEntry(entries, modIndex.SourceEntry, limits));
                 if (modManifest == null
                     || !string.Equals(modManifest.Id, modIndex.Id, StringComparison.Ordinal))
                 {
@@ -1528,6 +2131,10 @@ namespace CoreAI.Mods.WorldPackages
                 ValidateFinite(payload.CameraCFrame.Value.GetComponents(), "Camera.CFrame");
             }
 
+            ValidateLights(payload);
+            ValidateLighting(payload, root);
+            ValidateStarterPlayer(payload, root);
+
             string previousModId = null;
             foreach (RbxWorldModSource mod in payload.Mods)
             {
@@ -1560,6 +2167,104 @@ namespace CoreAI.Mods.WorldPackages
 
                 previousModId = mod.Manifest.Id;
             }
+        }
+
+        private static void ValidateLights(RbxWorldPackagePayload payload)
+        {
+            if (payload.PointLights.Count == 0)
+            {
+                return;
+            }
+
+            Dictionary<ulong, string> classes = new(payload.Tree.Instances.Count);
+            foreach (InstanceSnapshot node in payload.Tree.Instances)
+            {
+                classes[node.Id] = node.ClassName;
+            }
+
+            foreach (KeyValuePair<InstanceId, RbxWorldPackagePointLight> entry in payload.PointLights)
+            {
+                if (!classes.TryGetValue(entry.Key.Value, out string className)
+                    || !string.Equals(className, PointLightClassName, StringComparison.Ordinal))
+                {
+                    throw new RbxWorldPackageException(
+                        "World package carries PointLight state for instance " + entry.Key.Value
+                        + ", which is not a PointLight of the tree.");
+                }
+
+                RbxWorldPackagePointLight light = entry.Value;
+                if (!IsFinite(light.Brightness) || !IsFinite(light.Color.R) || !IsFinite(light.Color.G)
+                    || !IsFinite(light.Color.B) || !IsFinite(light.Range)
+                    || light.Range < 0f || light.Range > RbxPointLight.MaxRange)
+                {
+                    throw new RbxWorldPackageException(
+                        "PointLight " + entry.Key.Value + " needs a finite brightness and colour and a range within [0, "
+                        + RbxPointLight.MaxRange.ToString(CultureInfo.InvariantCulture) + "].");
+                }
+            }
+        }
+
+        private static void ValidateLighting(RbxWorldPackagePayload payload, InstanceSnapshot root)
+        {
+            if (!payload.Lighting.HasValue)
+            {
+                return;
+            }
+
+            RbxLightingDurableState lighting = payload.Lighting.Value;
+            if (!IsFinite(lighting.ClockTime) || lighting.ClockTime < 0f || lighting.ClockTime >= 24f
+                || !IsFinite(lighting.GeographicLatitude) || !IsFinite(lighting.Brightness)
+                || !IsFinite(lighting.Ambient.R) || !IsFinite(lighting.Ambient.G) || !IsFinite(lighting.Ambient.B)
+                || !IsFinite(lighting.OutdoorAmbient.R) || !IsFinite(lighting.OutdoorAmbient.G)
+                || !IsFinite(lighting.OutdoorAmbient.B))
+            {
+                throw new RbxWorldPackageException(
+                    "World package lighting needs finite values and a clock_time within [0, 24).");
+            }
+
+            foreach (InstanceSnapshot node in payload.Tree.Instances)
+            {
+                if (node.ParentId == root.Id && string.Equals(node.ClassName, LightingClassName, StringComparison.Ordinal))
+                {
+                    return;
+                }
+            }
+
+            throw new RbxWorldPackageException(
+                "World package carries a lighting block but its tree has no Lighting service.");
+        }
+
+        private static void ValidateStarterPlayer(RbxWorldPackagePayload payload, InstanceSnapshot root)
+        {
+            if (!payload.StarterPlayer.HasValue)
+            {
+                return;
+            }
+
+            RbxWorldPackageStarterPlayer settings = payload.StarterPlayer.Value;
+            if (!Enum.IsDefined(typeof(RbxDevComputerMovementMode), settings.DevComputerMovementMode)
+                || !Enum.IsDefined(typeof(RbxCameraMode), settings.CameraMode)
+                || double.IsNaN(settings.CameraMinZoomDistance) || double.IsInfinity(settings.CameraMinZoomDistance)
+                || double.IsNaN(settings.CameraMaxZoomDistance) || double.IsInfinity(settings.CameraMaxZoomDistance)
+                || settings.CameraMinZoomDistance < 0d
+                || settings.CameraMaxZoomDistance < settings.CameraMinZoomDistance)
+            {
+                throw new RbxWorldPackageException(
+                    "World package starter_player needs defined modes and finite zoom distances with "
+                    + "0 <= camera_min_zoom_distance <= camera_max_zoom_distance.");
+            }
+
+            foreach (InstanceSnapshot node in payload.Tree.Instances)
+            {
+                if (node.ParentId == root.Id
+                    && string.Equals(node.ClassName, StarterPlayerClassName, StringComparison.Ordinal))
+                {
+                    return;
+                }
+            }
+
+            throw new RbxWorldPackageException(
+                "World package carries a starter_player block but its tree has no StarterPlayer service.");
         }
 
         private static void ValidateSettings(RbxWorldSettings settings)
@@ -1604,8 +2309,7 @@ namespace CoreAI.Mods.WorldPackages
                     "Part " + id.Value + " has an empty Material name.");
             }
 
-            RbxEnum materialEnum = RbxEnumRegistry.CreateWithBuiltins().Get("Material");
-            if (!materialEnum.TryGetItem(part.Material.Name, out RbxEnumItem materialItem)
+            if (!BuiltInMaterialEnum.TryGetItem(part.Material.Name, out RbxEnumItem materialItem)
                 || materialItem.Value != part.Material.Value)
             {
                 throw new RbxWorldPackageException(
@@ -1613,13 +2317,20 @@ namespace CoreAI.Mods.WorldPackages
                     + part.Material.Name + "' (" + part.Material.Value + ").");
             }
 
-            ValidateFinite(part.CFrame.GetComponents(), "Part " + id.Value + " CFrame");
-            ValidateFinite(
-                new[] { part.Size.X, part.Size.Y, part.Size.Z },
-                "Part " + id.Value + " Size");
-            ValidateFinite(
-                new[] { part.Color.R, part.Color.G, part.Color.B },
-                "Part " + id.Value + " Color");
+            if (!IsFinite(part.CFrame))
+            {
+                throw new RbxWorldPackageException("Part " + id.Value + " CFrame contains a non-finite component.");
+            }
+
+            if (!IsFinite(part.Size))
+            {
+                throw new RbxWorldPackageException("Part " + id.Value + " Size contains a non-finite component.");
+            }
+
+            if (!IsFinite(part.Color.R) || !IsFinite(part.Color.G) || !IsFinite(part.Color.B))
+            {
+                throw new RbxWorldPackageException("Part " + id.Value + " Color contains a non-finite component.");
+            }
             if (float.IsNaN(part.Transparency) || float.IsInfinity(part.Transparency)
                 || part.Transparency < 0f || part.Transparency > 1f)
             {
@@ -1637,9 +2348,8 @@ namespace CoreAI.Mods.WorldPackages
                     "MaterialVariant " + node.Id + " is missing its variant state.");
             }
 
-            RbxEnum materialEnum = RbxEnumRegistry.CreateWithBuiltins().Get("Material");
             if (string.IsNullOrWhiteSpace(snapshot.BaseMaterial)
-                || !materialEnum.TryGetItem(snapshot.BaseMaterial, out RbxEnumItem materialItem)
+                || !BuiltInMaterialEnum.TryGetItem(snapshot.BaseMaterial, out RbxEnumItem materialItem)
                 || materialItem.Value != snapshot.BaseMaterialValue)
             {
                 throw new RbxWorldPackageException(
@@ -1666,13 +2376,15 @@ namespace CoreAI.Mods.WorldPackages
             }
         }
 
-        private static Dictionary<string, ZipArchiveEntry> IndexEntries(ZipArchive archive)
+        private static Dictionary<string, ZipArchiveEntry> IndexEntries(
+            ZipArchive archive,
+            RbxWorldPackageLimits limits)
         {
-            if (archive.Entries.Count > MaximumEntries)
+            if (archive.Entries.Count > limits.MaximumEntries)
             {
                 throw new RbxWorldPackageException(
                     "World package has " + archive.Entries.Count + " ZIP entries; limit is "
-                    + MaximumEntries + ".");
+                    + limits.MaximumEntries + ".");
             }
 
             Dictionary<string, ZipArchiveEntry> entries = new(StringComparer.Ordinal);
@@ -1692,11 +2404,11 @@ namespace CoreAI.Mods.WorldPackages
                 }
 
                 expandedBytes += entry.Length;
-                if (expandedBytes > MaximumExpandedPackageBytes)
+                if (expandedBytes > limits.MaximumExpandedPackageBytes)
                 {
                     throw new RbxWorldPackageException(
                         "World package expanded size exceeds format version 1 limit "
-                        + MaximumExpandedPackageBytes + " bytes.");
+                        + limits.MaximumExpandedPackageBytes + " bytes.");
                 }
             }
 
@@ -1723,11 +2435,11 @@ namespace CoreAI.Mods.WorldPackages
                     + "; this reader supports version " + CurrentFormatVersion + ".");
             }
 
-            if (manifest.MinimumReaderVersion > CurrentFormatVersion)
+            if (manifest.MinimumReaderVersion > CurrentReaderVersion)
             {
                 throw new RbxWorldPackageException(
                     "World package requires reader version " + manifest.MinimumReaderVersion
-                    + "; this reader is version " + CurrentFormatVersion + ".");
+                    + "; this reader is version " + CurrentReaderVersion + ".");
             }
 
             if (!string.Equals(manifest.ApiVersion, CurrentApiVersion, StringComparison.Ordinal))
@@ -1776,6 +2488,58 @@ namespace CoreAI.Mods.WorldPackages
 
                 previousId = mod.Id;
             }
+
+            ValidateModFolders(manifest.ModFolders);
+        }
+
+        /// <summary>
+        /// Refuses a <c>mod_folders</c> list that no writer produces: empty (a writer leaves the key out), longer than
+        /// <see cref="MaximumModFolders"/>, or holding an entry that is not a canonical non-top-level path, a
+        /// case-insensitive duplicate, or out of <see cref="ModFolderTree.ComparePaths"/> order.
+        /// </summary>
+        private static void ValidateModFolders(List<string> folders)
+        {
+            if (folders == null)
+            {
+                return;
+            }
+
+            if (folders.Count == 0)
+            {
+                throw new RbxWorldPackageException(
+                    "manifest.json mod_folders is empty; a writer leaves the key out instead.");
+            }
+
+            if (folders.Count > MaximumModFolders)
+            {
+                throw new RbxWorldPackageException(
+                    "manifest.json contains " + folders.Count.ToString(CultureInfo.InvariantCulture)
+                    + " mod folders; limit is " + MaximumModFolders.ToString(CultureInfo.InvariantCulture) + ".");
+            }
+
+            HashSet<string> seen = new(ModFolderPath.Comparer);
+            for (int index = 0; index < folders.Count; index++)
+            {
+                string entry = folders[index];
+                ModFolderPathParse parse = ModFolderPath.Parse(entry);
+                string code = !parse.Succeeded
+                    ? ModFolderErrors.Code(parse.Error)
+                    : parse.Path.IsRoot
+                        ? "top level"
+                        : !string.Equals(parse.Path.Value, entry, StringComparison.Ordinal)
+                            ? "not canonical"
+                            : !seen.Add(entry)
+                                ? "duplicate"
+                                : index > 0 && ModFolderTree.ComparePaths(folders[index - 1], entry) >= 0
+                                    ? "out of order"
+                                    : null;
+                if (code != null)
+                {
+                    throw new RbxWorldPackageException(
+                        "manifest.json mod_folders[" + index.ToString(CultureInfo.InvariantCulture) + "] '" + entry
+                        + "' is not a canonical folder path (" + code + ").");
+                }
+            }
         }
 
         private static void ValidateEntryIndex(
@@ -1791,6 +2555,21 @@ namespace CoreAI.Mods.WorldPackages
             {
                 expected.Add(mod.ManifestEntry);
                 expected.Add(mod.SourceEntry);
+            }
+
+            if (entries.ContainsKey(TerrainEntryName))
+            {
+                // WHY refused rather than read: a reader that predates the entry accepts such a manifest and
+                // would open the world without its cells, so the writer always raises the version with it.
+                if (manifest.MinimumReaderVersion < TerrainMinimumReaderVersion)
+                {
+                    throw new RbxWorldPackageException(
+                        "World package carries '" + TerrainEntryName + "' but declares minimum_reader_version "
+                        + manifest.MinimumReaderVersion + "; a package with Terrain cells declares "
+                        + TerrainMinimumReaderVersion + ".");
+                }
+
+                expected.Add(TerrainEntryName);
             }
 
             if (entries.Count != expected.Count)
@@ -1812,7 +2591,8 @@ namespace CoreAI.Mods.WorldPackages
 
         private static byte[] ReadRequiredEntry(
             IReadOnlyDictionary<string, ZipArchiveEntry> entries,
-            string entryName)
+            string entryName,
+            RbxWorldPackageLimits limits)
         {
             if (!entries.TryGetValue(entryName, out ZipArchiveEntry entry))
             {
@@ -1820,11 +2600,11 @@ namespace CoreAI.Mods.WorldPackages
                     "World package is missing required entry '" + entryName + "'.");
             }
 
-            if (entry.Length > MaximumEntryBytes)
+            if (entry.Length > limits.MaximumEntryBytes)
             {
                 throw new RbxWorldPackageException(
                     "World package entry '" + entryName + "' is " + entry.Length
-                    + " bytes; limit is " + MaximumEntryBytes + ".");
+                    + " bytes; limit is " + limits.MaximumEntryBytes + ".");
             }
 
             using Stream stream = entry.Open();
@@ -1835,36 +2615,51 @@ namespace CoreAI.Mods.WorldPackages
             while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
             {
                 total += read;
-                if (total > MaximumEntryBytes)
+                if (total > limits.MaximumEntryBytes)
                 {
                     throw new RbxWorldPackageException(
                         "World package entry '" + entryName
-                        + "' exceeds the decompressed size limit " + MaximumEntryBytes + ".");
+                        + "' exceeds the decompressed size limit " + limits.MaximumEntryBytes + ".");
                 }
 
                 output.Write(buffer, 0, read);
             }
 
+            // WHY the actual bytes, not the declared length: IndexEntries sums the sizes the ZIP declares,
+            // and an entry whose header understates its size would otherwise let every entry inflate to the
+            // per-entry limit, so the expanded total would bound nothing.
+            if (total > entry.Length)
+            {
+                throw new RbxWorldPackageException(
+                    "World package entry '" + entryName + "' inflates to more than the "
+                    + entry.Length + " bytes its header declares.");
+            }
+
             return output.ToArray();
         }
 
-        private static void WriteEntry(ZipArchive archive, string name, byte[] bytes)
+        private static void WriteEntry(
+            ZipArchive archive,
+            string name,
+            byte[] bytes,
+            int count,
+            RbxWorldPackageLimits limits)
         {
-            ValidateWritableEntry(name, bytes.LongLength);
+            ValidateWritableEntry(name, count, limits);
 
             ZipArchiveEntry entry = archive.CreateEntry(name, CompressionLevel.Optimal);
             entry.LastWriteTime = StableZipTimestamp;
             using Stream stream = entry.Open();
-            stream.Write(bytes, 0, bytes.Length);
+            stream.Write(bytes, 0, count);
         }
 
-        private static void ValidateWritableEntry(string name, long byteCount)
+        private static void ValidateWritableEntry(string name, long byteCount, RbxWorldPackageLimits limits)
         {
-            if (byteCount > MaximumEntryBytes)
+            if (byteCount > limits.MaximumEntryBytes)
             {
                 throw new RbxWorldPackageException(
                     "World package entry '" + name + "' is " + byteCount
-                    + " bytes; limit is " + MaximumEntryBytes + ".");
+                    + " bytes; limit is " + limits.MaximumEntryBytes + ".");
             }
         }
 
@@ -1883,8 +2678,16 @@ namespace CoreAI.Mods.WorldPackages
         {
             try
             {
-                string json = StrictUtf8.GetString(bytes);
-                return JsonConvert.DeserializeObject<T>(json, CreateJsonSettings());
+                // WHY a reader over the bytes instead of one string: a 64 MiB world.json decoded to a string
+                // first held three copies of the entry (bytes, UTF-16 text, the DTO graph) at once. The strict
+                // decoder still refuses invalid UTF-8, no byte-order mark is honoured, and trailing content
+                // is still an error, as in JsonConvert.DeserializeObject.
+                using MemoryStream input = new(bytes, false);
+                using StreamReader text = new(input, StrictUtf8, false, 64 * 1024);
+                using JsonTextReader json = new(text);
+                JsonSerializer serializer = JsonSerializer.CreateDefault(CreateJsonSettings());
+                serializer.CheckAdditionalContent = true;
+                return serializer.Deserialize<T>(json);
             }
             catch (Exception ex)
             {
@@ -1932,7 +2735,7 @@ namespace CoreAI.Mods.WorldPackages
             return string.Join(",", text);
         }
 
-        private static float[] ParseFloatComponents(string serialized, int expected)
+        internal static float[] ParseFloatComponents(string serialized, int expected)
         {
             string[] parts = (serialized ?? "").Split(',');
             if (parts.Length != expected)
@@ -2055,7 +2858,8 @@ namespace CoreAI.Mods.WorldPackages
                 UpdateAvailable = source.UpdateAvailable,
                 Entry = source.Entry ?? "main.lua",
                 LoadOrder = source.LoadOrder,
-                SuspendedAfterBudgetTrips = source.SuspendedAfterBudgetTrips
+                SuspendedAfterBudgetTrips = source.SuspendedAfterBudgetTrips,
+                Context = source.Context ?? ""
             };
         }
 
@@ -2085,6 +2889,12 @@ namespace CoreAI.Mods.WorldPackages
 
             [JsonProperty("diagnostics", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
             public List<PackageDiagnosticDto> Diagnostics;
+
+            // WHY no format_version bump: the key is omitted when the world has no persisted folder, so every
+            // package the previous writer produced is byte-identical; an older reader refuses a package that has
+            // it (MissingMemberHandling.Error) instead of dropping its empty folders.
+            [JsonProperty("mod_folders", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+            public List<string> ModFolders;
         }
 
         [Serializable]
@@ -2137,6 +2947,71 @@ namespace CoreAI.Mods.WorldPackages
 
             [JsonProperty("instances", Required = Required.Always)]
             public List<WorldInstanceDto> Instances;
+
+            // WHY omitted when null and no format_version bump: a world that does not drive its lighting
+            // writes no key and stays byte-identical; a reader up to 7.56.0 refuses the key by name
+            // ("Could not find member 'lighting'"), as it refuses every member it does not know.
+            [JsonProperty("lighting", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+            public WorldLightingDto Lighting;
+
+            // WHY omitted when null: a world that kept the StarterPlayer defaults writes no key and stays
+            // byte-identical; a reader up to 7.56.0 refuses the key by name.
+            [JsonProperty("starter_player", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+            public WorldStarterPlayerDto StarterPlayer;
+        }
+
+        [Serializable]
+        private sealed class WorldStarterPlayerDto
+        {
+            [JsonProperty("dev_computer_movement_mode", Required = Required.Always)]
+            public string DevComputerMovementMode;
+
+            [JsonProperty("camera_mode", Required = Required.Always)]
+            public string CameraMode;
+
+            [JsonProperty("camera_max_zoom_distance", Required = Required.Always)]
+            public double CameraMaxZoomDistance;
+
+            [JsonProperty("camera_min_zoom_distance", Required = Required.Always)]
+            public double CameraMinZoomDistance;
+        }
+
+        [Serializable]
+        private sealed class WorldLightingDto
+        {
+            [JsonProperty("clock_time", Required = Required.Always)]
+            public float ClockTime;
+
+            [JsonProperty("geographic_latitude", Required = Required.Always)]
+            public float GeographicLatitude;
+
+            [JsonProperty("brightness", Required = Required.Always)]
+            public float Brightness;
+
+            [JsonProperty("ambient", Required = Required.Always)]
+            public float[] Ambient;
+
+            [JsonProperty("outdoor_ambient", Required = Required.Always)]
+            public float[] OutdoorAmbient;
+        }
+
+        [Serializable]
+        private sealed class WorldLightDto
+        {
+            [JsonProperty("brightness", Required = Required.Always)]
+            public float Brightness;
+
+            [JsonProperty("color", Required = Required.Always)]
+            public float[] Color;
+
+            [JsonProperty("enabled", Required = Required.Always)]
+            public bool Enabled;
+
+            [JsonProperty("shadows", Required = Required.Always)]
+            public bool Shadows;
+
+            [JsonProperty("range", Required = Required.Always)]
+            public float Range;
         }
 
         [Serializable]
@@ -2214,6 +3089,11 @@ namespace CoreAI.Mods.WorldPackages
 
             [JsonProperty("humanoid")]
             public WorldHumanoidDto Humanoid;
+
+            // WHY omitted when null: an instance that is no PointLight writes no key, so every package
+            // without one stays byte-identical; readers up to 7.56.0 refuse the key by name.
+            [JsonProperty("light", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+            public WorldLightDto Light;
         }
 
         [Serializable]

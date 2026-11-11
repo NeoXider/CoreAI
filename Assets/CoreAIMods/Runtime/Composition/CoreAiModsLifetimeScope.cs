@@ -89,8 +89,93 @@ namespace CoreAI.Composition
         [SerializeField]
         private string storeId;
 
+        [Header("Instant edit loop")]
+        [Tooltip("How AI edits are backed up (write-behind), recorded for the next start (debounce), undone "
+                 + "(history length) and rate limited. See Docs/CoreAIMods/ROBLOX_API_ROADMAP.md, P3.")]
+        [SerializeField]
+        private CoreAiInstantEditSettings instantEdit = new();
+
+        [Header("Chat commands")]
+        [Tooltip("Add /undo, /redo (the player's AI changes to the world) and /fly to the in-world chat of the "
+                 + "parent CoreAI scope. A command the game registered first under the same name is kept.")]
+        [SerializeField]
+        private bool worldChatCommands = true;
+
+        [Header("AI from Lua")]
+        [Tooltip("Framework setting of this game: mods in every world may create agents (AIService) and call "
+                 + "models (TextGenerator). Off by default; a world cannot turn it on.")]
+        [SerializeField]
+        private bool allowAgentsFromLua;
+
+        [Header("Player camera")]
+        [Tooltip("The default third-person camera around the local character. Turn it off when the game owns "
+                 + "the camera.")]
+        [SerializeField]
+        private CoreAiPlayerCameraSettings playerCamera = new();
+
         [System.NonSerialized]
         private IRbxWorldPackageStore runtimeWorldPackageStore;
+
+        /// <summary>The instant edit settings this scope registers when it builds.</summary>
+        public CoreAiInstantEditSettings InstantEdit => instantEdit ??= new CoreAiInstantEditSettings();
+
+        /// <summary>
+        /// The framework setting <see cref="Ai.LuaCs.CoreAiLuaAiOptions.AllowAgentsFromLua"/> this scope registers
+        /// when the host registered no <see cref="Ai.LuaCs.CoreAiLuaAiOptions"/> of its own.
+        /// </summary>
+        public bool AllowAgentsFromLua => allowAgentsFromLua;
+
+        /// <summary>Sets <see cref="AllowAgentsFromLua"/> before this scope builds its container.</summary>
+        public void SetAllowAgentsFromLua(bool allow)
+        {
+            DemandNotBuilt(nameof(SetAllowAgentsFromLua));
+            allowAgentsFromLua = allow;
+        }
+
+        /// <summary>The player camera preset this scope registers when it builds.</summary>
+        public CoreAiPlayerCameraSettings PlayerCamera => playerCamera ??= new CoreAiPlayerCameraSettings();
+
+        /// <summary>Supplies the player camera preset before this scope builds its container.</summary>
+        public void SetPlayerCameraSettings(CoreAiPlayerCameraSettings settings)
+        {
+            DemandNotBuilt(nameof(SetPlayerCameraSettings));
+            playerCamera = settings ?? throw new System.ArgumentNullException(nameof(settings));
+        }
+
+        /// <summary>Supplies the instant edit settings before this scope builds its container.</summary>
+        public void SetInstantEditSettings(CoreAiInstantEditSettings settings)
+        {
+            DemandNotBuilt(nameof(SetInstantEditSettings));
+            instantEdit = settings ?? throw new System.ArgumentNullException(nameof(settings));
+        }
+
+        /// <summary>
+        /// Points the Rbx API at a scene world host before this scope builds its container; the code path
+        /// of the <c>robloxWorldHost</c> Inspector field, used by the one-click world bootstrap.
+        /// </summary>
+        public void SetRobloxWorldHost(Mods.Rbx.Binding.RbxWorldHost host)
+        {
+            DemandNotBuilt(nameof(SetRobloxWorldHost));
+            robloxWorldHost = host;
+        }
+
+        /// <summary>The scene world host this scope registers; null runs the world headless.</summary>
+        public Mods.Rbx.Binding.RbxWorldHost RobloxWorldHost => robloxWorldHost;
+
+        /// <summary>Sets the mods store namespace (see the Inspector field) before this scope builds.</summary>
+        public void SetModStoreId(string id)
+        {
+            DemandNotBuilt(nameof(SetModStoreId));
+            storeId = id;
+        }
+
+        private void DemandNotBuilt(string member)
+        {
+            if (Container != null)
+            {
+                throw new System.InvalidOperationException(member + " must be called before the mods scope builds its container.");
+            }
+        }
 
         /// <summary>Supplies the host's world-package persistence before this scope builds its container.</summary>
         public void SetWorldPackageStore(IRbxWorldPackageStore store)
@@ -126,9 +211,11 @@ namespace CoreAI.Composition
         protected override void Configure(IContainerBuilder builder)
         {
             // WHY: execute_lua's rate limiter is module-owned: the Lua-free core no longer registers it, so the
-            // mods module supplies it here. The Lua-CSharp sandbox is created inside the factory, so no
-            // sandbox registration is needed at this scope.
-            builder.Register(_ => new LuaGenerationRateLimiter(), Lifetime.Singleton);
+            // mods module supplies it here, configured by the instant edit settings together with the undo
+            // history and the gate's write-behind. The Lua-CSharp sandbox is created inside the factory, so
+            // no sandbox registration is needed at this scope.
+            builder.RegisterCoreAiInstantEditLoop(InstantEdit);
+            builder.RegisterInstance(PlayerCamera);
 
             if (robloxWorldHost != null)
             {
@@ -165,6 +252,11 @@ namespace CoreAI.Composition
             // in this composition reads live — see CoreAiModsInstaller and LuaCsCoroutineBudgetSettings.
             builder.RegisterInstance(coroutineResumeBudget ?? new Sandbox.LuaCs.LuaCsCoroutineBudgetSettings());
 
+            if (!builder.Exists(typeof(Ai.LuaCs.CoreAiLuaAiOptions), false, true))
+            {
+                builder.RegisterInstance(new Ai.LuaCs.CoreAiLuaAiOptions { AllowAgentsFromLua = allowAgentsFromLua });
+            }
+
             IEnumerable<string> scenes = allowedLuaScenes is { Length: > 0 } ? allowedLuaScenes : null;
             builder.RegisterCoreAiMods(
                 scenes,
@@ -175,6 +267,11 @@ namespace CoreAI.Composition
                 Mods.Rbx.Instances.InstanceRegistry.CurrentWorldAclVersion,
                 null, null, null, runtimeWorldPackageStore,
                 CreateAdditionalGameplayBindings());
+
+            if (worldChatCommands)
+            {
+                builder.RegisterCoreAiWorldChatCommands();
+            }
         }
 
         private System.Action<LuaCsApiRegistry, LuaCapabilities> CreateAdditionalGameplayBindings()

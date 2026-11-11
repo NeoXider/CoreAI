@@ -104,6 +104,7 @@ Shader "CoreAI/Rbx/Procedural Neon"
 
         UsePass "Universal Render Pipeline/Lit/ShadowCaster"
         UsePass "Universal Render Pipeline/Lit/DepthOnly"
+        UsePass "Universal Render Pipeline/Lit/DepthNormals"
     }
 
     Fallback Off

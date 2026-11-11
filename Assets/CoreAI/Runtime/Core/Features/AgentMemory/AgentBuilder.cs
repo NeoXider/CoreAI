@@ -42,13 +42,16 @@ namespace CoreAI.Ai
         private readonly string _roleId;
         private readonly List<ILlmTool> _tools = new();
         private readonly List<SkillSet> _skills = new();
+        private readonly List<string> _toolProfiles = new();
         private string _systemPrompt;
         private bool _withPerRequestSystemPrompt;
 
         private AgentMode _mode = AgentMode.ToolsAndChat;
+        private bool _enforceMode;
 
         // WHY: Default chat history keeps agent continuity; callers can opt out to save prompt tokens.
         private bool _withChatHistory = true;
+        private bool _chatHistoryChosen;
         private int? _contextWindowTokens;
         private bool _persistChatHistory;
         private int _maxChatHistoryMessages = 30;
@@ -270,9 +273,49 @@ namespace CoreAI.Ai
         /// <summary>
         /// Selects how the agent may respond: chat only, tools only, or both.
         /// </summary>
+        /// <remarks>
+        /// In this release the mode is enforced only after <see cref="WithModeEnforcement"/>; without it a
+        /// <see cref="AgentMode.ChatOnly"/> agent still receives its tools and a <see cref="AgentMode.ToolsOnly"/>
+        /// agent keeps chat history, and <see cref="Build"/> warns about both. Enforcement becomes the default
+        /// in the next release.
+        /// </remarks>
         public AgentBuilder WithMode(AgentMode mode)
         {
             _mode = mode;
+            return this;
+        }
+
+        /// <summary>
+        /// Makes the policy enforce <see cref="WithMode"/>: a <see cref="AgentMode.ChatOnly"/> agent's requests carry
+        /// no tools (memory, skills and later <see cref="AgentMemoryPolicy.AddToolForRole"/> additions included), and
+        /// a <see cref="AgentMode.ToolsOnly"/> agent sends no chat history unless <see cref="WithChatHistory"/> was
+        /// called explicitly. <see cref="AgentMode.ToolsAndChat"/> is unaffected.
+        /// </summary>
+        public AgentBuilder WithModeEnforcement(bool enforce = true)
+        {
+            _enforceMode = enforce;
+            return this;
+        }
+
+        /// <summary>
+        /// Lets the agent draw tools and skills from the named tool profiles (see <see cref="BuiltInToolProfileIds"/>),
+        /// in addition to the tools added with <see cref="WithTool"/>. Without this call a built agent uses only its
+        /// own tools, as before tool profiles existed, even for a built-in role whose definition lists profiles.
+        /// </summary>
+        public AgentBuilder WithToolProfile(params string[] profileIds)
+        {
+            if (profileIds != null)
+            {
+                foreach (string profileId in profileIds)
+                {
+                    string trimmed = profileId?.Trim();
+                    if (!string.IsNullOrEmpty(trimmed) && !_toolProfiles.Contains(trimmed))
+                    {
+                        _toolProfiles.Add(trimmed);
+                    }
+                }
+            }
+
             return this;
         }
 
@@ -297,6 +340,7 @@ namespace CoreAI.Ai
             int maxChatHistoryMessages = 30)
         {
             _withChatHistory = true;
+            _chatHistoryChosen = true;
             _contextWindowTokens = contextWindowTokens;
             _persistChatHistory = persistBetweenSessions;
             _maxChatHistoryMessages = maxChatHistoryMessages;
@@ -310,6 +354,7 @@ namespace CoreAI.Ai
         public AgentBuilder WithoutChatHistory()
         {
             _withChatHistory = false;
+            _chatHistoryChosen = true;
             _persistChatHistory = false;
             return this;
         }
@@ -516,15 +561,23 @@ namespace CoreAI.Ai
         /// for the full set of issue codes if you want to assert on them in your own checks.
         /// </summary>
         /// <remarks>
-        /// Use <see cref="BuildDetached()"/> for policy-free, test-only construction.
+        /// Use <see cref="BuildDetached()"/> for policy-free, test-only construction. When CoreAI has not
+        /// started yet (no <see cref="CoreAIAgent.Policy"/>), the config is queued and applied by
+        /// <see cref="ApplyPendingBuilds"/> when CoreAI initialises; a later build for the same role replaces
+        /// the queued one.
         /// </remarks>
         public AgentConfig Build()
         {
             AgentConfig config = BuildDetached();
 
-            if (CoreAIAgent.Policy != null)
+            AgentMemoryPolicy policy = CoreAIAgent.Policy;
+            if (policy != null)
             {
-                config.ApplyToPolicy(CoreAIAgent.Policy);
+                config.ApplyToPolicy(policy);
+            }
+            else
+            {
+                AgentRoleRegistration.QueuePending(config);
             }
 
             return config;
@@ -534,7 +587,8 @@ namespace CoreAI.Ai
         /// Builds the <see cref="AgentConfig"/> and applies it to the current global
         /// <see cref="CoreAIAgent.Policy"/> when available, hydrating persisted skills
         /// asynchronously before the role becomes ready. A hydration failure or cancellation
-        /// leaves the previously ready role untouched.
+        /// leaves the previously ready role untouched. Before CoreAI starts the config is queued
+        /// like <see cref="Build"/>.
         /// </summary>
         public Task<AgentConfig> BuildAsync(CancellationToken cancellationToken = default)
         {
@@ -544,10 +598,36 @@ namespace CoreAI.Ai
             AgentMemoryPolicy policy = CoreAIAgent.Policy;
             if (policy == null)
             {
+                AgentRoleRegistration.QueuePending(config);
                 return Task.FromResult(config);
             }
 
             return BuildAndApplyAsync(config, policy, cancellationToken);
+        }
+
+        /// <summary>
+        /// Applies every config that <see cref="Build"/> or <see cref="BuildAsync"/> queued because CoreAI had
+        /// not started, in build order, and clears the queue. CoreAI's initialisation calls this with the new
+        /// policy; a host with its own composition root calls it once its policy exists. Returns how many
+        /// configs were applied.
+        /// </summary>
+        public static int ApplyPendingBuilds(AgentMemoryPolicy policy)
+        {
+            if (policy == null)
+            {
+                throw new ArgumentNullException(nameof(policy));
+            }
+
+            return AgentRoleRegistration.ApplyPending(policy);
+        }
+
+        /// <summary>Number of configs queued until CoreAI initialises.</summary>
+        public static int PendingBuildCount => AgentRoleRegistration.PendingCount;
+
+        /// <summary>Drops every queued config (CoreAI's reset hook calls this with the facade reset).</summary>
+        public static void ClearPendingBuilds()
+        {
+            AgentRoleRegistration.ClearPending();
         }
 
         private static async Task<AgentConfig> BuildAndApplyAsync(AgentConfig config,
@@ -570,6 +650,10 @@ namespace CoreAI.Ai
                 EmitBuildWarnings();
             }
 
+            bool toolsOnlyDefaultsHistoryOff = _enforceMode && _mode == AgentMode.ToolsOnly && !_chatHistoryChosen;
+            bool withChatHistory = !toolsOnlyDefaultsHistoryOff && _withChatHistory;
+            bool persistChatHistory = !toolsOnlyDefaultsHistoryOff && _persistChatHistory;
+
             return new AgentConfig
             {
                 RoleId = _roleId,
@@ -581,9 +665,11 @@ namespace CoreAI.Ai
                 SkillVersionStore = _skillVersionStore,
                 RequireKnownSkillTools = _requireKnownSkillTools,
                 Mode = _mode,
-                WithChatHistory = _withChatHistory,
+                EnforceMode = _enforceMode,
+                ToolProfiles = new List<string>(_toolProfiles).AsReadOnly(),
+                WithChatHistory = withChatHistory,
                 ContextWindowTokens = ctxTokens,
-                PersistChatHistoryBetweenSessions = _persistChatHistory,
+                PersistChatHistoryBetweenSessions = persistChatHistory,
                 MaxChatHistoryMessages = _maxChatHistoryMessages,
                 Temperature = _temperature,
                 Reasoning = _reasoning,
@@ -672,6 +758,7 @@ namespace CoreAI.Ai
             if ((_mode == AgentMode.ToolsAndChat || _mode == AgentMode.ToolsOnly) &&
                 _tools.Count == 0 &&
                 _skills.Count == 0 &&
+                _toolProfiles.Count == 0 &&
                 !_skillAuthoring)
             {
                 issues.Add(new AgentBuilderIssue(
@@ -681,9 +768,23 @@ namespace CoreAI.Ai
                     "or switch to AgentMode.ChatOnly."));
             }
 
-            if (_mode == AgentMode.ToolsOnly && _tools.Count == 0)
+            if (!_enforceMode && _mode == AgentMode.ChatOnly &&
+                (_tools.Count > 0 || _skills.Count > 0 || _skillAuthoring || _toolProfiles.Count > 0))
             {
-                // WHY: Already reported by the rule above; no extra issue here.
+                issues.Add(new AgentBuilderIssue(
+                    AgentBuilderIssueCode.ChatOnlyModeOffersTools,
+                    "Mode is ChatOnly but tools, skills or tool profiles were added; in this release they are " +
+                    "still offered to the model. From the next release ChatOnly removes every tool. Call " +
+                    "WithModeEnforcement() to get that behaviour now, or use AgentMode.ToolsAndChat."));
+            }
+
+            if (!_enforceMode && _mode == AgentMode.ToolsOnly && _withChatHistory && !_chatHistoryChosen)
+            {
+                issues.Add(new AgentBuilderIssue(
+                    AgentBuilderIssueCode.ToolsOnlyModeKeepsChatHistory,
+                    "Mode is ToolsOnly but chat history is on by default; in this release the agent still sends " +
+                    "it. From the next release ToolsOnly turns history off unless WithChatHistory() is called. " +
+                    "Call WithModeEnforcement() or WithoutChatHistory() to get that behaviour now."));
             }
 
             if (_useLlmContextCompaction == true)
@@ -727,6 +828,14 @@ namespace CoreAI.Ai
         public string SystemPrompt { get; internal set; }
         public IReadOnlyList<ILlmTool> Tools { get; internal set; }
         public AgentMode Mode { get; internal set; }
+
+        /// <summary>
+        /// Whether the policy enforces <see cref="Mode"/> for this role (<see cref="AgentBuilder.WithModeEnforcement"/>).
+        /// </summary>
+        public bool EnforceMode { get; internal set; }
+
+        /// <summary>Tool profiles the agent draws tools and skills from (<see cref="AgentBuilder.WithToolProfile"/>).</summary>
+        public IReadOnlyList<string> ToolProfiles { get; internal set; } = Array.Empty<string>();
         public bool WithChatHistory { get; internal set; }
         public int ContextWindowTokens { get; internal set; }
         public bool PersistChatHistoryBetweenSessions { get; internal set; }
@@ -880,6 +989,11 @@ namespace CoreAI.Ai
                 streamingOverride = true;
             }
 
+            if (EnforceMode && Mode == AgentMode.ChatOnly)
+            {
+                return BuildChatOnlyPreparedRole(streamingOverride);
+            }
+
             // WHY: Self-service skills: register catalog context provider + meta-tools.
             // The catalog (name + description per skill) goes into the system prompt.
             // The model calls read_skill(name) to load instructions + tool schemas,
@@ -889,7 +1003,8 @@ namespace CoreAI.Ai
             ILlmTool readSkillTool = null;
             ILlmTool callSkillTool = null;
             ILlmTool manageSkillsTool = null;
-            bool hasSkills = Skills != null && Skills.Count > 0;
+            List<SkillSet> profileSkills = policy.SnapshotProfileSkills(ToolProfiles);
+            bool hasSkills = (Skills != null && Skills.Count > 0) || profileSkills.Count > 0;
             if (hasSkills || SkillAuthoringEnabled)
             {
                 // WHY: Policy lookup, dynamic additions and both proxies share one catalog,
@@ -897,9 +1012,25 @@ namespace CoreAI.Ai
                 liveCatalog ??= new MutableSkillCatalog(Skills);
                 IReadOnlyList<SkillSet> catalogSkills = liveCatalog;
 
+                List<SkillSet> advertised = Skills != null ? new List<SkillSet>(Skills) : new List<SkillSet>();
+                List<SkillSet> mergedProfileSkills = new();
+                foreach (SkillSet skill in profileSkills)
+                {
+                    if (liveCatalog.Get(skill.Name) != null)
+                    {
+                        continue;
+                    }
+
+                    liveCatalog.AddOrReplace(skill);
+                    mergedProfileSkills.Add(skill);
+                    advertised.Add(skill);
+                }
+
+                profileSkills = mergedProfileSkills;
+
                 // WHY: Inject the lightweight catalog into the stable system prefix. Skill catalog data is static
                 // per agent build (host skills), unlike live world-state context, so it stays cacheable.
-                string catalog = SkillSet.BuildCatalog(Skills);
+                string catalog = SkillSet.BuildCatalog(advertised);
                 if (!string.IsNullOrWhiteSpace(catalog))
                 {
                     additionalPrompt = string.IsNullOrWhiteSpace(additionalPrompt)
@@ -955,7 +1086,45 @@ namespace CoreAI.Ai
                 OverrideUniversalPrefix = OverrideUniversalPrefix,
                 StreamingOverride = streamingOverride,
                 AdditionalPrompt = additionalPrompt,
-                LiveCatalog = liveCatalog
+                LiveCatalog = liveCatalog,
+                ToolProfiles = new List<string>(ToolProfiles ?? Array.Empty<string>()),
+                ProfileSkills = profileSkills,
+                EnforcedMode = EnforceMode ? Mode : (AgentMode?)null
+            };
+        }
+
+        /// <summary>
+        /// The prepared role of an enforced <see cref="AgentMode.ChatOnly"/> agent: no tools, no memory tool, no
+        /// skills and no tool profiles, so its requests carry no tool at all.
+        /// </summary>
+        private AgentMemoryPolicy.PreparedAgentRole BuildChatOnlyPreparedRole(bool? streamingOverride)
+        {
+            return new AgentMemoryPolicy.PreparedAgentRole
+            {
+                RoleId = RoleId,
+                Tools = new List<ILlmTool>(),
+                MemoryDefaultAction = MemoryDefaultAction,
+                AllowDuplicateToolCalls = AllowDuplicateToolCalls,
+                HasMemoryTool = false,
+                WithChatHistory = WithChatHistory,
+                ContextWindowTokens = ContextWindowTokens,
+                PersistChatHistory = PersistChatHistoryBetweenSessions,
+                MaxChatHistoryMessages = MaxChatHistoryMessages,
+                UseLlmContextCompaction = UseLlmContextCompaction,
+                MaxOutputTokens = MaxOutputTokens,
+                MaxToolCallRoundtrips = MaxToolCallRoundtrips,
+                Temperature = Temperature,
+                Reasoning = Reasoning,
+                Sampling = Sampling,
+                ToolResultMemory = ToolResultMemory,
+                CompactionTriggerRatio = CompactionTriggerRatio,
+                OverrideUniversalPrefix = OverrideUniversalPrefix,
+                StreamingOverride = streamingOverride,
+                AdditionalPrompt = SystemPrompt,
+                LiveCatalog = null,
+                ToolProfiles = new List<string>(),
+                ProfileSkills = null,
+                EnforcedMode = AgentMode.ChatOnly
             };
         }
 

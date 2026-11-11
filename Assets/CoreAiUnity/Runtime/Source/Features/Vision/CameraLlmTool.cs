@@ -13,34 +13,53 @@ using UnityEngine;
 namespace CoreAI.Vision
 {
     /// <summary>
-    /// Agent-vision tool: lets an LLM agent SEE the game (<c>camera_capture</c>, aliased as <c>screenshot</c>
-    /// for discoverability), move its OWN camera (<c>camera_look</c>), and enumerate cameras
-    /// (<c>camera_list</c>). One <see cref="ILlmTool"/> named <c>camera</c> expanding to four native MEAI
-    /// functions. Capture is always read-only-safe on any camera; movement is gated by the opt-in
-    /// <see cref="CoreAiAgentCamera"/> marker so the player's camera is never hijacked. See
-    /// <c>Docs/CoreAI/agent-vision.md</c>.
+    /// Agent-vision tool: lets an LLM agent SEE the game and move its OWN camera. One <see cref="ILlmTool"/> named
+    /// <c>camera</c> expanding to five native MEAI functions:
+    /// <list type="bullet">
+    /// <item><description><c>camera_capture</c> (alias <c>screenshot</c>) — capture a named camera, the agent's own
+    /// camera or the free agent camera; never moves a camera.</description></item>
+    /// <item><description><c>camera_look</c> — position, rotation, an object or point to aim at, field of view.</description></item>
+    /// <item><description><c>camera_orbit</c> — yaw, pitch and distance around an object or a point.</description></item>
+    /// <item><description><c>camera_list</c> — every camera with its pose and whether the agent may move it.</description></item>
+    /// </list>
+    /// Movement goes through the ownership gate of <see cref="IAgentCameraService"/>: the agent moves a camera marked
+    /// for it (<see cref="CoreAiAgentCamera"/>) or its free camera, created on demand; the player's camera never moves.
+    /// See <c>Docs/CoreAI/agent-vision.md</c>.
     /// </summary>
     public sealed class CameraLlmTool : IAIFunctionsLlmTool
     {
         private readonly IAgentCameraService _service;
+        private readonly IAgentCameraRig _rig;
         private readonly string _agentRoleId;
 
+        /// <summary>
+        /// The tool for <paramref name="agentRoleId"/> over <paramref name="service"/>. Look and orbit use the service's
+        /// own rig when it implements <see cref="IAgentCameraRig"/> (as <see cref="AgentCameraService"/> does), else a
+        /// default <see cref="AgentCameraRig"/>.
+        /// </summary>
         public CameraLlmTool(IAgentCameraService service, string agentRoleId)
+            : this(service, agentRoleId, null)
+        {
+        }
+
+        /// <summary>The tool with an explicit <paramref name="rig"/>; null picks the default described above.</summary>
+        public CameraLlmTool(IAgentCameraService service, string agentRoleId, IAgentCameraRig rig)
         {
             _service = service ?? throw new ArgumentNullException(nameof(service));
             _agentRoleId = agentRoleId;
+            _rig = rig ?? service as IAgentCameraRig ?? new AgentCameraRig();
         }
 
         public string Name => "camera";
 
         public string Description =>
-            "See the game through a camera: capture a screenshot, move your own camera to look around, " +
+            "See the game through a camera: capture a screenshot, aim or orbit your own camera to look around, " +
             "or list available cameras.";
 
         public bool AllowDuplicates => false;
 
-        // Wrapper expands into native MEAI functions; the aggregate schema is intentionally empty because
-        // each AIFunction.JsonSchema (built from the [Description]-annotated parameters) is authoritative.
+        // WHY: the wrapper expands into native MEAI functions, so the aggregate schema stays empty; each
+        // AIFunction.JsonSchema (built from the [Description]-annotated parameters) is authoritative.
         public string ParametersSchema => "{}";
 
         public IEnumerable<AIFunction> CreateAIFunctions()
@@ -51,7 +70,7 @@ namespace CoreAI.Vision
                 {
                     Name = "camera_capture",
                     Description =
-                        "Take a screenshot of the game camera to SEE the current scene and verify your work. " +
+                        "Take a screenshot of a game camera to SEE the current scene and verify your work. " +
                         "Returns a compact JSON summary; the image itself is attached for you to look at. " +
                         "Defaults to your own camera, else the main camera. Does NOT move the camera.",
                     MarshalResult = LlmToolImageResult.PreserveResult
@@ -65,7 +84,7 @@ namespace CoreAI.Vision
                 {
                     Name = "screenshot",
                     Description =
-                        "Take a screenshot of the game camera to SEE the current scene and verify your work. " +
+                        "Take a screenshot of a game camera to SEE the current scene and verify your work. " +
                         "Alias for camera_capture: returns a compact JSON summary; the image itself is attached " +
                         "for you to look at. Defaults to your own camera, else the main camera. Does NOT " +
                         "move the camera.",
@@ -73,14 +92,29 @@ namespace CoreAI.Vision
                 });
 
             yield return AIFunctionFactory.Create(
-                (Func<string, float?, float?, float?, float?, float?, float?, string, CancellationToken, Task<string>>)
-                LookAsync,
+                (Func<string, float?, float?, float?, float?, float?, float?, string, float?, float?, float?, float?,
+                    CancellationToken, Task<string>>)LookAsync,
                 new AIFunctionFactoryOptions
                 {
                     Name = "camera_look",
                     Description =
-                        "Move/rotate YOUR OWN camera to look around. Only works on a camera marked " +
-                        "agent-controllable (CoreAiAgentCamera with allowMove); the player's camera cannot be moved."
+                        "Move and aim YOUR OWN camera: set a position, a rotation, an object (lookAt) or point " +
+                        "(targetX/Y/Z) to look at, and/or the field of view. Your free camera is created on first " +
+                        "use, starting at the main camera's view; the player's camera never moves. Call " +
+                        "camera_capture afterwards to see the new view."
+                });
+
+            yield return AIFunctionFactory.Create(
+                (Func<string, string, float?, float?, float?, float?, float?, float?, float?, CancellationToken,
+                    Task<string>>)OrbitAsync,
+                new AIFunctionFactoryOptions
+                {
+                    Name = "camera_orbit",
+                    Description =
+                        "Circle YOUR OWN camera around an object or point and aim at it. yaw = heading in degrees " +
+                        "(0 looks along +Z, 90 along +X), pitch = degrees above the target (0 level, 89 top-down), " +
+                        "distance in world units. Omitted values keep the current ones; omit the target to keep " +
+                        "circling the last one. Call camera_capture afterwards to see the view."
                 });
 
             yield return AIFunctionFactory.Create(
@@ -90,7 +124,7 @@ namespace CoreAI.Vision
                     Name = "camera_list",
                     Description =
                         "List scene cameras with their name, whether they are the main camera, whether they are " +
-                        "movable by you, and their current pose."
+                        "movable by you, whether one is your free camera, and their current pose."
                 });
         }
 
@@ -101,8 +135,8 @@ namespace CoreAI.Vision
         /// capture before the image reached the model. Failures are plain JSON strings.
         /// </summary>
         private async Task<object> CaptureCameraAsync(
-            [Description("Camera GameObject name, or 'main' for the main camera. Leave empty to use your own " +
-                         "camera if you have one, otherwise the main camera.")]
+            [Description("Camera to capture: empty = your own camera if you have one, else the main camera; " +
+                         "'main'; 'agent' (your own camera); or a name from camera_list.")]
             string cameraName = "",
             [Description("Long-edge size of the screenshot in pixels (clamped 64..1024). Default 512.")]
             int maxSize = 512,
@@ -122,7 +156,7 @@ namespace CoreAI.Vision
                     return Error("no_camera",
                         string.IsNullOrWhiteSpace(cameraName)
                             ? "No camera found in the scene."
-                            : $"No camera named '{cameraName}' and no fallback camera found.");
+                            : $"No camera named '{cameraName}' and no fallback camera found. Call camera_list.");
                 }
 
                 if (!_service.TryReserveCapture(_agentRoleId, out double retryAfterSeconds))
@@ -141,7 +175,9 @@ namespace CoreAI.Vision
                     await _service.CaptureAsync(cam, isMain, maxSize, CaptureImageFormat.Jpeg, cancellationToken);
                 if (!result.Ok || result.Bytes == null || result.Bytes.Length == 0)
                 {
-                    return Error(result.Error ?? "capture_failed", "Failed to capture the camera frame.");
+                    return Error(result.Error ?? "capture_failed",
+                        "Failed to capture the camera frame." +
+                        (string.IsNullOrEmpty(result.Message) ? "" : " " + result.Message));
                 }
 
                 string mime = result.Format == "png" ? "image/png" : "image/jpeg";
@@ -166,6 +202,10 @@ namespace CoreAI.Vision
                 });
                 return new LlmToolImageResult(summaryJson, AiAttachment.Image(result.Bytes, mime));
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 return Error("exception", ex.Message);
@@ -181,7 +221,8 @@ namespace CoreAI.Vision
         }
 
         private async Task<string> LookAsync(
-            [Description("Camera GameObject name, or 'main'. Leave empty to use your own agent camera.")]
+            [Description("Camera to move: empty or 'agent' = your own camera, 'free' = your free camera. " +
+                         "Other cameras move only if marked agent-controllable.")]
             string cameraName = "",
             [Description("New world position X. Omit to leave unchanged.")]
             float? posX = null,
@@ -189,14 +230,22 @@ namespace CoreAI.Vision
             float? posY = null,
             [Description("New world position Z. Omit to leave unchanged.")]
             float? posZ = null,
-            [Description("New Euler rotation X in degrees. Ignored when lookAt is set. Omit to leave unchanged.")]
+            [Description("New Euler rotation X in degrees. Ignored when a target is set. Omit to leave unchanged.")]
             float? rotX = null,
-            [Description("New Euler rotation Y in degrees. Ignored when lookAt is set. Omit to leave unchanged.")]
+            [Description("New Euler rotation Y in degrees. Ignored when a target is set. Omit to leave unchanged.")]
             float? rotY = null,
-            [Description("New Euler rotation Z in degrees. Ignored when lookAt is set. Omit to leave unchanged.")]
+            [Description("New Euler rotation Z in degrees. Ignored when a target is set. Omit to leave unchanged.")]
             float? rotZ = null,
-            [Description("Name of a GameObject to orient the camera toward. Overrides rotX/rotY/rotZ.")]
+            [Description("Name of a GameObject to orient the camera toward. Overrides rotX/rotY/rotZ and the point.")]
             string lookAt = null,
+            [Description("World X of a point to look at; give targetX, targetY and targetZ together.")]
+            float? targetX = null,
+            [Description("World Y of a point to look at.")]
+            float? targetY = null,
+            [Description("World Z of a point to look at.")]
+            float? targetZ = null,
+            [Description("Vertical field of view in degrees (clamped, default range 10..120). Omit to keep it.")]
+            float? fov = null,
             CancellationToken cancellationToken = default)
         {
             await UniTask.SwitchToMainThread(cancellationToken);
@@ -205,35 +254,130 @@ namespace CoreAI.Vision
                 if (!_service.TryResolveMovableCamera(cameraName, _agentRoleId, out Camera cam,
                         out CameraMoveDenial denial))
                 {
-                    return JsonConvert.SerializeObject(new
-                    {
-                        ok = false,
-                        error = DenialCode(denial.Reason),
-                        message = denial.Message
-                    });
+                    return Denied(denial);
                 }
 
-                if (!_service.TryApplyLook(cam, posX, posY, posZ, rotX, rotY, rotZ, lookAt, out string errorCode))
+                CameraRigResult result = _rig.Look(cam, new CameraLookRequest
                 {
-                    return Error(errorCode ?? "look_failed",
-                        errorCode == "no_change"
-                            ? "Provide a position, rotation, or lookAt target to move the camera."
-                            : errorCode == "target_not_found"
-                                ? $"No GameObject named '{lookAt}' was found to look at."
-                                : "Failed to move the camera.");
+                    PositionX = posX,
+                    PositionY = posY,
+                    PositionZ = posZ,
+                    RotationX = rotX,
+                    RotationY = rotY,
+                    RotationZ = rotZ,
+                    LookAt = lookAt,
+                    TargetX = targetX,
+                    TargetY = targetY,
+                    TargetZ = targetZ,
+                    FieldOfView = fov
+                });
+                if (!result.Ok)
+                {
+                    return Error(result.ErrorCode ?? "look_failed", result.Message ?? "Failed to move the camera.");
                 }
 
                 CameraPose pose = CameraPose.FromCamera(cam);
                 Vector3 p = pose.Position;
                 Vector3 r = pose.EulerRotation;
+                string aimed = result.HasTarget
+                    ? result.TargetName != null
+                        ? $", looking at '{result.TargetName}'"
+                        : $", looking at ({F(result.TargetPoint.x)}, {F(result.TargetPoint.y)}, {F(result.TargetPoint.z)})"
+                    : "";
                 return JsonConvert.SerializeObject(new
                 {
                     ok = true,
                     summary = $"Moved '{cam.name}' to pos ({F(p.x)}, {F(p.y)}, {F(p.z)}), " +
-                              $"rot ({F(r.x)}, {F(r.y)}, {F(r.z)}).",
+                              $"rot ({F(r.x)}, {F(r.y)}, {F(r.z)}), fov {F(pose.FieldOfView)}{aimed}. " +
+                              "Call camera_capture to see the new view.",
                     camera = cam.name,
                     pose = PoseJson(pose)
                 });
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return Error("exception", ex.Message);
+            }
+            finally
+            {
+#if !UNITY_WEBGL || UNITY_EDITOR
+                await UniTask.SwitchToThreadPool();
+#endif
+            }
+        }
+
+        private async Task<string> OrbitAsync(
+            [Description("Camera to move: empty or 'agent' = your own camera, 'free' = your free camera.")]
+            string cameraName = "",
+            [Description("Name of the GameObject to circle around (its rendered centre). Wins over the point.")]
+            string target = null,
+            [Description("World X of a point to circle around; give targetX, targetY and targetZ together.")]
+            float? targetX = null,
+            [Description("World Y of a point to circle around.")]
+            float? targetY = null,
+            [Description("World Z of a point to circle around.")]
+            float? targetZ = null,
+            [Description("Heading in degrees: 0 looks along +Z, 90 along +X, 180 along -Z. Omit to keep it.")]
+            float? yaw = null,
+            [Description("Degrees above the target: 0 level, 45 from above, 89 straight down. Omit to keep it.")]
+            float? pitch = null,
+            [Description("Distance from the target in world units. Omit to keep it.")]
+            float? distance = null,
+            [Description("Vertical field of view in degrees (clamped, default range 10..120). Omit to keep it.")]
+            float? fov = null,
+            CancellationToken cancellationToken = default)
+        {
+            await UniTask.SwitchToMainThread(cancellationToken);
+            try
+            {
+                if (!_service.TryResolveMovableCamera(cameraName, _agentRoleId, out Camera cam,
+                        out CameraMoveDenial denial))
+                {
+                    return Denied(denial);
+                }
+
+                CameraRigResult result = _rig.Orbit(cam, new CameraOrbitRequest
+                {
+                    Target = target,
+                    TargetX = targetX,
+                    TargetY = targetY,
+                    TargetZ = targetZ,
+                    Yaw = yaw,
+                    Pitch = pitch,
+                    Distance = distance,
+                    FieldOfView = fov
+                });
+                if (!result.Ok)
+                {
+                    return Error(result.ErrorCode ?? "orbit_failed", result.Message ?? "Failed to orbit the camera.");
+                }
+
+                CameraPose pose = CameraPose.FromCamera(cam);
+                Vector3 pivot = result.TargetPoint;
+                string around = result.TargetName != null
+                    ? $"'{result.TargetName}'"
+                    : $"({F(pivot.x)}, {F(pivot.y)}, {F(pivot.z)})";
+                return JsonConvert.SerializeObject(new
+                {
+                    ok = true,
+                    summary = $"Orbited '{cam.name}' around {around}: yaw {F(result.Yaw)}, pitch {F(result.Pitch)}, " +
+                              $"distance {F(result.Distance)}. Call camera_capture to see the view.",
+                    camera = cam.name,
+                    target = result.TargetName,
+                    pivot = new { x = pivot.x, y = pivot.y, z = pivot.z },
+                    yaw = Round(result.Yaw),
+                    pitch = Round(result.Pitch),
+                    distance = Round(result.Distance),
+                    pose = PoseJson(pose)
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -262,11 +406,16 @@ namespace CoreAI.Vision
                         isMain = info.IsMain,
                         marked = info.IsMarked,
                         movable = info.Movable,
+                        free = info.IsFree,
                         pose = PoseJson(info.Pose)
                     });
                 }
 
                 return JsonConvert.SerializeObject(new { ok = true, count = items.Count, cameras = items });
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -285,14 +434,21 @@ namespace CoreAI.Vision
             return JsonConvert.SerializeObject(new { ok = false, error = code, message });
         }
 
+        private static string Denied(CameraMoveDenial denial)
+        {
+            return JsonConvert.SerializeObject(new
+            {
+                ok = false,
+                error = DenialCode(denial.Reason),
+                message = denial.Message
+            });
+        }
+
         private static string DenialCode(CameraMoveDenialReason reason)
         {
             return reason switch
             {
                 CameraMoveDenialReason.NoCamera => "no_camera",
-                CameraMoveDenialReason.NotMarked => "camera_not_movable",
-                CameraMoveDenialReason.MovementDisabled => "camera_not_movable",
-                CameraMoveDenialReason.WrongRole => "camera_not_movable",
                 _ => "camera_not_movable"
             };
         }
@@ -305,6 +461,11 @@ namespace CoreAI.Vision
                 rotation = new { x = pose.EulerRotation.x, y = pose.EulerRotation.y, z = pose.EulerRotation.z },
                 fieldOfView = pose.FieldOfView
             };
+        }
+
+        private static float Round(float v)
+        {
+            return (float)Math.Round(v, 2);
         }
 
         private static string F(float v)
@@ -364,7 +525,7 @@ namespace CoreAI.Vision
                 return false;
             }
 
-            // "data:" prefix is 5 chars; media type spans up to the first ';'.
+            // WHY: "data:" is 5 chars and the media type runs up to the first ';'.
             string mediaType = dataUrl.Substring(5, semicolon - 5);
             string base64 = dataUrl.Substring(comma + 1);
             try
@@ -378,7 +539,7 @@ namespace CoreAI.Vision
             }
         }
 
-        // Mirrors only the fields needed for the host image lift.
+        // WHY: mirrors only the fields the host image lift needs.
         private sealed class CaptureResultShape
         {
             public bool ok { get; set; }

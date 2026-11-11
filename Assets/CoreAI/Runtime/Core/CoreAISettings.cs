@@ -316,8 +316,8 @@ namespace CoreAI
             set => _enableStreaming = value;
         }
 
-        /// <summary>
-        /// Whether the Lua sandbox may run on the WebGL player (opt-in). ///.</summary>
+        /// <summary>Obsolete and read by nothing; see <see cref="ICoreAISettings.EnableLuaOnWebGl"/>.</summary>
+        [System.Obsolete("Read by nothing: Lua-CSharp runs on the WebGL player like on every other one, so there is no WebGL Lua switch. To ship a build without Lua, leave CoreAiModsLifetimeScope out of the scene (or build without the COREAI_LUA define); to keep mods but not AI-written Lua, leave the lua-builder tool profile off the roles.")]
         public static bool EnableLuaOnWebGl
         {
             get => _enableLuaOnWebGl ?? Instance?.EnableLuaOnWebGl ?? DefaultEnableLuaOnWebGl;

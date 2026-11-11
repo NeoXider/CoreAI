@@ -24,9 +24,10 @@ namespace CoreAI.Composition
     /// dependency: the core (<see cref="WorldCommandsInstaller.RegisterWorldCommands"/>) registers only
     /// the native world-command executors, while this module installer — living in the
     /// <c>com.neoxider.coreaimods</c> package — adds the Lua-CSharp mod stack (sandbox + gameplay
-    /// bindings + persistent runtime + one-off executor) and attaches the <c>execute_lua</c> +
-    /// <c>manage_mods</c> + <c>get_mod_logs</c> tools (and the Lua Modding skill) to the built-in
-    /// Programmer role.
+    /// bindings + persistent runtime + one-off executor) and registers the <c>execute_lua</c> +
+    /// <c>manage_mods</c> + <c>get_mod_logs</c> + world-package tools (and the Lua Modding, Rbx API and Full
+    /// Lua skills) into the <see cref="BuiltInToolProfileIds.LuaBuilder"/> tool profile, which the built-in
+    /// Programmer role definition references.
     /// <para>
     /// The active VM is Lua-CSharp (<see cref="LuaCsModRuntime"/>): a managed, AOT-safe runtime that
     /// works on IL2CPP/WebGL. Consumers reach it through the VM-agnostic <see cref="ILuaModRuntime"/>
@@ -183,12 +184,37 @@ namespace CoreAI.Composition
             // IBundledModSource entries (StreamingAssets, Addressables, remote) to extend the set.
             builder.Register<IBundledModSource>(_ => new ResourcesBundledModSource(), Lifetime.Singleton);
 
+            // WHY one list per mod store, shared by manage_mods, the Hub Mods page and the world session: a folder
+            // made in any of them shows in the others and travels in the world package. A host store that is not
+            // file-backed gets one in-memory list for this composition.
+            if (!builder.Exists(typeof(Mods.Folders.IModFolderListStore), true))
+            {
+                builder.Register<Mods.Folders.IModFolderListStore>(
+                    c => c.Resolve<WorldSessionSourceBackend>().Store is FileLuaModSourceStore files
+                        ? FileModFolderListStore.For(files)
+                        : new Mods.Folders.InMemoryModFolderListStore(),
+                    Lifetime.Singleton);
+            }
+
             // WHY: one mod log ring buffer per container backs get_mod_logs (LLM tool + MCP tool); it is
             // consumed via ResolveOrDefault at the stack factory below, so a host that registers its own
             // ILuaLogService wins — the same override story as the mod stores. No mirrorLogger: the mod
             // runtime already writes errors to the scoped log unconditionally, and in production the
             // mirror would resolve to the same game-log sink and duplicate every error entry.
             builder.Register(c => new LuaLogService(), Lifetime.Singleton).As<ILuaLogService>();
+
+            // WHY a container singleton built eagerly: the bridge mirrors the CoreAI scope's UI focus
+            // (chat panel, Hub) into the scene world's input focus, so typing in CoreAI UI reaches Lua as
+            // gameProcessedEvent = true; the container disposes it with the scope, releasing the claim.
+            // Without a world host or a UI focus service it is inert, and RbxWorldHost.InputFocus stays the
+            // host-side path for a game's own UI.
+            builder.Register(c => new CoreAiUiFocusBridge(
+                    c.ResolveOrDefault<CoreAI.UiFocus.ICoreAiUiFocus>(),
+                    c.ResolveOrDefault<RbxWorldHost>()?.InputFocus),
+                Lifetime.Singleton);
+            builder.RegisterBuildCallback(container => container.Resolve<CoreAiUiFocusBridge>());
+            builder.RegisterRuntimeUiLua();
+            RegisterWorldAgents(builder);
 
             // WHY: one Lua-CSharp stack shared across both surfaces, so persistent runtime and one-off executor
             // resolve the same sandbox + gameplay bindings instance rather than diverging copies.
@@ -274,14 +300,8 @@ namespace CoreAI.Composition
                         CreateCharacterMotor(binder, humanoid, rbxHost, motorProvider));
                 }
 
-                IInGameLlmChatServiceFactory chatFactory =
-                    c.ResolveOrDefault<IInGameLlmChatServiceFactory>();
-                if (chatFactory != null)
-                {
-                    rbxApi.AttachChatFactory(chatFactory);
-                }
-
                 rbxApiHolder[0] = rbxApi;
+                AttachWorldServices(c, rbxApi);
 
                 LuaCsModStack luaCsStack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
                 {
@@ -312,7 +332,7 @@ namespace CoreAI.Composition
                         .GetActorContext(BuiltInAgentRoleIds.Programmer),
                     Capabilities = scriptCapabilities,
                     OneOffCapabilities = oneOffCapabilities,
-                    AdditionalGameplayBindings = additionalGameplayBindings,
+                    AdditionalGameplayBindings = ComposeGameplayBindings(c, rbxApi, additionalGameplayBindings),
                     // WHY: a one-shot chunk may run for seconds under its wall-clock budget; on a
                     // single-threaded player that would freeze the whole page (measured: ~6 s on WebGL).
                     // The player-loop yielder lets the guard hand a frame back while the chunk runs.
@@ -381,12 +401,11 @@ namespace CoreAI.Composition
                             // ScriptContext:SetTimeout; a world reload keeps it rather than quietly
                             // reverting a host-configured wall-clock override back to the baseline.
                             coroutineResumeBudget: initial.RbxApi.CoroutineResumeBudget);
-                        IInGameLlmChatServiceFactory chatFactory =
-                            c.ResolveOrDefault<IInGameLlmChatServiceFactory>();
-                        if (chatFactory != null)
-                        {
-                            stagedApi.AttachChatFactory(chatFactory);
-                        }
+                        AttachWorldServices(c, stagedApi);
+                        // WHY here and not in AttachWorldServices: the initial world is built while the session
+                        // controller is still being constructed, and the agents resolve the world through it; that
+                        // world is attached once the container built (RegisterWorldAgents).
+                        c.ResolveOrDefault<CoreAiWorldAgents>()?.AttachWorld(stagedApi.Scheduler);
 
                         // WHY the replacement world needs this too: a staged API starts with no motor
                         // factory, so without this a world loaded at runtime gives every Humanoid the
@@ -430,7 +449,7 @@ namespace CoreAI.Composition
                         scriptCapabilities,
                         oneOffCapabilities,
                         additionalGameplayBindings);
-                return new RbxWorldRuntimeSessionController(
+                RbxWorldRuntimeSessionController controller = new RbxWorldRuntimeSessionController(
                     sessionHost,
                     c.Resolve<IRbxWorldPackageStore>(),
                     initial.SourceStore,
@@ -448,6 +467,9 @@ namespace CoreAI.Composition
                         ?? Logging.Log.Instance).Warn(
                             "[CoreAI.WorldLoad] " + message,
                             Logging.LogTag.World));
+                // WHY set before anything captures: the world package carries the folders, including empty ones.
+                controller.ModFolderListStore = c.ResolveOrDefault<Mods.Folders.IModFolderListStore>();
+                return controller;
             }, Lifetime.Singleton).AsSelf().As<IRbxWorldRuntimeService>().As<IRbxWorldStartupSelection>();
 
             builder.Register(c => c.Resolve<RbxWorldRuntimeSessionController>().Stack, Lifetime.Singleton)
@@ -474,7 +496,17 @@ namespace CoreAI.Composition
             {
                 if (tickerHolder[0] != null)
                 {
-                    Object.Destroy(tickerHolder[0]);
+                    // WHY both: a scope disposed after Play Mode ended (or by an editor tool) must not call
+                    // Object.Destroy, which edit mode refuses with an error log.
+                    if (Application.isPlaying)
+                    {
+                        Object.Destroy(tickerHolder[0]);
+                    }
+                    else
+                    {
+                        Object.DestroyImmediate(tickerHolder[0]);
+                    }
+
                     tickerHolder[0] = null;
                 }
             });
@@ -645,51 +677,50 @@ namespace CoreAI.Composition
                     IActorIdentityProvider actorIdentityProvider =
                         container.ResolveOrDefault<IActorIdentityProvider>() ?? fallbackHostIdentityProvider;
 
-                    policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
-                        new LuaLlmTool(
-                            container.Resolve<LuaTool.ILuaExecutor>(),
-                            settings,
-                            log,
-                            limiter,
-                            actorIdentityProvider,
-                            BuiltInAgentRoleIds.Programmer));
-                    policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
-                        new LuaModsLlmTool(
-                            container.Resolve<ILuaModRuntime>(),
-                            settings,
-                            log,
-                            scriptCapabilities,
-                            allowModManagement: true,
-                            actorIdentityProvider: actorIdentityProvider,
-                            roleId: BuiltInAgentRoleIds.Programmer,
-                            worldMutationGate: container.Resolve<IConfirmedWorldMutationGate>()));
-                    policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
+                    // WHY the lua-builder profile instead of the Programmer role: which roles build with Lua is
+                    // role-definition data (the shipped Programmer definition lists this profile). Each factory
+                    // receives the role it serves, so the tool's actor identity follows that role. Services are
+                    // resolved in the old order, so a container missing one still gets the tools before it.
+                    const string luaBuilder = BuiltInToolProfileIds.LuaBuilder;
+                    LuaTool.ILuaExecutor luaExecutor = container.Resolve<LuaTool.ILuaExecutor>();
+                    policy.AddToolToProfile(luaBuilder, LuaTool.ExecuteLuaToolName, roleId => new LuaLlmTool(
+                        luaExecutor,
+                        settings,
+                        log,
+                        limiter,
+                        actorIdentityProvider,
+                        roleId));
+                    ILuaModRuntime modRuntime = container.Resolve<ILuaModRuntime>();
+                    IConfirmedWorldMutationGate worldMutationGate = container.Resolve<IConfirmedWorldMutationGate>();
+                    Mods.Folders.IModFolderListStore folders =
+                        container.ResolveOrDefault<Mods.Folders.IModFolderListStore>();
+                    policy.AddToolToProfile(luaBuilder, "manage_mods", roleId => new LuaModsLlmTool(
+                        modRuntime,
+                        settings,
+                        log,
+                        scriptCapabilities,
+                        allowModManagement: true,
+                        actorIdentityProvider: actorIdentityProvider,
+                        roleId: roleId,
+                        worldMutationGate: worldMutationGate,
+                        rateLimiter: limiter,
+                        folderList: folders));
+                    policy.AddToolToProfile(luaBuilder,
                         new GetModLogsLlmTool(container.Resolve<ILuaLogService>()));
-                    policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
-                        new SaveWorldLlmTool(
-                            container.Resolve<IRbxWorldRuntimeService>(),
-                            actorIdentityProvider,
-                            BuiltInAgentRoleIds.Programmer));
-                    policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
-                        new LoadWorldLlmTool(
-                            container.Resolve<IRbxWorldRuntimeService>(),
-                            actorIdentityProvider,
-                            BuiltInAgentRoleIds.Programmer));
-                    policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
-                        new ListAutoSavesLlmTool(
-                            container.Resolve<IRbxWorldRuntimeService>(),
-                            actorIdentityProvider,
-                            BuiltInAgentRoleIds.Programmer));
-                    policy.AddToolForRole(BuiltInAgentRoleIds.Programmer,
-                        new LoadAutoSaveLlmTool(
-                            container.Resolve<IRbxWorldRuntimeService>(),
-                            actorIdentityProvider,
-                            BuiltInAgentRoleIds.Programmer));
+                    IRbxWorldRuntimeService worldRuntime = container.Resolve<IRbxWorldRuntimeService>();
+                    policy.AddToolToProfile(luaBuilder, "save_world",
+                        roleId => new SaveWorldLlmTool(worldRuntime, actorIdentityProvider, roleId));
+                    policy.AddToolToProfile(luaBuilder, "load_world",
+                        roleId => new LoadWorldLlmTool(worldRuntime, actorIdentityProvider, roleId));
+                    policy.AddToolToProfile(luaBuilder, "list_autosaves",
+                        roleId => new ListAutoSavesLlmTool(worldRuntime, actorIdentityProvider, roleId));
+                    policy.AddToolToProfile(luaBuilder, "load_autosave",
+                        roleId => new LoadAutoSaveLlmTool(worldRuntime, actorIdentityProvider, roleId));
 
                     string skillOverride = skillTextProvider != null
                         ? skillTextProvider("AgentSkills/LuaModding")
                         : Resources.Load<TextAsset>("AgentSkills/LuaModding")?.text;
-                    policy.AddSkillForRole(BuiltInAgentRoleIds.Programmer, SkillSet.FromTextContent(
+                    policy.AddSkillToProfile(luaBuilder, SkillSet.FromTextContent(
                         BuiltInLuaModdingSkillText.SkillName,
                         BuiltInLuaModdingSkillText.SkillDescription,
                         skillOverride ?? BuiltInLuaModdingSkillText.Instructions));
@@ -697,7 +728,7 @@ namespace CoreAI.Composition
                     string rbxSkillOverride = skillTextProvider != null
                         ? skillTextProvider("AgentSkills/RbxApi")
                         : Resources.Load<TextAsset>("AgentSkills/RbxApi")?.text;
-                    policy.AddSkillForRole(BuiltInAgentRoleIds.Programmer, SkillSet.FromTextContent(
+                    policy.AddSkillToProfile(luaBuilder, SkillSet.FromTextContent(
                         BuiltInRbxApiSkillText.SkillName,
                         BuiltInRbxApiSkillText.SkillDescription,
                         rbxSkillOverride ?? BuiltInRbxApiSkillText.Instructions));
@@ -705,10 +736,15 @@ namespace CoreAI.Composition
                     string fullLuaSkillOverride = skillTextProvider != null
                         ? skillTextProvider("AgentSkills/FullLua")
                         : Resources.Load<TextAsset>("AgentSkills/FullLua")?.text;
-                    policy.AddSkillForRole(BuiltInAgentRoleIds.Programmer, SkillSet.FromTextContent(
+                    policy.AddSkillToProfile(luaBuilder, SkillSet.FromTextContent(
                         BuiltInFullLuaSkillText.SkillName,
                         BuiltInFullLuaSkillText.SkillDescription,
                         fullLuaSkillOverride ?? BuiltInFullLuaSkillText.Instructions));
+
+                    // WHY here: the CoreAI scope registers the default sub-agents before this scope exists, so
+                    // the ones over the Lua tools (the scripter) can only join once those tools are in the profile.
+                    container.ResolveOrDefault<CoreAiDefaultSubAgents>()?.RegisterAvailable(
+                        container.ResolveOrDefault<Ai.SubAgents.ISubAgentRegistry>(), policy);
                 }
                 catch (VContainerException)
                 {
@@ -716,6 +752,115 @@ namespace CoreAI.Composition
                     // Lua tools are an additive convenience, not a requirement.
                 }
             });
+        }
+
+        /// <summary>
+        /// The character world the agents read (always the published one, through the session), and the agents
+        /// themselves: the NPC listener, the player autopilot and <c>/autopilot</c>, the villager brains. A host
+        /// registration of <see cref="CoreAI.Mods.Rbx.Agents.IRbxCharacterWorld"/> or <see cref="CoreAiWorldAgents"/>
+        /// wins. The first world is attached once the container built; every staged world when it is built.
+        /// </summary>
+        private static void RegisterWorldAgents(IContainerBuilder builder)
+        {
+            if (!builder.Exists(typeof(CoreAI.Mods.Rbx.Agents.IRbxCharacterWorld), true))
+            {
+                builder.Register<CoreAI.Mods.Rbx.Agents.IRbxCharacterWorld>(c =>
+                        new CoreAI.Mods.Rbx.Agents.DelegateRbxCharacterWorld(
+                            () => c.Resolve<RbxWorldRuntimeSessionController>().CurrentRbxApi?.Game,
+                            part =>
+                            {
+                                IPartPropertySink sink =
+                                    c.Resolve<RbxWorldRuntimeSessionController>().CurrentRbxApi?.PartSink;
+                                return sink != null && sink.TryGetPartProperties(part.Id, out PartProperties pose)
+                                    ? pose.CFrame
+                                    : (Mods.Rbx.Datatypes.RbxCFrame?)null;
+                            },
+                            (part, cframe) => c.Resolve<RbxWorldRuntimeSessionController>().CurrentRbxApi?.PartSink
+                                ?.SetCFrame(part.Id, cframe)),
+                    Lifetime.Singleton);
+            }
+
+            if (!builder.Exists(typeof(CoreAiWorldAgents)))
+            {
+                builder.Register(c => new CoreAiWorldAgents(
+                        c.Resolve<CoreAI.Mods.Rbx.Agents.IRbxCharacterWorld>(),
+                        c.ResolveOrDefault<CoreAI.Decisions.IDecisionClientProvider>(),
+                        c.ResolveOrDefault<CoreAI.Decisions.IDecisionClock>(),
+                        c.ResolveOrDefault<CoreAI.Decisions.IDecisionTraceSink>(),
+                        c.ResolveOrDefault<CoreAI.Decisions.IDecisionRouter>(),
+                        c.ResolveOrDefault<CoreAI.Mods.Rbx.Agents.RbxCharacterAutopilotOptions>(),
+                        c.ResolveOrDefault<CoreAI.ChatOverlay.IChatCommandRegistry>(),
+                        c.ResolveOrDefault<CoreAI.ChatOverlay.IChatOverlayMessages>(),
+                        c.ResolveOrDefault<CoreAI.Ai.Npc.INpcDirector>(),
+                        c.ResolveOrDefault<CoreAI.Ai.Npc.NpcListenerPositionRelay>()),
+                    Lifetime.Singleton);
+            }
+
+            builder.RegisterBuildCallback(container =>
+            {
+                try
+                {
+                    // WHY only with a decision block or an NPC listener: without them there is nothing to run, and
+                    // resolving the session here would build the world in containers that never asked for it.
+                    if (container.ResolveOrDefault<CoreAI.Decisions.IDecisionClientProvider>() == null
+                        && container.ResolveOrDefault<CoreAI.Ai.Npc.NpcListenerPositionRelay>() == null)
+                    {
+                        return;
+                    }
+
+                    CoreAiWorldAgents agents = container.Resolve<CoreAiWorldAgents>();
+                    agents.AttachWorld(container.Resolve<RbxWorldRuntimeSessionController>().CurrentRbxApi?.Scheduler);
+                }
+                catch (VContainerException)
+                {
+                    // WHY: minimal containers (tests, headless tools) may omit the world session's services.
+                }
+            });
+        }
+
+        /// <summary>
+        /// What every world this composition builds gets, the initial one and each one a load stages: the
+        /// in-game chat factory, the runtime UI Lua surface (<c>UxmlService</c>) and the player camera preset.
+        /// </summary>
+        /// <remarks>
+        /// WHY one helper for both sites: the initial world and a staged replacement are built in two
+        /// factories, and a service attached in only one of them silently disappears after a world load.
+        /// </remarks>
+        private static void AttachWorldServices(IObjectResolver c, LuaCsRbxApiBindings rbxApi)
+        {
+            IInGameLlmChatServiceFactory chatFactory = c.ResolveOrDefault<IInGameLlmChatServiceFactory>();
+            if (chatFactory != null)
+            {
+                rbxApi.AttachChatFactory(chatFactory);
+            }
+
+            RuntimeUiLuaInstaller.AttachRuntimeUi(c, rbxApi);
+            CoreAiPlayerCameraSettings camera = c.ResolveOrDefault<CoreAiPlayerCameraSettings>();
+            if (camera != null)
+            {
+                rbxApi.CameraModule = camera.CreateCameraModule();
+            }
+        }
+
+        /// <summary>
+        /// The gameplay bindings every world's mod stack gets, the initial one and each one a load stages: the
+        /// host's additions plus the Lua AI surface (<c>AIService</c>, <c>TextGenerator</c>), which stays refused
+        /// until the framework setting <see cref="CoreAiLuaAiOptions.AllowAgentsFromLua"/> allows it.
+        /// </summary>
+        private static System.Action<LuaCsApiRegistry, LuaCapabilities> ComposeGameplayBindings(
+            IObjectResolver c,
+            LuaCsRbxApiBindings rbxApi,
+            System.Action<LuaCsApiRegistry, LuaCapabilities> additionalGameplayBindings)
+        {
+            return CoreAiLuaAiBindings.Attach(
+                rbxApi,
+                c.ResolveOrDefault<CoreAiLuaAiOptions>(),
+                c.ResolveOrDefault<IAiOrchestrationService>(),
+                c.ResolveOrDefault<CoreAI.Ai.Npc.INpcDirector>(),
+                additionalGameplayBindings,
+                RbxBoundObjectAnchors.CreateResolver(rbxApi.PartSink),
+                c.ResolveOrDefault<CoreAI.Ai.Npc.NpcSpeechAnchorRegistry>(),
+                c.ResolveOrDefault<CoreAI.Ai.Npc.ITextModerationFilter>());
         }
 
         /// <summary>
@@ -879,7 +1024,7 @@ namespace CoreAI.Composition
                     .GetActorContext(BuiltInAgentRoleIds.Programmer),
                 Capabilities = scriptCapabilities,
                 OneOffCapabilities = oneOffCapabilities,
-                AdditionalGameplayBindings = additionalGameplayBindings,
+                AdditionalGameplayBindings = ComposeGameplayBindings(container, rbxApi, additionalGameplayBindings),
                 FrameYielder = PlayerLoopScriptFrameYielder.Instance,
                 RbxApi = rbxApi,
                 // WHY rbxApi.CoroutineResumeBudget and not a fresh resolve: this session's rbxApi already

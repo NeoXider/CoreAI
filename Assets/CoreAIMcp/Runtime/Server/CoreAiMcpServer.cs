@@ -11,6 +11,7 @@ using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
 using CoreAI.Logging;
 using CoreAI.Mcp.Tools;
+using CoreAI.Mods.WorldPackages;
 using UnityEngine;
 using VContainer;
 using VContainer.Unity;
@@ -32,7 +33,7 @@ namespace CoreAI.Mcp.Server
     /// bodies touch live game state safely.
     /// </summary>
     [AddComponentMenu("CoreAI/CoreAI MCP Server")]
-    public sealed class CoreAiMcpServer : MonoBehaviour, IMainThreadDispatcher
+    public sealed class CoreAiMcpServer : MonoBehaviour, ICancellableMainThreadDispatcher
     {
         /// <summary>Environment variable read when no token is set on the component.</summary>
         public const string AuthTokenEnvironmentVariable = "COREAI_MCP_TOKEN";
@@ -87,10 +88,28 @@ namespace CoreAI.Mcp.Server
         /// <summary>Maximum queued plus still-running calls admitted by one host, including across restart.</summary>
         public const int MainThreadCallCapacity = 64;
 
+        /// <summary>Seconds between searches for a new CoreAI scope after the one the tools came from was destroyed.</summary>
+        public const double CompositionProbeIntervalSeconds = 0.5;
+
         private readonly object _callsGate = new();
         private readonly LinkedList<QueuedMainThreadCall> _mainThreadQueue = new();
         private int _runningCalls;
         private bool _retiringAutomaticHost;
+        private string _instructions = Protocol.McpServerInfo.DefaultInstructions;
+
+        private bool _catalogFollowsComposition;
+        private bool _compositionWithdrawn;
+        private IObjectResolver _compositionResolver;
+        private LifetimeScope _compositionScope;
+        private IReadOnlyCollection<string> _compositionToolNames = Array.Empty<string>();
+        private double _nextCompositionProbe;
+
+        /// <summary>
+        /// Test seam replacing the scene search for a CoreAI container. When set, it is also how liveness of
+        /// the composition is judged: the composition is current while it returns the container the tools
+        /// were built from.
+        /// </summary>
+        internal Func<IObjectResolver> CompositionResolverOverride { get; set; }
 
         /// <summary>Calls occupying admission capacity, including running work which has not actually finished.</summary>
         public int AdmittedMainThreadCalls { get { lock (_callsGate) return _mainThreadQueue.Count + _runningCalls; } }
@@ -129,6 +148,22 @@ namespace CoreAI.Mcp.Server
             get => mainThreadTimeoutSeconds;
             set => mainThreadTimeoutSeconds = value;
         }
+
+        /// <summary>
+        /// Guidance returned as <c>instructions</c> by <c>initialize</c> (defaults to
+        /// <see cref="Protocol.McpServerInfo.DefaultInstructions"/>; null or blank omits it). Read at start.
+        /// </summary>
+        public string Instructions
+        {
+            get => _instructions;
+            set => _instructions = value;
+        }
+
+        /// <summary>
+        /// True when the live catalog was built from a CoreAI scope and is rebuilt when that scope is
+        /// replaced (scene load). False for a catalog the host passed to <c>StartListening</c>.
+        /// </summary>
+        public bool CatalogFollowsComposition => _catalogFollowsComposition;
 
         /// <summary>Whether MCP explicitly receives unrestricted host-admin mod authority.</summary>
         public bool HostAdminModManagementEnabled => enableHostAdminModManagement;
@@ -206,6 +241,7 @@ namespace CoreAI.Mcp.Server
         private void Update()
         {
             PumpMainThreadQueue();
+            MonitorComposition(Time.realtimeSinceStartupAsDouble);
             if (_automaticHost != this || _server != null) return;
             lock (_callsGate)
             {
@@ -251,17 +287,26 @@ namespace CoreAI.Mcp.Server
                     _runningCalls++;
                 }
                 startedAny = true;
-                call.QueueExited.TrySetResult(true);
+                call.ExitQueue();
                 _ = call.Body();
             }
         }
 
         /// <inheritdoc />
-        public Task<T> RunOnMainThreadAsync<T>(Func<Task<T>> work)
+        public Task<T> RunOnMainThreadAsync<T>(Func<Task<T>> work) =>
+            RunOnMainThreadAsync(work, CancellationToken.None);
+
+        /// <inheritdoc />
+        public Task<T> RunOnMainThreadAsync<T>(Func<Task<T>> work, CancellationToken cancellationToken)
         {
             if (work == null)
             {
                 throw new ArgumentNullException(nameof(work));
+            }
+
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromCanceled<T>(cancellationToken);
             }
 
             TaskCompletionSource<T> tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -280,6 +325,14 @@ namespace CoreAI.Mcp.Server
                 call.Node = _mainThreadQueue.AddLast(call);
             }
 
+            if (cancellationToken.CanBeCanceled)
+            {
+                call.SetRegistration(cancellationToken.Register(() => WithdrawQueuedCall(call,
+                    new OperationCanceledException(
+                        "the client cancelled this call before it reached the Unity main thread; it did not run.",
+                        cancellationToken))));
+            }
+
             float timeout = mainThreadTimeoutSeconds;
             if (timeout > 0f)
             {
@@ -287,6 +340,19 @@ namespace CoreAI.Mcp.Server
             }
 
             return tcs.Task;
+        }
+
+        private void WithdrawQueuedCall(QueuedMainThreadCall call, Exception failure)
+        {
+            lock (_callsGate)
+            {
+                if (call.Node == null) return;
+                _mainThreadQueue.Remove(call.Node);
+                call.Node = null;
+            }
+
+            call.ExitQueue();
+            call.Fail(failure);
         }
 
         private async Task ExecuteMainThreadCallAsync<T>(Func<Task<T>> work, TaskCompletionSource<T> completion)
@@ -328,7 +394,8 @@ namespace CoreAI.Mcp.Server
                 // the dev-time MCP server can never come up in a WebGL player; degrade to a logged
                 // no-op instead of shipping the listener and Task.Run accept loop there.
                 Log.Instance.Warn(
-                    "[CoreAI MCP] The MCP server is not available in WebGL builds; server not started.");
+                    "[CoreAI MCP] The MCP server is not available in WebGL builds (a browser page cannot open " +
+                    "a listening socket); server not started. Connect MCP clients to an editor or desktop build.");
                 return;
             }
 
@@ -340,23 +407,27 @@ namespace CoreAI.Mcp.Server
                     $"will fail after {mainThreadTimeoutSeconds}s. Enable the component and its GameObject.");
             }
 
-            if (registry == null)
+            bool followsComposition = registry == null;
+            IObjectResolver compositionResolver = null;
+            LifetimeScope compositionScope = null;
+            if (followsComposition)
             {
-                IObjectResolver resolver = ResolveContainer();
-                if (resolver == null)
+                compositionResolver = ResolveComposition(out compositionScope);
+                if (compositionResolver == null)
                 {
                     Log.Instance.Warn("[CoreAI MCP] No built CoreAI LifetimeScope; server not started.");
                     return;
                 }
-                registry = BuildRegistry(resolver);
+                registry = BuildRegistry(compositionResolver);
             }
             if (listenPort.HasValue) port = listenPort.Value;
             int listeningPort = port;
             Registry = registry;
+            TrackComposition(followsComposition, compositionResolver, compositionScope);
 
             string token = ResolveAuthToken();
             _sessions = new McpSessionStore();
-            McpRpcDispatcher dispatcher = new(registry, _sessions, this);
+            McpRpcDispatcher dispatcher = new(registry, _sessions, this) { Instructions = _instructions };
             IMcpServerTransport transport = null;
             try
             {
@@ -382,6 +453,7 @@ namespace CoreAI.Mcp.Server
                     {
                         _server = null;
                         Registry = null;
+                        TrackComposition(false, null, null);
                         _activeAuthToken = null;
                         if (_active == this) _active = null;
                         FailPendingMainThreadCalls();
@@ -405,6 +477,7 @@ namespace CoreAI.Mcp.Server
             IMcpServerTransport stopped = _server;
             _server = null;
             Registry = null;
+            TrackComposition(false, null, null);
             _activeAuthToken = null;
             FailPendingMainThreadCalls();
             if (_active == this)
@@ -465,7 +538,7 @@ namespace CoreAI.Mcp.Server
             }
             foreach (QueuedMainThreadCall call in pending)
             {
-                call.QueueExited.TrySetResult(true);
+                call.ExitQueue();
                 call.Fail(new OperationCanceledException(
                     "the CoreAI MCP server stopped before this call reached the Unity main thread."));
             }
@@ -486,7 +559,7 @@ namespace CoreAI.Mcp.Server
                 _mainThreadQueue.Remove(call.Node);
                 call.Node = null;
             }
-            call.QueueExited.TrySetResult(true);
+            call.ExitQueue();
             call.Fail(new TimeoutException(
                 $"the Unity main thread never drained the MCP queue within {timeout.TotalSeconds:0.#}s - " +
                 "the game is paused, the CoreAiMcpServer component is disabled, or its GameObject is inactive."));
@@ -499,6 +572,8 @@ namespace CoreAI.Mcp.Server
             resolver.TryResolve(out ICoreAISettings settings);
             resolver.TryResolve(out ILog logger);
             resolver.TryResolve(out ILuaLogService logService);
+            resolver.TryResolve(out LuaGenerationRateLimiter modRateLimiter);
+            resolver.TryResolve(out CoreAI.Mods.Folders.IModFolderListStore modFolderList);
 
             IActorIdentityProvider modActorIdentityProvider = BuildMcpModIdentityProvider(resolver, modRuntime);
 
@@ -509,7 +584,7 @@ namespace CoreAI.Mcp.Server
             // the source now reports a missing camera per call instead.
             IScreenshotSource screenshot = new MainCameraScreenshotSource();
 
-            return CoreAiMcpToolProvider.Build(
+            return CoreAiMcpToolProvider.BuildWithModFolders(
                 luaExecutor,
                 modRuntime,
                 settings,
@@ -519,7 +594,31 @@ namespace CoreAI.Mcp.Server
                 logService,
                 worldTool,
                 skills,
-                screenshot);
+                screenshot,
+                null,
+                null,
+                null,
+                BuildWorldPackageTools(resolver, modActorIdentityProvider),
+                modRateLimiter,
+                modFolderList);
+        }
+
+        private static IReadOnlyList<IMcpTool> BuildWorldPackageTools(IObjectResolver resolver,
+            IActorIdentityProvider hostAdminIdentityProvider)
+        {
+            // WHY: the same identity the in-game Programmer tools receive; save_world additionally needs the
+            // host-admin admission, like manage_mods, because the slot it writes survives a restart.
+            try
+            {
+                IRbxWorldRuntimeService service = resolver.ResolveOrDefault<IRbxWorldRuntimeService>();
+                IActorIdentityProvider identity = resolver.ResolveOrDefault<IActorIdentityProvider>();
+                return WorldPackageMcpTools.Create(service, identity, hostAdminIdentityProvider);
+            }
+            catch (VContainerException ex)
+            {
+                Log.Instance.Warn($"[CoreAI MCP] World save/load tools omitted: {ex.Message}");
+                return Array.Empty<IMcpTool>();
+            }
         }
 
         private IActorIdentityProvider BuildMcpModIdentityProvider(
@@ -607,10 +706,17 @@ namespace CoreAI.Mcp.Server
             return Array.Empty<SkillSet>();
         }
 
-        private IObjectResolver ResolveContainer()
+        private IObjectResolver ResolveComposition(out LifetimeScope owner)
         {
+            owner = null;
+            if (CompositionResolverOverride != null)
+            {
+                return CompositionResolverOverride();
+            }
+
             if (scope != null && scope.Container != null)
             {
+                owner = scope;
                 return scope.Container;
             }
 
@@ -630,11 +736,101 @@ namespace CoreAI.Mcp.Server
                 fallback ??= candidate;
                 if (candidate.Container.TryResolve(out LuaTool.ILuaExecutor _))
                 {
+                    owner = candidate;
                     return candidate.Container;
                 }
             }
 
+            owner = fallback;
             return fallback?.Container;
+        }
+
+        private void TrackComposition(bool follows, IObjectResolver resolver, LifetimeScope owner)
+        {
+            _catalogFollowsComposition = follows;
+            _compositionWithdrawn = false;
+            _compositionResolver = follows ? resolver : null;
+            _compositionScope = follows ? owner : null;
+            _compositionToolNames = follows && Registry != null ? Registry.ToolNames : Array.Empty<string>();
+            _nextCompositionProbe = 0;
+        }
+
+        private bool IsCompositionCurrent()
+        {
+            if (CompositionResolverOverride != null)
+            {
+                return ReferenceEquals(CompositionResolverOverride(), _compositionResolver);
+            }
+
+            // WHY: both checks - a scene load destroys the scope (Unity null), and a scope that rebuilt its
+            // container keeps the component but hands out a new resolver.
+            return _compositionScope != null && ReferenceEquals(_compositionScope.Container, _compositionResolver);
+        }
+
+        /// <summary>
+        /// Keeps a composition-built catalog bound to a live CoreAI scope. When the scope the tools were built
+        /// from is destroyed (a scene load, <c>world_command load_scene</c> / <c>reload_scene</c>) or rebuilds
+        /// its container, the tools are withdrawn at once so no call reaches disposed services, and the
+        /// catalog is rebuilt from the next built scope, searched at most every
+        /// <see cref="CompositionProbeIntervalSeconds"/>. Every change is published as
+        /// <c>notifications/tools/list_changed</c>. A host-supplied catalog is never touched. Called from
+        /// <c>Update</c>; public for hosts that drive their own loop.
+        /// </summary>
+        /// <param name="realtimeSeconds">Monotonic time in seconds, e.g. <c>Time.realtimeSinceStartupAsDouble</c>.</param>
+        public void MonitorComposition(double realtimeSeconds)
+        {
+            McpToolRegistry catalog = Registry;
+            if (!_catalogFollowsComposition || catalog == null)
+            {
+                return;
+            }
+
+            if (!_compositionWithdrawn)
+            {
+                if (IsCompositionCurrent())
+                {
+                    return;
+                }
+
+                _compositionWithdrawn = true;
+                _compositionResolver = null;
+                _compositionScope = null;
+                _nextCompositionProbe = realtimeSeconds;
+                catalog.Rebind(_compositionToolNames, null);
+                _compositionToolNames = Array.Empty<string>();
+                Log.Instance.Warn(
+                    "[CoreAI MCP] The CoreAI scope the MCP tools were built from is gone (scene load or " +
+                    "container rebuild); its tools are withdrawn until a new CoreAI scope is built.");
+            }
+
+            if (realtimeSeconds < _nextCompositionProbe)
+            {
+                return;
+            }
+
+            _nextCompositionProbe = realtimeSeconds + CompositionProbeIntervalSeconds;
+            IObjectResolver next = ResolveComposition(out LifetimeScope owner);
+            if (next == null)
+            {
+                return;
+            }
+
+            try
+            {
+                _compositionToolNames = catalog.Rebind(_compositionToolNames, BuildRegistry(next));
+            }
+            catch (Exception ex)
+            {
+                // WHY: back off instead of rebuilding a broken composition twice a second.
+                _nextCompositionProbe = realtimeSeconds + 10 * CompositionProbeIntervalSeconds;
+                Log.Instance.Error($"[CoreAI MCP] Rebuilding the MCP tools from the new CoreAI scope failed: {ex.Message}");
+                return;
+            }
+
+            _compositionWithdrawn = false;
+            _compositionResolver = next;
+            _compositionScope = owner;
+            Log.Instance.Info($"[CoreAI MCP] MCP tools rebuilt from the new CoreAI scope ({catalog.Count} tools).");
         }
 
         /// <summary>
@@ -683,6 +879,37 @@ namespace CoreAI.Mcp.Server
             private readonly Action<Exception> _fail;
             public LinkedListNode<QueuedMainThreadCall> Node { get; set; }
             public TaskCompletionSource<bool> QueueExited { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            private readonly object _registrationGate = new();
+            private CancellationTokenRegistration _registration;
+            private bool _exited;
+
+            /// <summary>Keeps the cancellation registration until the call leaves the queue.</summary>
+            public void SetRegistration(CancellationTokenRegistration registration)
+            {
+                bool alreadyExited;
+                lock (_registrationGate)
+                {
+                    alreadyExited = _exited;
+                    if (!alreadyExited) _registration = registration;
+                }
+
+                if (alreadyExited) registration.Dispose();
+            }
+
+            /// <summary>Marks the call as no longer queued and drops its cancellation registration.</summary>
+            public void ExitQueue()
+            {
+                QueueExited.TrySetResult(true);
+                CancellationTokenRegistration registration;
+                lock (_registrationGate)
+                {
+                    _exited = true;
+                    registration = _registration;
+                    _registration = default;
+                }
+
+                registration.Dispose();
+            }
 
             public QueuedMainThreadCall(Func<Task> body, Action<Exception> fail)
             {

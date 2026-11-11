@@ -17,6 +17,12 @@ Shader "CoreAI/Rbx/Textured Surface"
         _OcclusionMap("Ambient Occlusion Map", 2D) = "white" {}
         _CavityStrength("Cavity Strength", Range(0,1)) = 0
         _MetalAlbedoLift("Metal Albedo Lift", Range(0,1)) = 0
+        [HDR] _EmissionColor("Emission Color", Color) = (0,0,0,1)
+        _EmissionThreshold("Emission Threshold", Range(0,1)) = 0.5
+        [HideInInspector] _AlphaFromPartColor("Alpha From Part Color", Float) = 0
+        [HideInInspector] _SrcBlend("Source Blend", Float) = 1
+        [HideInInspector] _DstBlend("Destination Blend", Float) = 0
+        [HideInInspector] _ZWrite("Depth Write", Float) = 1
         _TextureScale("Texture Scale", Float) = 1
         _TextureAspect("Texture Aspect", Float) = 1
         [HideInInspector] _Cutoff("Alpha Cutoff", Range(0,1)) = 0.5
@@ -37,8 +43,11 @@ Shader "CoreAI/Rbx/Textured Surface"
         {
             Name "ForwardLit"
             Tags { "LightMode" = "UniversalForwardOnly" }
+            // WHY: the defaults are the opaque state; only the blended twin of a part with
+            // 0 < Transparency < 1 switches them (RbxTransparentTwins).
+            Blend [_SrcBlend] [_DstBlend]
             Cull Back
-            ZWrite On
+            ZWrite [_ZWrite]
             ZTest LEqual
 
             HLSLPROGRAM
@@ -48,6 +57,7 @@ Shader "CoreAI/Rbx/Textured Surface"
             #pragma multi_compile_local_fragment _ _RBX_METALLIC_MAP
             #pragma multi_compile_local_fragment _ _RBX_OCCLUSION_MAP
             #pragma multi_compile_local_fragment _ _RBX_NORMAL_DIRECTX
+            #pragma multi_compile_local_fragment _ _RBX_EMISSION
             #pragma multi_compile_instancing
             #pragma multi_compile_fog
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
@@ -63,6 +73,7 @@ Shader "CoreAI/Rbx/Textured Surface"
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "RbxFog.hlsl"
 
             TEXTURE2D(_BaseMap);
             SAMPLER(sampler_BaseMap);
@@ -87,6 +98,9 @@ Shader "CoreAI/Rbx/Textured Surface"
                 float _InvertRoughness;
                 float _CavityStrength;
                 float _MetalAlbedoLift;
+                half4 _EmissionColor;
+                float _EmissionThreshold;
+                float _AlphaFromPartColor;
             CBUFFER_END
 
             struct Attributes
@@ -393,6 +407,17 @@ Shader "CoreAI/Rbx/Textured Surface"
                 #endif
                 half3 albedo = materialAlbedo * partModulation;
                 float3 normalWS = normalize(mappedNormalWS);
+                half3 emission = half3(0.0h, 0.0h, 0.0h);
+                #if defined(_RBX_EMISSION)
+                    // WHY: the hot texels of the colour map glow, so the emission follows the texture's
+                    // own cracks without a second map; the threshold sits on the linear red channel and
+                    // the warmth term keeps grey or blue texels dark.
+                    half heat = smoothstep((half)_EmissionThreshold, (half)_EmissionThreshold + 0.35h,
+                        textureColor.r);
+                    half warmth = saturate((textureColor.r - max(textureColor.g * 0.55h, textureColor.b))
+                        * 2.5h);
+                    emission = _EmissionColor.rgb * (heat * warmth);
+                #endif
 
                 SurfaceData surfaceData = (SurfaceData)0;
                 surfaceData.albedo = albedo;
@@ -400,7 +425,7 @@ Shader "CoreAI/Rbx/Textured Surface"
                 surfaceData.metallic = metallic;
                 surfaceData.smoothness = saturate(1.0h - roughness);
                 surfaceData.normalTS = half3(0.0h, 0.0h, 1.0h);
-                surfaceData.emission = half3(0.0h, 0.0h, 0.0h);
+                surfaceData.emission = emission;
                 surfaceData.occlusion = occlusion;
                 surfaceData.alpha = 1.0h;
 
@@ -410,7 +435,7 @@ Shader "CoreAI/Rbx/Textured Surface"
                 inputData.normalWS = normalWS;
                 inputData.viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(input.positionWS));
                 inputData.shadowCoord = TransformWorldToShadowCoord(input.positionWS);
-                inputData.fogCoord = ComputeFogFactor(input.positionCS.z);
+                inputData.fogCoord = RbxFogFactor(input.positionWS);
                 inputData.vertexLighting = VertexLighting(input.positionWS, normalWS);
                 inputData.bakedGI = SampleSH(normalWS);
                 inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);
@@ -418,7 +443,7 @@ Shader "CoreAI/Rbx/Textured Surface"
 
                 half4 color = UniversalFragmentPBR(inputData, surfaceData);
                 color.rgb = MixFog(color.rgb, inputData.fogCoord);
-                color.a = 1.0h;
+                color.a = lerp(1.0h, saturate(_Color.a), (half)saturate(_AlphaFromPartColor));
                 return color;
             }
             ENDHLSL
@@ -426,6 +451,9 @@ Shader "CoreAI/Rbx/Textured Surface"
 
         UsePass "Universal Render Pipeline/Lit/ShadowCaster"
         UsePass "Universal Render Pipeline/Lit/DepthOnly"
+        // WHY: SSAO in DepthNormals mode only sees objects that draw this pass; without it Rbx parts
+        // received no ambient occlusion at all.
+        UsePass "Universal Render Pipeline/Lit/DepthNormals"
     }
 
     Fallback "CoreAI/Rbx/Material Fallback"

@@ -2,8 +2,9 @@
 
 Puts a CoreAI Rbx world on a Mirror network transport, so `RemoteEvent` and `RemoteFunction` go
 through Mirror's real message handlers and batcher instead of looping back in one process. The
-package's tests drive that path through Mirror over an in-memory transport; it has not been run
-between two processes over a real socket.
+package's tests drive that path through Mirror over an in-memory transport, Mirror's host mode
+included. A two-process harness for localhost kcp ships with the package (see Two-process harness);
+no two-process result is recorded yet.
 
 `com.neoxider.coreaimirror` depends on `com.neoxider.coreai` and `com.neoxider.coreaimods` of the same
 release; install steps are in [INSTALL.md](../../INSTALL.md). Mirror itself is not part of CoreAI or of
@@ -24,14 +25,17 @@ state does not. World-state replication is planned as MVP6 in
 [ROBLOX_API_ROADMAP.md](../../Docs/CoreAIMods/ROBLOX_API_ROADMAP.md).
 
 Only Mirror messages cross the wire; no `NetworkBehaviour` or `SyncVar` is exposed to mods. The
-messages are `CoreAiAdmissionRequestMessage` (the host-defined `Credential` bytes and nothing else),
-`CoreAiAdmissionResponseMessage` (`Admitted`, `Reason`, `ActorId`), `CoreAiRemoteEventMessage`,
+messages are `CoreAiAdmissionRequestMessage` (the host-defined `Credential` bytes and the client's
+`ProtocolVersion`, nothing else), `CoreAiAdmissionResponseMessage` (`Admitted`, `Reason`, `ActorId`,
+the server's `ProtocolVersion` and the `Refusal` kind), `CoreAiRemoteEventMessage`,
 `CoreAiRemoteRequestMessage` and `CoreAiRemoteResponseMessage` (the remotes), and
-`CoreAiClientReadyMessage`, `CoreAiServerClockMessage` and `CoreAiDisconnectNoticeMessage` (see
-Sessions). No envelope carries a sender actor id: the server fills the sender from its own connection
-map, so a client cannot speak as another actor by editing a packet. A refusal's response carries only
-the reason `not admitted` and an empty `ActorId`; the detailed reason goes only to the host, through
-the `log` callback given to `CoreAiMirrorAuthenticator.Configure`.
+`CoreAiClientReadyMessage`, `CoreAiServerClockMessage`, `CoreAiDisconnectNoticeMessage` and
+`CoreAiRosterMessage` (see Sessions). No envelope carries a sender actor id: the server fills the
+sender from its own connection map, so a client cannot speak as another actor by editing a packet. A
+refusal by the host's admission provider tells the client only `not admitted` and an empty `ActorId`;
+the detailed reason goes only to the host, through the `log` callback given to
+`CoreAiMirrorAuthenticator.Configure`. A protocol refusal names both protocols — a protocol number is
+no secret.
 
 ## Setup
 
@@ -53,6 +57,11 @@ the `log` callback given to `CoreAiMirrorAuthenticator.Configure`.
    `IActorAdmissionProvider` before `StartServer` (`log` is optional and receives the refusal
    reasons); with no provider every connection is refused, there is no anonymous path. On a client,
    `ConfigureClientCredential` supplies the credential bytes the admission request sends.
+   The provider's other settings, all fixed once the bridge exists (each settable from code until
+   then, like `Role` and `Authenticator`): **Host Mode** — `ServeAsHostPlayer` (the default) makes a
+   host's own local client its Player, `Refuse` keeps the behaviour of 7.56.0 and older (see Sessions); **Publish
+   Roster** — whether ready clients are sent who is in the room; **Inbound Limits** — what each admitted
+   connection may send the server (see Sessions).
 4. Assign the provider to the **Network Bridge Provider** field (under the *Network transport*
    header) on your `CoreAiModsLifetimeScope`. Leaving that field empty is the default and keeps the
    world on the in-process null bridge - no remote peers, remotes loop back locally.
@@ -117,6 +126,26 @@ and the Player is re-created with `PlayerAdded` firing again.
 
 ## Sessions
 
+- **Both sides speak one protocol, or the admission is refused with a reason.** The admission request
+  carries the client's CoreAI Mirror protocol (`CoreAiMirrorProtocol.Version`, currently 1) and the
+  response the server's. A client of another protocol — or of none, which is CoreAI 7.56.0 and older —
+  is refused before the host's `IActorAdmissionProvider` is asked, counted in
+  `CoreAiMirrorAuthenticator.ProtocolMismatchRefusals` (and `RejectedCount`), with a reason that names
+  both protocols. A client refuses, the same way, an admission from a server of another protocol or of
+  none; `CoreAiAdmissionRefusal.RefusedByServer` tells the two apart. The admission messages are read
+  by hand-written tolerant serializers (`CoreAiMirrorAdmissionSerialization`), so an older peer's
+  shorter message and a newer peer's longer one are read and refused rather than dropped by Mirror
+  without a reason. Bump `CoreAiMirrorProtocol.Version` with every change to a message after
+  admission.
+- **A refused client learns why.** The refusal is sent and the connection is dropped on a later frame,
+  once Mirror has flushed it (`RefusalDropsPerformed`): kcp2k drops a connection before the call
+  returns, and Mirror discards what was not flushed, so a drop made with the refusal sent nothing.
+  Meanwhile the connection reaches nothing — it is unauthenticated and its one attempt is spent. A
+  current client closes its own connection on the refusal. On the client,
+  `CoreAiMirrorAuthenticator.ClientRefusal` keeps the `Kind` (`NotAdmitted`, `ProtocolMismatch`) and
+  the `Reason` after the connection closes (cleared when the next attempt starts) and
+  `ClientRefused` is raised before it closes. A composition that stops updating the authenticator
+  calls `PerformOwedRefusalDropsNow()`; a disabled authenticator does that itself.
 - **One admission attempt per connection.** A connection's first admission request is decided; a
   repeat on the same connection is ignored and counted (`CoreAiMirrorAuthenticator.IgnoredAdmissionRequests`),
   so a connection can neither mint a second Player nor retry credentials. A connection that sends no
@@ -145,6 +174,48 @@ and the Player is re-created with `PlayerAdded` firing again.
   server-bound envelope to itself over the wire: a remote from or to an actor registered in this
   process is delivered in process (`LocalDeliveries`), so `InvokeServer` from a host-local actor is
   answered at once and `FireClient`/`FireAllClients`/`InvokeClient` reach local actors.
+- **Mirror host mode: the host's own client is the host's Player.** In a host — server and local
+  client in one process, `NetworkManager.StartHost` — the host's local client is admitted through the
+  same authenticator over Mirror's local connection (so its credential goes through the host's own
+  `IActorAdmissionProvider` and its Player gets the admitted UserId), and the session host binds it as
+  a host-local connection (`MirrorNetworkBridge.BindHostLocalConnection`,
+  `CoreAiMirrorSessionHost.HostPlayerSessions`). Everything addressed to it is served in process, as
+  for any host-local actor: `FireClient` and `InvokeClient` reach the host's own LocalScripts,
+  `FireServer` and `InvokeServer` reach the server's scripts with the host's Player as the sender, and a
+  broadcast reaches the host in process and every remote client on the wire. It waits for no readiness,
+  is sent no clock anchor, notice or roster (the host's client half has no CoreAI handler for them), and
+  is never dropped: a kick of the host's own player ends its Player and its session and leaves the local
+  client on Mirror. Mirror removes the local connection without a disconnect event when the host's
+  client stops, so the bridge's next `Pump()` ends that session (`HostLocalConnectionsReleased`); a new
+  local client on the same id ends the old session first and keeps its own admission. The host's LocalScripts
+  must run as the admitted actor (the contract below holds for the host too). `HostMode = Refuse` (the
+  provider's **Host Mode**, or `CoreAiMirrorSessionOptions.HostMode`) keeps the older behaviour: the
+  local client is refused as a player, loudly (`HostModeConnectionsRefused`), and left on Mirror.
+- **Ready clients are told who is in the room.** The session host keeps the roster
+  (`CoreAiMirrorSessionHost.Roster`: one member per admitted actor, in join order, the host's own player
+  flagged `IsHost`) and sends a client the whole of it when the client acknowledges readiness — after
+  the first clock anchor and before anything held for it, split into `Snapshot` and `SnapshotContinued`
+  messages when it does not fit one — then every join and leave to every ready client
+  (`CoreAiRosterMessage`, reliable, with a revision). A member carries a server-assigned `MemberId`, the
+  admitted `UserId`, `Name` and `DisplayName` (cut to 64 UTF-8 bytes) and the host flag, never an actor
+  id; a snapshot names the recipient's own member. A player who reconnects keeps its member: no leave
+  and join. On a client, `MirrorNetworkBridge.Roster` holds the copy (`Members`, `TryGetSelf`,
+  `RevisionGaps`), `RosterChanged` is raised after each message, and the copy is cleared when the
+  connection changes; a roster this client cannot apply is dropped and counted as malformed.
+  `PublishRoster = false` sends nothing and still keeps the host-side roster.
+- **What a client sends the server is metered per connection.** Every inbound `RemoteEvent` and
+  `RemoteFunction` call is counted against its connection's token buckets — remotes per second and
+  payload bytes per second, each absorbing a burst (`CoreAiMirrorInboundLimits`: 1,500 remotes/s,
+  1 MiB/s, 2 s burst by default, which covers what an honest client's own limiter lets through) —
+  before the world decodes or dispatches it. Past them a remote is dropped and counted
+  (`InboundMessagesDropped`, `InboundBytesDropped`), a `RemoteFunction` call is answered at once with a
+  failure (`InboundLimitedReason`), and the drops are said once per connection every 10 s
+  (`InboundDropLogIntervalSeconds`). A payload larger than its channel carries — 1,000 bytes unreliable,
+  64 KiB reliable or a call — is dropped and counted whatever the rates (`InboundOversizeDropped`).
+  `TryGetInboundTraffic(connectionId, ...)` and `GetInboundTraffic()` give each bound connection's
+  accepted and dropped counts; a connection's meter starts full at its binding and goes with its
+  release. Limits are the provider's **Inbound Limits** or the bridge's `inboundLimits` argument,
+  copied at construction; `CoreAiMirrorInboundLimits.Unlimited` meters nothing.
 - **Payload limits are per channel.** A reliable `RemoteEvent` and both `RemoteFunction` directions
   carry up to 64 KiB (`CodecPayloadCeilingBytes`, or less when the transport's reliable channel cannot
   carry that in one message); an `UnreliableRemoteEvent` carries up to 1,000 bytes, Roblox's own
@@ -257,35 +328,91 @@ registered at all a client falls back to the local-host default, which will not 
 
 ## Known limits
 
-- **Host mode is not supported.** A server bridge installs server handlers only, and the provider
-  refuses a client bridge while the server is active, so a host - server and local client in one
-  process, the most common Mirror topology - has no Mirror client of its own. Mirror's host-mode local
-  client connection is refused as a world player, loudly (a log line, counted in
-  `CoreAiMirrorSessionHost.HostModeConnectionsRefused`), and left to Mirror. Actors registered in the
-  server process are served in process (see Sessions), which is not the same as a local client. Host
-  mode is planned as MVP5 in [ROBLOX_API_ROADMAP.md](../../Docs/CoreAIMods/ROBLOX_API_ROADMAP.md).
-- **A refused client never learns it was refused.** The refusal is queued and then the connection is
-  dropped synchronously, which discards the unsent batch, so the client cannot tell "refused" from
-  "server vanished". The refusal itself is sound: the connection is dropped and no actor is created.
-- **No inbound rate limit.** The rate limiter runs on the outbound path only, so an admitted peer can
-  flood the server's world dispatch. What the world bounds is the handler work a sender's remotes
-  start: at most 32 `OnServerEvent` handlers and `OnServerInvoke` callbacks per sender may be alive
-  at once (a `RemoteFunction` over that is refused with a fixed line that names no host mod, an event
-  is dropped, counted and logged once per sender); what those handlers cause — `task.*` threads, the
-  signal handlers their writes start — is held to a second budget of 128 threads per sender and 192
-  for all senders, whose signal listeners wait in a bounded queue instead of being dropped
-  ([RBX_API.md](../CoreAI/Docs/RBX_API.md)); and repeated receive warnings are logged once per sender
-  and kind every 10 s. Decoding and dispatch themselves are unmetered.
-- **Server and client must run the same CoreAI version.** A missing message fails loudly — provided
-  Mirror's `exceptionsDisconnect` is on, its default: an older server has no handler for
-  `CoreAiClientReadyMessage`, so Mirror disconnects a newer client right after admission with an error
-  in the server log; an older client never acknowledges readiness, so a newer server drops it at the
-  readiness deadline with a log line naming the cause. A field added to a message is not detected: the
-  older reader throws inside Mirror's handler, which disconnects only with `exceptionsDisconnect` on
-  and otherwise logs and keeps the connection, one message lost. Nothing on the wire negotiates the
-  version, and there is no compatibility fallback.
+- **No two-process run is recorded.** Everything above is proven over the in-memory transport,
+  Mirror's host mode included; the harness below is what runs it over localhost kcp, and its results
+  are not in yet.
+- **The inbound meter sits after Mirror's own unbatching.** Mirror reads every message of a batch
+  into its struct before the bridge's handler sees it, so a flood still costs that copy — bounded by
+  kcp's receive window — but nothing of the world's decoding or dispatch past the limits. A flooding
+  connection is dropped from, not disconnected; a kick policy for one is not built. Behind the meter the
+  world still bounds the handler work a sender's remotes start: at most 32 `OnServerEvent` handlers and
+  `OnServerInvoke` callbacks per sender alive at once, and 128 induced threads per sender, 192 for all
+  ([RBX_API.md](../CoreAI/Docs/RBX_API.md)).
+- **Protocol compatibility is exact.** A server and a client of different protocols never run
+  together, and there is no fallback that would let them; a protocol bump therefore needs every
+  client updated with the server.
+- **The host's client half has no CoreAI client bridge.** A host's own player is served in process (see
+  Sessions), so the host has no client-side `MirrorNetworkBridge` state of its own: no roster copy (it
+  reads the session host's), no clock anchors (it is the server's clock), no disconnect notice.
 - **Live Mirror sessions cannot be handed to a world loaded at runtime.**
   `RbxWorldRuntimeSessionController` refuses a world load — at request, at confirmation and on a raw
   host load — with status `network_sessions_active` while the bridge lists registered actors, and the
   live world is left unchanged; disconnect the clients or stop the server first. The check is
   conservative: an actor registered for a mod context whose socket is gone counts too.
+
+## Two-process harness
+
+`Harness/` holds a test rig that runs a Mirror host and its remote clients as separate player
+processes on localhost kcp, with the bridge, the session host and the authenticator for real: the
+protocol handshake, the host's own player in host mode, readiness, the roster, a `RemoteEvent` chat
+the host relays to everyone, `RemoteFunction` round trips both ways, an optional inbound flood, and
+spike S3 (5 MiB as reliable messages). It works at the bridge level with fixed remote ids — there is no
+Lua world, since replication does not cross the wire yet. Its assembly, `CoreAI.Net.Mirror.Harness`, is
+constrained to the `COREAI_MIRROR_HARNESS` define as well as `MIRROR`, and only the harness build adds
+that define, so a game that ships this package never ships the harness.
+
+**Build** (the project must not be open in another editor):
+
+```text
+"C:\Program Files\Unity\Hub\Editor\6000.6.0f1\Editor\Unity.exe" -batchmode -quit -projectPath <project>
+  -executeMethod CoreAI.Net.Mirror.Harness.Editor.CoreAiMirrorHarnessBuild.BuildFromCommandLine
+  [-coreaiHarnessBuildOut Builds/CoreAiMirrorHarness] [-coreaiHarnessBuildTarget Windows|Linux]
+  -logFile <log>
+```
+
+or **Tools > CoreAI > Mirror > Build Two-Process Harness (Windows)**. The build saves an empty
+temporary scene, builds it with `BuildPlayerOptions.extraScriptingDefines = COREAI_MIRROR_HARNESS`, and
+deletes the scene; the harness creates its `NetworkManager`, `KcpTransport`, authenticator and provider
+at load when the player is started with `-coreaiHarness`.
+
+**Run** three processes, the host first (one line each):
+
+```text
+CoreAiMirrorHarness.exe -batchmode -nographics -logFile host.log -coreaiHarness host -coreaiHarnessClients 2
+  -coreaiHarnessFloodWatch 10 -coreaiHarnessS3 -coreaiHarnessOut results/host.json
+CoreAiMirrorHarness.exe -batchmode -nographics -logFile a.log -coreaiHarness client -coreaiHarnessName a
+  -coreaiHarnessClients 2 -coreaiHarnessOut results/a.json
+CoreAiMirrorHarness.exe -batchmode -nographics -logFile b.log -coreaiHarness client -coreaiHarnessName b
+  -coreaiHarnessClients 2 -coreaiHarnessFlood 10000 -coreaiHarnessFloodSeconds 5 -coreaiHarnessOut results/b.json
+```
+
+| Argument | Meaning (default) |
+| --- | --- |
+| `-coreaiHarness host\|client` | The role; without it the player does nothing. |
+| `-coreaiHarnessName <name>` | The player's name; its actor is `harness-<name>` (`host`, `client`). |
+| `-coreaiHarnessAddress <ip>`, `-coreaiHarnessPort <port>` | Where the host listens (`127.0.0.1`, `7777`). |
+| `-coreaiHarnessClients <n>` | Remote clients in the run, on every process (`2`); the roster expects `n + 1`. |
+| `-coreaiHarnessSecret <text>` | The shared admission secret (`coreai-harness`). |
+| `-coreaiHarnessFlood <per second>`, `-coreaiHarnessFloodSeconds <s>` | A client floods the host with unreliable remotes sent around its own bridge, after its checks (`0`, `5`). |
+| `-coreaiHarnessFloodWatch <s>` | The host measures its frame times for this long after its checks (`0`: no flood window). Make it a few seconds longer than the flood. |
+| `-coreaiHarnessS3` | The host runs spike S3 against the first remote client after the flood window. |
+| `-coreaiHarnessTimeout <s>` | Gives up and fails after this long (`180`). |
+| `-coreaiHarnessOut <file>` | Where the JSON result goes (`coreai-mirror-harness-<host\|name>.json`). |
+
+Each process exits 0 when every check passed and 1 otherwise, writes its result as JSON and logs it on
+one line after `COREAI_MIRROR_HARNESS_RESULT `. The result lists each check (`PASS ...`/`FAIL ...`), the
+seconds to ready, the roster, the chat lines heard, the p99 frame time over the run
+(`p99FrameMs`) and over the flood window (`p99FrameMsDuringFlood`, checked below 33 ms), the flood's
+sent, accepted and dropped counts, the transport's limits (`reliableMaxPacketSize`,
+`reliableMaxContentSize`, `unreliableMaxPacketSize` and the bridge's own ceilings), and the peaks of the
+managed heap, of Unity's allocated memory and of the process working set.
+
+**Spike S3** sends 5 MiB to one client four times — in 16 KiB, 64 KiB and 256 KiB slices, then in the
+largest slice the reliable channel carries (`reliableMaxContentSize` less 20 bytes of envelope) — all
+of a run handed to Mirror in one frame, the next run after the client's receipt. Each `spike` entry
+records the slice size and count, how long the host took to hand them to Mirror (`hostSendSeconds`),
+the time to the client's receipt (`hostSeconds`, one round trip included) and the client's own first-to-
+last time (`clientSeconds`), and the managed and Unity peaks on both sides. A final probe hands Mirror a
+slice one byte over the largest and records whether Mirror refused it with its size error
+(`oversizeRefusedByMirror`): together with `reliableMaxPacketSize` that is the largest message kcp
+accepts. These numbers set the join snapshot's chunk size; none is recorded yet.

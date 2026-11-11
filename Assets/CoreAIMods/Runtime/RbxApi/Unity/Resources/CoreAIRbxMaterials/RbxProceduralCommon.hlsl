@@ -764,6 +764,23 @@ float RbxPlasticGrainHeight(float3 physicalPosition)
     return (grain - 0.5) * RBX_PLASTIC_GRAIN_HEIGHT;
 }
 
+// WHY: a single-colour Part still read as flat paint with the grain alone: real moulded plastic shows
+// broad handling smudges in its highlight and a faint orange-peel relief. Both live in the roughness and
+// the height only, so the albedo (and with it Part.Color) stays as the author set it. The relief is
+// footprint-filtered and its unresolved variance moves into the roughness, so it never shimmers.
+void RbxApplyPlasticSurfaceDetail(float3 physicalPosition, float surfaceDetail,
+    inout RbxSurfaceSample sample)
+{
+    float smudges = RbxFbm(physicalPosition * 1.4 + float3(3.1, 7.7, 1.3));
+    float peelVisibility;
+    float peel = RbxFilteredValueNoise(physicalPosition * 62.0 + float3(13.0, 5.0, 37.0),
+        peelVisibility);
+    sample.smoothness += (half)((smudges - 0.5) * 0.2 * surfaceDetail);
+    sample.smoothness = RbxCompensateUnresolvedRoughness(sample.smoothness, peelVisibility,
+        (half)(0.03 * surfaceDetail));
+    sample.height += (peel - 0.5) * 0.004 * surfaceDetail * peelVisibility;
+}
+
 half3 RbxComposeMaterialColor(half3 partColor, half3 materialColor, half partColorInfluence)
 {
     half3 partModulation = lerp(half3(1.0h, 1.0h, 1.0h),
@@ -772,7 +789,7 @@ half3 RbxComposeMaterialColor(half3 partColor, half3 materialColor, half partCol
 }
 
 RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal, int materialMode,
-    float patternScale, half3 baseColor, float grainStrength)
+    float patternScale, half3 baseColor, float grainStrength, float surfaceDetail)
 {
     RbxSurfaceSample sample;
     float3 physicalPosition = patternPosition;
@@ -803,6 +820,10 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
         // 25 degrees of tilt at arm's length and read as sandpaper.
         sample.height = (stipple - 0.5) * 0.0125
             + RbxPlasticGrainHeight(physicalPosition) * grainStrength;
+        UNITY_BRANCH if (surfaceDetail > 0.0)
+        {
+            RbxApplyPlasticSurfaceDetail(physicalPosition, surfaceDetail, sample);
+        }
     }
     else if (materialMode == 1)
     {
@@ -819,6 +840,10 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
             microVisibility, 0.055h);
         sample.height = (microRoughness - 0.5) * 0.009
             + RbxPlasticGrainHeight(physicalPosition) * grainStrength;
+        UNITY_BRANCH if (surfaceDetail > 0.0)
+        {
+            RbxApplyPlasticSurfaceDetail(physicalPosition, surfaceDetail, sample);
+        }
     }
     else if (materialMode == 2)
     {
@@ -1118,6 +1143,10 @@ RbxSurfaceSample RbxEvaluateSurface(float3 patternPosition, float3 patternNormal
         sample.occlusion = 0.9h + drifts * 0.1h;
         sample.height = (drifts - 0.5) * 0.01 + (crystals - 0.5) * 0.001
             + RbxPlasticGrainHeight(physicalPosition) * grainStrength;
+        UNITY_BRANCH if (surfaceDetail > 0.0)
+        {
+            RbxApplyPlasticSurfaceDetail(physicalPosition, surfaceDetail, sample);
+        }
     }
     else if (materialMode == 17)
     {

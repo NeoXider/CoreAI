@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    WHY this mirrors CoreAI.Mods.Folders.asmdef (noEngineReferences, no references, no precompiled
+    references): see ../CoreAI.RbxApi.Datatypes/CoreAI.RbxApi.Datatypes.csproj. Only the Domain folder is
+    compiled; the Unity view next to it (ModFolders/Unity, its own asmdef) needs UnityEngine.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <AssemblyName>CoreAI.Mods.Folders</AssemblyName>
+    <RootNamespace>CoreAI.Mods.Folders</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../Assets/CoreAIMods/Runtime/ModFolders/Domain/**/*.cs" />
+  </ItemGroup>
+</Project>

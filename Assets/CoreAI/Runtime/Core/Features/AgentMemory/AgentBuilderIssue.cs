@@ -18,7 +18,19 @@ namespace CoreAI.Ai
         InvalidChatHistorySize,
 
         /// <summary><c>WithTemperature(...)</c> was configured outside the supported sampling range.</summary>
-        TemperatureOutOfRange
+        TemperatureOutOfRange,
+
+        /// <summary>
+        /// <see cref="AgentMode.ChatOnly"/> with tools, skills or tool profiles while the mode is not enforced:
+        /// the tools are still offered (enforcement becomes the default in the next release).
+        /// </summary>
+        ChatOnlyModeOffersTools,
+
+        /// <summary>
+        /// <see cref="AgentMode.ToolsOnly"/> with chat history left at its default while the mode is not enforced:
+        /// history is still sent (enforcement becomes the default in the next release).
+        /// </summary>
+        ToolsOnlyModeKeepsChatHistory
     }
 
     /// <summary>

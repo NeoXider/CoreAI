@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
 using CoreAI.Infrastructure.Lua;
+using CoreAI.Mods.Folders;
 
 namespace CoreAI.Ai.Hub
 {
@@ -13,7 +14,7 @@ namespace CoreAI.Ai.Hub
     /// source, load/reload/unload, recent errors) to a concrete runtime adapter. This keeps the
     /// concrete adapter (<see cref="LuaCsModRuntimeHubService"/>) tiny.
     /// </summary>
-    public abstract class HubModServiceBase : IHubModService
+    public abstract class HubModServiceBase : IHubModService, IHubModFolderWriter
     {
         private readonly ILuaModSourceStore _store;
         private readonly LuaCapabilities _grant;
@@ -125,6 +126,72 @@ namespace CoreAI.Ai.Hub
             LogsChanged?.Invoke();
         }
 
+        /// <summary>
+        /// Swaps the live source of a loaded mod for <paramref name="newSource"/> after a folder move, without
+        /// running it again (<see cref="ILuaModSourceRetitler"/>). False when the runtime cannot; the move of a
+        /// running mod then fails instead of letting the next save write the old folder back.
+        /// </summary>
+        protected virtual bool RuntimeRetitle(string id, string newSource)
+        {
+            return false;
+        }
+
+        /// <inheritdoc />
+        public void SetModFolder(string id, string folderPath)
+        {
+            string modId = (id ?? "").Trim();
+            if (modId.Length == 0 || !TryGetSource(modId, out string source) || string.IsNullOrEmpty(source))
+            {
+                throw new InvalidOperationException("Mod '" + modId + "' has no source to move.");
+            }
+
+            ModFolderHeaderEdit edit = ModFolderHeaderEditor.SetCategory(source, folderPath);
+            if (!edit.Succeeded)
+            {
+                throw new ArgumentException(ModFolderErrors.Code(edit.Error) + ": " + edit.Message, nameof(folderPath));
+            }
+
+            if (string.Equals(edit.Source, source, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (IsLoaded(modId) && !RuntimeRetitle(modId, edit.Source))
+            {
+                throw new InvalidOperationException("Mod '" + modId +
+                                                    "' is running and this mod runtime cannot move a running mod; switch it off first.");
+            }
+
+            PersistFolderMove(modId, edit.Source, edit.Category);
+            InvalidatePendingSave(modId);
+            RaiseChanged();
+        }
+
+        /// <summary>
+        /// Writes a moved mod's source with its stored manifest, only the category changed. A mod the store does
+        /// not hold (loaded only) has nothing to write; a store without strict acknowledgment throws, like
+        /// switching a mod on or off.
+        /// </summary>
+        private void PersistFolderMove(string modId, string source, string category)
+        {
+            if (_store == null || !_store.TryLoad(modId, out _, out LuaModManifest stored) || stored == null)
+            {
+                return;
+            }
+
+            LuaModManifest manifest = CopyManifest(stored);
+            manifest.Category = category ?? "";
+            if (_store is ILuaModSourceStrictWriter strictWriter && LuaModSourceStoreCapabilities.CanSaveStrict(_store))
+            {
+                strictWriter.SaveStrict(modId, source, manifest);
+                return;
+            }
+
+            _store.Save(modId, source, manifest);
+            throw new InvalidOperationException("Mod '" + modId +
+                                                "' was moved, but the source store has no strict save acknowledgment; the move is unconfirmed.");
+        }
+
         /// <summary>Invalidates a retained live save receipt after an observed runtime mutation.</summary>
         protected void InvalidatePendingSave(string modId)
         {
@@ -165,6 +232,7 @@ namespace CoreAI.Ai.Hub
                     Capabilities = manifest.Capabilities,
                     StoredActive = manifest.Active,
                     SuspendedAfterBudgetTrips = manifest.SuspendedAfterBudgetTrips,
+                    LoadOrder = manifest.LoadOrder,
                     IsStored = true
                 };
             }
@@ -193,7 +261,13 @@ namespace CoreAI.Ai.Hub
             List<HubModRecord> result = new(byId.Count);
             foreach (HubModRecord record in byId.Values)
             {
-                EnrichFromHeader(record);
+                // WHY only for a mod without a readable stored name: every manifest writer derives the display
+                // fields from the header, so re-reading each stored source repeated what the manifest holds and
+                // cost one store read per mod on every refresh (1,000 file reads at 1,000 mods).
+                if (!record.IsStored || string.IsNullOrWhiteSpace(record.Name))
+                {
+                    EnrichFromHeader(record);
+                }
                 result.Add(record);
             }
 
@@ -526,6 +600,8 @@ namespace CoreAI.Ai.Hub
                 manifest.LoadOrder = LuaModManifest.NextLoadOrder(_store);
             }
 
+            manifest.Context = LuaModManifest.ResolveContext(header, existing);
+
             if (_store is ILuaModSourceStrictWriter strictWriter &&
                 LuaModSourceStoreCapabilities.CanSaveStrict(_store))
             {
@@ -693,7 +769,8 @@ namespace CoreAI.Ai.Hub
                 UpdateAvailable = source.UpdateAvailable,
                 Entry = source.Entry,
                 LoadOrder = source.LoadOrder,
-                SuspendedAfterBudgetTrips = source.SuspendedAfterBudgetTrips
+                SuspendedAfterBudgetTrips = source.SuspendedAfterBudgetTrips,
+                Context = source.Context
             };
         }
 

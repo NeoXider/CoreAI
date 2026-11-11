@@ -10,18 +10,21 @@ namespace CoreAI.Mods.Rbx.Rendering
 {
     /// <summary>Runtime URP catalog for Rbx part materials. One process-wide cache owns every
     /// native material; lookups only return shared handles and never clone a material per part.</summary>
-    public sealed class RbxProceduralMaterialProvider : IRbxMaterialProvider<Material>
+    public sealed class RbxProceduralMaterialProvider : IRbxMaterialProvider<Material>,
+        IRbxTransparentMaterialProvider
     {
         private const string ResourceRoot = "CoreAIRbxMaterials/";
         private const string SurfaceResource = ResourceRoot + "RbxProceduralSurface";
         private const string NeonResource = ResourceRoot + "RbxProceduralNeon";
         private const string TransparentResource = ResourceRoot + "RbxProceduralTransparent";
         private const string FallbackResource = ResourceRoot + "RbxProceduralFallback";
+        private const string WaterResource = ResourceRoot + "RbxWater";
 
         private const string SurfaceShaderName = "CoreAI/Rbx/Procedural Surface";
         private const string NeonShaderName = "CoreAI/Rbx/Procedural Neon";
         private const string TransparentShaderName = "CoreAI/Rbx/Procedural Transparent";
         private const string FallbackShaderName = "CoreAI/Rbx/Material Fallback";
+        private const string WaterShaderName = "CoreAI/Rbx/Water";
 
         private static readonly CatalogDefinition[] Definitions =
         {
@@ -29,10 +32,13 @@ namespace CoreAI.Mods.Rbx.Rendering
             // metres. It is set per material, not per shader mode, because Rubber shares
             // SmoothPlastic's mode and Snow shares Salt's, and both must keep their own look. Salt's
             // larger bump strength turned the full grain into stucco at two metres, so it takes half.
+            // WHY: the surface detail (broad smudges in the roughness, a fine orange-peel relief) keeps
+            // the default Part material from reading as flat paint. Like the grain it is set per
+            // material, so Rubber and Snow, which share these shader modes, keep their own look.
             new("Plastic", 256, ShaderKind.Surface, 0, 1f, 0.08f,
-                new Color(0.72f, 0.71f, 0.7f), 0.82f, grainStrength: 1f),
+                new Color(0.72f, 0.71f, 0.7f), 0.82f, grainStrength: 1f, surfaceDetail: 1f),
             new("SmoothPlastic", 272, ShaderKind.Surface, 1, 1f, 0.015f,
-                new Color(0.76f, 0.75f, 0.74f), 0.82f, grainStrength: 1f),
+                new Color(0.76f, 0.75f, 0.74f), 0.82f, grainStrength: 1f, surfaceDetail: 0.6f),
             // WHY: Roblox Neon has no intrinsic palette; the emission is Part.Color itself.
             new("Neon", 288, ShaderKind.Neon, 0, 1f, 0f, Color.white, 1f),
             new("Wood", 512, ShaderKind.Surface, 2, 12f, 0.22f,
@@ -90,18 +96,18 @@ namespace CoreAI.Mods.Rbx.Rendering
             new("Asphalt", 1376, ShaderKind.Surface, 9, 5f, 0.36f,
                 new Color(0.12f, 0.125f, 0.13f), 0.18f),
             new("Salt", 1392, ShaderKind.Surface, 16, 2.4f, 0.2f,
-                new Color(0.92f, 0.91f, 0.86f), 0.16f, grainStrength: 0.5f),
+                new Color(0.92f, 0.91f, 0.86f), 0.16f, grainStrength: 0.5f, surfaceDetail: 0.8f),
             new("Ice", 1536, ShaderKind.Transparent, 2, 2f, 0.3f,
                 new Color(0.4f, 0.74f, 1f, 0.86f), 0.2f),
             new("Glacier", 1552, ShaderKind.Transparent, 2, 1.2f, 0.42f,
                 new Color(28f / 100f, 0.62f, 0.92f, 0.92f), 0.18f),
             new("Glass", 1568, ShaderKind.Transparent, 1, 0.25f, 0.06f,
-                new Color(0.47f, 0.78f, 0.9f, 0.72f), 0.34f),
+                new Color(0.47f, 0.78f, 0.9f, 0.72f), 0.34f, sceneRefraction: true),
             new("ForceField", 1584, ShaderKind.Transparent, 0, 1.35f, 0f,
                 new Color(0.45f, 0.1f, 1f, 0.84f), 0.42f),
             new("Air", 1792, ShaderKind.Transparent, 1, 0.2f, 0f,
                 new Color(0.86f, 0.94f, 1f, 0.02f), 0f),
-            new("Water", 2048, ShaderKind.Transparent, 2, 0.7f, 0.2f,
+            new("Water", 2048, ShaderKind.Water, 2, 0.7f, 0.2f,
                 new Color(0.08f, 0.42f, 0.72f, 0.62f), 0.22f),
             new("Cardboard", 2304, ShaderKind.Surface, 17, 4f, 0.24f,
                 new Color(0.54f, 0.36f, 0.18f), 0.36f),
@@ -151,6 +157,12 @@ namespace CoreAI.Mods.Rbx.Rendering
             intrinsicColor = default;
             partColorInfluence = 0f;
             return false;
+        }
+
+        /// <inheritdoc />
+        public bool TryGetTransparentMaterial(Material opaqueMaterial, out Material transparentMaterial)
+        {
+            return RbxTransparentTwins.TryGet(opaqueMaterial, out transparentMaterial);
         }
 
         /// <summary>Opaque magenta/black diagnostic material returned for an invalid or unmapped id.</summary>
@@ -203,6 +215,7 @@ namespace CoreAI.Mods.Rbx.Rendering
                 return;
             }
 
+            RbxSceneTextures.EnsureApplied();
             _fallbackMaterial = CreateFallbackMaterial();
             Dictionary<int, Material> materials = new(Definitions.Length);
             foreach (CatalogDefinition definition in Definitions)
@@ -260,6 +273,8 @@ namespace CoreAI.Mods.Rbx.Rendering
             material.SetFloat(PropertyIds.PatternScale, definition.PatternScale);
             material.SetFloat(PropertyIds.BumpStrength, definition.BumpStrength);
             material.SetFloat(PropertyIds.GrainStrength, definition.GrainStrength);
+            material.SetFloat(PropertyIds.SurfaceDetail, definition.SurfaceDetail);
+            material.SetFloat(PropertyIds.SceneRefraction, definition.SceneRefraction ? 1f : 0f);
 
             if (definition.Kind == ShaderKind.Transparent)
             {
@@ -268,6 +283,14 @@ namespace CoreAI.Mods.Rbx.Rendering
                     : BlendMode.OneMinusSrcAlpha;
                 material.SetFloat(PropertyIds.SrcBlend, (float)BlendMode.SrcAlpha);
                 material.SetFloat(PropertyIds.DstBlend, (float)destinationBlend);
+                material.renderQueue = (int)RenderQueue.Transparent;
+            }
+            else if (definition.Kind == ShaderKind.Water)
+            {
+                // WHY: the blend state is what the transparent shader needs should the water shader fall
+                // back to it on a platform that cannot compile it; the water pass itself ignores it.
+                material.SetFloat(PropertyIds.SrcBlend, (float)BlendMode.SrcAlpha);
+                material.SetFloat(PropertyIds.DstBlend, (float)BlendMode.OneMinusSrcAlpha);
                 material.renderQueue = (int)RenderQueue.Transparent;
             }
 
@@ -288,6 +311,10 @@ namespace CoreAI.Mods.Rbx.Rendering
                 case ShaderKind.Neon:
                     resourcePath = NeonResource;
                     shaderName = NeonShaderName;
+                    break;
+                case ShaderKind.Water:
+                    resourcePath = WaterResource;
+                    shaderName = WaterShaderName;
                     break;
                 default:
                     resourcePath = TransparentResource;
@@ -324,6 +351,7 @@ namespace CoreAI.Mods.Rbx.Rendering
 
         private static void DestroyMaterial(Material material)
         {
+            RbxTransparentTwins.Forget(material);
             if (material == null)
             {
                 return;
@@ -343,7 +371,8 @@ namespace CoreAI.Mods.Rbx.Rendering
         {
             Surface,
             Neon,
-            Transparent
+            Transparent,
+            Water
         }
 
         // WHY: the catalog table must stay readable without the native engine (engine-free
@@ -358,6 +387,8 @@ namespace CoreAI.Mods.Rbx.Rendering
             public static readonly int PatternScale = Shader.PropertyToID("_PatternScale");
             public static readonly int BumpStrength = Shader.PropertyToID("_BumpStrength");
             public static readonly int GrainStrength = Shader.PropertyToID("_GrainStrength");
+            public static readonly int SurfaceDetail = Shader.PropertyToID("_SurfaceDetail");
+            public static readonly int SceneRefraction = Shader.PropertyToID("_SceneRefraction");
             public static readonly int SrcBlend = Shader.PropertyToID("_SrcBlend");
             public static readonly int DstBlend = Shader.PropertyToID("_DstBlend");
         }
@@ -373,10 +404,12 @@ namespace CoreAI.Mods.Rbx.Rendering
             public readonly Color MaterialColor;
             public readonly float PartColorInfluence;
             public readonly float GrainStrength;
+            public readonly float SurfaceDetail;
+            public readonly bool SceneRefraction;
 
             public CatalogDefinition(string name, int value, ShaderKind kind, int mode,
                 float patternScale, float bumpStrength, Color materialColor, float partColorInfluence,
-                float grainStrength = 0f)
+                float grainStrength = 0f, float surfaceDetail = 0f, bool sceneRefraction = false)
             {
                 Name = name;
                 Value = value;
@@ -387,6 +420,8 @@ namespace CoreAI.Mods.Rbx.Rendering
                 MaterialColor = materialColor;
                 PartColorInfluence = partColorInfluence;
                 GrainStrength = grainStrength;
+                SurfaceDetail = surfaceDetail;
+                SceneRefraction = sceneRefraction;
             }
         }
     }

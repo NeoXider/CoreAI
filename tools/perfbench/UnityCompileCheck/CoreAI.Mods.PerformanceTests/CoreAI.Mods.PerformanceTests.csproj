@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The P19 PlayMode test assembly (Assets/CoreAIMods/Tests/PlayMode/Performance, top level). See ../UnityCompileCheck.props. -->
+  <Import Project="../UnityCompileCheck.props" />
+  <PropertyGroup>
+    <AssemblyName>CoreAI.Mods.PerformanceTests</AssemblyName>
+    <DefineConstants>$(DefineConstants);UNITY_INCLUDE_TESTS</DefineConstants>
+    <NUnitDll Condition="'$(NUnitDll)' == ''">$(UnityLibraryDir)/PackageCache/com.unity.ext.nunit@0198eae3b53e/net472/unity-custom/nunit.framework.dll</NUnitDll>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(RepoRoot)/Assets/CoreAIMods/Tests/PlayMode/Performance/*.cs" LinkBase="Performance" />
+    <ProjectReference Include="../CoreAI.RbxApi.Unity/CoreAI.RbxApi.Unity.csproj" />
+    <ProjectReference Include="../CoreAI.RbxApi.Binding/CoreAI.RbxApi.Binding.csproj" />
+    <ProjectReference Include="../CoreAI.Mods/CoreAI.Mods.csproj" />
+    <ProjectReference Include="../CoreAI.Mods.PerformanceScenarios/CoreAI.Mods.PerformanceScenarios.csproj" />
+    <Reference Include="UnityEngine.TestRunner">
+      <HintPath>$(UnityLibraryDir)/ScriptAssemblies/UnityEngine.TestRunner.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="nunit.framework">
+      <HintPath>$(NUnitDll)</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

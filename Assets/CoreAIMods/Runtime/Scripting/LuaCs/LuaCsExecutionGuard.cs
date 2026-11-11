@@ -492,7 +492,13 @@ namespace CoreAI.Sandbox.LuaCs
     /// overshoot the budget by ~2^(window/iterationSize) before the first sample, i.e. straight to
     /// out-of-memory. A batch of <see cref="HookInstructionBatch"/> keeps at most ~one doubling between
     /// samples, so the peak heap stays within a small constant factor of the budget, matching the
-    /// per-instruction guarantee this backstop replaced. This is the only defense against allocation
+    /// per-instruction guarantee this backstop replaced. That statement is about two-operand concatenation,
+    /// the shape of every doubling loop: a window of four instructions holds at most two of them, so the
+    /// largest string such a bomb reaches is within five budgets (pinned by LuaCsHookBatchEditModeTests).
+    /// It is not a bound on one instruction: a single concatenation of many operands
+    /// (<c>s .. s .. s ..</c>, up to about 200 operands before the parser refuses the nesting) is one VM
+    /// instruction that multiplies a string that many times, and no hook can interrupt an instruction; the
+    /// guard trips at the next sample, after the fact. This is the only defense against allocation
     /// bombs built from plain string concatenation: that is ordinary VM opcodes with no library call
     /// site to cap, unlike <c>string.rep</c>/<c>string.format</c>/<c>table.concat</c>, which are capped
     /// directly in <see cref="LuaCsSecureEnvironment"/>. The allocation rule itself — a sampled suspicion
@@ -586,7 +592,15 @@ namespace CoreAI.Sandbox.LuaCs
         // purpose: it must stay tight enough that an exponential concat bomb cannot overshoot the
         // allocation budget by more than ~one doubling between samples (see the type doc). Each hook fire
         // charges this many instructions to the step budget, so the SAME max-instruction limit holds.
-        private const int HookInstructionBatch = 4;
+        // WHY still 4 after the 2026-11 measurements (tools/vmbench/RESULTS.md): on the Boehm collector Unity
+        // uses, a wider window would buy at most 1.9x (16) to 3.3x (no hook at all), and every extra
+        // instruction in the window is one more the script runs before the heap is looked at: three
+        // instructions are one more doubling of a string. The same window now also bounds the scheduler
+        // threads' hook (LuaCsCoroutineHandle), which used to fire on every instruction.
+        /// <summary>
+        /// Instructions between two fires of a guard hook: the unobserved stretch of every guarded run.
+        /// </summary>
+        internal const int HookInstructionBatch = 4;
 
         /// <summary>
         /// Wall-clock slice a chunk may hold the host frame for before the hook yields it (async path
@@ -790,8 +804,7 @@ namespace CoreAI.Sandbox.LuaCs
                 LuaValue[] results;
                 try
                 {
-                    results = state.CallAsync(new LuaValue(function), args.AsSpan(), runToken)
-                        .GetAwaiter().GetResult();
+                    results = CallOnStack(state, function, args, runToken);
                 }
                 catch (Exception) when (hook.HasTripped)
                 {
@@ -806,6 +819,28 @@ namespace CoreAI.Sandbox.LuaCs
             {
                 EndGuard(state, installed, hook, completed);
             }
+        }
+
+        // WHY not LuaStateExtensions.CallAsync(function, arguments): that wrapper is an async method that
+        // completes through a Task even when the call finished synchronously (72 bytes per guarded call,
+        // measured), and every handler, timer and export call comes through here. This is the wrapper's own
+        // body - push the function and its arguments, run the VM's call at that index, read the results off the
+        // top of the stack and pop them - without its state machine. Like the wrapper, it leaves the stack as
+        // the VM left it when the call throws.
+        private static LuaValue[] CallOnStack(LuaState state, LuaFunction function, LuaValue[] args,
+            CancellationToken runToken)
+        {
+            LuaStack stack = state.Stack;
+            int functionIndex = stack.Count;
+            stack.Push(new LuaValue(function));
+            stack.PushRange(args.AsSpan());
+            int count = state.CallAsync(functionIndex, functionIndex, runToken).GetAwaiter().GetResult();
+            int returnBase = stack.Count - count;
+            LuaValue[] results = count == 0
+                ? Array.Empty<LuaValue>()
+                : stack.AsSpan().Slice(returnBase).ToArray();
+            stack.PopUntil(returnBase);
+            return results;
         }
 
         /// <summary>Runs a loaded Lua-CSharp chunk and reads the first returned value as <typeparamref name="T"/>.</summary>

@@ -65,6 +65,15 @@ namespace CoreAI.Hub.UI
         /// </summary>
         public bool StopGenerationOnEscape { get; set; }
 
+        /// <summary>
+        /// Role the Hub chat answers with when no chat configuration asset is wired (the shipped Hub prefab wires
+        /// none). Defaults to <see cref="Ai.BuiltInAgentRoleIds.Programmer"/>, the built-in role that carries the Lua
+        /// and world tools, so the default Hub chat can build instead of only talking; the header dropdown still
+        /// switches roles, and a wired chat configuration's own role always wins. Set it before the tab is first
+        /// shown. The standalone chat panel and <see cref="CoreAiChatOptions.DefaultRoleId"/> keep SmartChat.
+        /// </summary>
+        public string DefaultRoleId { get; set; } = Ai.BuiltInAgentRoleIds.Programmer;
+
         /// <inheritdoc />
         public override Func<object> CreatePageContent => BuildContent;
 
@@ -140,18 +149,31 @@ namespace CoreAI.Hub.UI
             {
                 _panel.EnableAgentSwitching();
                 _panel.EnableApiSwitching();
-
-                // WHY: the Hub chat always surfaces tool-call progress so the player can see mod/tool actions
-                // execute inline. This overrides the shared chat config for the embedded panel only — the
-                // standalone chat keeps its own ShowToolCallsInChat setting.
-                CoreAiChatOptions hubOptions = _chatConfig != null
-                    ? CoreAiChatOptions.From(_chatConfig)
-                    : CoreAiChatOptions.CreateDefault();
-                hubOptions.ShowToolCallsInChat = true;
-                _panel.SetRuntimeOptions(hubOptions);
+                _panel.SetRuntimeOptions(BuildRuntimeOptions(_chatConfig, DefaultRoleId));
             }
 
             return _host;
+        }
+
+        /// <summary>
+        /// The options the embedded panel runs with: the wired chat configuration (its role included), or the
+        /// defaults with <paramref name="defaultRoleId"/> when none is wired; tool-call progress is always shown.
+        /// </summary>
+        internal static CoreAiChatOptions BuildRuntimeOptions(CoreAiChatConfig chatConfig, string defaultRoleId)
+        {
+            CoreAiChatOptions options = chatConfig != null
+                ? CoreAiChatOptions.From(chatConfig)
+                : CoreAiChatOptions.CreateDefault();
+            if (chatConfig == null && !string.IsNullOrWhiteSpace(defaultRoleId))
+            {
+                options.RoleId = defaultRoleId.Trim();
+            }
+
+            // WHY: the Hub chat always surfaces tool-call progress so the player can see mod/tool actions
+            // execute inline. This overrides the shared chat config for the embedded panel only — the
+            // standalone chat keeps its own ShowToolCallsInChat setting.
+            options.ShowToolCallsInChat = true;
+            return options;
         }
     }
 }

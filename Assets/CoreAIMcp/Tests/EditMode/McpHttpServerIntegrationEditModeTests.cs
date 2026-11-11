@@ -368,9 +368,107 @@ namespace CoreAI.Mcp.Tests
             Assert.AreEqual(0, _echo.InvocationCount);
         }
 
+        [Test]
+        public async Task UnsupportedProtocolHeader_RejectionIsPlainTextNamingTheNegotiatedVersions()
+        {
+            using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(5) };
+            client.DefaultRequestHeaders.TryAddWithoutValidation(McpServerInfo.ProtocolVersionHeader, "2026-07-28");
+            using HttpResponseMessage response = await PostAsync(client, EchoCallBody(), "application/json");
+            string body = await response.Content.ReadAsStringAsync();
+
+            Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+            // WHY: a dual-era client falls back to initialize only when the 400 is NOT a modern JSON-RPC error.
+            StringAssert.Contains("text/plain", response.Content.Headers.ContentType.MediaType);
+            StringAssert.Contains(McpServerInfo.LatestProtocolVersion, body);
+            StringAssert.Contains(McpServerInfo.DefaultProtocolVersion, body);
+            Assert.AreEqual(0, _echo.InvocationCount);
+        }
+
+        [Test]
+        public async Task Delete_TerminatesTheSession_AndClosesItsNotificationStream()
+        {
+            ServicePointManager.FindServicePoint(new Uri(Url)).ConnectionLimit = 4;
+            using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(10) };
+            using HttpResponseMessage initialized = await PostAsync(client, InitializeBody(), "application/json");
+            string session = initialized.Headers.GetValues(McpServerInfo.SessionHeader).Single();
+            using HttpResponseMessage stream = await OpenNotificationsAsync(client, session);
+            using StreamReader reader = new(await stream.Content.ReadAsStreamAsync());
+            await ReadRevisionAsync(reader);
+
+            using HttpRequestMessage delete = new(HttpMethod.Delete, Url);
+            delete.Headers.TryAddWithoutValidation(McpServerInfo.SessionHeader, session);
+            using HttpResponseMessage deleted = await client.SendAsync(delete);
+
+            Assert.AreEqual(HttpStatusCode.NoContent, deleted.StatusCode);
+            Task<string> tail = reader.ReadToEndAsync();
+            Assert.AreSame(tail, await Task.WhenAny(tail, Task.Delay(3000)),
+                "terminating the session must close its open notification stream at once.");
+            client.DefaultRequestHeaders.TryAddWithoutValidation(McpServerInfo.SessionHeader, session);
+            using HttpResponseMessage after = await PostAsync(client, EchoCallBody(), "application/json");
+            Assert.AreEqual(HttpStatusCode.NotFound, after.StatusCode);
+            Assert.AreEqual(0, _echo.InvocationCount);
+        }
+
+        [Test]
+        public async Task Delete_WithoutASession_IsRejected()
+        {
+            using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(5) };
+            using HttpResponseMessage response = await client.SendAsync(new HttpRequestMessage(HttpMethod.Delete, Url));
+
+            Assert.AreEqual(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Test]
+        public async Task CancelledNotification_OverHttp_WithdrawsTheQueuedCallOfTheSameSession()
+        {
+            int port = FreeLoopbackPort();
+            FakeMcpTool tool = new("queued_tool");
+            HeldGameThread gameThread = new();
+            McpSessionStore sessions = new();
+            McpHttpServer server = new(port, new McpRpcDispatcher(new McpToolRegistry(new[] { tool }), sessions, gameThread));
+            try
+            {
+                try { server.Start(); }
+                catch (HttpListenerException ex)
+                {
+                    Assert.Ignore($"HttpListener could not bind loopback (needs a URL ACL): {ex.Message}");
+                    return;
+                }
+
+                string url = $"http://127.0.0.1:{port}/mcp";
+                // WHY: the held call and the cancellation are two simultaneous requests on one origin; see
+                // NotificationCapacity_IsBounded_AndPostContinuesWorking for Mono's per-origin budget.
+                ServicePointManager.FindServicePoint(new Uri(url)).ConnectionLimit = 4;
+                using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(10) };
+                using HttpResponseMessage initialized = await PostToUrlAsync(client, url, InitializeBody(), "application/json");
+                client.DefaultRequestHeaders.TryAddWithoutValidation(McpServerInfo.SessionHeader,
+                    initialized.Headers.GetValues(McpServerInfo.SessionHeader).Single());
+                Task<HttpResponseMessage> call = PostToUrlAsync(client, url,
+                    "{\"jsonrpc\":\"2.0\",\"id\":41,\"method\":\"tools/call\",\"params\":{\"name\":\"queued_tool\"}}",
+                    "application/json");
+                await gameThread.Queued.Task;
+
+                using HttpResponseMessage cancelled = await PostToUrlAsync(client, url,
+                    "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/cancelled\",\"params\":{\"requestId\":41}}",
+                    "application/json");
+                gameThread.Release();
+                using HttpResponseMessage answered = await call;
+                JObject payload = JObject.Parse(await answered.Content.ReadAsStringAsync());
+
+                Assert.AreEqual(HttpStatusCode.Accepted, cancelled.StatusCode);
+                Assert.AreEqual(0, tool.InvocationCount, "the cancelled call must never reach the game thread.");
+                Assert.AreEqual(JsonRpcErrorCodes.InternalError, (int)payload["error"]["code"]);
+            }
+            finally
+            {
+                server.Dispose();
+            }
+        }
+
         [TestCase(null, false)]
         [TestCase(null, true)]
         [TestCase(McpServerInfo.DefaultProtocolVersion, true)]
+        [TestCase(McpServerInfo.LatestProtocolVersion, true)]
         [TestCase("2025-03-26", false)]
         public async Task SupportedOrInferredProtocol_StillRunsTheRequestedTool(string version, bool withSession)
         {
@@ -460,6 +558,21 @@ namespace CoreAI.Mcp.Tests
             int port = ((IPEndPoint)probe.LocalEndpoint).Port;
             probe.Stop();
             return port;
+        }
+
+        /// <summary>A game thread that has not reached its next frame: work waits until Release.</summary>
+        private sealed class HeldGameThread : IMainThreadDispatcher
+        {
+            private readonly TaskCompletionSource<bool> _frame = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public TaskCompletionSource<bool> Queued { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public void Release() => _frame.TrySetResult(true);
+
+            public async Task<T> RunOnMainThreadAsync<T>(Func<Task<T>> work)
+            {
+                Queued.TrySetResult(true);
+                await _frame.Task.ConfigureAwait(false);
+                return await work().ConfigureAwait(false);
+            }
         }
 
         private sealed class ReentrantCancellationTool : IMcpTool

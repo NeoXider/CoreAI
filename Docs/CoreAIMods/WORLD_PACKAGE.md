@@ -31,6 +31,72 @@ save and load. Tests: the three `WorldPackage_*` load-order cases in
 `Package_RoundTripAndCapture_KeepSuspendedAfterBudgetTrips` and
 `Capture_FromAStoreThatCannotBeListed_IsRefused_NotSavedWithoutItsMods` in `Mvp3WorldPackageEditModeTests`.
 
+**Lights and the day cycle.** A `PointLight` node carries an optional `light` block (`brightness`, `color`
+[r, g, b], `enabled`, `shadows`, `range` in studs within [0, 60]); a PointLight without one restores with the
+class defaults. `world.json` carries an optional top-level `lighting` block (`clock_time` in [0, 24),
+`geographic_latitude`, `brightness`, `ambient` and `outdoor_ambient` [r, g, b]) only when the world drives its
+lighting (`RbxLighting.IsDriven`: a script changed a day-cycle property, or a saved block was restored);
+`TimeOfDay` is derived from `clock_time` and not stored, and a missing block means the class defaults and
+the scene's own lighting. Restore puts both back through the classes' setters after the tree, and a
+restored block makes the world drive its lighting. Both keys are omitted when absent, so a package without
+them is byte-identical to one written before they existed; no `format_version` bump. Readers up to 7.56.0
+refuse a package that carries either key by name ("Could not find member 'lighting'"), as every reader
+refuses an unknown key in `manifest.json`, `world.json` or an instance (`MissingMemberHandling.Error`), so no
+release opens such a world without them. The reader refuses a `light` block on a node that is not a
+PointLight, a range outside [0, 60], a `clock_time` outside [0, 24), a non-finite value, and a `lighting`
+block in a tree without a `Lighting` service. Tests: `WorldPackageLightingEditModeTests`. Known limit:
+`RbxLighting.RestoreDurableState` advances the Lighting service's revision, so a world with a `lighting`
+block re-saves with a higher revision on that one node.
+
+**StarterPlayer settings.** `world.json` carries an optional top-level `starter_player` block
+(`dev_computer_movement_mode` and `camera_mode` by `Enum` item name, `camera_max_zoom_distance` and
+`camera_min_zoom_distance` in studs) when any of them differs from the class defaults (`UserChoice`, `Classic`,
+400, 0.5); a missing block means the defaults. Restore sets them through `RbxStarterPlayer`'s setters in an
+order its zoom clamps cannot alter, and each `Player` copies them when it joins, as before; a `Player` itself
+never enters a package. The reader refuses an unknown or numeric item name, a non-finite distance, a minimum
+below 0 or above the maximum, and the block in a tree without a `StarterPlayer` service. No `format_version`
+bump; readers up to 7.56.0 refuse the key by name. Tests: `WorldPackageStarterPlayerEditModeTests` (including
+a literal 7.56.0 package that loads with the defaults and re-encodes to the same text).
+
+**Terrain cells.** The Workspace `Terrain` node is runtime infrastructure (every data model bootstrap
+creates it, so it is not in `world.json`), but its cells are durable: a world with at least one cell writes
+them in a last entry `Terrain/voxels.bin` (`TerrainVoxelCodec`, CAVX v1, canonical run-length chunks; save,
+load, save is byte-identical). Capture takes a copy-on-write snapshot of the cells (one reference per chunk),
+so the pre-mutation snapshot an undo restores holds the cells of that moment. A package with the entry
+declares `minimum_reader_version: 2` (`format_version` stays 1): readers up to 7.56.0 accept version 1 only
+and refuse it ("World package requires reader version 2; this reader is version 1.") instead of opening the
+world without its cells, and this reader refuses an entry under version 1. A world without cells writes no
+entry and version 1, so its package is byte-identical to one written before the entry existed. The reader
+decodes the entry into a scratch store held to the platform's Terrain bounds and budgets before anything is
+restored, and refuses a non-canonical entry, an entry without a cell, and cells outside the bounds; restore
+puts the cells into the restored world's Terrain after the tree (a composition whose class catalog has no
+`Terrain` refuses such a package before any side effect). The entry is held to the entry limit and, on
+WebGL, the 4 MiB package budget like every other; the write-behind proof bounds it at 12,299 bytes per chunk.
+A cell write counts as a change of the world for the undo mark and for the startup record. Tests:
+`WorldPackageTerrainEditModeTests`.
+
+**Mod folders and script contexts in the manifests.** A mod's folder (P20) is its manifest's `Category`, a
+`/`-separated path copied raw from the `@coreai` header (`Games/Arcade`; a one-level category is a one-folder
+path), so it travels with the mod and needs no new key. Folders that hold no mod travel in an optional
+`manifest.json` key `mod_folders`: canonical paths (`ModFolderPath.Parse`), case-insensitive duplicates once,
+sorted by `ModFolderTree.ComparePaths`, at most 1,024 (`MaximumModFolders`). Capture reads them from the
+session's shared `IModFolderListStore` (`RbxWorldRuntimeSessionController.ModFolderListStore`; a file store
+keeps them in `<mod store>/.mod-folders`, `FileModFolderListStore`), and a confirmed load or restore writes the
+package's list into it before the staged start and puts the previous list back when the load does not publish.
+The key is omitted when there is no such folder; the reader refuses an empty list, more than 1,024 entries, and
+an entry that is not canonical, is the top level, repeats another or is out of order, naming the entry and the
+reason. A mod manifest may carry `Context` (`server`, `client` or `shared`; MVP4 SC-5), derived from the header's
+`context:` key and omitted when empty, so every manifest of a mod without one is byte-identical to before. Both
+keys are additive without a `format_version` bump: readers up to 7.56.0 refuse a package that carries either by
+name, as they refuse every unknown key (`WorldPackageLightingEditModeTests.UnknownKeys_*`). Tests:
+`WorldPackageModFoldersEditModeTests`, `Mvp4ScriptManifestEditModeTests`.
+
+**Client staging.** `RbxWorldPackageRestoreOptions.RegistryAuthority = Replica` restores into a replica registry
+inside one replication-apply scope, so a client's copy keeps the server's ids and every captured revision and
+nothing is marked diverged; a later local write is. `ReplicaRbxWorldSessionHost` stages and commits such
+worlds like the headless host (MVP4 SC-16; the checks that keep server sources out of a client payload come with
+step B2). Tests: `Mvp4ReplicaStagingEditModeTests`.
+
 The durable v1 surface is class/name/Archivable, world-owned origin/ACL/revision metadata, attributes,
 tags, BasePart properties, Model PrimaryPart/stored WorldPivot, ClickDetector distance, camera CFrame,
 ValueBase `Value` payloads (Int/Number/String/Bool/Object/Vector3/CFrame/Color3; ObjectValue targets
@@ -117,9 +183,27 @@ its DataModel — and no host scope outlives the restore.
 switch off every cross-actor check and write the downgrade into every later save. A composition that
 must open legacy worlds is composed with `worldAclVersion: null`.
 
-Version 1 limits compressed packages to 64 MiB, each expanded entry to 16 MiB, all expanded entries to
+Version 1 limits compressed packages to 64 MiB, each expanded entry to 64 MiB, all expanded entries to
 128 MiB, ZIP entries to 2,048, mods to 256, instances to 100,000, hierarchy depth to 2,048, and
-attributes/tags to 256 each per instance. The per-instance limits are also enforced at the source, so a
+attributes/tags to 256 each per instance (`RbxWorldPackageLimits.Format`).
+
+The entry limit was 16 MiB up to 7.56.0 and was raised so that a world at the desktop instance ceiling
+(16,384 charged instances) can be backed up; nothing else in the format changed. Measured on the writer
+(CoreCLR, `world.json` bytes): the reference grid of 16,384 plain Parts writes 19.6 MB (1,192 B per
+instance); the heaviest realistic world at the ceiling, every charged instance a rotated, coloured Part
+with a fractional size, one of twelve materials, eight attributes and four tags, built by AI console
+calls, writes 47.8 MB (2,915 B per instance) and compresses to 3.1 MB, which leaves a quarter of the
+64 MiB entry limit free (`WorldPackageCeilingEditModeTests` pins both the fit and the headroom). The
+expanded total stays 128 MiB, so the most a reader inflates per package is what it was. A reader up to
+7.56.0 reads every package whose entries are within 16 MiB exactly as before (the entries are byte for
+byte what it wrote), and refuses a larger `world.json` by the size its ZIP header declares, before
+inflating it ("World package entry 'world.json' is N bytes; limit is 16777216."). A reader may be held to
+lower limits than the format's, never higher (`RbxWorldPackageSerializer.ReadPackage(bytes, limits)`):
+`RbxWorldPackageLimits.Version1Baseline` is the 7.56.0 set, `RbxWorldPackageLimits.WebGl` the browser's.
+Every inflated entry must also stay within the size its header declares, so an understated header cannot
+let entries inflate past the expanded total.
+
+The per-instance limits are also enforced at the source, so a
 script cannot build a world that cannot be saved: a `SetAttribute` that would add a 257th attribute,
 an `AddTag` that would add a 257th tag, and a `Parent` assignment that would put an instance deeper
 than 2,048 levels (`InstanceTreeSerializer.MaximumSnapshotDepth`) raise `BAD_ARGUMENT`. The byte
@@ -143,7 +227,7 @@ session gets only the store's refusal, which is logged: its 257th mod runs witho
 The writer never throws on a lone surrogate either: text that did not come through capture (mod
 manifests, settings, a hand-built payload) has it replaced with U+FFFD before the strict UTF-8 encode;
 the reader still refuses invalid UTF-8 bytes. A world that captures but still cannot be encoded — its
-`world.json` past the 16 MiB entry limit, or past the WebGL write budget — gets a failed
+`world.json` past the entry limit, or past the WebGL write budget — gets a failed
 `RbxWorldPackageWriteResult` with `PackageCannotBeEncoded` set, as opposed to an I/O or durability
 failure. The gate treats it like a world past the mod limit: `forget` and the safety autosave of a
 confirmed load run without the backup they can never get, and say so (`backup_warning` in the
@@ -153,9 +237,12 @@ limit can be replaced by a confirmed load the same way.
 
 The hierarchy validator and capture traversal are iterative and linear. Capture checks depth/count
 before accepting each node. The writer preflights
-exact UTF-8 expanded size, so it cannot emit a package its reader rejects on aggregate expansion. JSON
+exact UTF-8 expanded size, so it cannot emit a package its reader rejects on aggregate expansion. The
+writer emits `world.json` straight from the payload (`RbxWorldPackageWorldJson`), byte for byte what the
+reader's DTOs serialized to, and refuses a null in a property the reader requires, as the serializer did;
+the reader decodes each JSON entry from its bytes without materializing it as one string. JSON
 DTO materialization still precedes the 100,000-instance semantic check; hostile 16 MiB `world.json`
-browser peak memory remains a residual risk.
+browser peak memory remains a residual risk (a WebGL reader keeps the 16 MiB entry limit).
 
 The world-owned projection runs after the generic instance snapshot has materialized the live tree,
 so mod-ephemeral subtrees still count toward the snapshot's depth, count and allocation budgets.
@@ -220,6 +307,25 @@ failure. Manual slots are not read, written, or rotated by this gate. An `execut
 confirmed load keeps its own error and gets the explanation (the world it ran against was replaced)
 after it, instead of in its place.
 
+**Write-behind autosaves.** With `ConfirmedWorldMutationGate.WriteBehindBackups` on and a store that
+implements `IRbxWorldAutoSaveWriteBehindStore` (the file store does), the durable write of the autosave
+runs behind the mutation; the safety autosave of a confirmed load stays durable-first. What stays in front
+of the mutation is the capture and the store's `PrepareAutoAsync`, which decides every refusal the encode
+could raise. The file store makes that decision without encoding when it can: it validates the payload as
+the writer does, then bounds every entry from above without formatting a number or deflating a byte
+(structure and text counted exactly, each float at 16 characters, each double at 25, each line break at two,
+zlib's worst case for every entry plus its ZIP headers) and compares the bounds with its platform's limits.
+When every bound fits, the encode itself runs in `CommitAutoAsync`, after the pending marker and one
+player-loop frame later than the mutation (`UniTask.NextFrame`; no wait in Edit Mode or without a player
+loop), so the frame that shows the change is drawn first; when a bound does not fit, the encode runs in
+front of the mutation as before and decides exactly. A failure of the deferred encode, which the proof rules
+out unless the payload changed after it, is a lost backup like a failed write: the next gated mutation backs
+itself up durably first. The pre-mutation snapshot the undo service keeps holds the payload until the encode
+finishes and then only the compact package. `FileRbxWorldPackageStore(defersProvenEncodes: false)` encodes
+every autosave in front; `waitBeforeDeferredEncodeAsync` replaces the frame wait. Measured at 2,048 grid Parts
+(CoreCLR, contended machine, see `dev-docs/PERF_BASELINE_2026-11.md`): the proof costs a few milliseconds
+where the encode cost over a hundred. Tests: `WorldPackageEncodeBehindEditModeTests`.
+
 A world session needs more from the shared gate than serialization: to keep the startup selection
 (below) in step it must see each mutation start and end, and it runs the boot-time startup restore
 under the gate. That second face is the public `IStartupAwareWorldMutationGate` (`IsHeld`,
@@ -231,7 +337,9 @@ world tree are not recorded for the next start, the boot restore runs without th
 change may be recorded in the middle of a gated mutation (the next change records the finished state).
 
 File reads/writes are chunked with PlayerLoop yields. The JSON/ZIP codec itself is not incremental, so
-the actual WebGL player refuses to write a package above 4 MiB, with more than 4,096 instances, more
+the actual WebGL player writes with the 7.56.0 entry limit (16 MiB, `RbxWorldPackageLimits.Version1Baseline`)
+and reads with `RbxWorldPackageLimits.WebGl` (4 MiB compressed, 16 MiB per entry), and it refuses to write
+a package above 4 MiB, with more than 4,096 instances, more
 than 32,768 collection items, or more than 2 MiB of text characters before entering unbounded work.
 The text count covers every string the encoding writes: names, ledger metadata, value payloads
 (`StringValue` text included), Humanoid state, attributes, tags, mod sources and manifests, and

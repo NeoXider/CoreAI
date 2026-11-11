@@ -1,12 +1,13 @@
 using System;
 using CoreAI.Ai;
 using CoreAI.Chat;
+using CoreAI.Look;
 using UnityEngine.UIElements;
 
 namespace CoreAI.Hub.UI
 {
     /// <summary>
-    /// One-call registration for the built-in Hub pages (Chat, Settings, Statistics) into a
+    /// One-call registration for the built-in Hub pages (Chat, Settings, Graphics, Statistics) into a
     /// <see cref="HubPageRegistry"/>. Pages are registered as lazy factories, so their content is only
     /// built when a tab is first activated. Every argument is optional and null-tolerant: a page without
     /// its data source still renders a short setup note instead of throwing.
@@ -19,11 +20,14 @@ namespace CoreAI.Hub.UI
         /// <summary>Registry id of the built-in Settings page.</summary>
         public const string SettingsPageId = HubSettingsPage.DefaultPageId;
 
+        /// <summary>Registry id of the built-in Graphics page.</summary>
+        public const string GraphicsPageId = HubGraphicsPage.DefaultPageId;
+
         /// <summary>Registry id of the built-in Statistics page.</summary>
         public const string StatisticsPageId = HubStatisticsPage.DefaultPageId;
 
         /// <summary>
-        /// Registers the Chat, Settings, and Statistics pages into <paramref name="registry"/>.
+        /// Registers the Chat, Settings, Graphics, and Statistics pages into <paramref name="registry"/>.
         /// </summary>
         /// <param name="registry">Target registry. Required.</param>
         /// <param name="chatTemplate">Chat UXML cloned by the Chat page (e.g. <c>CoreAiChat.uxml</c>).</param>
@@ -35,6 +39,10 @@ namespace CoreAI.Hub.UI
         /// Opt-in, off by default: forwarded to <see cref="HubChatPage.StopGenerationOnEscape"/>. See that
         /// property for the default-vs-opt-in Escape behavior.
         /// </param>
+        /// <param name="graphics">
+        /// Optional graphics options service edited by the Graphics page. Null follows the service the
+        /// running CoreAI scope publishes, so the page works without passing anything.
+        /// </param>
         public static void RegisterAll(
             HubPageRegistry registry,
             VisualTreeAsset chatTemplate = null,
@@ -42,7 +50,8 @@ namespace CoreAI.Hub.UI
             CoreAiChatConfig chatConfig = null,
             ICoreAISettings settings = null,
             InMemoryAiOrchestrationMetrics metrics = null,
-            bool chatStopGenerationOnEscape = false)
+            bool chatStopGenerationOnEscape = false,
+            IGraphicsOptionsService graphics = null)
         {
             if (registry == null)
             {
@@ -60,6 +69,11 @@ namespace CoreAI.Hub.UI
                 SettingsPageId,
                 () => new HubSettingsPage(settings, chatConfig),
                 100);
+
+            registry.Register(
+                GraphicsPageId,
+                () => new HubGraphicsPage(graphics),
+                150);
 
             registry.Register(
                 StatisticsPageId,

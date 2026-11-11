@@ -23,6 +23,12 @@ namespace CoreAI.Ai
         /// concept always report false.
         /// </summary>
         public bool Quarantined;
+
+        /// <summary>
+        /// The mod's folder as its live <c>@coreai</c> header declares it (the raw <c>category</c> value, a
+        /// <c>/</c>-separated path; empty is the top level). Runtimes that do not read headers report empty.
+        /// </summary>
+        public string Category = "";
     }
 
     /// <summary>

@@ -33,6 +33,15 @@ namespace CoreAI.Chat
         private readonly IActorIdentityProvider _actorIdentityProvider;
         private readonly IAgentMemoryScopeProvider _scopeProvider;
 
+        /// <summary>
+        /// Orchestrator mode for the chat turns of this service; <c>null</c> (the default) keeps every turn a
+        /// single-agent turn. When set and active, a chat turn (source tag <c>Chat</c>, the panel's and the
+        /// overlay's) becomes a lead turn that plans and delegates, and <see cref="StopAgent(string, ActorContext?)"/>
+        /// also stops that role's plans and clears their queues. <see cref="TryCreateFromScope"/> sets it from the
+        /// scope when the mode is registered.
+        /// </summary>
+        public CoreAI.Ai.SubAgents.OrchestratorChatDriver OrchestratorMode { get; set; }
+
         public CoreAiChatService(
             IAiOrchestrationService orchestrator,
             AgentMemoryPolicy memoryPolicy = null,
@@ -188,14 +197,33 @@ namespace CoreAI.Chat
                         $"[CoreAiChatService] Resolve IAgentCameraService (optional): {ex.Message}");
                 }
 
-                return new CoreAiChatService(
+                CoreAiChatService service = new(
                     orchestrator, policy, settings, memStore, logger, llmClient, cameraService,
                     actorIdentityProvider, scopeProvider);
+                service.OrchestratorMode = ResolveOrchestratorMode(scope);
+                return service;
             }
             catch (Exception ex)
             {
                 GameLoggerUnscopedFallback.Instance.LogError(GameLogFeature.Core,
                     $"[CoreAiChatService] Failed to create from scene: {ex}");
+                return null;
+            }
+        }
+
+        /// <summary>The scope's orchestrator mode driver, or <c>null</c> when the mode is not registered.</summary>
+        internal static CoreAI.Ai.SubAgents.OrchestratorChatDriver ResolveOrchestratorMode(CoreAILifetimeScope scope)
+        {
+            try
+            {
+                return scope?.Container?.Resolve(typeof(CoreAI.Ai.SubAgents.OrchestratorChatDriver))
+                    as CoreAI.Ai.SubAgents.OrchestratorChatDriver;
+            }
+            catch (Exception ex)
+            {
+                // WHY: optional service - registered only when orchestrator mode is enabled; Debug, not Warning.
+                GameLoggerUnscopedFallback.Instance.LogDebug(GameLogFeature.Core,
+                    $"[CoreAiChatService] Resolve OrchestratorChatDriver (optional): {ex.Message}");
                 return null;
             }
         }
@@ -262,7 +290,7 @@ namespace CoreAI.Chat
             AiTaskRequest request,
             CancellationToken ct,
             CancellationToken deadlineToken) =>
-            await SendMessageCoreAsync(request, token => _orchestrator.RunTaskAsync(request, token), ct,
+            await SendMessageCoreAsync(request, (task, token) => _orchestrator.RunTaskAsync(task, token), ct,
                 deadlineToken) ?? "";
 
         /// <summary>Preserves typed task completion; a legacy string-only orchestrator is explicitly unsupported.</summary>
@@ -281,13 +309,13 @@ namespace CoreAI.Chat
         {
             if (_orchestrator is not IAiTaskResultService typed || !typed.SupportsTaskResults)
                 throw new NotSupportedException("The orchestrator does not expose typed task results.");
-            return SendMessageCoreAsync(request, token => typed.RunTaskResultAsync(request, token), ct,
+            return SendMessageCoreAsync(request, (task, token) => typed.RunTaskResultAsync(task, token), ct,
                 deadlineToken);
         }
 
         private async System.Threading.Tasks.Task<TResult> SendMessageCoreAsync<TResult>(AiTaskRequest request,
-            Func<CancellationToken, System.Threading.Tasks.Task<TResult>> send, CancellationToken ct,
-            CancellationToken hostDeadlineToken)
+            Func<AiTaskRequest, CancellationToken, System.Threading.Tasks.Task<TResult>> send, CancellationToken ct,
+            CancellationToken hostDeadlineToken, bool leadTurn = false)
         {
             if (request == null)
             {
@@ -295,6 +323,14 @@ namespace CoreAI.Chat
             }
 
             BindRequestActor(request);
+            CoreAI.Ai.SubAgents.OrchestratorChatDriver driver = OrchestratorMode;
+            if (!leadTurn && driver != null && driver.Applies(request))
+            {
+                return await driver.RunAsync(request,
+                    (lead, token) => SendMessageCoreAsync(lead, send, token, hostDeadlineToken, true), ct,
+                    result => !(result is LlmCompletionResult completion && !completion.Ok));
+            }
+
             string admittedActorId = request.ActorContext.Value.ActorId;
             string admittedRawTraceId = request.TraceId ?? "";
             string admittedTrimmedTraceId = admittedRawTraceId.Trim();
@@ -318,6 +354,7 @@ namespace CoreAI.Chat
             Action<LlmToolCallStarted> onToolStarted = null;
             Action<LlmToolCallCompleted> onToolCompleted = null;
             Action<LlmToolCallFailed> onToolFailed = null;
+            IDisposable progressSubscription = null;
             try
             {
                 timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
@@ -329,6 +366,9 @@ namespace CoreAI.Chat
                     timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct, deadlineToken);
                     effectiveCt = timeoutCts.Token;
                     deadline = new IdleTimeoutDeadline(idleCts, timeoutSec);
+                    // WHY: a lead turn waits on sub-agents without tool events of its own trace; its plan reports
+                    // progress on every task change, which re-arms the deadline the same way a tool event does.
+                    progressSubscription = request.Progress?.Subscribe(deadline.Rearm);
 
                     // WHY: global events can belong to another actor or turn using the same role.
                     // Capture admission metadata so caller mutation cannot redirect deadline progress.
@@ -372,7 +412,7 @@ namespace CoreAI.Chat
                     effectiveCt = timeoutCts.Token;
                 }
 
-                TResult result = await send(effectiveCt);
+                TResult result = await send(request, effectiveCt);
                 // Orchestrator + LLM stack use ConfigureAwait(false); marshal to player loop for UI.
                 // WebGL player: see CoreAiWebGlUiThreadMarshaling (Editor WebGL keeps full switch).
                 await CoreAiWebGlUiThreadMarshaling.SwitchToMainThreadForUiOptional(CancellationToken.None);
@@ -399,6 +439,7 @@ namespace CoreAI.Chat
                     CoreAi.OnToolCallFailed -= onToolFailed;
                 }
 
+                progressSubscription?.Dispose();
                 deadline?.Dispose();
                 timeoutCts?.Dispose();
                 deadlineCts?.Dispose();
@@ -515,6 +556,13 @@ namespace CoreAI.Chat
             }
 
             BindRequestActor(request);
+            CoreAI.Ai.SubAgents.OrchestratorChatDriver driver = OrchestratorMode;
+            if (driver != null && driver.Applies(request))
+            {
+                return driver.RunStreamingAsync(request.Clone(),
+                    (lead, token) => SendMessageStreamingCoreAsync(lead, token, deadlineToken), ct);
+            }
+
             return SendMessageStreamingCoreAsync(request.Clone(), ct, deadlineToken);
         }
 
@@ -541,6 +589,7 @@ namespace CoreAI.Chat
             CancellationToken anyDeadlineToken = deadlineToken;
             CancellationToken effectiveCt = ct;
             IAsyncEnumerator<LlmStreamChunk> streamEnumerator = null;
+            IDisposable progressSubscription = null;
             try
             {
                 timeoutSec = _settings?.LlmRequestTimeoutSeconds ?? 0f;
@@ -552,6 +601,8 @@ namespace CoreAI.Chat
                     timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct, anyDeadlineToken);
                     effectiveCt = timeoutCts.Token;
                     deadline = new IdleTimeoutDeadline(idleCts, timeoutSec);
+                    // WHY: a streaming lead is silent while a delegation runs; its plan's progress re-arms the window.
+                    progressSubscription = request.Progress?.Subscribe(deadline.Rearm);
                 }
                 else if (deadlineToken.CanBeCanceled)
                 {
@@ -618,6 +669,7 @@ namespace CoreAI.Chat
             }
             finally
             {
+                progressSubscription?.Dispose();
                 deadline?.Dispose();
                 timeoutCts?.Dispose();
                 deadlineCts?.Dispose();
@@ -627,14 +679,16 @@ namespace CoreAI.Chat
 
         /// <summary>
         /// Gives the chat agent <paramref name="roleId"/> the runtime <c>camera</c> tool when
-        /// <paramref name="enabled"/> is true and the agent-vision service is available. Idempotent and
-        /// silently degrades (returns false) when disabled, when no vision service was resolved, or when the
-        /// role already has the tool. Vision-capable models can then see and refine their own work; text-only
-        /// models never call it. See <see cref="CoreAiChatCameraTools"/>.
+        /// <paramref name="enabled"/> is true, the configured model can receive images (<see cref="IsVisionEnabled"/>,
+        /// the same verdict that gates <see cref="AskWithCameraAsync(string,string,string,int,int,CancellationToken)"/>)
+        /// and the agent-vision service is available. Idempotent and silently degrades (returns false) when
+        /// disabled, when the model is text-only, when no vision service was resolved, or when the role already has
+        /// the tool. See <see cref="CoreAiChatCameraTools"/>.
         /// </summary>
         public bool TryEnsureCameraToolForRole(string roleId, bool enabled)
         {
-            return CoreAiChatCameraTools.TryAttachCameraTool(_memoryPolicy, _cameraService, roleId, enabled);
+            return CoreAiChatCameraTools.TryAttachCameraTool(_memoryPolicy, _cameraService, roleId, enabled,
+                enabled && IsVisionEnabled());
         }
 
         /// <summary>Clears the stored chat history for the selected agent role.</summary>
@@ -702,9 +756,13 @@ namespace CoreAI.Chat
         /// <summary>Requests cancellation of active work for the selected agent role.</summary>
         public void StopAgent(string roleId, ActorContext? actorContext)
         {
+            ActorContext actor = ResolveActor(actorContext, roleId);
+            // WHY first: Stop from the panel or the overlay ends the role's plans and clears their queues before the
+            // queue cancels the lead's request, so no queued instruction starts in between.
+            OrchestratorMode?.Stop(roleId, actor);
             if (_orchestrator is IActorAiTaskCancellation actorCancellation)
             {
-                actorCancellation.CancelActorTasks(ResolveActor(actorContext, roleId), roleId);
+                actorCancellation.CancelActorTasks(actor, roleId);
             }
             else
             {
@@ -843,7 +901,8 @@ namespace CoreAI.Chat
         }
 
         /// <summary>
-        /// Sends a chat turn using streaming when enabled, otherwise falls back to buffered completion.
+        /// Sends a chat turn using streaming when enabled, otherwise falls back to buffered completion. A failed turn
+        /// throws (see <see cref="LlmTurnFailure"/>) instead of returning a partial or an error text as the reply.
         /// </summary>
         public async System.Threading.Tasks.Task<string> SendMessageSmartAsync(
             string userText,
@@ -852,29 +911,7 @@ namespace CoreAI.Chat
             bool? uiStreamingOverride = null,
             CancellationToken ct = default)
         {
-            if (IsStreamingEnabled(roleId, uiStreamingOverride))
-            {
-                StringBuilder sb = new();
-                await foreach (LlmStreamChunk chunk in SendMessageStreamingAsync(userText, roleId, ct))
-                {
-                    onChunk?.Invoke(chunk);
-                    if (!string.IsNullOrEmpty(chunk.Text))
-                    {
-                        sb.Append(chunk.Text);
-                    }
-                }
-
-                return sb.ToString();
-            }
-
-            string full = await SendMessageAsync(userText, roleId, ct);
-            if (onChunk != null && !string.IsNullOrEmpty(full))
-            {
-                onChunk(new LlmStreamChunk { Text = full });
-                onChunk(new LlmStreamChunk { IsDone = true });
-            }
-
-            return full;
+            return await SendMessageSmartAsync(CreateTaskRequest(userText, roleId), onChunk, uiStreamingOverride, ct);
         }
 
         /// <summary>
@@ -895,6 +932,14 @@ namespace CoreAI.Chat
 
         /// <summary>
         /// Sends a prepared AI task using streaming when enabled, otherwise falls back to buffered completion.
+        /// <para>
+        /// The reply text is never a failure: a stream that reports an error (a terminal chunk with
+        /// <see cref="LlmStreamChunk.Error"/> or an error code) throws the exception <c>CoreAi.StreamAsync</c>
+        /// throws, after <paramref name="onChunk"/> saw that chunk, and a failed buffered turn throws the same way
+        /// when the orchestrator reports typed results (every built-in composition does). A stopped turn throws
+        /// <see cref="OperationCanceledException"/>. <see cref="SendMessageSmartResultAsync"/> returns the failure
+        /// as a result instead.
+        /// </para>
         /// </summary>
         public async System.Threading.Tasks.Task<string> SendMessageSmartAsync(
             AiTaskRequest request,
@@ -913,6 +958,7 @@ namespace CoreAI.Chat
                 await foreach (LlmStreamChunk chunk in SendMessageStreamingAsync(request, ct))
                 {
                     onChunk?.Invoke(chunk);
+                    LlmTurnFailure.ThrowIfFailed(chunk, SmartAskOperation);
                     if (!string.IsNullOrEmpty(chunk.Text))
                     {
                         sb.Append(chunk.Text);
@@ -922,7 +968,9 @@ namespace CoreAI.Chat
                 return sb.ToString();
             }
 
-            string full = await SendMessageAsync(request, ct);
+            string full = SupportsTaskResults
+                ? LlmTurnFailure.ContentOrThrow(await SendMessageResultAsync(request, ct), SmartAskOperation)
+                : await SendMessageAsync(request, ct);
             if (onChunk != null && !string.IsNullOrEmpty(full))
             {
                 onChunk(new LlmStreamChunk { Text = full });
@@ -931,6 +979,82 @@ namespace CoreAI.Chat
 
             return full;
         }
+
+        /// <summary>
+        /// <see cref="SendMessageSmartAsync(AiTaskRequest, Action{LlmStreamChunk}, bool?, CancellationToken)"/> that
+        /// returns the outcome as <see cref="LlmCompletionResult"/>: <c>Ok = false</c> with the error category, HTTP
+        /// status and the text streamed so far for a failed turn, instead of an exception. A stopped turn still
+        /// throws <see cref="OperationCanceledException"/>, as <see cref="SendMessageResultAsync(AiTaskRequest, CancellationToken)"/>
+        /// does. The buffered path needs an orchestrator with typed results (<see cref="SupportsTaskResults"/>);
+        /// the streaming path does not.
+        /// </summary>
+        public async System.Threading.Tasks.Task<LlmCompletionResult> SendMessageSmartResultAsync(
+            AiTaskRequest request,
+            Action<LlmStreamChunk> onChunk = null,
+            bool? uiStreamingOverride = null,
+            CancellationToken ct = default)
+        {
+            if (request == null)
+            {
+                throw new ArgumentNullException(nameof(request));
+            }
+
+            if (!IsStreamingEnabled(request.RoleId, uiStreamingOverride))
+            {
+                LlmCompletionResult buffered = await SendMessageResultAsync(request, ct);
+                if (onChunk != null && buffered != null && buffered.Ok && !string.IsNullOrEmpty(buffered.Content))
+                {
+                    onChunk(new LlmStreamChunk { Text = buffered.Content });
+                    onChunk(new LlmStreamChunk { IsDone = true });
+                }
+
+                return buffered ?? new LlmCompletionResult
+                {
+                    Ok = false,
+                    Error = "No completion was returned.",
+                    ErrorCode = LlmErrorCode.EmptyResponse
+                };
+            }
+
+            StringBuilder text = new();
+            StringBuilder reasoning = new();
+            LlmStreamChunk last = null;
+            await foreach (LlmStreamChunk chunk in SendMessageStreamingAsync(request, ct))
+            {
+                onChunk?.Invoke(chunk);
+                if (chunk == null)
+                {
+                    continue;
+                }
+
+                if (LlmTurnFailure.IsFailure(chunk))
+                {
+                    return LlmTurnFailure.ToFailedResult(chunk, text.ToString());
+                }
+
+                text.Append(chunk.Text ?? "");
+                reasoning.Append(chunk.ReasoningText ?? "");
+                last = chunk;
+            }
+
+            return new LlmCompletionResult
+            {
+                Ok = true,
+                Content = text.ToString(),
+                ReasoningContent = reasoning.ToString(),
+                Model = last?.Model ?? "",
+                PromptTokens = last?.PromptTokens,
+                LastRoundtripPromptTokens = last?.LastRoundtripPromptTokens,
+                CompletionTokens = last?.CompletionTokens,
+                TotalTokens = last?.TotalTokens,
+                ReasoningTokens = last?.ReasoningTokens,
+                CacheReadTokens = last?.CacheReadTokens ?? 0,
+                CacheWriteTokens = last?.CacheWriteTokens ?? 0,
+                ExecutedToolCalls = last?.ExecutedToolCalls ?? Array.Empty<LlmToolCallTrace>()
+            };
+        }
+
+        private const string SmartAskOperation = "CoreAi.SmartAskAsync";
 
         // ===== Vision / multimodal (P2) =====
 
@@ -1155,13 +1279,7 @@ namespace CoreAI.Chat
                     return "";
                 }
 
-                if (!result.Ok)
-                {
-                    throw new InvalidOperationException(
-                        $"CoreAiChatService vision request failed: {result.Error}");
-                }
-
-                return result.Content ?? "";
+                return LlmTurnFailure.ContentOrThrow(result, "CoreAiChatService vision request");
             }
             catch (OperationCanceledException) when (timeoutSec > 0f && !ct.IsCancellationRequested)
             {

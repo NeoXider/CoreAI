@@ -168,8 +168,9 @@ Concurrency limit: AiOrchestrationQueueOptions.MaxConcurrent
   CACHEABLE SYSTEM PREFIX (byte-stable per role)
 ═══════════════════════════════════════════════════
 
-📌 Layer 1 — Universal Prefix (shared by all; asset default):
-"Respond concisely and to the point. Avoid unnecessary verbosity."
+📌 Layer 1 — Universal Prefix (shared by all; default of a new asset):
+"CRITICAL RULES FOR ALL AGENTS: 1. TOOL CALLING ... 2. STRICT ADHERENCE ...
+ 3. NO CHIT-CHAT ... 4. TOOL LIFECYCLE ..."
 
 📌 Layer 2 — Role prompt (CoreMechanicAI):
 "You are the CoreMechanicAI. Evaluate crafting recipes..."

@@ -1,0 +1,28 @@
+{
+  "name": "CoreAI.Net.Mirror.Harness",
+  "rootNamespace": "CoreAI.Net.Mirror.Harness",
+  "references": [
+    "CoreAI.Net.Mirror",
+    "CoreAI.Core",
+    "CoreAI.RbxApi.Datatypes",
+    "CoreAI.RbxApi.Instances",
+    "CoreAI.RbxApi.Binding",
+    "CoreAI.Mods",
+    "VContainer",
+    "Mirror",
+    "Mirror.Transports",
+    "kcp2k"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "MIRROR",
+    "COREAI_MIRROR_HARNESS"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

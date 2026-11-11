@@ -33,7 +33,8 @@ The catalog maps all 45 public `Enum.Material` items, grouped by shader family:
   CeramicTiles, Basalt, CrackedLava, Rock; Grass, LeafyGrass, Sandstone, Sand, Mud, Ground, Snow,
   Salt, Fabric, Cardboard, Carpet, Leather;
 - Neon (HDR unlit emissive): Neon;
-- Transparent (mode 0 additive, 1 smooth, 2 fractured): ForceField; Glass, Air; Ice, Glacier, Water.
+- Transparent (mode 0 additive, 1 smooth, 2 fractured): ForceField; Glass, Air; Ice, Glacier;
+- Water (`CoreAI/Rbx/Water`, animated): Water.
 
 Opaque materials use procedural albedo, metallic, smoothness, occlusion, and height-derived normals.
 Plastic, SmoothPlastic and Salt add a shared 4.5 cm value-noise grain (`RbxPlasticGrainHeight`,
@@ -93,6 +94,65 @@ kernel sample once fully filtered. Micro-normal strength fades under minificatio
 toward the unresolved normal variance. The shaders target shader model 3.0 and keep bounded branch-only
 work with no dynamic loops. Fragment derivatives are available on the WebGL 2 target; there are no
 compute passes, geometry/tessellation stages, per-part materials, threads, or blocking paths.
+
+## Materials v2: water, Glass, surface detail, partial transparency
+
+**Water** (`RbxWater.shader`) has its own shader. Two drifting simplex layers, a long swell and a finer
+chop moving another way, give moving waves with analytical slopes, so there is no normal texture.
+`_PatternScale` is the wave scale in cycles per metre, `_BumpStrength` the wave strength and
+`_WaveSpeed` the drift. The surface reflects the sky, the reflection probes and the sun through URP's
+lighting. Each layer fades out once a pixel covers its wavelength, so distant water stays calm.
+
+- With scene textures (the PC tier, see below), the water refracts what lies beneath it through the
+  camera opaque texture. It tints that view by depth through the camera depth texture, so shallow water
+  shows the bottom and deep water takes the water colour. Its edge fades out where it meets geometry.
+- Without them, the waves are the same and the surface is alpha-blended with a Fresnel-weighted
+  opacity.
+- The shader falls back to `CoreAI/Rbx/Procedural Transparent`, mode 2 (the pre-v2 look), on a platform
+  that cannot compile it.
+- `RbxWaterTime.SetOverride(seconds)` pins the wave clock for reproducible captures, and `ClearOverride`
+  releases it.
+- `Part.Material = Enum.Material.Water` renders this water on a part (in Roblox, Water applies to
+  Terrain only). The block world's voxel water uses the same material.
+
+**Glass** refracts the scene behind it on the scene-texture tier. The view through it is bent by its
+surface normal and tinted, with the lit reflection on top, and Part transparency fades the pane back to
+the unbent scene. Air shares Glass's mode, keeps `_SceneRefraction` at 0 and stays invisible. Without
+scene textures, Glass keeps the alpha-blended look, which is also what Roblox shows on mobile.
+
+**Scene textures** are switched by one global shader keyword, `_RBX_SCENE_TEXTURES`, through
+`RbxSceneTextures`. The Rbx assemblies do not reference URP, so the default asks the active pipeline
+asset for its public `supportsCameraOpaqueTexture` and `supportsCameraDepthTexture` switches by
+reflection: both on turns the keyword on. When the pipeline cannot be asked, the default follows the
+platform tier:
+
+- on for desktop players and the Editor;
+- off for WebGL and mobile, whose pipeline asset renders no opaque or depth texture.
+
+The keyword is decided once, before the first Rbx material draws. A host that switches pipeline assets
+at runtime (a quality level with the opaque texture off), or knows better, calls
+`RbxSceneTextures.SetAvailable`; nothing else, the default look included, sets it.
+
+**Fog.** Every lit Rbx shader (Procedural Surface, Procedural Transparent, Textured Surface, Water)
+measures the fog distance from the view depth (`RbxFog.hlsl`), the way URP's own fragment fog does.
+URP's `ComputeFogFactor` expects the vertex-stage clip-space z; fed the fragment-stage `SV_POSITION.z`
+(device depth) it put every surface near the far plane, so with fog on, which the default look turns on,
+every part took the full fog colour.
+
+**Surface detail** (`_SurfaceDetail`, set to 1 for Plastic, 0.6 for SmoothPlastic and 0.8 for Salt)
+adds broad handling smudges to the roughness and a footprint-filtered orange-peel relief. The albedo is
+untouched, so Part.Color stays as authored. Rubber and Snow share those shader modes and keep 0.
+
+**Partial transparency.** A part with 0 < `Transparency` < 1 draws with a blended twin of its material
+(`IRbxTransparentMaterialProvider`, cached in `RbxTransparentTwins`):
+
+- the twin is a copy with source-alpha blending, no depth writes and the transparent queue;
+- its alpha is read from the per-renderer part colour (`_AlphaFromPartColor`);
+- materials that already blend (Glass, Water, ForceField) are their own twin;
+- Neon and the diagnostic fallback have none and stay opaque.
+
+The opaque Surface, Textured, Neon and Fallback shaders also draw URP Lit's DepthNormals pass, so parts
+receive SSAO.
 
 ## Visible fallback
 
@@ -162,6 +222,16 @@ A null graphics device, unavailable floating-point target or unsupported URP req
 ignored test, not rendered acceptance. This regression does not establish fog correctness, full relief
 appearance, target-player shader inclusion or WebGL/device behavior. Those gates require their own
 Unity/player receipts and reviewed captures.
+
+`RbxMaterialsV2CapturePlayModeTests` renders Water at two pinned times, CrackedLava next to Basalt with
+no light at all (no sun, no ambient, no reflections), a half-transparent and an opaque Brick in front
+of a Neon panel, Glass over a striped wall with and without refraction, and Plastic surface detail under
+a grazing sun; each check compares an object-masked crop between two frames, and every frame is written
+to `artifacts/materials/v2/`. The camera is placed in studs through `RbxSpace`, like the parts.
+`DefaultLookNoonCapturePlayModeTests` renders a noon scene with the default look on and off into
+`artifacts/look/` and checks, on masked crops, that the look's sky replaces the default one, that the
+Neon bar blooms over the wall only with the look on, and that the look's fog leaves the brick wall ten
+metres away at least half of its texture contrast.
 
 ## Source and licensing
 

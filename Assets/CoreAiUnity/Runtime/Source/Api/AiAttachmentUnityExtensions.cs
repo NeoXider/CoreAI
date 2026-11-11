@@ -177,7 +177,15 @@ namespace CoreAI
         internal static byte[] CaptureCamera(Camera camera, int width, int height, CaptureImageFormat format,
             int jpegQuality)
         {
-            RenderTexture target = RenderTexture.GetTemporary(width, height, 24);
+            // WHY: an HDR render target - URP renders a camera that draws into a texture in that texture's own
+            // format, so an 8-bit target clipped every HDR value before post-processing and the AI never saw
+            // bloom; the HDR frame is converted into the 8-bit sRGB texture the encoder reads.
+            bool hdr = camera.allowHDR && SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.DefaultHDR);
+            RenderTexture target = RenderTexture.GetTemporary(width, height, 24,
+                hdr ? RenderTextureFormat.DefaultHDR : RenderTextureFormat.Default);
+            RenderTexture encoded = hdr
+                ? RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB)
+                : target;
             RenderTexture previousTarget = camera.targetTexture;
             RenderTexture previousActive = RenderTexture.active;
             try
@@ -191,12 +199,22 @@ namespace CoreAI
 
                 camera.targetTexture = target;
                 camera.Render();
-                return ReadBackAndEncode(target, width, height, format, jpegQuality, false);
+                if (hdr)
+                {
+                    UnityEngine.Graphics.Blit(target, encoded);
+                }
+
+                return ReadBackAndEncode(encoded, width, height, format, jpegQuality, false);
             }
             finally
             {
                 camera.targetTexture = previousTarget;
                 RenderTexture.active = previousActive;
+                if (hdr)
+                {
+                    RenderTexture.ReleaseTemporary(encoded);
+                }
+
                 RenderTexture.ReleaseTemporary(target);
             }
         }
@@ -212,13 +230,13 @@ namespace CoreAI
                 if (region.HasValue)
                 {
                     Rect r = region.Value;
-                    Graphics.Blit(source, target,
+                    UnityEngine.Graphics.Blit(source, target,
                         new Vector2(r.width / source.width, r.height / source.height),
                         new Vector2(r.x / source.width, r.y / source.height));
                 }
                 else
                 {
-                    Graphics.Blit(source, target);
+                    UnityEngine.Graphics.Blit(source, target);
                 }
 
                 return ReadBackAndEncode(target, width, height, format, jpegQuality, format == CaptureImageFormat.Png);

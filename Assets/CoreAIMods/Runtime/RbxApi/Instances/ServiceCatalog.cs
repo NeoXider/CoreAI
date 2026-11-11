@@ -213,11 +213,13 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.RegisterTreeBacked("TweenService");
             catalog.RegisterTreeBacked("CollectionService");
             catalog.RegisterTreeBacked("ScriptContext");
-            catalog.RegisterStub("DataStoreService", "MVP9", implementedServiceHint);
+            catalog.Register(RuntimeUi.RbxUxmlService.ServiceClassName, new RuntimeUi.RbxUxmlService());
+            catalog.RegisterStub("DataStoreService", "MVP16", implementedServiceHint);
             catalog.RegisterImplementedFallback("UserInputService");
-            catalog.RegisterStub("ContextActionService", "MVP10", implementedServiceHint);
-            catalog.RegisterStub("SoundService", "MVP15", implementedServiceHint);
-            catalog.RegisterStub("AIService", "a future MVP (reserved)",
+            catalog.RegisterImplementedFallback("StarterGui");
+            catalog.RegisterStub("ContextActionService", "MVP7", implementedServiceHint);
+            catalog.RegisterStub("SoundService", "MVP17", implementedServiceHint);
+            catalog.RegisterStub("AIService", "P12",
                 "CoreAI agent/chat access from Lua is planned; not yet scriptable");
             catalog.RegisterUnsupportedStub("PathfindingService",
                 "use host navigation or scripted waypoints; this service is not planned");
@@ -238,8 +240,6 @@ namespace CoreAI.Mods.Rbx.Instances
                 "this is a Roblox platform backend service; CoreAI worlds have no such backend";
             const string chatWorkaround = "chat is TextChatService, which CoreAI does not support";
 
-            catalog.RegisterStub("StarterGui", "MVP14",
-                "build HUD content in 3D space until the GUI subset lands");
             catalog.RegisterBacklogStub("StarterPack",
                 "per-player tools land with the Backpack contents slice; give items from "
                 + "Players.PlayerAdded meanwhile");

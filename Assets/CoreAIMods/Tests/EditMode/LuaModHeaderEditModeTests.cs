@@ -26,7 +26,8 @@ print('ready')", "fallback");
             Assert.AreEqual("First-Person Controller", header.Name);
             Assert.AreEqual("1.0.0", header.Version);
             Assert.IsFalse(header.Active);
-            Assert.AreEqual("All, Full", header.Capabilities);
+            // WHY: the Ui bit joined LuaCapabilities.All, which changed the order Enum.ToString prints the two names in.
+            Assert.AreEqual("Full, All", header.Capabilities);
             Assert.AreEqual("player/controllers", header.Category);
             Assert.AreEqual("CoreAI", header.Author);
             Assert.AreEqual("WASD to move, mouse to look.", header.Description);

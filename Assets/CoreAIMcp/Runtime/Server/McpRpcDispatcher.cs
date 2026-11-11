@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Mcp.Protocol;
 using CoreAI.Mcp.Tools;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Mcp.Server
@@ -43,12 +45,19 @@ namespace CoreAI.Mcp.Server
     /// Pure JSON-RPC 2.0 / MCP method router. Owns NO sockets: it takes a parsed request object and
     /// returns a response object, marshalling <c>tools/call</c> onto the main thread via the injected
     /// <see cref="IMainThreadDispatcher"/>. Engine-free and fully unit-testable.
+    /// <para>
+    /// Cancellation: every <c>tools/call</c> in flight is registered under its session and request id, and
+    /// a <c>notifications/cancelled</c> naming that id from the same session cancels it. Requests without a
+    /// session share one sessionless namespace.
+    /// </para>
     /// </summary>
     public sealed class McpRpcDispatcher
     {
         private readonly McpToolRegistry _registry;
         private readonly McpSessionStore _sessions;
         private readonly IMainThreadDispatcher _mainThread;
+        private readonly object _inFlightGate = new();
+        private readonly Dictionary<string, CancellationTokenSource> _inFlight = new(StringComparer.Ordinal);
 
         /// <param name="registry">The tools available in the current composition.</param>
         /// <param name="sessions">Session id issuer/validator.</param>
@@ -63,13 +72,34 @@ namespace CoreAI.Mcp.Server
         /// <summary>The live catalog shared with host updates and notification transport.</summary>
         public McpToolRegistry Registry => _registry;
 
+        /// <summary>
+        /// Text returned as <c>instructions</c> by <c>initialize</c>: guidance an MCP client may hand to its
+        /// model. Null or blank omits the field.
+        /// </summary>
+        public string Instructions { get; set; }
+
+        /// <summary>Number of <c>tools/call</c> requests that can currently be cancelled by id.</summary>
+        public int CancellableCallCount { get { lock (_inFlightGate) return _inFlight.Count; } }
+
         /// <summary>True only while a notification transport is available.</summary>
         internal bool SupportsListChanged { get; set; }
 
         internal bool IsKnownSession(string sessionId) => _sessions.IsKnown(sessionId);
 
-        /// <summary>Routes a single parsed JSON-RPC request.</summary>
-        public async Task<McpDispatchResult> DispatchAsync(JObject request, CancellationToken cancellationToken)
+        internal bool RemoveSession(string sessionId) => _sessions.Remove(sessionId);
+
+        /// <summary>Routes a single parsed JSON-RPC request that arrived without a session.</summary>
+        public Task<McpDispatchResult> DispatchAsync(JObject request, CancellationToken cancellationToken)
+        {
+            return DispatchAsync(request, null, cancellationToken);
+        }
+
+        /// <summary>
+        /// Routes a single parsed JSON-RPC request. <paramref name="sessionId"/> is the request's
+        /// <c>Mcp-Session-Id</c> (null when absent); it scopes request ids for cancellation.
+        /// </summary>
+        public async Task<McpDispatchResult> DispatchAsync(JObject request, string sessionId,
+            CancellationToken cancellationToken)
         {
             JToken id = request?["id"];
             JToken version = request?["jsonrpc"];
@@ -95,6 +125,11 @@ namespace CoreAI.Mcp.Server
             // WHY: Notifications (no id) never get a response body; the client fires and forgets.
             if (JsonRpc.IsNotification(request))
             {
+                if (method == McpMethods.CancelledNotification)
+                {
+                    CancelInFlight(sessionId, (parameters as JObject)?["requestId"]);
+                }
+
                 // notifications/initialized and any other client notification are accepted as no-ops.
                 return McpDispatchResult.Notification();
             }
@@ -102,7 +137,7 @@ namespace CoreAI.Mcp.Server
             switch (method)
             {
                 case McpMethods.Initialize:
-                    return HandleInitialize(id, request);
+                    return HandleInitialize(id, parameters as JObject);
 
                 case McpMethods.Ping:
                     return McpDispatchResult.Reply(JsonRpc.Result(id, new JObject()));
@@ -114,21 +149,23 @@ namespace CoreAI.Mcp.Server
                     }));
 
                 case McpMethods.ToolsCall:
-                    return await HandleToolsCallAsync(id, request, cancellationToken).ConfigureAwait(false);
+                    return await HandleToolsCallAsync(id, request, sessionId, cancellationToken).ConfigureAwait(false);
 
                 default:
                     return McpDispatchResult.Reply(JsonRpc.Error(id, JsonRpcErrorCodes.MethodNotFound,
-                        $"Method not found: {method}"));
+                        $"Method not found: {method}. This server implements initialize, ping, tools/list and tools/call."));
             }
         }
 
-        private McpDispatchResult HandleInitialize(JToken id, JObject request)
+        private McpDispatchResult HandleInitialize(JToken id, JObject parameters)
         {
+            JToken requested = parameters?["protocolVersion"];
+            string requestedVersion = requested?.Type == JTokenType.String ? (string)requested : null;
             string sessionId = _sessions.Issue();
 
             JObject result = new()
             {
-                ["protocolVersion"] = McpServerInfo.DefaultProtocolVersion,
+                ["protocolVersion"] = McpServerInfo.NegotiateProtocolVersion(requestedVersion),
                 ["capabilities"] = new JObject
                 {
                     ["tools"] = SupportsListChanged ? new JObject { ["listChanged"] = true } : new JObject()
@@ -139,13 +176,17 @@ namespace CoreAI.Mcp.Server
                     ["version"] = McpServerInfo.Version
                 }
             };
+            if (!string.IsNullOrWhiteSpace(Instructions))
+            {
+                result["instructions"] = Instructions;
+            }
 
             return McpDispatchResult.Reply(JsonRpc.Result(id, result), sessionId);
         }
 
         private sealed class ToolBindingChangedException : Exception { }
 
-        private async Task<McpDispatchResult> HandleToolsCallAsync(JToken id, JObject request,
+        private async Task<McpDispatchResult> HandleToolsCallAsync(JToken id, JObject request, string sessionId,
             CancellationToken cancellationToken)
         {
             JObject parameters = request?["params"] as JObject;
@@ -166,19 +207,34 @@ namespace CoreAI.Mcp.Server
             McpToolRegistry.InvocationPlan invocation = _registry.CaptureInvocation(name, arguments);
             if (invocation == null)
                 return McpDispatchResult.Reply(JsonRpc.Error(id, JsonRpcErrorCodes.InvalidParams,
-                    $"Invalid params: unknown tool '{name}'."));
+                    $"Invalid params: unknown tool '{name}'. Re-read tools/list, or call coreai_tools with " +
+                    "action 'list' for the tools it brokers."));
 
+            string key = InFlightKey(sessionId, id);
+            using CancellationTokenSource requestLifetime =
+                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            bool registered;
+            lock (_inFlightGate)
+            {
+                // WHY: a request id still in flight in the same session is a client error; the later call
+                // runs but only the first one can be cancelled by that id.
+                registered = !_inFlight.ContainsKey(key);
+                if (registered) _inFlight.Add(key, requestLifetime);
+            }
+            CancellationToken callToken = requestLifetime.Token;
             try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                McpToolResult toolResult = await _mainThread
-                    .RunOnMainThreadAsync(() =>
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        if (invocation == null || !invocation.TryAdmit())
-                            throw new ToolBindingChangedException();
-                        return invocation.InvokeAsync(cancellationToken);
-                    })
+                callToken.ThrowIfCancellationRequested();
+                Func<Task<McpToolResult>> work = () =>
+                {
+                    callToken.ThrowIfCancellationRequested();
+                    if (!invocation.TryAdmit())
+                        throw new ToolBindingChangedException();
+                    return invocation.InvokeAsync(callToken);
+                };
+                McpToolResult toolResult = await (_mainThread is ICancellableMainThreadDispatcher cancellable
+                        ? cancellable.RunOnMainThreadAsync(work, callToken)
+                        : _mainThread.RunOnMainThreadAsync(work))
                     .ConfigureAwait(false);
 
                 return McpDispatchResult.Reply(JsonRpc.Result(id,
@@ -210,6 +266,42 @@ namespace CoreAI.Mcp.Server
                 return McpDispatchResult.Reply(JsonRpc.Result(id,
                     McpToolResult.Failure($"Tool '{name}' failed: {ex.Message}").ToJson()));
             }
+            finally
+            {
+                if (registered)
+                {
+                    lock (_inFlightGate) _inFlight.Remove(key);
+                }
+            }
+        }
+
+        private void CancelInFlight(string sessionId, JToken requestId)
+        {
+            if (requestId == null || (requestId.Type != JTokenType.String && requestId.Type != JTokenType.Integer))
+            {
+                return;
+            }
+
+            CancellationTokenSource target;
+            lock (_inFlightGate)
+            {
+                if (!_inFlight.TryGetValue(InFlightKey(sessionId, requestId), out target)) return;
+            }
+
+            // WHY: outside the lock, because cancellation callbacks run synchronously and belong to host tools.
+            try
+            {
+                target.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+
+        // WHY: the JSON form of the id, because a string "1" and a number 1 are different request ids.
+        private static string InFlightKey(string sessionId, JToken id)
+        {
+            return (sessionId ?? "") + "\n" + (id ?? JValue.CreateNull()).ToString(Formatting.None);
         }
     }
 }

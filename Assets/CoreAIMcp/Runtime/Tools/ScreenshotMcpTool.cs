@@ -7,11 +7,11 @@ using Newtonsoft.Json.Linq;
 namespace CoreAI.Mcp.Tools
 {
     /// <summary>
-    /// MCP <c>screenshot</c> tool: captures the running game's main camera to a PNG and returns it as an
-    /// MCP image content item (base64). Registered whenever an <see cref="IScreenshotSource"/> exists;
-    /// the Unity host always supplies one, so a missing camera is reported at CALL time instead of
-    /// hiding the tool from <c>tools/list</c> for the whole session. Runs on the Unity main thread
-    /// (rendering is main-thread only).
+    /// MCP <c>screenshot</c> tool: captures the running game's main camera (or a named camera) to a PNG and
+    /// returns it as an MCP image content item (base64). Registered whenever an
+    /// <see cref="IScreenshotSource"/> exists; the Unity host always supplies one, so a missing camera is
+    /// reported at CALL time instead of hiding the tool from <c>tools/list</c> for the whole session. Runs
+    /// on the Unity main thread (rendering is main-thread only).
     /// </summary>
     public sealed class ScreenshotMcpTool : IMcpTool
     {
@@ -31,23 +31,45 @@ namespace CoreAI.Mcp.Tools
 
         /// <inheritdoc />
         public string Description =>
-            "Capture the running game's main camera and return it as a PNG image (base64). Use it to SEE " +
-            "the result of a spawn or edit. max_resolution caps the longer edge in pixels (default " +
-            "1024) to keep the payload small; the image is downscaled to fit.";
+            "Capture the running game's main camera (or the camera named in 'camera') and return it as a PNG " +
+            "image (base64). Use it to SEE the result of a spawn or edit. max_resolution caps the longer edge " +
+            "in pixels (default 1024) to keep the payload small. Screen-space overlay UI is not part of a " +
+            "camera render.";
 
         /// <inheritdoc />
         public string InputSchemaJson =>
             "{\"type\":\"object\",\"properties\":{\"max_resolution\":{\"type\":\"integer\"," +
-            "\"description\":\"Cap on the longer image edge in pixels (default 1024). 0 = no cap.\"}}}";
+            "\"description\":\"Cap on the longer image edge in pixels (default 1024). 0 = no cap.\"}," +
+            "\"camera\":{\"type\":\"string\",\"description\":\"Optional name of the camera GameObject to " +
+            "capture. Omit for the main camera. An unknown name fails and lists the active cameras.\"}}}";
 
         /// <inheritdoc />
         public Task<McpToolResult> InvokeAsync(JObject arguments, CancellationToken cancellationToken)
         {
             int maxRes = McpArguments.Int(arguments, "max_resolution", DefaultMaxResolution);
+            string cameraName = McpArguments.String(arguments, "camera")?.Trim();
+
+            string base64;
+            string error;
+            bool captured;
+            if (string.IsNullOrEmpty(cameraName))
+            {
+                captured = _source.TryCaptureBase64Png(maxRes, out base64, out error);
+            }
+            else if (_source is ICameraScreenshotSource cameras)
+            {
+                captured = cameras.TryCaptureBase64Png(cameraName, maxRes, out base64, out error);
+            }
+            else
+            {
+                return Task.FromResult(McpToolResult.Failure(
+                    "screenshot: this game's capture source cannot select a camera; omit 'camera' to capture " +
+                    "the main camera."));
+            }
 
             // WHY: the source reports WHY it failed; passing that text through is the difference between
             // "fix your camera" and a wrong-diagnosis goose chase for the agent on the other end.
-            if (!_source.TryCaptureBase64Png(maxRes, out string base64, out string error))
+            if (!captured)
             {
                 return Task.FromResult(McpToolResult.Failure(
                     "screenshot: capture failed - " +

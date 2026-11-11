@@ -34,8 +34,6 @@ namespace CoreAI.Ai
         private const string ExecuteLuaCodeParameterDescription =
             "Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. Build world objects Roblox-style (Instance.new('Part'), game/workspace) - see read_skill('Rbx API'). Inspect the scene with coreai_world_find(pattern), coreai_world_pos(name), coreai_world_exists(name). Full reflection is a rarely-needed backup - see read_skill('Full Lua'). Return compact JSON/string for diagnostics.";
 
-        private static readonly System.Diagnostics.Stopwatch Clock = System.Diagnostics.Stopwatch.StartNew();
-
         private readonly ILuaExecutor _executor;
         private readonly ICoreAISettings _settings;
         private readonly ILog _logger;
@@ -126,10 +124,9 @@ namespace CoreAI.Ai
                 return SerializeResult(new LuaResult { Success = false, Error = "Lua code is required" });
             }
 
-            if (!_rateLimiter.TryAcquire(Clock.Elapsed.TotalSeconds))
+            if (!_rateLimiter.TryAcquire(out LuaRateLimitBudget budget))
             {
-                string limitError =
-                    $"Lua rate limit exceeded ({_rateLimiter.MaxPerWindow} per {_rateLimiter.WindowSeconds:0}s); call rejected.";
+                string limitError = DescribeRateLimitRefusal(budget);
                 if (_settings.LogToolCallResults)
                 {
                     _logger.Warn($"[Tool Call] execute_lua: {limitError}");
@@ -180,6 +177,15 @@ namespace CoreAI.Ai
                     Error = $"Lua execution failed: {ex.Message}"
                 });
             }
+        }
+
+        /// <summary>
+        /// The error of a call refused by the rate limit: says the code did not run and names when the next call
+        /// is accepted, so the model waits instead of retrying at once.
+        /// </summary>
+        internal static string DescribeRateLimitRefusal(LuaRateLimitBudget budget)
+        {
+            return "Lua rate limit exceeded; execute_lua was NOT executed. " + budget.Describe() + " Wait, then retry.";
         }
 
         private static readonly JsonSerializerSettings TrimNulls = new()

@@ -8,11 +8,11 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Lua">
-      <HintPath>D:\Git\CoreAI\Assets\CoreAIMods\Plugins\Lua.dll</HintPath>
+      <HintPath>$(MSBuildThisFileDirectory)..\..\Assets\CoreAIMods\Plugins\Lua.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Microsoft.Bcl.TimeProvider">
-      <HintPath>D:\Git\CoreAI\Assets\Packages\Microsoft.Bcl.TimeProvider.10.0.9\lib\netstandard2.0\Microsoft.Bcl.TimeProvider.dll</HintPath>
+      <HintPath>$(MSBuildThisFileDirectory)..\..\Assets\Packages\Microsoft.Bcl.TimeProvider.8.0.1\lib\netstandard2.0\Microsoft.Bcl.TimeProvider.dll</HintPath>
       <Private>true</Private>
     </Reference>
   </ItemGroup>

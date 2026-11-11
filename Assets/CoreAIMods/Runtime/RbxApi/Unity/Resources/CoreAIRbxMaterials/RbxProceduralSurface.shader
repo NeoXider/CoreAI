@@ -10,6 +10,11 @@ Shader "CoreAI/Rbx/Procedural Surface"
         [HideInInspector] _PatternScale("Pattern Scale", Float) = 1
         [HideInInspector] _BumpStrength("Bump Strength", Float) = 0.3
         [HideInInspector] _GrainStrength("Grain Strength", Float) = 0
+        [HideInInspector] _SurfaceDetail("Surface Detail", Float) = 0
+        [HideInInspector] _AlphaFromPartColor("Alpha From Part Color", Float) = 0
+        [HideInInspector] _SrcBlend("Source Blend", Float) = 1
+        [HideInInspector] _DstBlend("Destination Blend", Float) = 0
+        [HideInInspector] _ZWrite("Depth Write", Float) = 1
         [HideInInspector] _BaseMap("Base Map", 2D) = "white" {}
         [HideInInspector] _Cutoff("Alpha Cutoff", Range(0,1)) = 0.5
     }
@@ -29,8 +34,11 @@ Shader "CoreAI/Rbx/Procedural Surface"
         {
             Name "ForwardLit"
             Tags { "LightMode" = "UniversalForwardOnly" }
+            // WHY: the defaults are the opaque state; only the blended twin of a part with
+            // 0 < Transparency < 1 switches them (RbxTransparentTwins).
+            Blend [_SrcBlend] [_DstBlend]
             Cull Back
-            ZWrite On
+            ZWrite [_ZWrite]
             ZTest LEqual
 
             HLSLPROGRAM
@@ -53,6 +61,7 @@ Shader "CoreAI/Rbx/Procedural Surface"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             #include "RbxProceduralCommon.hlsl"
+            #include "RbxFog.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
@@ -63,6 +72,8 @@ Shader "CoreAI/Rbx/Procedural Surface"
                 float _PatternScale;
                 float _BumpStrength;
                 float _GrainStrength;
+                float _SurfaceDetail;
+                float _AlphaFromPartColor;
             CBUFFER_END
 
             struct Attributes
@@ -118,7 +129,8 @@ Shader "CoreAI/Rbx/Procedural Surface"
                 half3 baseColor = RbxComposeMaterialColor(_Color.rgb, _MaterialColor.rgb,
                     _PartColorInfluence);
                 RbxSurfaceSample procedural = RbxEvaluateSurface(patternPosition,
-                    geometricPatternNormal, materialMode, _PatternScale, baseColor, _GrainStrength);
+                    geometricPatternNormal, materialMode, _PatternScale, baseColor, _GrainStrength,
+                    _SurfaceDetail);
                 float3 normalWS = RbxPerturbNormal(input.positionWS, geometricNormalWS,
                     procedural.heightGradient, objectAlignedProjection, _PatternScale,
                     _BumpStrength, procedural.height);
@@ -139,7 +151,7 @@ Shader "CoreAI/Rbx/Procedural Surface"
                 inputData.normalWS = normalWS;
                 inputData.viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(input.positionWS));
                 inputData.shadowCoord = TransformWorldToShadowCoord(input.positionWS);
-                inputData.fogCoord = ComputeFogFactor(input.positionCS.z);
+                inputData.fogCoord = RbxFogFactor(input.positionWS);
                 inputData.vertexLighting = VertexLighting(input.positionWS, normalWS);
                 inputData.bakedGI = SampleSH(normalWS);
                 inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);
@@ -147,7 +159,7 @@ Shader "CoreAI/Rbx/Procedural Surface"
 
                 half4 color = UniversalFragmentPBR(inputData, surfaceData);
                 color.rgb = MixFog(color.rgb, inputData.fogCoord);
-                color.a = 1.0h;
+                color.a = lerp(1.0h, saturate(_Color.a), (half)saturate(_AlphaFromPartColor));
                 return color;
             }
             ENDHLSL
@@ -155,6 +167,9 @@ Shader "CoreAI/Rbx/Procedural Surface"
 
         UsePass "Universal Render Pipeline/Lit/ShadowCaster"
         UsePass "Universal Render Pipeline/Lit/DepthOnly"
+        // WHY: SSAO in DepthNormals mode only sees objects that draw this pass; without it Rbx parts
+        // received no ambient occlusion at all.
+        UsePass "Universal Render Pipeline/Lit/DepthNormals"
     }
 
     Fallback Off

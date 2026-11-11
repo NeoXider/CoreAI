@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Mcp.Protocol;
@@ -22,6 +23,55 @@ namespace CoreAI.Mcp.Tests
             Assert.IsFalse(registry.Contains("c"));
             Assert.IsNotNull(registry.Find("a"));
             Assert.IsNull(registry.Find("c"));
+        }
+
+        [Test]
+        public void ToListJson_HandsOutIndependentSchemaTrees()
+        {
+            McpToolRegistry registry = new(new[] { new FakeMcpTool("a") });
+
+            JArray first = registry.ToListJson();
+            ((JObject)first[0]["inputSchema"])["properties"] = new JObject { ["tampered"] = true };
+            JArray second = registry.ToListJson();
+
+            Assert.IsNotNull(second[0]["inputSchema"]["properties"]["echo"],
+                "a caller editing one tools/list payload must not change the published schema.");
+            Assert.IsNull(second[0]["inputSchema"]["properties"]["tampered"]);
+        }
+
+        [Test]
+        public void Rebind_SwapsTheComposedTools_InOneRevision_AndKeepsHostTools()
+        {
+            McpToolRegistry live = new(new IMcpTool[] { new FakeMcpTool("old"), new FakeMcpTool("host") }, null, true);
+            McpToolRegistry rebuilt = new(new IMcpTool[] { new FakeMcpTool("kept"), new FakeMcpTool("hidden") },
+                new FuncMcpToolResidencyPolicy(tool => tool.Name == "hidden" ? McpToolResidency.Dynamic : McpToolResidency.Native));
+            long revision = live.Revision;
+            int changes = 0;
+            live.Changed += () => changes++;
+
+            IReadOnlyCollection<string> published = live.Rebind(new[] { "old" }, rebuilt);
+
+            Assert.AreEqual(revision + 1, live.Revision);
+            Assert.AreEqual(1, changes, "one rebind is one list_changed notification.");
+            Assert.IsFalse(live.Contains("old"));
+            Assert.IsTrue(live.Contains("host"), "a tool the host added is not the composition's to withdraw.");
+            Assert.IsTrue(live.Contains("kept"));
+            Assert.AreEqual(McpToolResidency.Dynamic, live.ResidencyOf("hidden"));
+            Assert.IsTrue(live.Contains(CoreAiToolsBrokerMcpTool.ToolName), "the live catalog keeps its own broker.");
+            CollectionAssert.AreEquivalent(new[] { "kept", "hidden" }, published);
+        }
+
+        [Test]
+        public void Rebind_WithoutASource_WithdrawsOnlyTheNamedTools()
+        {
+            McpToolRegistry live = new(new IMcpTool[] { new FakeMcpTool("old"), new FakeMcpTool("host") }, null, true);
+
+            IReadOnlyCollection<string> published = live.Rebind(new[] { "old" }, null);
+
+            Assert.IsEmpty(published);
+            Assert.IsFalse(live.Contains("old"));
+            Assert.IsTrue(live.Contains("host"));
+            CollectionAssert.AreEquivalent(new[] { "host" }, live.ToolNames);
         }
 
         [Test]

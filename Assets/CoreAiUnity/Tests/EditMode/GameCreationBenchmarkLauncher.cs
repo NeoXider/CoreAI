@@ -214,7 +214,8 @@ namespace CoreAI.Tests.EditMode
                     if (target.ConfigurationDeferred)
                     {
                         if (source == null && !complete) throw new InvalidOperationException($"Target '{target.LabelOrModel}' needs its original legacy target configuration.");
-                        resolved.Add(source ?? new BenchmarkTarget(target.Model, target.BaseUrl, target.KeyReference, target.Label));
+                        resolved.Add(source ?? new BenchmarkTarget(target.Model, target.BaseUrl, target.KeyReference, target.Label,
+                            displayName: target.DisplayName));
                         continue;
                     }
                     string key = target.KeyReference;
@@ -225,7 +226,7 @@ namespace CoreAI.Tests.EditMode
                             throw new InvalidOperationException($"Target '{target.LabelOrModel}' needs a literal API key that is unavailable. Restore its original targets file or enter its key in the benchmark window before resuming.");
                     }
                     resolved.Add(new BenchmarkTarget(target.Model, target.BaseUrl, key, target.Label,
-                        target.ReasoningEffort, target.ExtraBodyJson, target.Temperature));
+                        target.ReasoningEffort, target.ExtraBodyJson, target.Temperature, target.DisplayName));
                 }
                 SetOrClear(EnvTargets, BenchmarkTargetList.ToJson(resolved, true));
                 foreach (KeyValuePair<string, string> option in manifest.Options)
@@ -318,6 +319,10 @@ namespace CoreAI.Tests.EditMode
         {
             public bool enabled = true;
             public string label = "";
+
+            /// <summary>Optional name reports show (e.g. the provider's model name); empty uses the label, else the model id.</summary>
+            public string displayName = "";
+
             public string model = "";
             public string baseUrl = "";
 
@@ -401,6 +406,7 @@ namespace CoreAI.Tests.EditMode
                 {
                     enabled = row.enabled,
                     label = row.label ?? "",
+                    displayName = row.displayName ?? "",
                     model = row.model ?? "",
                     baseUrl = row.baseUrl ?? "",
                     apiKey = key.StartsWith(BenchmarkTarget.ApiKeyEnvPrefix, StringComparison.OrdinalIgnoreCase)
@@ -465,7 +471,8 @@ namespace CoreAI.Tests.EditMode
                     continue;
                 }
 
-                targets.Add(new BenchmarkTarget(row.model, row.baseUrl, row.apiKey, row.label, effort, body, temperature));
+                targets.Add(new BenchmarkTarget(row.model, row.baseUrl, row.apiKey, row.label, effort, body, temperature,
+                    row.displayName));
             }
 
             if (problems.Count > 0)
@@ -1078,7 +1085,7 @@ namespace CoreAI.Tests.EditMode
 
             foreach (BenchmarkTarget target in targets)
             {
-                if (!string.IsNullOrWhiteSpace(onlyTargets) && !onlyTargets.Split(',').Any(label => label.Trim() == target.DisplayName)) continue;
+                if (!string.IsNullOrWhiteSpace(onlyTargets) && !onlyTargets.Split(',').Any(label => label.Trim() == target.Handle)) continue;
                 if (!TryValidateExtraBody(target.ExtraBodyJson, out _, out string bodyError))
                 {
                     error = $"Target '{target.DisplayName}': {bodyError}";

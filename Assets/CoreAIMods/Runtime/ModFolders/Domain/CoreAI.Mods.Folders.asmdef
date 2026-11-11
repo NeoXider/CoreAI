@@ -1,0 +1,14 @@
+{
+  "name": "CoreAI.Mods.Folders",
+  "rootNamespace": "CoreAI.Mods.Folders",
+  "references": [],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

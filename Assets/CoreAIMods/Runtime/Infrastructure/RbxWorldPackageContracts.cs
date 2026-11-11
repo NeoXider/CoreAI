@@ -8,10 +8,12 @@ using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Ai.LuaCs;
 using CoreAI.Authority;
+using CoreAI.Mods.Folders;
 using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
+using CoreAI.Mods.Rbx.Instances.Terrain;
 using CoreAI.Mods.Rbx.Spatial;
 using Cysharp.Threading.Tasks;
 using Newtonsoft.Json;
@@ -79,9 +81,202 @@ namespace CoreAI.Mods.WorldPackages
         public string Member { get; }
     }
 
+    /// <summary>
+    /// The optional blocks of a world package beside the instance tree, the Part state and the mods. A null
+    /// member is an absent block, which a reader takes as the default; every block a later release adds
+    /// goes here, so code that copies a payload keeps it.
+    /// </summary>
+    public sealed class RbxWorldPackageOptionalState
+    {
+        /// <summary>The Workspace Terrain's cells, or null for a world without any.</summary>
+        public TerrainSnapshot Terrain { get; set; }
+
+        /// <summary>The properties of every PointLight in the tree, by instance id; null or missing ids are class defaults.</summary>
+        public IReadOnlyDictionary<InstanceId, RbxWorldPackagePointLight> PointLights { get; set; }
+
+        /// <summary>The Lighting service's day-cycle state when the world drives its lighting; null keeps the scene's own.</summary>
+        public RbxLightingDurableState? Lighting { get; set; }
+
+        /// <summary>The StarterPlayer service's control and camera settings; null means the class defaults.</summary>
+        public RbxWorldPackageStarterPlayer? StarterPlayer { get; set; }
+
+        /// <summary>
+        /// The persisted mod folders (P20): folders that exist without a mod in them, by canonical path; null or
+        /// empty when there are none. A mod's own folder travels in its manifest's category.
+        /// </summary>
+        public IReadOnlyList<string> ModFolders { get; set; }
+
+        internal RbxWorldPackageOptionalState Clone()
+        {
+            return new RbxWorldPackageOptionalState
+            {
+                Terrain = Terrain,
+                PointLights = PointLights,
+                Lighting = Lighting,
+                StarterPlayer = StarterPlayer,
+                ModFolders = ModFolders
+            };
+        }
+    }
+
+    /// <summary>The durable settings of the <c>StarterPlayer</c> service (the package's <c>starter_player</c> block).</summary>
+    public readonly struct RbxWorldPackageStarterPlayer : IEquatable<RbxWorldPackageStarterPlayer>
+    {
+        public RbxWorldPackageStarterPlayer(
+            RbxDevComputerMovementMode devComputerMovementMode,
+            RbxCameraMode cameraMode,
+            double cameraMaxZoomDistance,
+            double cameraMinZoomDistance)
+        {
+            DevComputerMovementMode = devComputerMovementMode;
+            CameraMode = cameraMode;
+            CameraMaxZoomDistance = cameraMaxZoomDistance;
+            CameraMinZoomDistance = cameraMinZoomDistance;
+        }
+
+        public RbxDevComputerMovementMode DevComputerMovementMode { get; }
+
+        public RbxCameraMode CameraMode { get; }
+
+        /// <summary>Studs; never below <see cref="CameraMinZoomDistance"/>.</summary>
+        public double CameraMaxZoomDistance { get; }
+
+        /// <summary>Studs; within [0, <see cref="CameraMaxZoomDistance"/>].</summary>
+        public double CameraMinZoomDistance { get; }
+
+        /// <summary>The class defaults, which a package leaves out.</summary>
+        public static RbxWorldPackageStarterPlayer Defaults => new(
+            RbxDevComputerMovementMode.UserChoice,
+            RbxCameraMode.Classic,
+            RbxStarterPlayer.DefaultCameraMaxZoomDistance,
+            RbxStarterPlayer.DefaultCameraMinZoomDistance);
+
+        /// <summary>The settings of <paramref name="starterPlayer"/> as they are now.</summary>
+        public static RbxWorldPackageStarterPlayer Of(RbxStarterPlayer starterPlayer)
+        {
+            if (starterPlayer == null)
+            {
+                throw new ArgumentNullException(nameof(starterPlayer));
+            }
+
+            return new RbxWorldPackageStarterPlayer(
+                starterPlayer.DevComputerMovementMode,
+                starterPlayer.CameraMode,
+                starterPlayer.CameraMaxZoomDistance,
+                starterPlayer.CameraMinZoomDistance);
+        }
+
+        /// <summary>
+        /// Puts these settings on <paramref name="starterPlayer"/> through its public setters, in an order the
+        /// zoom clamps cannot alter (the minimum to zero first, then the maximum, then the minimum).
+        /// </summary>
+        public void ApplyTo(RbxStarterPlayer starterPlayer)
+        {
+            if (starterPlayer == null)
+            {
+                throw new ArgumentNullException(nameof(starterPlayer));
+            }
+
+            starterPlayer.DevComputerMovementMode = DevComputerMovementMode;
+            starterPlayer.CameraMode = CameraMode;
+            starterPlayer.CameraMinZoomDistance = 0d;
+            starterPlayer.CameraMaxZoomDistance = CameraMaxZoomDistance;
+            starterPlayer.CameraMinZoomDistance = CameraMinZoomDistance;
+        }
+
+        public bool Equals(RbxWorldPackageStarterPlayer other)
+        {
+            return DevComputerMovementMode == other.DevComputerMovementMode && CameraMode == other.CameraMode
+                   && CameraMaxZoomDistance.Equals(other.CameraMaxZoomDistance)
+                   && CameraMinZoomDistance.Equals(other.CameraMinZoomDistance);
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is RbxWorldPackageStarterPlayer other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return ((int)DevComputerMovementMode * 397) ^ (int)CameraMode ^ CameraMaxZoomDistance.GetHashCode()
+                   ^ (CameraMinZoomDistance.GetHashCode() * 31);
+        }
+    }
+
+    /// <summary>The durable properties of one <c>PointLight</c> (the package's <c>light</c> block).</summary>
+    public readonly struct RbxWorldPackagePointLight : IEquatable<RbxWorldPackagePointLight>
+    {
+        public RbxWorldPackagePointLight(float brightness, RbxColor3 color, bool enabled, bool shadows, float range)
+        {
+            Brightness = brightness;
+            Color = color;
+            Enabled = enabled;
+            Shadows = shadows;
+            Range = range;
+        }
+
+        public float Brightness { get; }
+
+        public RbxColor3 Color { get; }
+
+        public bool Enabled { get; }
+
+        public bool Shadows { get; }
+
+        /// <summary>Studs, within [0, <see cref="RbxPointLight.MaxRange"/>].</summary>
+        public float Range { get; }
+
+        /// <summary>The state of <paramref name="light"/> as it is now.</summary>
+        public static RbxWorldPackagePointLight Of(RbxPointLight light)
+        {
+            if (light == null)
+            {
+                throw new ArgumentNullException(nameof(light));
+            }
+
+            return new RbxWorldPackagePointLight(light.Brightness, light.Color, light.Enabled, light.Shadows, light.Range);
+        }
+
+        /// <summary>Puts this state on <paramref name="light"/> through its public setters.</summary>
+        public void ApplyTo(RbxPointLight light)
+        {
+            if (light == null)
+            {
+                throw new ArgumentNullException(nameof(light));
+            }
+
+            light.SetBrightness(Brightness);
+            light.SetColor(Color);
+            light.SetEnabled(Enabled);
+            light.SetShadows(Shadows);
+            light.SetRange(Range);
+        }
+
+        public bool Equals(RbxWorldPackagePointLight other)
+        {
+            return Brightness.Equals(other.Brightness) && Color == other.Color && Enabled == other.Enabled
+                   && Shadows == other.Shadows && Range.Equals(other.Range);
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is RbxWorldPackagePointLight other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return Brightness.GetHashCode() ^ (Range.GetHashCode() * 397) ^ (Enabled ? 1 : 0) ^ (Shadows ? 2 : 0);
+        }
+    }
+
     /// <summary>Canonical in-memory payload shared by package files and future join snapshots.</summary>
     public sealed class RbxWorldPackagePayload
     {
+        private static readonly IReadOnlyDictionary<InstanceId, RbxWorldPackagePointLight> EmptyPointLights =
+            new Dictionary<InstanceId, RbxWorldPackagePointLight>();
+
+        private readonly RbxWorldPackageOptionalState _optional;
+
         public RbxWorldPackagePayload(
             DateTime capturedAtUtc,
             RbxWorldSettings settings,
@@ -101,6 +296,20 @@ namespace CoreAI.Mods.WorldPackages
             RbxCFrame? cameraCFrame,
             IReadOnlyList<RbxWorldModSource> mods,
             IReadOnlyList<RbxWorldPackageDiagnostic> diagnostics)
+            : this(capturedAtUtc, settings, tree, parts, cameraCFrame, mods, diagnostics, null)
+        {
+        }
+
+        /// <param name="optionalState">The optional blocks; copied, so a later change to it does not reach the payload.</param>
+        public RbxWorldPackagePayload(
+            DateTime capturedAtUtc,
+            RbxWorldSettings settings,
+            InstanceTreeSnapshot tree,
+            IReadOnlyDictionary<InstanceId, PartProperties> parts,
+            RbxCFrame? cameraCFrame,
+            IReadOnlyList<RbxWorldModSource> mods,
+            IReadOnlyList<RbxWorldPackageDiagnostic> diagnostics,
+            RbxWorldPackageOptionalState optionalState)
         {
             CapturedAtUtc = capturedAtUtc;
             Settings = settings;
@@ -109,6 +318,7 @@ namespace CoreAI.Mods.WorldPackages
             CameraCFrame = cameraCFrame;
             Mods = mods;
             Diagnostics = diagnostics ?? Array.Empty<RbxWorldPackageDiagnostic>();
+            _optional = optionalState?.Clone() ?? new RbxWorldPackageOptionalState();
         }
 
         public DateTime CapturedAtUtc { get; }
@@ -124,6 +334,32 @@ namespace CoreAI.Mods.WorldPackages
         public IReadOnlyList<RbxWorldModSource> Mods { get; }
 
         public IReadOnlyList<RbxWorldPackageDiagnostic> Diagnostics { get; }
+
+        /// <summary>The Workspace Terrain's cells, or null for a world without any.</summary>
+        public TerrainSnapshot Terrain => _optional.Terrain;
+
+        /// <summary>The properties of every PointLight the package stores, by instance id; never null.</summary>
+        public IReadOnlyDictionary<InstanceId, RbxWorldPackagePointLight> PointLights =>
+            _optional.PointLights ?? EmptyPointLights;
+
+        /// <summary>The Lighting service's day-cycle state, or null when the world does not drive its lighting.</summary>
+        public RbxLightingDurableState? Lighting => _optional.Lighting;
+
+        /// <summary>The StarterPlayer settings, or null when they are the class defaults.</summary>
+        public RbxWorldPackageStarterPlayer? StarterPlayer => _optional.StarterPlayer;
+
+        /// <summary>The persisted mod folders, sorted canonical paths; never null.</summary>
+        public IReadOnlyList<string> ModFolders => _optional.ModFolders ?? Array.Empty<string>();
+
+        /// <summary>A copy of the optional blocks, for a caller that builds a payload from this one.</summary>
+        public RbxWorldPackageOptionalState OptionalState => _optional.Clone();
+
+        /// <summary>This payload with another capture time, every block kept.</summary>
+        public RbxWorldPackagePayload WithCapturedAtUtc(DateTime capturedAtUtc)
+        {
+            return new RbxWorldPackagePayload(
+                capturedAtUtc, Settings, Tree, Parts, CameraCFrame, Mods, Diagnostics, _optional);
+        }
     }
 
     /// <summary>Inputs used to capture the running Rbx composition without depending on file I/O.</summary>
@@ -136,13 +372,15 @@ namespace CoreAI.Mods.WorldPackages
             RbxWorldSettings settings,
             IRbxCameraRig cameraRig = null,
             ILuaModSourceStore modSourceStore = null,
-            DateTime? capturedAtUtc = null)
+            DateTime? capturedAtUtc = null,
+            IModFolderListStore modFolderListStore = null)
         {
             Registry = registry ?? throw new ArgumentNullException(nameof(registry));
             Game = game ?? throw new ArgumentNullException(nameof(game));
             PartSink = partSink;
             CameraRig = cameraRig;
             ModSourceStore = modSourceStore;
+            ModFolderListStore = modFolderListStore;
             Settings = settings ?? throw new ArgumentNullException(nameof(settings));
             CapturedAtUtc = capturedAtUtc;
         }
@@ -156,6 +394,9 @@ namespace CoreAI.Mods.WorldPackages
         public IRbxCameraRig CameraRig { get; }
 
         public ILuaModSourceStore ModSourceStore { get; }
+
+        /// <summary>Where the world's persisted mod folders are kept; null captures none.</summary>
+        public IModFolderListStore ModFolderListStore { get; }
 
         public RbxWorldSettings Settings { get; }
 
@@ -185,6 +426,14 @@ namespace CoreAI.Mods.WorldPackages
         /// blank uses the composition's local host id (<see cref="LocalActorIdentityProvider.DefaultActorId"/>).
         /// </summary>
         public string HostActorId { get; set; }
+
+        /// <summary>
+        /// The authority of the registry the restore builds (MVP4 SC-16): <see cref="RegistryAuthority.Authoritative"/>
+        /// (the default) for a server or solo world; <see cref="RegistryAuthority.Replica"/> for a client's copy of
+        /// the server's world, restored inside one replication-apply scope so it keeps the server's ids and
+        /// revisions and nothing is marked diverged.
+        /// </summary>
+        public RegistryAuthority RegistryAuthority { get; set; } = RegistryAuthority.Authoritative;
     }
 
     /// <summary>A freshly restored DataModel plus the exact mod sources that must restart once.</summary>
@@ -1255,6 +1504,7 @@ namespace CoreAI.Mods.WorldPackages
     /// <summary>Engine-free session host used by headless players and composition tests.</summary>
     public sealed class HeadlessRbxWorldSessionHost : IRbxWorldSessionHost
     {
+        private readonly RegistryAuthority _stagedAuthority;
         private InstanceRegistry _registry;
         private RbxDataModel _game;
         private IPartPropertySink _partSink;
@@ -1267,7 +1517,20 @@ namespace CoreAI.Mods.WorldPackages
             RbxWorldSettings settings = null,
             IPartPropertySink partSink = null,
             IRbxCameraRig cameraRig = null)
+            : this(registry, game, settings, partSink, cameraRig, RegistryAuthority.Authoritative)
         {
+        }
+
+        /// <summary>A host whose every staged world is a registry of <paramref name="stagedAuthority"/> (see <see cref="ReplicaRbxWorldSessionHost"/>).</summary>
+        internal HeadlessRbxWorldSessionHost(
+            InstanceRegistry registry,
+            RbxDataModel game,
+            RbxWorldSettings settings,
+            IPartPropertySink partSink,
+            IRbxCameraRig cameraRig,
+            RegistryAuthority stagedAuthority)
+        {
+            _stagedAuthority = stagedAuthority;
             _registry = registry ?? throw new ArgumentNullException(nameof(registry));
             _game = game ?? throw new ArgumentNullException(nameof(game));
             _partSink = partSink;
@@ -1309,7 +1572,8 @@ namespace CoreAI.Mods.WorldPackages
                 payload,
                 new RbxWorldPackageRestoreOptions
                 {
-                    CameraRig = stagedCamera
+                    CameraRig = stagedCamera,
+                    RegistryAuthority = _stagedAuthority
                 });
             return new Candidate(this, restored, stagedCamera, CloneSettings(payload.Settings));
         }
@@ -1420,7 +1684,7 @@ namespace CoreAI.Mods.WorldPackages
     /// world stays live every mutation through the shared gate records it again as it is.
     /// </summary>
     public sealed class RbxWorldRuntimeSessionController
-        : IRbxWorldRuntimeService, IRbxWorldStartupSelection, IDisposable
+        : IRbxWorldRuntimeService, IRbxWorldStartupSelection, IRbxWorldUndoHost, IDisposable
     {
         private const int MaximumPendingLoadRequests = 8;
         private static readonly TimeSpan DefaultPendingLoadTimeToLive = TimeSpan.FromMinutes(2d);
@@ -1482,6 +1746,15 @@ namespace CoreAI.Mods.WorldPackages
         private string _lastTickFailure;
         private Action<string> _mutationStartingHook;
         private Func<string, CancellationToken, UniTask<string>> _afterMutationHook;
+        private TimeSpan _startupRefreshDebounce = TimeSpan.Zero;
+        private bool _debouncedRefreshPending;
+        private bool _debouncedWorldOnly = true;
+        private DateTime _debounceFirstChangeUtc;
+        private DateTime _debounceLastChangeUtc;
+        private string _deliveredStartupNote = "";
+        private bool _forceStartupRecordAfterMutation;
+        private readonly IReadOnlyList<RbxMissingAutoSave> _missingAutoSavesAtStart;
+        private IRbxWorldAutoSaveWriteBehindStore _missingAutoSavesToAcknowledge;
 
         public RbxWorldRuntimeSessionController(
             IRbxWorldSessionHost host,
@@ -1551,6 +1824,19 @@ namespace CoreAI.Mods.WorldPackages
                     + "the ConfirmedWorldMutationGate the host gate wraps.");
             }
 
+            IRbxWorldAutoSaveWriteBehindStore writeBehindStore = packageStore as IRbxWorldAutoSaveWriteBehindStore;
+            _missingAutoSavesAtStart = writeBehindStore?.MissingAutoSavesAtOpen ?? Array.Empty<RbxMissingAutoSave>();
+            string missingBackups = RbxMissingAutoSave.Describe(_missingAutoSavesAtStart);
+            if (missingBackups.Length > 0)
+            {
+                // WHY at construction: this is the first moment of the next start that has a sink, and a
+                // backup lost to a crash must be said once, plainly, instead of looking like a corrupt ring.
+                // WHY acknowledged only by the first frame: a composition that never runs a frame (an
+                // EditMode test over the real save root) must not consume the report the game still owes.
+                ReportDiagnostic(missingBackups);
+                _missingAutoSavesToAcknowledge = writeBehindStore;
+            }
+
             Runtime = new ActiveLuaModRuntime(this);
             Executor = new ActiveLuaExecutor(this);
             Stack = new LuaCsModStack(() => Current.Stack);
@@ -1616,6 +1902,48 @@ namespace CoreAI.Mods.WorldPackages
         }
 
         /// <summary>
+        /// Quiet time after a gated change before the world that opens on the next start is recorded:
+        /// zero (the default) records it inside the gated call, as before; a positive value lets the frame
+        /// pump record a burst of AI edits once, when no gated change came for this long, and at the latest
+        /// <see cref="StartupRefreshInterval"/> (or this value, if longer) after the first change of the
+        /// burst. A record that then fails is reported through <see cref="StartupSelectionNote"/> and in the
+        /// result of the next gated call.
+        /// </summary>
+        /// <remarks>
+        /// WHY: each record is a whole package written while the gate is held, so a burst of AI edits paid
+        /// one full write per call in front of its tool result. Changes made within the debounce before the
+        /// process ends are not recorded for the next start; their autosaves still are.
+        /// </remarks>
+        public TimeSpan StartupRefreshDebounce
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _startupRefreshDebounce;
+                }
+            }
+            set
+            {
+                if (value < TimeSpan.Zero)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(value), "The debounce cannot be negative.");
+                }
+
+                lock (_gate)
+                {
+                    _startupRefreshDebounce = value;
+                }
+            }
+        }
+
+        /// <summary>
+        /// The autosaves written behind a mutation that a crash interrupted before the store opened at this
+        /// start (reported once through the diagnostics sink); empty for a store without write-behind support.
+        /// </summary>
+        public IReadOnlyList<RbxMissingAutoSave> MissingAutoSavesAtStart => _missingAutoSavesAtStart;
+
+        /// <summary>
         /// Why the latest change to the live startup world was not recorded for the next start (the
         /// startup restore would refuse the world, or the record was not durably written), whichever path
         /// made the change, gated tool or Hub; empty once a later record succeeded or when nothing failed.
@@ -1658,7 +1986,105 @@ namespace CoreAI.Mods.WorldPackages
                 session.RbxApi.PartSink,
                 _host.Settings,
                 session.RbxApi.CameraRig,
-                session.SourceStore));
+                session.SourceStore,
+                modFolderListStore: ModFolderListStore));
+        }
+
+        /// <summary>
+        /// The shared list of persisted mod folders of this world's mod store (the one the Hub page and
+        /// <c>manage_mods</c> use); null keeps no folder in any capture. Capture reads it, and a confirmed load or a
+        /// restore writes the package's folders into it before the staged start and puts the previous list back
+        /// when the load does not publish. Set it before the first capture.
+        /// </summary>
+        public IModFolderListStore ModFolderListStore { get; set; }
+
+        /// <inheritdoc />
+        public RbxWorldStateMark MarkPublishedWorld()
+        {
+            InstanceRegistry registry;
+            long sourceChanges;
+            lock (_gate)
+            {
+                DemandActiveLocked();
+                registry = _current.RbxApi.Registry;
+                sourceChanges = _sourceChanges;
+            }
+
+            return RbxWorldStateMark.Of(registry, sourceChanges);
+        }
+
+        /// <inheritdoc />
+        /// <remarks>
+        /// The same staged replacement as a confirmed load, refused by the same session rules, but with no
+        /// safety autosave of its own (the caller's gated call wrote one) and without leaving the startup
+        /// world: when the live world is the one that opens on the next start, the restored world is
+        /// recorded as it. Must run inside the shared gate; taking it here would wait for itself.
+        /// </remarks>
+        public async UniTask<RbxWorldLoadResult> RestoreSnapshotInPlaceAsync(
+            RbxWorldPackagePayload payload,
+            CancellationToken cancellationToken)
+        {
+            DemandActive();
+            if (payload == null)
+            {
+                return new RbxWorldLoadResult(false, "World package payload is required.", 0);
+            }
+
+            string networkRefusal = DescribeLiveNetworkSessions();
+            if (networkRefusal.Length > 0)
+            {
+                return new RbxWorldLoadResult(
+                    false, networkRefusal, 0, RbxWorldLoadRefusedException.NetworkSessionsActiveStatus);
+            }
+
+            string packageRefusal = DescribeUnloadablePackage(payload);
+            if (packageRefusal.Length > 0)
+            {
+                return new RbxWorldLoadResult(
+                    false, packageRefusal, 0, RbxWorldLoadRefusedException.IncompatiblePackageStatus);
+            }
+
+            if (_transactionalSourceStore == null)
+            {
+                return new RbxWorldLoadResult(
+                    false,
+                    NonTransactionalSourceStoreRefusal,
+                    0,
+                    RbxWorldLoadRefusedException.IncompatiblePackageStatus);
+            }
+
+            lock (_gate)
+            {
+                if (_loadInProgress)
+                {
+                    return new RbxWorldLoadResult(
+                        false, "Another confirmed world load is already in progress.", 0);
+                }
+
+                _loadInProgress = true;
+            }
+
+            try
+            {
+                StartupSource keep = ReadLiveStartupSource();
+                RbxWorldLoadResult replaced = await ReplaceWorldAsync(payload, null, keep, cancellationToken);
+                if (replaced != null && replaced.Success && keep != null)
+                {
+                    lock (_gate)
+                    {
+                        _forceStartupRecordAfterMutation = true;
+                    }
+                }
+
+                return replaced;
+            }
+            finally
+            {
+                lock (_gate)
+                {
+                    _loadInProgress = false;
+                }
+            }
         }
 
         public IReadOnlyList<RbxPendingWorldLoadRequest> GetPendingManualLoads()
@@ -2167,11 +2593,19 @@ namespace CoreAI.Mods.WorldPackages
             BufferedLuaModStore stagedModStore = new(_modStore);
             DeferredLuaScriptVersionStore stagedVersions = new(_versionStore);
             bool published = false;
+            IModFolderListStore folderStore = ModFolderListStore;
+            IReadOnlyList<string> previousFolders = null;
             try
             {
                 sourceReplacement = await _transactionalSourceStore.PrepareExactReplacementAsync(
                     payload.Mods, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
+                if (folderStore != null)
+                {
+                    previousFolders = folderStore.Load();
+                    folderStore.Save(payload.ModFolders);
+                }
+
                 candidate = _host.Stage(payload);
                 stagedNetwork = new StagedNetworkBridge(_networkBridge);
                 stagedRbxApi = _rbxApiFactory(candidate, stagedNetwork);
@@ -2312,6 +2746,19 @@ namespace CoreAI.Mods.WorldPackages
                 if (!published)
                 {
                     ShutdownStaged(stagedStack, stagedRbxApi, stagedNetwork, candidate);
+                    if (folderStore != null && previousFolders != null)
+                    {
+                        try
+                        {
+                            folderStore.Save(previousFolders);
+                        }
+                        catch (Exception folderException)
+                        {
+                            ReportDiagnostic("Putting the previous mod folders back after a failed load failed: "
+                                             + folderException.Message);
+                        }
+                    }
+
                     if (sourceReplacement != null)
                     {
                         try
@@ -2402,6 +2849,25 @@ namespace CoreAI.Mods.WorldPackages
 
             EndAbandonedMutationWatch();
             StartPendingStartupRefresh();
+            AcknowledgeReportedMissingAutoSaves();
+        }
+
+        private void AcknowledgeReportedMissingAutoSaves()
+        {
+            IRbxWorldAutoSaveWriteBehindStore store = Interlocked.Exchange(ref _missingAutoSavesToAcknowledge, null);
+            if (store == null)
+            {
+                return;
+            }
+
+            try
+            {
+                store.AcknowledgeMissingAutoSaves();
+            }
+            catch (Exception ex)
+            {
+                ReportDiagnostic("Clearing the record of the missing autosaves failed: " + ex.Message);
+            }
         }
 
         public void Dispose()
@@ -2730,9 +3196,31 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             MutationChange change = EndWatchingMutation();
+            bool forced;
+            TimeSpan debounce;
+            lock (_gate)
+            {
+                forced = _forceStartupRecordAfterMutation;
+                _forceStartupRecordAfterMutation = false;
+                debounce = _startupRefreshDebounce;
+            }
+
+            if (forced)
+            {
+                // WHY: an undo or redo republished the world in place; its watch saw the outgoing registry,
+                // so only this flag says that what the startup entry holds has changed.
+                change = MutationChange.Sources;
+            }
+
             if (change == MutationChange.None)
             {
-                return UniTask.FromResult("");
+                return UniTask.FromResult(debounce > TimeSpan.Zero ? TakeUndeliveredStartupNote() : "");
+            }
+
+            if (debounce > TimeSpan.Zero)
+            {
+                DebounceStartupRefresh(change == MutationChange.World);
+                return UniTask.FromResult(TakeUndeliveredStartupNote());
             }
 
             if (change == MutationChange.World && DeferWorldRefreshIfTooSoon())
@@ -2741,6 +3229,62 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             return RefreshStartupSelectionAsync(trigger, change == MutationChange.World);
+        }
+
+        /// <summary>Leaves a gated change to the frame pump, which records the burst once it is quiet.</summary>
+        private void DebounceStartupRefresh(bool worldOnly)
+        {
+            lock (_gate)
+            {
+                if (_disposed || _liveStartupSource == null)
+                {
+                    return;
+                }
+
+                DateTime now = _utcNow();
+                if (!_debouncedRefreshPending)
+                {
+                    _debouncedRefreshPending = true;
+                    _debouncedWorldOnly = true;
+                    _debounceFirstChangeUtc = now;
+                }
+
+                _debounceLastChangeUtc = now;
+                if (!worldOnly)
+                {
+                    _debouncedWorldOnly = false;
+                }
+            }
+        }
+
+        private bool IsDebouncedRefreshDueLocked()
+        {
+            if (!_debouncedRefreshPending)
+            {
+                return false;
+            }
+
+            DateTime now = _utcNow();
+            TimeSpan longest = _startupRefreshInterval > _startupRefreshDebounce
+                ? _startupRefreshInterval
+                : _startupRefreshDebounce;
+            return now - _debounceLastChangeUtc >= _startupRefreshDebounce
+                   || now - _debounceFirstChangeUtc >= longest;
+        }
+
+        /// <summary>The startup note once per distinct note, for the next gated result after a pump record.</summary>
+        private string TakeUndeliveredStartupNote()
+        {
+            lock (_gate)
+            {
+                if (string.Equals(_startupSelectionNote, _deliveredStartupNote, StringComparison.Ordinal))
+                {
+                    return "";
+                }
+
+                _deliveredStartupNote = _startupSelectionNote;
+                return _startupSelectionNote;
+            }
         }
 
         /// <summary>What a gated mutation changed of what a startup entry holds.</summary>
@@ -2896,10 +3440,14 @@ namespace CoreAI.Mods.WorldPackages
             }
         }
 
-        /// <summary>True for an instance a startup entry holds: neither a mod's own nor runtime infrastructure.</summary>
+        /// <summary>
+        /// True for an instance a startup entry holds: neither a mod's own nor runtime infrastructure, or the
+        /// Terrain, whose node is rebuilt by its bootstrap but whose cells travel in their own entry.
+        /// </summary>
         private static bool IsWorldOwned(InstanceRecord record)
         {
-            return string.IsNullOrEmpty(record.OwnerModId) && !record.IsRuntimeInfrastructure;
+            return string.IsNullOrEmpty(record.OwnerModId)
+                   && (!record.IsRuntimeInfrastructure || record.Instance is RbxTerrain);
         }
 
         /// <summary>
@@ -3072,16 +3620,19 @@ namespace CoreAI.Mods.WorldPackages
             bool worldOnly;
             lock (_gate)
             {
+                bool debouncedDue = IsDebouncedRefreshDueLocked();
                 if (_startupRefreshRunning
                     || _disposed
                     || _liveStartupSource == null
-                    || (!_startupRefreshPending && !(_worldRefreshDeferred && IsWorldRefreshDueLocked()))
+                    || (!_startupRefreshPending
+                        && !(_worldRefreshDeferred && IsWorldRefreshDueLocked())
+                        && !debouncedDue)
                     || (_worldMutationGate is IStartupAwareWorldMutationGate gate && gate.IsHeld))
                 {
                     return;
                 }
 
-                worldOnly = !_startupRefreshPending;
+                worldOnly = !_startupRefreshPending && !(debouncedDue && !_debouncedWorldOnly);
                 _startupRefreshRunning = true;
             }
 
@@ -3151,6 +3702,7 @@ namespace CoreAI.Mods.WorldPackages
             {
                 _startupRefreshPending = false;
                 _worldRefreshDeferred = false;
+                _debouncedRefreshPending = false;
                 return _disposed ? null : _liveStartupSource;
             }
         }
@@ -3196,29 +3748,22 @@ namespace CoreAI.Mods.WorldPackages
         }
 
         /// <summary>
-        /// A digest of everything a startup entry of <paramref name="payload"/> restores: its encoded
-        /// package with the capture time left out, which differs on every capture of the same world.
+        /// A digest of everything a startup entry of <paramref name="payload"/> restores: the entries of its
+        /// package with the capture time left out, which differs on every capture of the same world. The
+        /// digest is only ever compared with another one of this process.
         /// </summary>
+        /// <remarks>
+        /// WHY the entries and not the encoded package: the same entries always deflate to the same
+        /// package, and skipping the deflate removed about half the cost of every startup record check.
+        /// </remarks>
         private static byte[] ComputeStartupContent(RbxWorldPackagePayload payload)
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
-            // WHY: the digest encodes the package in one frame, so it keeps to the same bounded work
+            // WHY: the digest encodes the entries in one frame, so it keeps to the same bounded work
             // the package store's own WebGL encoder accepts, and a larger world is refused before it.
             FileRbxWorldPackageStore.ValidateWebGlWorkBudget(payload);
 #endif
-            RbxWorldPackagePayload timeless = new(
-                DateTime.MinValue,
-                payload.Settings,
-                payload.Tree,
-                payload.Parts,
-                payload.CameraCFrame,
-                payload.Mods,
-                payload.Diagnostics);
-            byte[] encoded = RbxWorldPackageSerializer.WritePackage(timeless);
-            using (SHA256 algorithm = SHA256.Create())
-            {
-                return algorithm.ComputeHash(encoded);
-            }
+            return RbxWorldPackageSerializer.ComputeEntryDigest(payload.WithCapturedAtUtc(DateTime.MinValue));
         }
 
         /// <summary>

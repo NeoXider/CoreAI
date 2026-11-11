@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using CoreAI.Ai;
 using CoreAI.Logging;
+using CoreAI.Mods.Folders;
 
 namespace CoreAI.Infrastructure.Lua
 {
@@ -148,7 +149,7 @@ namespace CoreAI.Infrastructure.Lua
                 // active bundled mod starts before any mod the player loads later, and a mod without a
                 // recorded order restores first. A bundled library therefore still starts before the
                 // player's mods that use it.
-                _store.Save(id, mod.Source, BuildManifest(mod, origin, newHash, HeaderActive(mod.Source)));
+                _store.Save(id, mod.Source, BuildManifest(mod, origin, newHash, HeaderActive(mod.Source), null));
                 return Outcome.Installed;
             }
 
@@ -166,10 +167,37 @@ namespace CoreAI.Infrastructure.Lua
             // WHY: A strictly-newer bundled version always wins so "bump the header version and it ships"
             // stays reliable — editing a sample changes its hash but not its version, so a hash-based
             // staleness check alone would leave it stuck on stale content forever.
-            LuaModManifest updated = BuildManifest(mod, origin, newHash, existing.Active);
+            BundledMod seeded = KeepPlayerFolder(mod, existingSource, existing);
+            LuaModManifest updated = BuildManifest(seeded, origin, newHash, existing.Active, existing);
             updated.LoadOrder = existing.LoadOrder;
-            _store.Save(id, mod.Source, updated);
+            _store.Save(id, seeded.Source, updated);
             return Outcome.Updated;
+        }
+
+        /// <summary>
+        /// <paramref name="mod"/>, or the same bundled source in the folder the player moved the installed copy to:
+        /// when the installed source is not the one last seeded and its category differs from the bundle's, the new
+        /// version keeps the player's folder (P20). A category the folder rules refuse keeps the bundle's.
+        /// </summary>
+        /// <remarks>
+        /// WHY the seeded hash stays the bundle's own: the stored copy then still differs from what was seeded, so
+        /// the next version bump keeps the player's folder again instead of taking it for an untouched copy.
+        /// </remarks>
+        private static BundledMod KeepPlayerFolder(BundledMod mod, string existingSource, LuaModManifest existing)
+        {
+            if (string.Equals(Fnv1a(existingSource ?? ""), existing.SeededHash ?? "", StringComparison.Ordinal))
+            {
+                return mod;
+            }
+
+            string playerCategory = ModFolderHeaderEditor.ReadCategory(existingSource ?? "");
+            if (string.Equals(playerCategory, ModFolderHeaderEditor.ReadCategory(mod.Source ?? ""), StringComparison.Ordinal))
+            {
+                return mod;
+            }
+
+            ModFolderHeaderEdit edit = ModFolderHeaderEditor.SetCategory(mod.Source ?? "", playerCategory);
+            return edit.Succeeded ? new BundledMod(mod.Id, edit.Source, mod.Version) : mod;
         }
 
         private static bool HeaderActive(string source)
@@ -177,7 +205,8 @@ namespace CoreAI.Infrastructure.Lua
             return LuaModHeader.Parse(source ?? "", "").Active;
         }
 
-        private static LuaModManifest BuildManifest(BundledMod mod, string origin, string hash, bool active)
+        private static LuaModManifest BuildManifest(
+            BundledMod mod, string origin, string hash, bool active, LuaModManifest existing)
         {
             LuaModHeader header = LuaModHeader.Parse(mod.Source ?? "", mod.Id);
             return new LuaModManifest
@@ -195,7 +224,8 @@ namespace CoreAI.Infrastructure.Lua
                 SeededHash = hash,
                 UpdateAvailable = false,
                 Active = active,
-                Entry = "main.lua"
+                Entry = "main.lua",
+                Context = LuaModManifest.ResolveContext(header, existing)
             };
         }
 

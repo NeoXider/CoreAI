@@ -61,11 +61,16 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
         // host's agent, and what it holds (model configuration, conversation memory, tool access)
         // is minted on the server and cannot be exercised by a client, so it is scoped like
         // DataStoreService — the closest Roblox service that fronts a server-side backend.
+        // WHY Terrain is here although Terrain.yaml carries no replication tag (OURS): it is a
+        // host-protected singleton every side's bootstrap creates under its own Workspace, like Camera,
+        // and its cells travel separately as the replication wire's chunk deltas. Replicated as an
+        // ordinary instance, a client would be told to create a second Terrain beside its own, or to
+        // destroy the one its cells live in.
         private static readonly string[] NotReplicatedClasses =
         {
             "ServerStorage", "ServerScriptService", "PlayerScripts", "Camera", "RunService",
             "UserInputService", "ScriptContext", "DataStoreService", "PathfindingService", "CoreGui",
-            "Chat", "GuiService", "NetworkServer", "NetworkClient", "AIService"
+            "Chat", "GuiService", "NetworkServer", "NetworkClient", "AIService", "Terrain"
         };
 
         // WHY owner-only: PlayerGui.yaml is tagged PlayerReplicated — it exists for one player and
@@ -143,9 +148,11 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
         // never-visible classes rather than the owner-only ones: PlayerScripts.yaml is tagged
         // NotReplicated outright, the container is client-local by definition, and a game filter
         // that let it through would ship a client-side artefact back to the very client that owns it.
+        // WHY Terrain is on the floor: like Camera, each side creates its own, so a game filter that let
+        // it through would make a client create or destroy the instance its voxel cells belong to.
         private static readonly string[] NeverVisibleClasses =
         {
-            "ServerStorage", "ServerScriptService", "Camera", "PlayerScripts"
+            "ServerStorage", "ServerScriptService", "Camera", "PlayerScripts", "Terrain"
         };
 
         // WHY owner-only rather than never: PlayerGui.yaml is PlayerReplicated and Backpack is scoped

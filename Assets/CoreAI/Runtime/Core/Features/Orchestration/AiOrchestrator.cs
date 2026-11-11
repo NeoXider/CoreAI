@@ -191,7 +191,8 @@ namespace CoreAI.Ai
             string system = systemBase;
             AgentMemoryState memoryState = null;
             AgentMemoryPromptParts memoryParts = default;
-            bool useMemoryTool = _memoryPolicy?.IsMemoryEnabled(roleId) ?? false;
+            bool useMemoryTool = (_memoryPolicy?.IsMemoryEnabled(roleId) ?? false) &&
+                                 AiTaskRequestScopeRules.AllowsDurableMemory(task);
             if (useMemoryTool &&
                 _memoryStore != null && _memoryStore.TryLoad(roleId, out memoryState) &&
                 !string.IsNullOrWhiteSpace(memoryState?.Memory))
@@ -206,7 +207,8 @@ namespace CoreAI.Ai
             }
 
             string user = _promptComposer.BuildUserPayload(snap, task);
-            IReadOnlyList<ILlmTool> roleTools = _memoryPolicy?.GetToolsForRole(roleId);
+            IReadOnlyList<ILlmTool> roleTools = AiTaskRequestScopeRules.MergeRequestTools(
+                _memoryPolicy?.GetToolsForRole(roleId), task?.RequestTools);
             IReadOnlyList<ILlmTool> tools = FilterToolsForRequest(roleTools, task);
             system = AppendStableToolContract(system, roleTools, task, roleId);
             string toolAvailability = AiToolContractPromptFormatter.BuildRequestToolAvailabilityMessage(tools, task);
@@ -218,13 +220,13 @@ namespace CoreAI.Ai
 
             AgentMemoryPolicy.RoleMemoryConfig roleConfig =
                 _memoryPolicy?.GetRoleConfig(roleId) ?? new AgentMemoryPolicy.RoleMemoryConfig();
-            roleConfig = ResolveRoleConfigForRequest(roleConfig, task);
+            roleConfig = ResolveRoleConfigForRequest(roleConfig, task, roleId);
 
             int contextWindowTokens = roleConfig.ContextTokens > 0
                 ? roleConfig.ContextTokens
                 : _settings.ContextWindowTokens;
             int? routedWindowTokens =
-                _llm?.ResolveContextWindowTokensForRole(roleId, task?.RoutingProfileId ?? "");
+                _llm?.ResolveContextWindowTokensForRole(roleId, ResolveRoutingProfileId(task, roleId));
             if (routedWindowTokens > 0)
             {
                 // WHY: budgets must follow the routed endpoint's real window — after a 128K→8K
@@ -235,7 +237,7 @@ namespace CoreAI.Ai
                     : routedWindowTokens.Value;
             }
 
-            string routeWindowKey = BuildRouteWindowKey(roleId, task?.RoutingProfileId, routedWindowTokens);
+            string routeWindowKey = BuildRouteWindowKey(roleId, ResolveRoutingProfileId(task, roleId), routedWindowTokens);
             int reportedWindowTokens = GetReportedContextWindow(routeWindowKey);
             if (reportedWindowTokens > 0)
             {
@@ -2086,7 +2088,7 @@ namespace CoreAI.Ai
                                                                 ResolveRoleConfigForRequest(
                                                                     _memoryPolicy?.GetRoleConfig(roleId) ??
                                                                     new AgentMemoryPolicy.RoleMemoryConfig(),
-                                                                    task);
+                                                                    task, roleId);
                 if (!roleConfig.WithChatHistory || _memoryStore == null)
                 {
                     return;
@@ -2391,7 +2393,7 @@ namespace CoreAI.Ai
             }
 
             bool native = _llm?.SupportsNativeToolCallingForRole(
-                bundle.RoleId, bundle.Task?.RoutingProfileId ?? "") == true;
+                bundle.RoleId, ResolveRoutingProfileId(bundle.Task, bundle.RoleId)) == true;
             return LlmToolChannelPolicy.InterpretsProse(native, bundle.Task?.AllowTextShapedToolCallsOnNativeEndpoint,
                 bundle.Task?.ForcedToolMode ?? LlmToolChoiceMode.Auto);
         }
@@ -2613,7 +2615,7 @@ namespace CoreAI.Ai
             // WHY: resolve against the endpoint the request will actually reach (explicit profile or
             // runtime re-route), so the tool contract follows an endpoint switch mid-session.
             bool supportsNativeToolCalling =
-                _llm?.SupportsNativeToolCallingForRole(roleId, task?.RoutingProfileId ?? "") == true;
+                _llm?.SupportsNativeToolCallingForRole(roleId, ResolveRoutingProfileId(task, roleId)) == true;
             return AiToolContractPromptFormatter.AppendStableRoleToolContract(
                 system,
                 roleTools,
@@ -2886,11 +2888,25 @@ namespace CoreAI.Ai
         // every ad-hoc Programmer conversation on the player's disk and re-inject it into later,
         // unrelated sessions. Pinned by AiOrchestratorHistoryEditModeTests
         // .RunTaskAsync_ChatSource_EnablesShortTermHistory_ForProgrammer.
-        private static AgentMemoryPolicy.RoleMemoryConfig ResolveRoleConfigForRequest(
+        private AgentMemoryPolicy.RoleMemoryConfig ResolveRoleConfigForRequest(
             AgentMemoryPolicy.RoleMemoryConfig roleConfig,
-            AiTaskRequest task)
+            AiTaskRequest task,
+            string roleId)
         {
+            if (task?.HistoryMode == AiTaskHistoryMode.None)
+            {
+                return AiTaskRequestScopeRules.ApplyHistoryMode(roleConfig, task);
+            }
+
             if (!IsChatSourceRequest(task) || roleConfig.WithChatHistory)
+            {
+                return roleConfig;
+            }
+
+            // WHY: a role built with an enforced ToolsOnly mode promised to run without a conversation; a chat
+            // surface asking it a question must not quietly hand it one.
+            if (_memoryPolicy != null && _memoryPolicy.TryGetEnforcedMode(roleId, out AgentMode enforced) &&
+                enforced == AgentMode.ToolsOnly)
             {
                 return roleConfig;
             }
@@ -2898,6 +2914,24 @@ namespace CoreAI.Ai
             roleConfig.WithChatHistory = true;
             roleConfig.PersistChatHistory = false;
             return roleConfig;
+        }
+
+        /// <summary>
+        /// The routing profile a turn uses: the request's own when it names one, otherwise the one the role's
+        /// definition prefers (as <c>AgentConfig.AskAsync</c> resolves it), otherwise none.
+        /// </summary>
+        private string ResolveRoutingProfileId(AiTaskRequest task, string roleId)
+        {
+            if (!string.IsNullOrWhiteSpace(task?.RoutingProfileId))
+            {
+                return task.RoutingProfileId;
+            }
+
+            string role = string.IsNullOrWhiteSpace(roleId) ? task?.RoleId : roleId;
+            return _memoryPolicy != null && _memoryPolicy.TryGetRoutingProfile(role, out string profile) &&
+                   !string.IsNullOrWhiteSpace(profile)
+                ? profile
+                : "";
         }
 
         private static bool IsChatSourceRequest(AiTaskRequest task)
@@ -3253,7 +3287,7 @@ namespace CoreAI.Ai
             {
                 ActorId = bundle.ActorId,
                 AgentRoleId = bundle.RoleId,
-                RoutingProfileId = task.RoutingProfileId ?? "",
+                RoutingProfileId = ResolveRoutingProfileId(task, bundle.RoleId),
                 SystemPrompt = bundle.SystemPrompt,
                 UserPayload = userPayload,
                 ChatHistory = bundle.ChatHistory,
@@ -3272,6 +3306,7 @@ namespace CoreAI.Ai
                 // LlmCompletionRequest by hand - every host that goes through the package's public API
                 // (AiTaskRequest) could not reach it, while the docs prescribed it as the cure.
                 AllowTextShapedToolCallsOnNativeEndpoint = task.AllowTextShapedToolCallsOnNativeEndpoint,
+                Progress = task.Progress,
                 Reasoning = ResolveReasoning(task.Reasoning, bundle.RoleConfig.Reasoning),
                 Sampling = ResolveSampling(task.Sampling, bundle.RoleConfig.Sampling),
                 TemperatureOverride = task.Temperature ?? bundle.RoleConfig.Temperature,

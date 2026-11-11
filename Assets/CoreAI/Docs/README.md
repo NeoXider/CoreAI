@@ -58,9 +58,12 @@ the `roleId`, attachment and list overloads: omit the argument or cast the null.
 | File | Topic |
 |------|--------|
 | [AGENT_BUILDER.md](AGENT_BUILDER.md) | Fluent `AgentBuilder`: tools, modes, memory, recipes |
+| [PROMPT_TOKEN_COSTS.md](PROMPT_TOKEN_COSTS.md) | What each shipped tool, skill and prompt costs in tokens per request, and how to recount |
 | [ENGINE_AGNOSTIC_TOOLS.md](ENGINE_AGNOSTIC_TOOLS.md) | Tools and prompts without Unity APIs |
 | [LESSON_ORCHESTRATION.md](LESSON_ORCHESTRATION.md) | Lesson/practice hooks: runtime context, tool policy, tests |
 | [LLM_ROUTING.md](LLM_ROUTING.md) | Execution modes, portable routing contracts, usage sinks, timeouts |
+| [DECISION_MODELS.md](DECISION_MODELS.md) | Decision models: typed yes/no, choice and score questions with probabilities, the three backends, routing, budgets, NPC and autopilot policies |
+| [NPC_AGENTS.md](NPC_AGENTS.md) | NPC agents: personas, who answers a line, cooldowns and budgets, per-NPC memory, fallback lines, speech sinks; `AIService` and `TextGenerator` from Lua |
 | [LLM_TOOLS.md](LLM_TOOLS.md) | Built-in vs host-wired `ILlmTool` implementations, agent-authored skills (`manage_skills`), and the camera/vision tools |
 | [LUA_SANDBOX_SECURITY.md](LUA_SANDBOX_SECURITY.md) | Lua sandbox boundary, removed APIs, execution limits, binding rules, and escape-test checklist |
 | [RBX_API.md](RBX_API.md) | Roblox-style API a mod builds with: `Instance.new`, datatypes, services, `BasePart.Material` / `MaterialVariant` / `Part.Color`, the execution budget and `ScriptContext`, saving and loading a world, samples |

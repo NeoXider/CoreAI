@@ -108,6 +108,20 @@ namespace CoreAI.Mcp.Server
             _authToken = string.IsNullOrWhiteSpace(authToken) ? null : authToken.Trim();
         }
 
+        /// <summary>
+        /// False in a WebGL player: the browser sandbox has no listening sockets, so <see cref="Start"/>
+        /// refuses with a <see cref="PlatformNotSupportedException"/> instead of failing inside the socket layer.
+        /// </summary>
+        public static bool IsSupportedOnThisPlatform =>
+#if UNITY_WEBGL && !UNITY_EDITOR
+            false;
+#else
+            true;
+#endif
+
+        /// <summary>Per-instance copy of <see cref="IsSupportedOnThisPlatform"/>; tests turn it off to exercise the refusal.</summary>
+        internal bool PlatformSupportsListener { get; set; } = IsSupportedOnThisPlatform;
+
         /// <summary>True while the listener is accepting connections.</summary>
         public bool IsRunning => _listener is { IsListening: true };
 
@@ -124,12 +138,23 @@ namespace CoreAI.Mcp.Server
         /// <summary>Largest accepted request body in bytes; anything bigger is refused with 413.</summary>
         public int MaxRequestBodyBytes { get; set; } = DefaultMaxRequestBodyBytes;
 
-        /// <summary>Starts the listener and the accept loop. Throws when the port cannot be bound.</summary>
+        /// <summary>
+        /// Starts the listener and the accept loop. Throws when the port cannot be bound, and throws
+        /// <see cref="PlatformNotSupportedException"/> on a platform without listening sockets (WebGL).
+        /// </summary>
         public void Start()
         {
             if (IsRunning)
             {
                 return;
+            }
+
+            if (!PlatformSupportsListener)
+            {
+                throw new PlatformNotSupportedException(
+                    "The CoreAI MCP HTTP server cannot listen on this platform: a WebGL player runs in the " +
+                    "browser sandbox, which cannot open a listening socket. Connect MCP clients to an editor " +
+                    "or desktop build instead.");
             }
 
             _listener = new HttpListener();
@@ -287,6 +312,12 @@ namespace CoreAI.Mcp.Server
                     return;
                 }
 
+                if (string.Equals(request.HttpMethod, "DELETE", StringComparison.OrdinalIgnoreCase))
+                {
+                    await TerminateSessionAsync(context, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
                 if (!string.Equals(request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
                 {
                     context.Response.StatusCode = 405;
@@ -319,7 +350,8 @@ namespace CoreAI.Mcp.Server
                 }
 
                 McpDispatchResult result =
-                    await AwaitOperationAsync(_dispatcher.DispatchAsync(rpcRequest, cancellationToken),
+                    await AwaitOperationAsync(_dispatcher.DispatchAsync(rpcRequest,
+                            request.Headers[McpServerInfo.SessionHeader], cancellationToken),
                         Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
 
                 if (result.IsNotification)
@@ -405,12 +437,17 @@ namespace CoreAI.Mcp.Server
                     cancellationToken).ConfigureAwait(false);
                 return true;
             }
-            // WHY: every retained session negotiated the advertised version; sessionless legacy POST uses 2025-03-26.
-            string protocolVersion = request.Headers["MCP-Protocol-Version"] ??
-                (sessionId != null ? McpServerInfo.DefaultProtocolVersion : "2025-03-26");
-            if (protocolVersion != McpServerInfo.DefaultProtocolVersion && protocolVersion != "2025-03-26")
+            // WHY: an absent header is legal only for clients older than the header itself (2025-03-26).
+            // The rejection stays plain text: a dual-era client probing with a modern request reads a 400
+            // without a modern JSON-RPC error body as "legacy server" and falls back to initialize.
+            string protocolVersion = request.Headers[McpServerInfo.ProtocolVersionHeader];
+            if (protocolVersion != null && !McpServerInfo.IsAcceptedProtocolVersionHeader(protocolVersion))
             {
-                await DenyAsync(context, 400, "Unsupported MCP-Protocol-Version; negotiate a supported version with initialize.",
+                await DenyAsync(context, 400,
+                    $"Unsupported MCP-Protocol-Version '{protocolVersion}'. This server negotiates " +
+                    string.Join(", ", McpServerInfo.NegotiatedProtocolVersions) +
+                    " through initialize (and serves " + McpServerInfo.HeaderlessProtocolVersion +
+                    " clients that send no header); initialize again and send the version it returns.",
                     cancellationToken).ConfigureAwait(false);
                 return true;
             }
@@ -527,6 +564,28 @@ namespace CoreAI.Mcp.Server
                 foreach (NotificationStream stream in _streams.Values) stream.Signal();
         }
 
+        private async Task TerminateSessionAsync(HttpListenerContext context, CancellationToken cancellationToken)
+        {
+            string sessionId = context.Request.Headers[McpServerInfo.SessionHeader];
+            if (string.IsNullOrEmpty(sessionId))
+            {
+                await DenyAsync(context, 400, "DELETE terminates a session: send its Mcp-Session-Id.", cancellationToken)
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            _dispatcher.RemoveSession(sessionId);
+            NotificationStream stream;
+            lock (_streamsGate)
+            {
+                if (_streams.TryGetValue(sessionId, out stream)) _streams.Remove(sessionId);
+            }
+
+            stream?.Cancel();
+            context.Response.StatusCode = 204;
+            context.Response.Close();
+        }
+
         private async Task ServeNotificationsAsync(HttpListenerContext context, CancellationToken cancellationToken)
         {
             if (!AcceptsEventStream(context.Request))
@@ -613,7 +672,12 @@ namespace CoreAI.Mcp.Server
             private readonly SemaphoreSlim _signal = new(0, 1);
             private readonly CancellationTokenSource _cancel = new();
             public CancellationToken Token => _cancel.Token;
-            public void Cancel() => _cancel.Cancel();
+            public void Cancel()
+            {
+                // WHY: the stream's own loop may be disposing it at the same moment.
+                try { _cancel.Cancel(); }
+                catch (ObjectDisposedException) { }
+            }
             public void Signal()
             {
                 if (_signal.CurrentCount == 0) _signal.Release();

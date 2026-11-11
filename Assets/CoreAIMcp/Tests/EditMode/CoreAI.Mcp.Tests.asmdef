@@ -6,7 +6,9 @@
     "CoreAI.Core",
     "CoreAI.Source",
     "CoreAI.Mods",
+    "CoreAI.RbxApi.Instances",
     "VContainer",
+    "UniTask",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner"
   ],

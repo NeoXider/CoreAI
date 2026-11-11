@@ -247,26 +247,46 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
-        public void Lua_CameraFieldOfView_IsTheLoudStub_ButAValidPropertyName()
+        public void Lua_CameraFieldOfView_DrivesTheUnityLens_AndFieldOfViewModeStaysTheLoudStub()
         {
-            // WHY (M1-03/M1-05): FieldOfView is real Roblox API with no backing in the rig; reading
-            // it is the loud stub, and watching it must not be refused as a typo.
+            // WHY (P1): FieldOfView is the Unity camera's vertical angle; FieldOfViewMode has no
+            // backing, so reading it is the loud stub while watching it is not refused as a typo.
             World world = BuildWorld();
             world.Stack.Runtime.LoadMod("m", @"
                 local cam = workspace.CurrentCamera
-                local ok, err = pcall(function() return cam.FieldOfView end)
+                cam.FieldOfView = 45
+                store_set('fov', tostring(cam.FieldOfView))
+                local ok, err = pcall(function() return cam.FieldOfViewMode end)
                 store_set('read', tostring(ok) .. '|' .. tostring(err))
-                local watchOk = pcall(function() return cam:GetPropertyChangedSignal('FieldOfView') end)
+                local watchOk = pcall(function() return cam:GetPropertyChangedSignal('FieldOfViewMode') end)
                 store_set('watch', tostring(watchOk))
                 local typoOk, typoErr = pcall(function() return cam:GetPropertyChangedSignal('CFrameX') end)
                 store_set('typo', tostring(typoOk) .. '|' .. tostring(typoErr))");
 
+            Assert.AreEqual("45", world.Store.Get("m", "fov"));
+            Assert.AreEqual(45f, _cameraGo.GetComponent<Camera>().fieldOfView, Epsilon);
             string read = world.Store.Get("m", "read");
             StringAssert.StartsWith("false|", read);
             StringAssert.Contains("NOT_IMPLEMENTED", read);
-            StringAssert.Contains("Camera.FieldOfView", read);
+            StringAssert.Contains("Camera.FieldOfViewMode", read);
             Assert.AreEqual("true", world.Store.Get("m", "watch"));
             StringAssert.Contains("CFrameX is not a valid property name.", world.Store.Get("m", "typo"));
+        }
+
+        [Test]
+        public void Lua_CameraViewportSize_IsTheUnityCameraPixels()
+        {
+            World world = BuildWorld();
+            Camera lens = _cameraGo.GetComponent<Camera>();
+            world.Stack.Runtime.LoadMod("m", @"
+                local size = workspace.CurrentCamera.ViewportSize
+                store_set('size', string.format('%d,%d', size.X, size.Y))");
+
+            // WHY the (1, 1) fallback: an EditMode camera with no game view may report 0 pixels, which
+            // the world reads as Roblox's unset viewport.
+            int width = lens.pixelWidth > 0 ? lens.pixelWidth : 1;
+            int height = lens.pixelHeight > 0 ? lens.pixelHeight : 1;
+            Assert.AreEqual(width + "," + height, world.Store.Get("m", "size"));
         }
 
         // ---- camera_set_cframe / camera_follow ----------------------------------------------

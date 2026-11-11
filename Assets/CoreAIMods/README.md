@@ -117,6 +117,7 @@ Mod system:
 - [mod-authoring.md](../../Docs/CoreAIMods/mod-authoring.md) — authoring guide (header, API, limits).
 - [mod-system.md](../../Docs/CoreAIMods/mod-system.md) — manifests, bundled mods, Hub, quarantine, reload modes.
 - [MOD_SHARING.md](../../Docs/CoreAIMods/MOD_SHARING.md) — the export bundle and safe import.
+- [PLAY_WORLD.md](../../Docs/CoreAIMods/PLAY_WORLD.md) — the one-click play world: modules, baseplate, `/undo` `/redo` `/fly`.
 - [WORLD_PACKAGE.md](../../Docs/CoreAIMods/WORLD_PACKAGE.md) — world save/load, autosaves, startup world.
 - [CHARACTER_MOTOR_BRIDGE.md](../../Docs/CoreAIMods/CHARACTER_MOTOR_BRIDGE.md) — drive Rbx characters with your own controller.
 - [SCRIPT_ENGINE_SEAM.md](../../Docs/CoreAIMods/SCRIPT_ENGINE_SEAM.md) — the engine-neutral scripting contracts.

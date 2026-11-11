@@ -26,5 +26,41 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>Mouse position in pixels, top-left origin (Roblox screen convention).</summary>
         RbxVector2 GetMouseLocation();
+
+        /// <summary>
+        /// Device mouse movement since the previous poll, in pixels, x right and y down. False when the
+        /// source has no device delta; the service then differences <see cref="GetMouseLocation"/>, which
+        /// reads zero while the pointer is locked.
+        /// </summary>
+        bool TryReadMouseDelta(out RbxVector2 delta)
+        {
+            delta = RbxVector2.Zero;
+            return false;
+        }
+
+        /// <summary>Wheel movement since the previous poll: positive forward, negative backward, 0 none.</summary>
+        float ReadMouseWheel()
+        {
+            return 0f;
+        }
+
+        /// <summary>
+        /// The left (<paramref name="stick"/> 1) or right (2) thumbstick of the first gamepad, each axis in
+        /// [-1, 1] with y up, as Roblox's <c>InputObject.Position</c> carries it; false when there is none.
+        /// </summary>
+        bool TryReadThumbstick(int stick, out RbxVector2 position)
+        {
+            position = RbxVector2.Zero;
+            return false;
+        }
+
+        /// <summary>
+        /// Who owns the input now (chat, Hub, game UI); null when the host reports nothing, so every
+        /// event is the game's. Read live each frame, so a host may attach it after composition.
+        /// </summary>
+        IInputFocusState FocusState => null;
+
+        /// <summary>The host cursor behind <c>MouseBehavior</c>; null for a headless source.</summary>
+        IRbxCursorPort CursorPort => null;
     }
 }

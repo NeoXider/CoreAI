@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Datatypes;
 
@@ -29,11 +30,24 @@ namespace CoreAI.Mods.Rbx.Instances
             { "MouseButton1", "MouseButton2", "MouseButton3" };
 
         private static readonly object GameNotProcessed = false;
+        private static readonly object GameProcessed = true;
+
+        /// <summary>Largest <see cref="MouseDeltaSensitivity"/> the mirror allows.</summary>
+        public const double MaximumMouseDeltaSensitivity = 10d;
 
         private RbxEnumRegistry _enums;
         private RbxEnumItem _mouseBehavior;
         private RbxVector2 _previousMouseLocation;
         private bool _hasPreviousMouseLocation;
+        private IInputFocusState _focusState;
+        private IRbxCursorPort _cursorPort;
+        private double _mouseDeltaSensitivity = 1d;
+        private object _processedThisStep = GameNotProcessed;
+        private object _pointerProcessedThisStep = GameNotProcessed;
+        private readonly RbxVector2[] _thumbsticks = new RbxVector2[2];
+        private bool _wasCaptured;
+
+        private static readonly string[] ThumbstickKeyCodeNames = { "Thumbstick1", "Thumbstick2" };
 
         internal RbxUserInputService(ClassDescriptor descriptor)
             : base(descriptor)
@@ -53,15 +67,28 @@ namespace CoreAI.Mods.Rbx.Instances
         public RbxScriptSignal InputChanged { get; } =
             new("UserInputService.InputChanged");
 
+        /// <summary>
+        /// Mirror <c>UserInputService.TextBoxFocused(textBoxThatFocused)</c>: fires when a host text field
+        /// takes the keyboard. CoreAI's own fields are not script-visible TextBoxes, so the argument is nil.
+        /// </summary>
+        public RbxScriptSignal TextBoxFocused { get; } =
+            new("UserInputService.TextBoxFocused");
+
+        /// <summary>
+        /// Mirror <c>UserInputService.TextBoxFocusReleased(textboxReleased)</c>: fires when the host text
+        /// field gives the keyboard back; the argument is nil for the reason <see cref="TextBoxFocused"/> gives.
+        /// </summary>
+        public RbxScriptSignal TextBoxFocusReleased { get; } =
+            new("UserInputService.TextBoxFocusReleased");
+
         /// <summary>Device state seam; headless in-memory by default, the composition attaches the
         /// engine-backed source once (like the camera rig).</summary>
         public IInputSource InputSource { get; private set; } = new InMemoryInputSource();
 
-        /// <summary>Enum.MouseBehavior item; state-only in MVP1 (Default until assigned). A change
-        /// fires <c>Changed("MouseBehavior")</c> and its property signal; assigning the item it
-        /// already holds fires nothing.
-        /// TODO: route LockCenter/LockCurrentPosition to the host cursor when the pointer-lock
-        /// slice lands.</summary>
+        /// <summary>Enum.MouseBehavior item (Default until assigned). A change goes to the host
+        /// <see cref="CursorPort"/>, which locks or frees the pointer, and fires
+        /// <c>Changed("MouseBehavior")</c> and its property signal; assigning the item it already
+        /// holds fires nothing.</summary>
         public RbxEnumItem MouseBehavior
         {
             get => _mouseBehavior;
@@ -73,8 +100,92 @@ namespace CoreAI.Mods.Rbx.Instances
                 }
 
                 _mouseBehavior = value;
+                ApplyMouseBehaviorToCursor();
                 NotifyPropertyChanged(nameof(MouseBehavior));
             }
+        }
+
+        /// <summary>The requested lock, as the engine-free enum the cursor port takes.</summary>
+        public RbxMouseLock RequestedMouseLock =>
+            _mouseBehavior == null ? RbxMouseLock.Default : (RbxMouseLock)_mouseBehavior.Value;
+
+        /// <summary>
+        /// Mirror <c>UserInputService.MouseDeltaSensitivity</c>: scales every reported mouse delta,
+        /// clamped to [0, 10], default 1. A change fires <c>Changed("MouseDeltaSensitivity")</c>.
+        /// </summary>
+        public double MouseDeltaSensitivity
+        {
+            get => _mouseDeltaSensitivity;
+            set
+            {
+                double clamped = double.IsNaN(value)
+                    ? _mouseDeltaSensitivity
+                    : Math.Max(0d, Math.Min(MaximumMouseDeltaSensitivity, value));
+                if (clamped.Equals(_mouseDeltaSensitivity))
+                {
+                    return;
+                }
+
+                _mouseDeltaSensitivity = clamped;
+                NotifyPropertyChanged(nameof(MouseDeltaSensitivity));
+            }
+        }
+
+        /// <summary>The focus state in effect: the attached one, else the input source's own.</summary>
+        public IInputFocusState FocusState => _focusState ?? InputSource.FocusState;
+
+        /// <summary>The cursor port in effect: the attached one, else the input source's own.</summary>
+        public IRbxCursorPort CursorPort => _cursorPort ?? InputSource.CursorPort;
+
+        /// <summary>True while a host surface owns the input, so events carry gameProcessedEvent = true.</summary>
+        public bool IsGameInputCaptured => FocusState?.IsGameInputCaptured ?? false;
+
+        /// <summary>
+        /// True while mouse input belongs to host UI: a surface owns the input or the pointer is over a
+        /// panel. Mouse events then carry gameProcessedEvent = true, and the default camera neither zooms
+        /// nor starts a right-drag.
+        /// </summary>
+        public bool IsPointerInputProcessed =>
+            IsGameInputCaptured || (FocusState?.IsPointerOverUi ?? false);
+
+        /// <summary>The left (1) or right (2) thumbstick as read by the last <see cref="Step"/>, each axis in [-1, 1], y up.</summary>
+        public RbxVector2 GetThumbstick(int stick)
+        {
+            return stick == 1 ? _thumbsticks[0] : stick == 2 ? _thumbsticks[1] : RbxVector2.Zero;
+        }
+
+        /// <summary>
+        /// Mirror <c>UserInputService:GetFocusedTextBox()</c>. CoreAI's own text fields are not
+        /// script-visible TextBoxes, so this is nil even while one has the keyboard; read
+        /// <see cref="IsGameInputCaptured"/> from C#, or <c>gameProcessedEvent</c> from a script.
+        /// </summary>
+        public RbxInstance GetFocusedTextBox()
+        {
+            ThrowIfDestroyed("GetFocusedTextBox");
+            return null;
+        }
+
+        /// <summary>
+        /// True while the pointer is locked: a lock was requested and the host cursor granted it (a
+        /// headless world with no cursor port grants every request).
+        /// </summary>
+        public bool IsPointerLocked =>
+            RequestedMouseLock != RbxMouseLock.Default && (CursorPort?.IsPointerLocked ?? true);
+
+        /// <summary>Unscaled device mouse delta of the last <see cref="Step"/>, pixels, y down.</summary>
+        public RbxVector2 LastFrameMouseDelta { get; private set; }
+
+        /// <summary>Wheel movement of the last <see cref="Step"/>: positive forward, 0 none.</summary>
+        public float LastFrameWheel { get; private set; }
+
+        /// <summary>
+        /// Mirror <c>UserInputService:GetMouseDelta()</c>: the last frame's mouse movement in pixels,
+        /// scaled by <see cref="MouseDeltaSensitivity"/>, and zero unless the pointer is locked.
+        /// </summary>
+        public RbxVector2 GetMouseDelta()
+        {
+            ThrowIfDestroyed("GetMouseDelta");
+            return IsPointerLocked ? Scale(LastFrameMouseDelta) : RbxVector2.Zero;
         }
 
         /// <summary>Attaches the engine-backed input source; resolved once at composition.</summary>
@@ -83,7 +194,22 @@ namespace CoreAI.Mods.Rbx.Instances
             if (source != null)
             {
                 InputSource = source;
+                ApplyMouseBehaviorToCursor();
             }
+        }
+
+        /// <summary>Attaches a focus state that takes precedence over the input source's own.</summary>
+        public void AttachFocusState(IInputFocusState focusState)
+        {
+            _focusState = focusState;
+        }
+
+        /// <summary>Attaches a cursor port that takes precedence over the input source's own, and
+        /// applies the current <see cref="MouseBehavior"/> to it.</summary>
+        public void AttachCursorPort(IRbxCursorPort cursorPort)
+        {
+            _cursorPort = cursorPort;
+            ApplyMouseBehaviorToCursor();
         }
 
         /// <summary>Binds the world's enum registry so fired InputObjects carry interned
@@ -146,9 +272,66 @@ namespace CoreAI.Mods.Rbx.Instances
                 return;
             }
 
+            bool captured = IsGameInputCaptured;
+            _processedThisStep = captured ? GameProcessed : GameNotProcessed;
+            _pointerProcessedThisStep = IsPointerInputProcessed ? GameProcessed : GameNotProcessed;
+            StepTextFocus(captured);
             StepKeys();
             StepMouseButtons();
             StepMouseMovement();
+            StepMouseWheel();
+            StepThumbsticks();
+        }
+
+        private void StepTextFocus(bool captured)
+        {
+            if (captured == _wasCaptured)
+            {
+                return;
+            }
+
+            _wasCaptured = captured;
+            RbxScriptSignal signal = captured ? TextBoxFocused : TextBoxFocusReleased;
+            if (signal.HasConnections)
+            {
+                signal.Fire((object)null);
+            }
+        }
+
+        private void StepThumbsticks()
+        {
+            for (int stick = 0; stick < _thumbsticks.Length; stick++)
+            {
+                RbxVector2 position = InputSource.TryReadThumbstick(stick + 1, out RbxVector2 read)
+                    ? ClampStick(read)
+                    : RbxVector2.Zero;
+                RbxVector2 previous = _thumbsticks[stick];
+                if (position == previous)
+                {
+                    continue;
+                }
+
+                _thumbsticks[stick] = position;
+                if (!InputChanged.HasConnections)
+                {
+                    continue;
+                }
+
+                RbxInputObject input = new(
+                    FindItemByName("KeyCode", ThumbstickKeyCodeNames[stick]),
+                    FindItemByName("UserInputType", "Gamepad1"),
+                    FindItemByName("UserInputState", "Change"),
+                    new RbxVector3(position.X, position.Y, 0f),
+                    new RbxVector3(position.X - previous.X, position.Y - previous.Y, 0f));
+                InputChanged.Fire(input, _processedThisStep);
+            }
+        }
+
+        private static RbxVector2 ClampStick(RbxVector2 value)
+        {
+            float x = float.IsNaN(value.X) ? 0f : Math.Max(-1f, Math.Min(1f, value.X));
+            float y = float.IsNaN(value.Y) ? 0f : Math.Max(-1f, Math.Min(1f, value.Y));
+            return new RbxVector2(x, y);
         }
 
         private void StepKeys()
@@ -169,7 +352,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 {
                     if (!_previousKeys.Contains(keyCode))
                     {
-                        InputBegan.Fire(MakeKeyInput(keyCode, "Begin"), GameNotProcessed);
+                        InputBegan.Fire(MakeKeyInput(keyCode, "Begin"), _processedThisStep);
                     }
                 }
             }
@@ -180,7 +363,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 {
                     if (!_currentKeys.Contains(keyCode))
                     {
-                        InputEnded.Fire(MakeKeyInput(keyCode, "End"), GameNotProcessed);
+                        InputEnded.Fire(MakeKeyInput(keyCode, "End"), _processedThisStep);
                     }
                 }
             }
@@ -213,32 +396,73 @@ namespace CoreAI.Mods.Rbx.Instances
                     FindItemByName("UserInputState", down ? "Begin" : "End"),
                     new RbxVector3(location.X, location.Y, 0f),
                     RbxVector3.Zero);
-                signal.Fire(input, GameNotProcessed);
+                signal.Fire(input, _pointerProcessedThisStep);
             }
         }
 
         private void StepMouseMovement()
         {
             RbxVector2 location = InputSource.GetMouseLocation();
-            // WHY: HasConnections gate FIRST — a mouse-move frame with no InputChanged listener must
-            // allocate nothing (this runs every frame the mouse moves; the common case has 0 listeners).
-            if (InputChanged.HasConnections
-                && _hasPreviousMouseLocation
-                && (location.X != _previousMouseLocation.X || location.Y != _previousMouseLocation.Y))
+            RbxVector2 delta;
+            if (!InputSource.TryReadMouseDelta(out delta))
             {
-                RbxInputObject input = new(
-                    FindItemByName("KeyCode", "Unknown"),
-                    FindItemByName("UserInputType", "MouseMovement"),
-                    FindItemByName("UserInputState", "Change"),
-                    new RbxVector3(location.X, location.Y, 0f),
-                    new RbxVector3(
+                delta = _hasPreviousMouseLocation
+                    ? new RbxVector2(
                         location.X - _previousMouseLocation.X,
-                        location.Y - _previousMouseLocation.Y, 0f));
-                InputChanged.Fire(input, GameNotProcessed);
+                        location.Y - _previousMouseLocation.Y)
+                    : RbxVector2.Zero;
             }
 
+            LastFrameMouseDelta = delta;
             _previousMouseLocation = location;
             _hasPreviousMouseLocation = true;
+            // WHY: HasConnections gate FIRST — a mouse-move frame with no InputChanged listener must
+            // allocate nothing (this runs every frame the mouse moves; the common case has 0 listeners).
+            if (!InputChanged.HasConnections || (delta.X == 0f && delta.Y == 0f))
+            {
+                return;
+            }
+
+            RbxVector2 scaled = Scale(delta);
+            RbxInputObject input = new(
+                FindItemByName("KeyCode", "Unknown"),
+                FindItemByName("UserInputType", "MouseMovement"),
+                FindItemByName("UserInputState", "Change"),
+                new RbxVector3(location.X, location.Y, 0f),
+                new RbxVector3(scaled.X, scaled.Y, 0f));
+            InputChanged.Fire(input, _pointerProcessedThisStep);
+        }
+
+        private void StepMouseWheel()
+        {
+            float wheel = InputSource.ReadMouseWheel();
+            LastFrameWheel = float.IsNaN(wheel) ? 0f : wheel;
+            if (LastFrameWheel == 0f || !InputChanged.HasConnections)
+            {
+                return;
+            }
+
+            // WHY the sign and not the raw amount: devices and browsers report one notch as 1, 3 or 120;
+            // the mirror only promises the direction (InputObject.Position.Z, positive forward).
+            RbxVector2 location = InputSource.GetMouseLocation();
+            RbxInputObject input = new(
+                FindItemByName("KeyCode", "Unknown"),
+                FindItemByName("UserInputType", "MouseWheel"),
+                FindItemByName("UserInputState", "Change"),
+                new RbxVector3(location.X, location.Y, LastFrameWheel > 0f ? 1f : -1f),
+                RbxVector3.Zero);
+            InputChanged.Fire(input, _pointerProcessedThisStep);
+        }
+
+        private RbxVector2 Scale(RbxVector2 delta)
+        {
+            float factor = (float)_mouseDeltaSensitivity;
+            return new RbxVector2(delta.X * factor, delta.Y * factor);
+        }
+
+        private void ApplyMouseBehaviorToCursor()
+        {
+            CursorPort?.ApplyMouseBehavior(RequestedMouseLock);
         }
 
         private RbxInputObject MakeKeyInput(int keyCodeValue, string state)

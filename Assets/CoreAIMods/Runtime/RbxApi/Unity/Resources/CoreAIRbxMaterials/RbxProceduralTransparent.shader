@@ -11,6 +11,7 @@ Shader "CoreAI/Rbx/Procedural Transparent"
         [HideInInspector] _BumpStrength("Bump Strength", Float) = 0.3
         [HideInInspector] _SrcBlend("Source Blend", Float) = 5
         [HideInInspector] _DstBlend("Destination Blend", Float) = 10
+        [HideInInspector] _SceneRefraction("Scene Refraction", Float) = 0
     }
 
     SubShader
@@ -49,10 +50,17 @@ Shader "CoreAI/Rbx/Procedural Transparent"
             #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
             #pragma multi_compile_fragment _ _REFLECTION_PROBE_BLENDING
             #pragma multi_compile_fragment _ _REFLECTION_PROBE_BOX_PROJECTION
+            // WHY: a global keyword (RbxSceneTextures) because the Rbx runtime cannot read the pipeline
+            // asset; off, Glass keeps the alpha-blended look, as Roblox shows it on mobile.
+            #pragma multi_compile_fragment _ _RBX_SCENE_TEXTURES
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #if defined(_RBX_SCENE_TEXTURES)
+                #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareOpaqueTexture.hlsl"
+            #endif
             #include "RbxProceduralCommon.hlsl"
+            #include "RbxFog.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
@@ -64,6 +72,7 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                 float _BumpStrength;
                 float _SrcBlend;
                 float _DstBlend;
+                float _SceneRefraction;
             CBUFFER_END
 
             struct Attributes
@@ -95,19 +104,26 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                 return output;
             }
 
+            // WHY one return: with an early return inside the branch, FXC reported "use of potentially
+            // uninitialized variable (RbxTransparentHeight)" for the D3D fragment program.
             float RbxTransparentHeight(float3 positionWS, int materialMode)
             {
+                float height;
                 if (materialMode == 1)
                 {
-                    return RbxFbm(positionWS * 2.4) * 0.18;
+                    height = RbxFbm(positionWS * 2.4) * 0.18;
+                }
+                else
+                {
+                    float3 position = positionWS * 1.4;
+                    float fractureA = pow(saturate(1.0 - abs(sin(position.x * 2.7 + position.z * 1.2 +
+                        RbxFbm(position * 0.7) * 4.0))), 7.0);
+                    float fractureB = pow(saturate(1.0 - abs(sin(position.z * 3.1 - position.y * 1.7 +
+                        RbxValueNoise(position * 1.8) * 3.0))), 9.0);
+                    height = RbxFbm(position * 1.6) * 0.24 + saturate(fractureA + fractureB) * 0.76;
                 }
 
-                float3 position = positionWS * 1.4;
-                float fractureA = pow(saturate(1.0 - abs(sin(position.x * 2.7 + position.z * 1.2 +
-                    RbxFbm(position * 0.7) * 4.0))), 7.0);
-                float fractureB = pow(saturate(1.0 - abs(sin(position.z * 3.1 - position.y * 1.7 +
-                    RbxValueNoise(position * 1.8) * 3.0))), 9.0);
-                return RbxFbm(position * 1.6) * 0.24 + saturate(fractureA + fractureB) * 0.76;
+                return height;
             }
 
             float3 RbxTransparentNormal(float3 patternPosition, float3 normalWS, int materialMode,
@@ -222,7 +238,7 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                 inputData.normalWS = normalWS;
                 inputData.viewDirectionWS = viewDirectionWS;
                 inputData.shadowCoord = TransformWorldToShadowCoord(input.positionWS);
-                inputData.fogCoord = ComputeFogFactor(input.positionCS.z);
+                inputData.fogCoord = RbxFogFactor(input.positionWS);
                 inputData.vertexLighting = VertexLighting(input.positionWS, normalWS);
                 inputData.bakedGI = SampleSH(normalWS);
                 inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);
@@ -231,6 +247,23 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                 half4 color = UniversalFragmentPBR(inputData, surfaceData);
                 color.rgb = MixFog(color.rgb, inputData.fogCoord);
                 color.a = saturate(surfaceData.alpha);
+                #if defined(_RBX_SCENE_TEXTURES)
+                    // WHY: alpha blending alone read as tinted plastic. Glass shows the scene behind it
+                    // bent by its surface normal and tinted, with the lit reflection on top; Part
+                    // transparency fades the whole pane back to the unbent scene. Air (also mode 1)
+                    // keeps _SceneRefraction at 0 and stays invisible.
+                    UNITY_BRANCH if (materialMode == 1 && _SceneRefraction > 0.5)
+                    {
+                        float2 screenUV = inputData.normalizedScreenSpaceUV;
+                        float3 viewNormal = TransformWorldToViewDir(normalWS);
+                        half3 straight = SampleSceneColor(screenUV);
+                        half3 refracted = SampleSceneColor(screenUV + viewNormal.xy * 0.03);
+                        half3 glassTint = lerp(half3(1.0h, 1.0h, 1.0h), materialColor, 0.35h);
+                        half3 throughGlass = refracted * glassTint * (1.0h - fresnel) + color.rgb;
+                        color.rgb = lerp(straight, throughGlass, saturate(_Color.a));
+                        color.a = 1.0h;
+                    }
+                #endif
                 return color;
             }
             ENDHLSL

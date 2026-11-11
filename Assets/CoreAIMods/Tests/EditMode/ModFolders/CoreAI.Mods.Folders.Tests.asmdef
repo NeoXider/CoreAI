@@ -1,0 +1,48 @@
+{
+  "name": "CoreAI.Mods.Folders.Tests",
+  "rootNamespace": "CoreAI.Tests.EditMode.ModFolders",
+  "references": [
+    "CoreAI.Mods.Folders",
+    "CoreAI.Mods.Folders.Unity",
+    "CoreAI.Mods",
+    "CoreAI.RbxApi.Instances",
+    "CoreAI.RbxApi.Datatypes",
+    "CoreAI.RbxApi.Binding",
+    "CoreAI.LuauDownlevel",
+    "CoreAI.Mods.Hub",
+    "CoreAI.Hub.UI",
+    "CoreAI.Core",
+    "CoreAI.Source",
+    "UniTask",
+    "VContainer",
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll",
+    "Newtonsoft.Json.dll",
+    "Microsoft.Extensions.AI.dll",
+    "Microsoft.Extensions.AI.Abstractions.dll",
+    "Microsoft.Bcl.AsyncInterfaces.dll",
+    "System.Text.Json.dll",
+    "Lua.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.neoxider.coreaihub",
+      "expression": "",
+      "define": "COREAI_HAS_HUB"
+    }
+  ],
+  "noEngineReferences": false
+}

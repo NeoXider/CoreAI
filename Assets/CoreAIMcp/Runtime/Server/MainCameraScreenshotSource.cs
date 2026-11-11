@@ -1,30 +1,31 @@
 using System;
+using System.Collections.Generic;
 using CoreAI.Logging;
 using CoreAI.Mcp.Tools;
+using CoreAI.Vision;
 using UnityEngine;
 
 namespace CoreAI.Mcp.Server
 {
     /// <summary>
-    /// Captures the main camera to a PNG for the <c>screenshot</c> MCP tool. Must be called on the Unity
-    /// main thread. Renders <see cref="Camera.main"/> (falling back to any enabled camera) into an
-    /// off-screen <see cref="RenderTexture"/> so the capture works headless-of-display and in a build,
-    /// then downscales to the requested cap.
+    /// Captures a camera to a PNG for the <c>screenshot</c> MCP tool. Must be called on the Unity main
+    /// thread. Renders <see cref="Camera.main"/> (falling back to any enabled camera), or the camera named
+    /// by the caller, off-screen through the shared <see cref="AiAttachmentUnityExtensions"/> capture: one
+    /// pooled render target and one cached readback texture, so a capture allocates only its encoded bytes
+    /// and works in edit mode, play mode and a build alike.
     /// <para>
     /// WHY: the camera is resolved per call, never cached at startup - a server started from a bootstrap
     /// scene would otherwise decide "no camera" forever, and the tool would stay missing from
     /// <c>tools/list</c> for the whole session.
     /// </para>
     /// </summary>
-    public sealed class MainCameraScreenshotSource : IScreenshotSource
+    public sealed class MainCameraScreenshotSource : ICameraScreenshotSource
     {
         /// <inheritdoc />
         public bool TryCaptureBase64Png(int maxResolution, out string base64Png, out string error)
         {
             base64Png = null;
-            error = null;
-
-            Camera camera = ResolveCamera();
+            Camera camera = ResolveDefaultCamera();
             if (camera == null)
             {
                 error = "no camera is active in the loaded scenes (Camera.main is null and " +
@@ -32,34 +33,33 @@ namespace CoreAI.Mcp.Server
                 return false;
             }
 
-            int width = Screen.width > 0 ? Screen.width : 1280;
-            int height = Screen.height > 0 ? Screen.height : 720;
-            if (maxResolution > 0)
+            return Capture(camera, maxResolution, out base64Png, out error);
+        }
+
+        /// <inheritdoc />
+        public bool TryCaptureBase64Png(string cameraName, int maxResolution, out string base64Png, out string error)
+        {
+            base64Png = null;
+            Camera camera = FindActiveCamera(cameraName, out string available);
+            if (camera == null)
             {
-                float scale = Mathf.Min(1f, maxResolution / (float)Mathf.Max(width, height));
-                width = Mathf.Max(1, Mathf.RoundToInt(width * scale));
-                height = Mathf.Max(1, Mathf.RoundToInt(height * scale));
+                error = $"no active camera is named '{cameraName}'. Active cameras: {available}.";
+                return false;
             }
 
-            RenderTexture rt = RenderTexture.GetTemporary(width, height, 24, RenderTextureFormat.ARGB32);
-            RenderTexture previousTarget = camera.targetTexture;
-            RenderTexture previousActive = RenderTexture.active;
-            Texture2D texture = null;
+            return Capture(camera, maxResolution, out base64Png, out error);
+        }
+
+        private static bool Capture(Camera camera, int maxResolution, out string base64Png, out string error)
+        {
+            base64Png = null;
+            error = null;
             try
             {
-                camera.targetTexture = rt;
-                camera.Render();
-
-                RenderTexture.active = rt;
-                texture = new Texture2D(width, height, TextureFormat.RGB24, false);
-                texture.ReadPixels(new Rect(0, 0, width, height), 0, 0);
-                texture.Apply(false);
-
-                byte[] png = texture.EncodeToPNG();
+                byte[] png = camera.CaptureAiAttachment(Math.Max(0, maxResolution), CaptureImageFormat.Png).Data;
                 if (png == null || png.Length == 0)
                 {
-                    error = $"EncodeToPNG produced no bytes for a {width}x{height} capture of camera " +
-                            $"'{camera.name}'.";
+                    error = $"EncodeToPNG produced no bytes for a capture of camera '{camera.name}'.";
                     return false;
                 }
 
@@ -70,24 +70,13 @@ namespace CoreAI.Mcp.Server
             {
                 // WHY: log the real exception AND hand its text to the agent, which is the only one that
                 // can act on it — a generic "no active camera" here would misdiagnose a live camera.
-                error = $"capture of camera '{camera.name}' at {width}x{height} failed: " +
-                        $"{ex.GetType().Name}: {ex.Message}";
+                error = $"capture of camera '{camera.name}' failed: {ex.GetType().Name}: {ex.Message}";
                 Log.Instance.Error($"[CoreAI MCP] screenshot {error}\n{ex}");
                 return false;
             }
-            finally
-            {
-                camera.targetTexture = previousTarget;
-                RenderTexture.active = previousActive;
-                RenderTexture.ReleaseTemporary(rt);
-                if (texture != null)
-                {
-                    UnityEngine.Object.Destroy(texture);
-                }
-            }
         }
 
-        private static Camera ResolveCamera()
+        private static Camera ResolveDefaultCamera()
         {
             if (Camera.main != null)
             {
@@ -96,6 +85,37 @@ namespace CoreAI.Mcp.Server
 
             Camera[] all = Camera.allCameras;
             return all != null && all.Length > 0 ? all[0] : null;
+        }
+
+        private static Camera FindActiveCamera(string cameraName, out string available)
+        {
+            Camera[] all = Camera.allCameras ?? Array.Empty<Camera>();
+            Camera caseInsensitive = null;
+            int caseInsensitiveMatches = 0;
+            List<string> names = new(all.Length);
+            foreach (Camera candidate in all)
+            {
+                if (candidate == null)
+                {
+                    continue;
+                }
+
+                names.Add(candidate == Camera.main ? candidate.name + " (main)" : candidate.name);
+                if (string.Equals(candidate.name, cameraName, StringComparison.Ordinal))
+                {
+                    available = null;
+                    return candidate;
+                }
+
+                if (string.Equals(candidate.name, cameraName, StringComparison.OrdinalIgnoreCase))
+                {
+                    caseInsensitive = candidate;
+                    caseInsensitiveMatches++;
+                }
+            }
+
+            available = names.Count == 0 ? "none" : string.Join(", ", names);
+            return caseInsensitiveMatches == 1 ? caseInsensitive : null;
         }
     }
 }

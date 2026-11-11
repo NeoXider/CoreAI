@@ -361,7 +361,7 @@ namespace CoreAI.Ai.LuaCs
             LuaCsRbxSchedulerCallable launch)
         {
             LuaState ownerState = LuaCsScriptState.Unwrap(launch.OwnerState);
-            RunnerPool pool = _runnerPools.GetValue(ownerState, CreateRunnerPool);
+            RunnerPool pool = _runnerPools.GetValue(ownerState, CreateRunnerPoolCallback);
             if (pool.OwnerModId == null)
             {
                 pool.OwnerModId = ownerModId;
@@ -395,6 +395,11 @@ namespace CoreAI.Ai.LuaCs
             SignalRunnersCreated++;
             return new LuaCsRbxScriptThread(this, _scriptEngine, launch, ownerModId, runner);
         }
+
+        // WHY a cached delegate: C# 9 builds a new one from the method group on every call, which was one
+        // allocation per signal handler fire.
+        private static readonly ConditionalWeakTable<LuaState, RunnerPool>.CreateValueCallback
+            CreateRunnerPoolCallback = CreateRunnerPool;
 
         private static RunnerPool CreateRunnerPool(LuaState ownerState)
         {

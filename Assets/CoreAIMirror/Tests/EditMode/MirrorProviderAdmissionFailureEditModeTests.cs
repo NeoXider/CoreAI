@@ -116,12 +116,12 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         [Test]
-        public void A4_10_HostMode_TheHostsOwnLocalClient_IsRefusedAsAPlayerLoudly_AndLeftOnMirror()
+        public void HostMode_TheHostsOwnLocalClient_IsServedAsTheHostsPlayer_WaitsForNoReadiness_AndStaysOnMirror()
         {
-            // WHY: in Mirror host mode the host's own client connection was admitted as a remote
-            // player, never acknowledged readiness — no CoreAI client bridge sits beside a server
-            // one — and was dropped from its own host ten seconds later with a line blaming an old
-            // client (A4-10).
+            // WHY: A4-10 found the host's own client admitted as a remote player that never
+            // acknowledged readiness — no CoreAI client bridge sits beside a server one — and dropped
+            // from its own host ten seconds later. MVP5 serves it as the host's Player, in process,
+            // with no readiness to wait for and no drop.
             double now = 0d;
             _provider.ClockSeconds = () => now;
             List<string> connected = new();
@@ -139,15 +139,64 @@ namespace CoreAI.Net.Mirror.Tests
             {
                 Assert.IsTrue(_authenticator.Decide(local.connectionId, "localhost",
                     Encoding.UTF8.GetBytes(Credential)).Admitted);
-                LogAssert.Expect(LogType.Error, new Regex("host mode is not supported"));
 
                 _authenticator.OnServerAuthenticated.Invoke(local);
                 InvokeUpdate(_provider);
                 now = MirrorNetworkBridge.ReadinessTimeoutSeconds + 1d;
                 InvokeUpdate(_provider);
 
-                CollectionAssert.IsEmpty(connected, "the host's own client is no world player");
+                CollectionAssert.AreEqual(new[] { "remote-1" }, connected, "the host's own client is the host's Player");
+                Assert.AreEqual(1, _provider.SessionHost.HostPlayerSessions);
+                Assert.AreEqual(0, _provider.SessionHost.HostModeConnectionsRefused);
+                Assert.AreEqual(1, _provider.SessionHost.LiveSessionCount);
+                Assert.IsTrue(_provider.SessionHost.IsHostLocalSession(local.connectionId));
+                Assert.IsTrue(bridge.IsHostLocalConnection(local.connectionId));
+                CollectionAssert.AreEqual(new[] { "remote-1" }, bridge.ActorIds);
+                Assert.AreEqual(0, bridge.ReadinessTimeouts, "nothing waits for a readiness it never has to send");
+                Assert.IsTrue(NetworkServer.connections.TryGetValue(local.connectionId,
+                        out NetworkConnectionToClient still) && ReferenceEquals(still, local),
+                    "the host's local client stays on Mirror");
+                CollectionAssert.IsEmpty(_mirror.ServerDisconnectRequests);
+            }
+            finally
+            {
+                // WHY removed by hand: Mirror's shutdown disconnects every connection, and a local one
+                // with no local client behind it has nothing to disconnect.
+                NetworkServer.RemoveConnection(local.connectionId);
+            }
+        }
+
+        [Test]
+        public void Negative_HostMode_UnderTheRefusePolicy_TheHostsOwnLocalClient_IsRefusedAsAPlayerLoudly_AndLeftOnMirror()
+        {
+            double now = 0d;
+            _provider.ClockSeconds = () => now;
+            _provider.HostMode = CoreAiMirrorHostModePolicy.Refuse;
+            List<string> connected = new();
+            _provider.AttachWorld(context =>
+            {
+                connected.Add(context.ActorId);
+                return true;
+            }, _ => true);
+            MirrorNetworkBridge bridge = (MirrorNetworkBridge)_provider.Bridge;
+            OfflineMirror.StartServer();
+            _authenticator.OnStartServer();
+            LocalConnectionToClient local = new() { isAuthenticated = true };
+            NetworkServer.AddConnection(local);
+            try
+            {
+                Assert.IsTrue(_authenticator.Decide(local.connectionId, "localhost",
+                    Encoding.UTF8.GetBytes(Credential)).Admitted);
+                LogAssert.Expect(LogType.Error, new Regex("HostMode is Refuse"));
+
+                _authenticator.OnServerAuthenticated.Invoke(local);
+                InvokeUpdate(_provider);
+                now = MirrorNetworkBridge.ReadinessTimeoutSeconds + 1d;
+                InvokeUpdate(_provider);
+
+                CollectionAssert.IsEmpty(connected, "under Refuse the host's own client is no world player");
                 Assert.AreEqual(1, _provider.SessionHost.HostModeConnectionsRefused);
+                Assert.AreEqual(0, _provider.SessionHost.HostPlayerSessions);
                 Assert.AreEqual(0, _provider.SessionHost.LiveSessionCount);
                 CollectionAssert.IsEmpty(bridge.ActorIds);
                 Assert.AreEqual(0, bridge.ReadinessTimeouts, "nothing waits for a readiness it cannot send");
@@ -155,11 +204,11 @@ namespace CoreAI.Net.Mirror.Tests
                         out NetworkConnectionToClient still) && ReferenceEquals(still, local),
                     "the host's local client is left to Mirror, not dropped");
                 CollectionAssert.IsEmpty(_mirror.ServerDisconnectRequests);
+                Assert.Throws<InvalidOperationException>(() => _provider.HostMode = CoreAiMirrorHostModePolicy.ServeAsHostPlayer,
+                    "the policy is fixed once the bridge exists, like Role");
             }
             finally
             {
-                // WHY removed by hand: Mirror's shutdown disconnects every connection, and a local one
-                // with no local client behind it has nothing to disconnect.
                 NetworkServer.RemoveConnection(local.connectionId);
             }
         }

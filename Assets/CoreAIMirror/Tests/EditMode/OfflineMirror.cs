@@ -97,6 +97,13 @@ namespace CoreAI.Net.Mirror.Tests
     /// its own injected clock and is pumped by the fixture, never by this harness.
     /// </para>
     /// <para>
+    /// Host mode is Mirror's own: <see cref="StartHost"/> builds the real local connection pair and
+    /// <see cref="PumpHost"/> runs the queues Mirror processes in its late update, so the host's
+    /// admission crosses Mirror's real handlers. A peer of another CoreAI version is written byte by
+    /// byte (<see cref="DeliverRawToServer"/>, <see cref="DeliverRawToClient"/>), since this build's
+    /// own serializers can only write this build's layout.
+    /// </para>
+    /// <para>
     /// With WebGL selected in the Editor, Mirror still registers its server handlers but forces
     /// its capacity to zero. This in-memory fixture restores its offline capacity after Listen;
     /// it does not exercise a listening server socket in a WebGL player.
@@ -131,6 +138,10 @@ namespace CoreAI.Net.Mirror.Tests
         private const int ServerConnectionCapacity = 4;
         private static readonly MethodInfo FlushConnection = typeof(NetworkConnection).GetMethod(
             "Update", BindingFlags.NonPublic | BindingFlags.Instance);
+        private static readonly FieldInfo ToServerQueue = typeof(LocalConnectionToClient).GetField(
+            "queue", BindingFlags.NonPublic | BindingFlags.Instance);
+        private static readonly FieldInfo ToClientQueue = typeof(LocalConnectionToServer).GetField(
+            "queue", BindingFlags.NonPublic | BindingFlags.Instance);
 
         private readonly GameObject _go;
         private readonly Transport _previousTransport;
@@ -291,6 +302,80 @@ namespace CoreAI.Net.Mirror.Tests
             NetworkServer.Shutdown();
         }
 
+        /// <summary>
+        /// Starts Mirror's host mode the way <c>NetworkManager.StartHost</c> does: a listening server,
+        /// the local client and server connection pair, and the server's connect event for the local
+        /// connection. Nothing is authenticated yet; the fixture runs the admission itself.
+        /// </summary>
+        public static LocalConnectionToClient StartHost()
+        {
+            StartServer();
+            NetworkClient.ConnectHost();
+            HostMode.InvokeOnConnected();
+            Assert.IsNotNull(NetworkServer.localConnection, "host mode creates the server's local connection");
+            Assert.IsTrue(NetworkClient.activeHost, "host mode gives the client the local connection to the server");
+            return NetworkServer.localConnection;
+        }
+
+        /// <summary>
+        /// Hands each side of the host-mode connection pair what the other queued — Mirror does this in
+        /// its late update — repeating until both queues are empty; a handler that answers is served
+        /// by the next round.
+        /// </summary>
+        public static void PumpHost()
+        {
+            Assert.IsNotNull(FlushConnection, "Mirror's NetworkConnection.Update() is where local queues are processed");
+            Assert.IsNotNull(ToServerQueue, "LocalConnectionToClient.queue holds what the local client sent");
+            Assert.IsNotNull(ToClientQueue, "LocalConnectionToServer.queue holds what the server sent the local client");
+            for (int round = 0; round < MaxLoopbackRounds; round++)
+            {
+                LocalConnectionToClient server = NetworkServer.localConnection;
+                if (server != null)
+                {
+                    FlushConnection.Invoke(server, null);
+                }
+
+                if (NetworkClient.connection is LocalConnectionToServer client)
+                {
+                    FlushConnection.Invoke(client, null);
+                }
+
+                if (QueuedOn(NetworkServer.localConnection, ToServerQueue) == 0
+                    && QueuedOn(NetworkClient.connection as LocalConnectionToServer, ToClientQueue) == 0)
+                {
+                    return;
+                }
+            }
+
+            Assert.Fail("the host's local connection pair kept exchanging messages for " + MaxLoopbackRounds + " rounds");
+        }
+
+        /// <summary>
+        /// Stops the host's client half the way <c>NetworkManager.StopClient</c> does in host mode:
+        /// Mirror removes the server's local connection and raises no server disconnect event.
+        /// </summary>
+        public static void StopHostClient()
+        {
+            Assert.IsTrue(NetworkClient.activeHost, "only a host has a local client to stop");
+            NetworkClient.Disconnect();
+        }
+
+        /// <summary>
+        /// Delivers one message to the server exactly as a peer of another CoreAI version writes it:
+        /// the message id, then whatever <paramref name="writeBody"/> writes and nothing else.
+        /// </summary>
+        public static void DeliverRawToServer(int connectionId, ushort messageId, Action<NetworkWriter> writeBody)
+        {
+            Transport.active.OnServerDataReceived?.Invoke(connectionId, RawBatch(messageId, writeBody),
+                Channels.Reliable);
+        }
+
+        /// <summary>The client-bound half of <see cref="DeliverRawToServer"/>.</summary>
+        public static void DeliverRawToClient(ushort messageId, Action<NetworkWriter> writeBody)
+        {
+            Transport.active.OnClientDataReceived?.Invoke(RawBatch(messageId, writeBody), Channels.Reliable);
+        }
+
         /// <summary>Connects the client the way NetworkManager does and marks it authenticated.</summary>
         public static void StartClient()
         {
@@ -402,11 +487,29 @@ namespace CoreAI.Net.Mirror.Tests
         {
             NetworkWriter packed = new();
             NetworkMessages.Pack(message, packed);
+            return BatchOf(packed);
+        }
+
+        private static ArraySegment<byte> RawBatch(ushort messageId, Action<NetworkWriter> writeBody)
+        {
+            NetworkWriter packed = new();
+            packed.WriteUShort(messageId);
+            writeBody?.Invoke(packed);
+            return BatchOf(packed);
+        }
+
+        private static ArraySegment<byte> BatchOf(NetworkWriter packed)
+        {
             Batcher batcher = new(65536);
             batcher.AddMessage(packed.ToArraySegment(), 0d);
             NetworkWriter batch = new();
             Assert.IsTrue(batcher.GetBatch(batch));
             return batch.ToArraySegment();
+        }
+
+        private static int QueuedOn(object connection, FieldInfo queue)
+        {
+            return connection == null ? 0 : ((System.Collections.ICollection)queue.GetValue(connection)).Count;
         }
 
         /// <summary>

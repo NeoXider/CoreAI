@@ -48,7 +48,7 @@ namespace CoreAI.Ai
             AgentMemoryPolicy policy = ResolvePolicyForAsk(config);
             if (policy.HasRole(config.RoleId))
             {
-                return RunAskAsync(config, orchestrator, message, priority, cancellationToken);
+                return RunAskAsync(config, orchestrator, message, priority, cancellationToken, policy);
             }
 
             return EnsureRegisteredAndAskAsync(config, orchestrator, message, priority,
@@ -78,7 +78,8 @@ namespace CoreAI.Ai
             IAiOrchestrationService orchestrator,
             string message,
             int priority,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            AgentMemoryPolicy policy = null)
         {
             if (orchestrator == null)
             {
@@ -98,12 +99,27 @@ namespace CoreAI.Ai
             return orchestrator.RunTaskAsync(new AiTaskRequest
             {
                 RoleId = config.RoleId,
-                RoutingProfileId = config.LlmProfileId ?? "",
+                RoutingProfileId = ResolveRoutingProfileId(config, policy),
                 Hint = message,
                 Priority = priority,
                 ActorContext = actorContext,
                 CancellationScope = actorContext.SessionId
             }, cancellationToken);
+        }
+
+        /// <summary>
+        /// The agent's own routing profile, else the one its role definition prefers, else none.
+        /// </summary>
+        private static string ResolveRoutingProfileId(AgentConfig config, AgentMemoryPolicy policy)
+        {
+            if (!string.IsNullOrWhiteSpace(config.LlmProfileId))
+            {
+                return config.LlmProfileId;
+            }
+
+            return policy != null && policy.TryGetRoutingProfile(config.RoleId, out string routingProfileId)
+                ? routingProfileId
+                : "";
         }
 
         private static async Task<string> EnsureRegisteredAndAskAsync(
@@ -118,7 +134,7 @@ namespace CoreAI.Ai
             // works without an explicit `ApplyToPolicy(CoreAIAgent.Policy)` call. Registration hydrates
             // asynchronously before dispatch; concurrent first asks share one registration.
             await AgentRoleRegistration.EnsureReadyAsync(policy, config, cancellationToken);
-            return await RunAskAsync(config, orchestrator, message, priority, cancellationToken);
+            return await RunAskAsync(config, orchestrator, message, priority, cancellationToken, policy);
         }
 
         /// <summary>
@@ -222,6 +238,110 @@ namespace CoreAI.Ai
         }
 
         private static readonly ConditionalWeakTable<AgentMemoryPolicy, PolicySlots> Tables = new();
+
+        private static readonly object PendingSync = new();
+        private static readonly List<AgentConfig> PendingConfigs = new();
+
+        /// <summary>Number of configs built before CoreAI started and not applied yet.</summary>
+        internal static int PendingCount
+        {
+            get
+            {
+                lock (PendingSync)
+                {
+                    return PendingConfigs.Count;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Queues a config built while no global policy existed; a later config for the same role replaces it.
+        /// </summary>
+        internal static void QueuePending(AgentConfig config)
+        {
+            string roleId = config?.RoleId?.Trim();
+            if (string.IsNullOrEmpty(roleId))
+            {
+                return;
+            }
+
+            lock (PendingSync)
+            {
+                PendingConfigs.RemoveAll(queued =>
+                    string.Equals(queued.RoleId?.Trim(), roleId, StringComparison.Ordinal));
+                PendingConfigs.Add(config);
+            }
+        }
+
+        /// <summary>True when a config for <paramref name="roleId"/> is waiting for CoreAI to start.</summary>
+        internal static bool IsPending(string roleId)
+        {
+            string trimmed = roleId?.Trim();
+            if (string.IsNullOrEmpty(trimmed))
+            {
+                return false;
+            }
+
+            lock (PendingSync)
+            {
+                foreach (AgentConfig queued in PendingConfigs)
+                {
+                    if (string.Equals(queued.RoleId?.Trim(), trimmed, StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Applies and clears the queue in build order. A config that fails to apply is logged and skipped, so
+        /// one broken agent cannot stop CoreAI's initialisation or the agents queued after it.
+        /// </summary>
+        internal static int ApplyPending(AgentMemoryPolicy policy)
+        {
+            List<AgentConfig> batch;
+            lock (PendingSync)
+            {
+                if (PendingConfigs.Count == 0)
+                {
+                    return 0;
+                }
+
+                batch = new List<AgentConfig>(PendingConfigs);
+                PendingConfigs.Clear();
+            }
+
+            int applied = 0;
+            foreach (AgentConfig config in batch)
+            {
+                try
+                {
+                    config.ApplyToPolicy(policy);
+                    applied++;
+                }
+                catch (Exception ex)
+                {
+                    (Log.Instance ?? NullLog.Instance).Error(
+                        $"[AgentBuilder:{config.RoleId}] The agent built before CoreAI started could not be " +
+                        $"registered: {ex.GetType().Name}: {ex.Message}",
+                        LogTag.Core);
+                }
+            }
+
+            return applied;
+        }
+
+        /// <summary>Drops every queued config.</summary>
+        internal static void ClearPending()
+        {
+            lock (PendingSync)
+            {
+                PendingConfigs.Clear();
+            }
+        }
 
         public static Task EnsureReadyAsync(AgentMemoryPolicy policy, AgentConfig config,
             CancellationToken cancellationToken)

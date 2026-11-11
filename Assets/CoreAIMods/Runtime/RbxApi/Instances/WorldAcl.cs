@@ -10,21 +10,31 @@ namespace CoreAI.Mods.Rbx.Instances
         internal MutationEnvelopeScope(InstanceRegistry registry, MutationEnvelope envelope,
             bool actorIsUnrestricted, string actorWorldId, MutationEnvelopeScope previous)
         {
+            Reset(registry, envelope, actorIsUnrestricted, actorWorldId, previous);
+        }
+
+        /// <summary>Server-issued mutation envelope active for this scope.</summary>
+        public MutationEnvelope Envelope { get; private set; }
+
+        internal bool ActorIsUnrestricted { get; private set; }
+
+        internal string ActorWorldId { get; private set; }
+
+        internal MutationEnvelopeScope Previous { get; private set; }
+
+        /// <summary>
+        /// Re-arms a scope the registry pooled. Only the registry's own server-generated path reuses
+        /// scopes, and it never hands one out, so no holder can dispose a scope after it was re-armed.
+        /// </summary>
+        internal void Reset(InstanceRegistry registry, MutationEnvelope envelope, bool actorIsUnrestricted,
+            string actorWorldId, MutationEnvelopeScope previous)
+        {
             _registry = registry ?? throw new ArgumentNullException(nameof(registry));
             Envelope = envelope;
             ActorIsUnrestricted = actorIsUnrestricted;
             ActorWorldId = actorWorldId ?? "";
             Previous = previous;
         }
-
-        /// <summary>Server-issued mutation envelope active for this scope.</summary>
-        public MutationEnvelope Envelope { get; }
-
-        internal bool ActorIsUnrestricted { get; }
-
-        internal string ActorWorldId { get; }
-
-        internal MutationEnvelopeScope Previous { get; }
 
         /// <inheritdoc />
         public void Dispose()

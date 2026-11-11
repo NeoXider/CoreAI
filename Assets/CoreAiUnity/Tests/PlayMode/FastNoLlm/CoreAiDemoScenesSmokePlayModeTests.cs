@@ -24,6 +24,7 @@ namespace CoreAI.Tests.PlayMode
         // ship. FrozenList_MatchesBuildEntryPointAndProjectScenes below fails the moment the two drift.
         private static readonly string[] FrozenDemoScenePaths =
         {
+            "Assets/CoreAI.Demos/BlockWorld/BlockWorld.unity",
             "Assets/CoreAI.Demos/FullAccess/FullAccessDemo.unity",
             "Assets/CoreAI.Demos/GameplayServices/GameplayServicesDemo.unity",
             "Assets/CoreAI.Demos/Hub/CoreAiHubDemo.unity",
@@ -108,7 +109,7 @@ namespace CoreAI.Tests.PlayMode
             Application.logMessageReceived += capture;
 
             Assert.AreEqual(
-                17,
+                18,
                 FrozenDemoScenePaths.Length,
                 "Published first-party demo inventory changed; update the G11 build matrix and QA evidence.");
             foreach (string scenePath in FrozenDemoScenePaths)

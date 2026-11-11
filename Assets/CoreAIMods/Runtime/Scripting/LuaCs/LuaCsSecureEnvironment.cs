@@ -14,7 +14,7 @@ namespace CoreAI.Sandbox.LuaCs
     /// <summary>
     /// Creates Lua-CSharp runtimes with a restricted global surface and execution guards.
     /// </summary>
-    public sealed class LuaCsSecureEnvironment
+    public sealed partial class LuaCsSecureEnvironment
     {
         /// <summary>Reserved host resolver captured by transformed chunks before user code runs.</summary>
         public const string TrustedIteratorResolverName = "__coreai_luau_iter";
@@ -217,6 +217,7 @@ namespace CoreAI.Sandbox.LuaCs
             state.OpenStringLibrary();
             state.OpenTableLibrary();
             state.OpenMathLibrary();
+            InstallLuauMathExtensions(state);
             state.OpenCoroutineLibrary();
             state.OpenBitwiseLibrary();
 

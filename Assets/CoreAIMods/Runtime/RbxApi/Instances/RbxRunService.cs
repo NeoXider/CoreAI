@@ -117,6 +117,21 @@ namespace CoreAI.Mods.Rbx.Instances
             FireIfListened(RenderStepped, delta);
         }
 
+        /// <summary>
+        /// The render pair for an unboxed delta, as the scheduler's PreRender pump hands it: the delta is
+        /// boxed only when PreRender or RenderStepped has a listener on a process that draws frames.
+        /// </summary>
+        internal void FireRenderPhase(float deltaSeconds)
+        {
+            if (Topology is { RendersFrames: false }
+                || (!PreRender.HasConnections && !RenderStepped.HasConnections))
+            {
+                return;
+            }
+
+            FireRenderPhase((object)deltaSeconds);
+        }
+
         private static void FireIfListened(RbxScriptSignal signal, object delta)
         {
             if (signal.HasConnections)

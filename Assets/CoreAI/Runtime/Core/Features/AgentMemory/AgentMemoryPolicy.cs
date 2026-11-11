@@ -6,9 +6,11 @@ namespace CoreAI.Ai
 {
     /// <summary>
     /// Mutable role policy for memory tools, chat history, prompt overlays, and per-role
-    /// LLM behaviour overrides.
+    /// LLM behaviour overrides. A fresh policy holds the shipped <see cref="BuiltInRoleDefinitions"/>; tools
+    /// reach a role directly (<see cref="AddToolForRole"/>) or through the tool profiles its definition lists
+    /// (<see cref="AddToolToProfile(string, ILlmTool)"/>).
     /// </summary>
-    public sealed class AgentMemoryPolicy
+    public sealed partial class AgentMemoryPolicy
     {
         private readonly object _lock = new();
         private readonly Dictionary<string, RoleMemoryConfig> _roleConfigs;
@@ -47,6 +49,15 @@ namespace CoreAI.Ai
             public bool? StreamingOverride;
             public string AdditionalPrompt;
             public MutableSkillCatalog LiveCatalog;
+
+            /// <summary>Tool profiles the role draws tools from; empty detaches it from every profile.</summary>
+            public List<string> ToolProfiles;
+
+            /// <summary>Skills that came from <see cref="ToolProfiles"/> and were merged into the live catalog.</summary>
+            public List<SkillSet> ProfileSkills;
+
+            /// <summary>The agent mode the policy enforces for the role, or null when none is enforced.</summary>
+            public AgentMode? EnforcedMode;
         }
 
         /// <summary>
@@ -134,6 +145,29 @@ namespace CoreAI.Ai
                 {
                     _additionalSystemPrompts.Remove(roleId);
                 }
+
+                // WHY profiles follow the builder: an AgentBuilder for a role has always REPLACED its tools,
+                // installer tools included, so a role built without WithToolProfile keeps today's meaning and
+                // is detached from the profiles its definition listed.
+                SetRoleToolProfilesLocked(roleId, RoleDefinition.NormalizeProfileIds(prepared.ToolProfiles));
+                _roleInlineSkills.Remove(roleId);
+                if (prepared.LiveCatalog != null && prepared.ProfileSkills != null && prepared.ProfileSkills.Count > 0)
+                {
+                    _derivedSkills[roleId] = new List<SkillSet>(prepared.ProfileSkills);
+                }
+                else
+                {
+                    _derivedSkills.Remove(roleId);
+                }
+
+                if (prepared.EnforcedMode.HasValue)
+                {
+                    _enforcedModes[roleId] = prepared.EnforcedMode.Value;
+                }
+                else
+                {
+                    _enforcedModes.Remove(roleId);
+                }
             }
         }
 
@@ -149,13 +183,20 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Replaces the direct tool list for a role; pass an empty list to clear custom tools.
+        /// Replaces the direct tool list for a role; pass an empty list to clear custom tools. The role is also
+        /// detached from its tool profiles, so the list passed here is the whole tool set (plus the memory tool
+        /// and skill meta-tools); use <see cref="AddToolForRole"/> to add a tool next to the profile tools.
         /// </summary>
         public void SetToolsForRole(string roleId, IReadOnlyList<ILlmTool> tools)
         {
             roleId = roleId?.Trim();
             lock (_lock)
             {
+                if (roleId != null)
+                {
+                    SetRoleToolProfilesLocked(roleId, null);
+                }
+
                 List<ILlmTool> replacement = tools == null
                     ? new List<ILlmTool>()
                     : new List<ILlmTool>(tools);
@@ -241,15 +282,40 @@ namespace CoreAI.Ai
             return carried;
         }
 
+        /// <summary>What <see cref="AddOrReplaceToolForRole"/> changed in a role's tool list.</summary>
+        public enum ToolRegistrationChange
+        {
+            /// <summary>Nothing changed: invalid arguments, or this very tool instance was already registered.</summary>
+            None = 0,
+
+            /// <summary>The tool was appended; the role had no tool with that name.</summary>
+            Added = 1,
+
+            /// <summary>A tool with the same name was replaced in place, keeping its position.</summary>
+            Replaced = 2
+        }
+
         /// <summary>
-        /// Append a single tool to an existing role's tool list (e.g. the <c>read_skill</c> meta-tool).
-        /// If no tools exist for the role yet, a new list is created.
+        /// Adds a single tool to a role's tool list (e.g. the <c>read_skill</c> meta-tool), replacing a tool of the
+        /// same <see cref="ILlmTool.Name"/> (ordinal) instead of appending a duplicate. If no tools exist for the
+        /// role yet, a new list is created. Use <see cref="AddOrReplaceToolForRole"/> to learn what changed.
         /// </summary>
         public void AddToolForRole(string roleId, ILlmTool tool)
         {
+            AddOrReplaceToolForRole(roleId, tool);
+        }
+
+        /// <summary>
+        /// Adds <paramref name="tool"/> to <paramref name="roleId"/>, or replaces the registered tool with the same
+        /// name (ordinal) in place. Repeated registrations of one tool - e.g. <c>CoreAi.RegisterGameStateTool()</c>
+        /// in <c>OnEnable</c> - therefore keep exactly one function per name: strict providers reject a request that
+        /// declares a name twice. A tool with an empty name is always appended.
+        /// </summary>
+        public ToolRegistrationChange AddOrReplaceToolForRole(string roleId, ILlmTool tool)
+        {
             if (string.IsNullOrWhiteSpace(roleId) || tool == null)
             {
-                return;
+                return ToolRegistrationChange.None;
             }
 
             roleId = roleId.Trim();
@@ -261,7 +327,44 @@ namespace CoreAI.Ai
                     _customTools[roleId] = list;
                 }
 
-                list.Add(tool);
+                string name = tool.Name;
+                if (string.IsNullOrEmpty(name))
+                {
+                    list.Add(tool);
+                    return ToolRegistrationChange.Added;
+                }
+
+                int first = -1;
+                bool removedDuplicates = false;
+                for (int i = list.Count - 1; i >= 0; i--)
+                {
+                    if (list[i] == null || !string.Equals(list[i].Name, name, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    if (first >= 0)
+                    {
+                        list.RemoveAt(first);
+                        removedDuplicates = true;
+                    }
+
+                    first = i;
+                }
+
+                if (first < 0)
+                {
+                    list.Add(tool);
+                    return ToolRegistrationChange.Added;
+                }
+
+                if (ReferenceEquals(list[first], tool))
+                {
+                    return removedDuplicates ? ToolRegistrationChange.Replaced : ToolRegistrationChange.None;
+                }
+
+                list[first] = tool;
+                return ToolRegistrationChange.Replaced;
             }
         }
 
@@ -532,57 +635,29 @@ namespace CoreAI.Ai
         }
 
 
+        /// <summary>Creates a policy holding the shipped <see cref="BuiltInRoleDefinitions"/>.</summary>
         public AgentMemoryPolicy()
         {
             _roleConfigs = new Dictionary<string, RoleMemoryConfig>();
-
-            foreach (string roleId in BuiltInAgentRoleIds.AllBuiltInRoles)
+            foreach (RoleDefinition definition in BuiltInRoleDefinitions.CreateAll())
             {
-                bool isProgrammer = roleId == BuiltInAgentRoleIds.Programmer;
-                bool needsExactToolOutput = isProgrammer || roleId == BuiltInAgentRoleIds.CoreMechanic;
-                bool smartCompaction = !isProgrammer;
-                // WHY: Programmer keeps history off by default; chat-source runs enable it per-run
-                // without mutating global policy (see AiOrchestratorHistoryEditModeTests).
-                // Code/mechanics agents need exact tool output across turns for iterative correctness.
-                RoleMemoryConfig builtIn = new(
-                    true,
-                    MemoryToolAction.Append,
-                    !isProgrammer,
-                    toolResultMemory: needsExactToolOutput
-                        ? ToolResultMemoryPolicy.Full
-                        : ToolResultMemoryPolicy.CompactSummary,
-                    useLlmContextCompaction: smartCompaction);
-
-                // WHY: The Programmer writes/iterates Lua and routinely needs many tool roundtrips in one turn
-                // (generate → run → read error → fix → re-run …), and the Creator/Builder orchestrate a whole
-                // build across many tool calls (one spawn per object). Cap them at 0 = unlimited so they are
-                // never cut off mid-task. Builder shares the Creator's tool-result memory treatment
-                // (CompactSummary + smart compaction) since it is not in needsExactToolOutput above. Other
-                // built-in roles inherit the global default (null = 20).
-                if (isProgrammer ||
-                    roleId == BuiltInAgentRoleIds.Creator ||
-                    roleId == BuiltInAgentRoleIds.Builder)
-                {
-                    builtIn.MaxToolCallRoundtrips = 0;
-                }
-
-                _roleConfigs[roleId] = builtIn;
+                ApplyRoleDefinition(definition);
             }
+        }
 
-            // WHY: Built-in chat roles:
-            // - PlainChat: no MemoryTool by default, persistent chat history only.
-            // - SmartChat: MemoryTool + persistent chat history by default.
-            _roleConfigs[BuiltInAgentRoleIds.PlainChat] = new RoleMemoryConfig(
-                false,
-                withChatHistory: true,
-                persistChatHistory: true,
-                useLlmContextCompaction: true);
-            _roleConfigs[BuiltInAgentRoleIds.SmartChat] = new RoleMemoryConfig(
-                true,
-                MemoryToolAction.Append,
-                true,
-                true,
-                useLlmContextCompaction: true);
+        /// <summary>
+        /// Creates a policy holding the shipped built-in definitions, then applies <paramref name="definitions"/>
+        /// over them in order, so a host definition for a built-in role replaces the shipped one.
+        /// </summary>
+        /// <remarks>
+        /// A factory rather than a constructor on purpose: VContainer builds this type with its widest
+        /// constructor, and a parameterised one would change how every container resolves the policy.
+        /// </remarks>
+        public static AgentMemoryPolicy Create(IEnumerable<RoleDefinition> definitions)
+        {
+            AgentMemoryPolicy policy = new();
+            policy.ApplyRoleDefinitions(definitions);
+            return policy;
         }
 
         /// <summary>
@@ -899,33 +974,58 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
-        /// Returns the effective tools for a role, including the built-in memory tool when enabled.
+        /// Returns the effective tools for a role: the built-in memory tool when enabled, then the tools of the
+        /// role's tool profiles, then its direct tools (a direct tool wins over a profile tool of the same name).
+        /// A role whose <see cref="AgentMode.ChatOnly"/> mode is enforced gets none.
         /// </summary>
         public IReadOnlyList<ILlmTool> GetToolsForRole(string roleId)
         {
             roleId = roleId?.Trim();
+            List<PendingProfileTool> missing = CollectMissingProfileTools(roleId);
+            if (missing != null)
+            {
+                MaterializeProfileTools(roleId, missing);
+            }
+
+            bool warnUnknown;
+            IReadOnlyList<ILlmTool> result;
             lock (_lock)
             {
                 List<ILlmTool> tools = new();
 
-                if (_customTools.TryGetValue(roleId, out List<ILlmTool> custom) && custom != null && custom.Count > 0)
+                bool hasCustom = _customTools.TryGetValue(roleId, out List<ILlmTool> custom) &&
+                                 custom != null && custom.Count > 0;
+                warnUnknown = ShouldWarnUnknownRoleLocked(roleId);
+                if (IsChatOnlyEnforcedLocked(roleId))
                 {
-                    bool customHasMemory = ListContainsMemoryTool(custom);
-
-                    if (IsMemoryEnabledLocked(roleId) && !customHasMemory)
+                    result = Array.Empty<ILlmTool>();
+                }
+                else
+                {
+                    List<ILlmTool> fromProfiles = ResolveProfileToolsLocked(roleId, hasCustom ? custom : null);
+                    bool hasMemory = (hasCustom && ListContainsMemoryTool(custom)) ||
+                                     ListContainsMemoryTool(fromProfiles);
+                    if (IsMemoryEnabledLocked(roleId) && !hasMemory)
                     {
                         tools.Add(_memoryToolInstance);
                     }
 
-                    tools.AddRange(custom);
-                }
-                else if (IsMemoryEnabledLocked(roleId))
-                {
-                    tools.Add(_memoryToolInstance);
-                }
+                    tools.AddRange(fromProfiles);
+                    if (hasCustom)
+                    {
+                        tools.AddRange(custom);
+                    }
 
-                return tools.Count > 0 ? tools : Array.Empty<ILlmTool>();
+                    result = tools.Count > 0 ? tools : Array.Empty<ILlmTool>();
+                }
             }
+
+            if (warnUnknown)
+            {
+                WarnUnknownRole(roleId);
+            }
+
+            return result;
         }
 
         /// <summary>Check memory enabled under <see cref="_lock"/>.</summary>

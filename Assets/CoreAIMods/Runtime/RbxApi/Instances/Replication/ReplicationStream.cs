@@ -222,6 +222,28 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
         /// </remarks>
         public ReplicationBatchPlan Plan()
         {
+            EnsureSeeded();
+            return PlanPending(_dirty.Pending);
+        }
+
+        /// <summary>
+        /// Plans from deltas the caller gathered from this stream's dirty set over one or more steps,
+        /// merged by the dirty set's own rules: what <see cref="ReplicationPublisher"/> hands a
+        /// recipient its budget held back, together with the current step.
+        /// </summary>
+        internal ReplicationBatchPlan Plan(IReadOnlyList<ReplicationDelta> pending)
+        {
+            if (pending == null)
+            {
+                throw new ArgumentNullException(nameof(pending));
+            }
+
+            EnsureSeeded();
+            return PlanPending(pending);
+        }
+
+        private void EnsureSeeded()
+        {
             if (!_seeded && _dirty.UnobservedInstanceCount > 0)
             {
                 throw new InvalidOperationException(
@@ -230,8 +252,10 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
                     + "began observing, and nothing that built them reached it. Build the dirty set before "
                     + "the world, or seed the recipient with PlanWorld() first.");
             }
+        }
 
-            IReadOnlyList<ReplicationDelta> pending = _dirty.Pending;
+        private ReplicationBatchPlan PlanPending(IReadOnlyList<ReplicationDelta> pending)
+        {
             if (pending.Count == 0)
             {
                 return null;

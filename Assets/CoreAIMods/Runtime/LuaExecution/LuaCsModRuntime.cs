@@ -165,7 +165,7 @@ namespace CoreAI.Ai.LuaCs
     /// <c>manage_mods</c> can later run on this VM. Both stores default to no-op implementations, so a
     /// host that wires neither keeps the prior in-memory-only behaviour.
     /// </summary>
-    public sealed class LuaCsModRuntime : ILuaModRuntime, IBudgetedLuaModRuntime
+    public sealed class LuaCsModRuntime : ILuaModRuntime, IBudgetedLuaModRuntime, ILuaModSourceRetitler
     {
         // WHY: ~10 s matches Luau's script watchdog so a mod handler is not cut sooner than a Roblox one.
         public const int DefaultHandlerTimeoutMs = 10_000;
@@ -496,6 +496,9 @@ namespace CoreAI.Ai.LuaCs
         {
             public readonly object EventGate = new();
             public string Id = "";
+
+            /// <summary>The mutation-envelope label of this mod's handler dispatches, built on first use.</summary>
+            public string DispatchOperation;
             public string OwnerActorId = "";
             public bool OwnerHasHostAuthority;
             public IScriptState State;
@@ -962,6 +965,36 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <inheritdoc />
+        public bool TryRetitleModSource(ActorContext caller, string id, string newSource)
+        {
+            DemandModAccess(caller, "move", id);
+            string modId = Normalize(id);
+            string ownerActorId;
+            LuaCapabilities caps;
+            lock (_gate)
+            {
+                if (!_mods.TryGetValue(modId, out Mod mod))
+                {
+                    return false;
+                }
+
+                if (!global::CoreAI.Mods.Folders.ModFolderHeaderEditor.DiffersOnlyInCategory(mod.Source, newSource))
+                {
+                    throw new ArgumentException(
+                        $"move: the new source of mod '{modId}' changes more than the category entry of its header.",
+                        nameof(newSource));
+                }
+
+                mod.Source = newSource;
+                ownerActorId = mod.OwnerActorId;
+                caps = mod.Caps;
+            }
+
+            PersistMod(modId, newSource, caps, ownerActorId, false);
+            return true;
+        }
+
+        /// <inheritdoc />
         public void LoadMod(
             ActorContext caller,
             string id,
@@ -1384,7 +1417,8 @@ namespace CoreAI.Ai.LuaCs
                         LogReports = mod.LogReports,
                         LoadedAtUtc = mod.LoadedAtUtc,
                         OwnerActorId = mod.OwnerActorId,
-                        Quarantined = mod.Quarantined
+                        Quarantined = mod.Quarantined,
+                        Category = global::CoreAI.Mods.Folders.ModFolderHeaderEditor.ReadCategory(mod.Source)
                     });
                 }
             }
@@ -4148,45 +4182,120 @@ namespace CoreAI.Ai.LuaCs
             while (dispatched < limit)
             {
                 KeyValuePair<string, string> evt;
-                object[] handlerSnapshot;
-                lock (mod.EventGate)
+                // WHY rented, not one shared field: a handler can reach this method again (a host call that
+                // ticks the runtime), and its snapshot must not overwrite the one this loop is still walking.
+                List<object> handlerSnapshot = RentHandlerSnapshot();
+                try
                 {
-                    if (mod.Pending.Count == 0 || mod.Removed)
+                    lock (mod.EventGate)
                     {
-                        return dispatched;
+                        if (mod.Pending.Count == 0 || mod.Removed)
+                        {
+                            return dispatched;
+                        }
+
+                        evt = mod.Pending.Peek();
+
+                        // WHY: Snapshot the handler list under the per-mod gate: a dispatched handler may call hooks_on()
+                        // for the same event, mutating mod.Handlers; enumerating the live list would then
+                        // throw out of the (unguarded) tick.
+                        if (mod.Handlers.TryGetValue(evt.Key, out List<object> handlers))
+                        {
+                            handlerSnapshot.AddRange(handlers);
+                        }
+
+                        // WHY: Dequeue only when the whole handler batch fits so one event is never partially delivered.
+                        if (handlerSnapshot.Count > limit - dispatched)
+                        {
+                            return dispatched;
+                        }
+
+                        mod.Pending.Dequeue();
                     }
 
-                    evt = mod.Pending.Peek();
-
-                    // WHY: Snapshot the handler list under the per-mod gate: a dispatched handler may call hooks_on()
-                    // for the same event, mutating mod.Handlers; enumerating the live list would then
-                    // throw out of the (unguarded) tick.
-                    handlerSnapshot = mod.Handlers.TryGetValue(evt.Key, out List<object> handlers)
-                        ? handlers.ToArray()
-                        : Array.Empty<object>();
-
-                    // WHY: Dequeue only when the whole handler batch fits so one event is never partially delivered.
-                    if (handlerSnapshot.Length > limit - dispatched)
+                    for (int index = 0; index < handlerSnapshot.Count; index++)
                     {
-                        return dispatched;
-                    }
+                        if (mod.Removed)
+                        {
+                            return dispatched;
+                        }
 
-                    mod.Pending.Dequeue();
+                        // WHY a rented two-slot array instead of `params`: the guard reads the arguments into
+                        // script values before any script runs, so the array is free again by the time a handler
+                        // could cause another dispatch; a fresh array per handler was garbage on every event.
+                        object[] arguments = RentEventArguments();
+                        arguments[0] = evt.Key;
+                        arguments[1] = evt.Value;
+                        try
+                        {
+                            InvokeGuarded(mod, handlerSnapshot[index], arguments);
+                        }
+                        finally
+                        {
+                            ReturnEventArguments(arguments);
+                        }
+
+                        dispatched++;
+                    }
                 }
-
-                foreach (object fn in handlerSnapshot)
+                finally
                 {
-                    if (mod.Removed)
-                    {
-                        return dispatched;
-                    }
-
-                    InvokeGuarded(mod, fn, evt.Key, evt.Value);
-                    dispatched++;
+                    ReturnHandlerSnapshot(handlerSnapshot);
                 }
             }
 
             return dispatched;
+        }
+
+        private readonly Stack<List<object>> _handlerSnapshotPool = new();
+        private readonly Stack<object[]> _eventArgumentPool = new();
+        private readonly Stack<GuardedDispatch> _guardedDispatchPool = new();
+
+        private List<object> RentHandlerSnapshot()
+        {
+            return _handlerSnapshotPool.Count > 0 ? _handlerSnapshotPool.Pop() : new List<object>();
+        }
+
+        private void ReturnHandlerSnapshot(List<object> snapshot)
+        {
+            snapshot.Clear();
+            _handlerSnapshotPool.Push(snapshot);
+        }
+
+        private object[] RentEventArguments()
+        {
+            return _eventArgumentPool.Count > 0 ? _eventArgumentPool.Pop() : new object[2];
+        }
+
+        private void ReturnEventArguments(object[] arguments)
+        {
+            arguments[0] = null;
+            arguments[1] = null;
+            _eventArgumentPool.Push(arguments);
+        }
+
+        /// <summary>
+        /// One handler call waiting inside the mutation envelope: the state a lambda would capture, kept in a
+        /// pooled object whose delegate is built once, so a dispatch allocates neither a closure nor a delegate.
+        /// </summary>
+        private sealed class GuardedDispatch
+        {
+            public readonly Func<bool> Run;
+            public IScriptExecutionGuard Guard;
+            public IScriptState State;
+            public object Function;
+            public object[] Arguments;
+
+            public GuardedDispatch()
+            {
+                Run = Invoke;
+            }
+
+            private bool Invoke()
+            {
+                Guard.Invoke(State, Function, CancellationToken.None, Arguments);
+                return true;
+            }
         }
 
         private void InvokeGuarded(Mod mod, object fn, params object[] args)
@@ -4208,17 +4317,30 @@ namespace CoreAI.Ai.LuaCs
                 {
                     ActorContext actorContext =
                         _rbxApi.ResolveOwnerActorContext(mod.Id);
-                    _rbxApi.Registry.ApplyServerGeneratedMutation(
-                        actorContext.ActorId,
-                        actorContext.Grants.IsUnrestricted,
-                        actorContext.WorldId,
-                        "dispatch handler owned by mod '" + mod.Id + "'",
-                        () =>
-                        {
-                            _handlerGuard.Invoke(
-                                mod.State, fn, CancellationToken.None, args);
-                            return true;
-                        });
+                    GuardedDispatch dispatch = _guardedDispatchPool.Count > 0
+                        ? _guardedDispatchPool.Pop()
+                        : new GuardedDispatch();
+                    dispatch.Guard = _handlerGuard;
+                    dispatch.State = mod.State;
+                    dispatch.Function = fn;
+                    dispatch.Arguments = args;
+                    try
+                    {
+                        _rbxApi.Registry.ApplyServerGeneratedMutation(
+                            actorContext.ActorId,
+                            actorContext.Grants.IsUnrestricted,
+                            actorContext.WorldId,
+                            mod.DispatchOperation ??= "dispatch handler owned by mod '" + mod.Id + "'",
+                            dispatch.Run);
+                    }
+                    finally
+                    {
+                        dispatch.Guard = null;
+                        dispatch.State = null;
+                        dispatch.Function = null;
+                        dispatch.Arguments = null;
+                        _guardedDispatchPool.Push(dispatch);
+                    }
                 }
 
                 // WHY not after a scheduler fault of the same frame: that fault is counted once per
@@ -5532,7 +5654,8 @@ namespace CoreAI.Ai.LuaCs
                 Origin = existing?.Origin ?? "",
                 SeededVersion = existing?.SeededVersion ?? "",
                 SeededHash = existing?.SeededHash ?? "",
-                UpdateAvailable = existing?.UpdateAvailable ?? false
+                UpdateAvailable = existing?.UpdateAvailable ?? false,
+                Context = LuaModManifest.ResolveContext(header, existing)
             };
         }
 

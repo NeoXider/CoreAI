@@ -14,6 +14,7 @@ Mirror networking and the benchmark are separate packages so a consumer installs
 | Benchmark | `com.neoxider.coreaibenchmark` | none | do not install in players |
 | In-game MCP server | `com.neoxider.coreaimcp` (depends on Unity + Mods) | none | remove the package |
 | Mirror networking | `com.neoxider.coreaimirror` (depends on Core + Mods) | assemblies build only with `MIRROR` (defined by the Mirror package) | remove the package or Mirror |
+| Chat Markdown | `com.neoxider.markdownrenderer` 1.2.1+ (separately installed; no CoreAI package depends on it) | `COREAI_HAS_MARKDOWN_RENDERER` | `COREAI_DISABLE_MARKDOWN_RENDERER`, or remove the package; see [CHAT_MARKDOWN.md](CHAT_MARKDOWN.md) |
 
 `CoreAI.Core.asmdef` has no Lua reference. Lua VM/sandbox implementations and their
 Lua-CSharp dependencies live in `CoreAI.Mods`. `CoreAI.Source` owns the guarded LLMUnity
@@ -29,6 +30,8 @@ adapter. The benchmark depends on Core, Unity, and Mods because G1-G8 execute re
 | **Lua (Lua-CSharp) > Enable Lua** / **Disable Lua** | Adds / removes the `COREAI_LUA` scripting define. The Lua-CSharp runtime ships inside `com.neoxider.coreaimods`; nothing extra is installed. |
 | **LLMUnity > Enable + Update to latest** | Adds `ai.undream.llm` from its Git URL through the Package Manager, or re-resolves it to the latest commit when it is already installed. |
 | **LLMUnity > Remove package** | Removes `ai.undream.llm` after a confirmation; `COREAI_HAS_LLMUNITY` unsets. |
+| **Markdown Renderer > Install (v1.2.1)** | Shows the package's licence terms, then adds `com.neoxider.markdownrenderer` from its Git URL pinned to the tag; chat answers then render as Markdown. |
+| **Markdown Renderer > Remove package** | Removes the package; `COREAI_HAS_MARKDOWN_RENDERER` unsets and chat answers show as plain text again. |
 | **Report module status** | Shows whether `COREAI_LLM` and `COREAI_LUA` are set and which LLMUnity version is installed. |
 
 The define items change the scripting defines of the **currently selected build target** only; repeat them

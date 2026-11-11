@@ -55,10 +55,10 @@ namespace CoreAI.Mods.Rbx.Instances
             }
         }
 
-        // TODO: MVP5 — game:BindToClose(fn) with M6.1 semantics (parallel callbacks, bounded flush window).
+        // TODO: MVP16 — game:BindToClose(fn) with M6.1 semantics (parallel callbacks, bounded flush window).
         public void BindToClose(object callback)
         {
-            throw RbxError.NotImplemented("game:BindToClose", "MVP5",
+            throw RbxError.NotImplemented("game:BindToClose", "MVP16",
                 "rely on mod hot-reload teardown for cleanup until BindToClose lands");
         }
     }

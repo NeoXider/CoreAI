@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The P19 scenario assembly (Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios). See ../UnityCompileCheck.props. -->
+  <Import Project="../UnityCompileCheck.props" />
+  <PropertyGroup>
+    <AssemblyName>CoreAI.Mods.PerformanceScenarios</AssemblyName>
+    <DefineConstants>$(DefineConstants);COREAI_PERF_SCENARIOS</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(RepoRoot)/Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios/*.cs" LinkBase="Scenarios" />
+    <ProjectReference Include="../CoreAI.RbxApi.Unity/CoreAI.RbxApi.Unity.csproj" />
+    <ProjectReference Include="../CoreAI.RbxApi.Binding/CoreAI.RbxApi.Binding.csproj" />
+    <ProjectReference Include="../CoreAI.Source/CoreAI.Source.csproj" />
+    <ProjectReference Include="../CoreAI.Mods/CoreAI.Mods.csproj" />
+  </ItemGroup>
+</Project>

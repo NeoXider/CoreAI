@@ -14,6 +14,12 @@ namespace CoreAI.Net.Mirror
     {
         /// <summary>Host-defined credential bytes. CoreAI never parses, stores or logs them.</summary>
         public byte[] Credential;
+
+        /// <summary>
+        /// The CoreAI Mirror protocol the joining client speaks (<see cref="CoreAiMirrorProtocol.Version"/>);
+        /// <see cref="CoreAiMirrorProtocol.Unversioned"/> from a client that predates the field.
+        /// </summary>
+        public int ProtocolVersion;
     }
 
     /// <summary>The server's answer to an admission request.</summary>
@@ -23,12 +29,13 @@ namespace CoreAI.Net.Mirror
         public bool Admitted;
 
         /// <summary>
-        /// A short, non-specific reason shown to the rejected client.
+        /// A short reason shown to the rejected client: the fixed "not admitted" for a refusal of
+        /// the host's admission provider, and both protocols for a protocol mismatch.
         /// </summary>
         /// <remarks>
         /// WHY not the provider's own reason: "signature mismatch" versus "expired token" tells an
         /// attacker which half of a forged credential to fix. The detailed reason goes to the host's
-        /// log; the client is told only that it was refused.
+        /// log; the client is told only that it was refused. A protocol number is no such secret.
         /// </remarks>
         public string Reason;
 
@@ -43,6 +50,16 @@ namespace CoreAI.Net.Mirror
         /// would be the first thing it must not tell.
         /// </remarks>
         public string ActorId;
+
+        /// <summary>
+        /// The protocol the server speaks; <see cref="CoreAiMirrorProtocol.Unversioned"/> from a
+        /// server that predates the field. A client refuses an admission from a server of another
+        /// protocol.
+        /// </summary>
+        public int ProtocolVersion;
+
+        /// <summary>Why the admission was refused, as <see cref="CoreAiAdmissionRefusalKind"/>.</summary>
+        public byte Refusal;
     }
 
     /// <summary>
@@ -119,18 +136,11 @@ namespace CoreAI.Net.Mirror
     /// WHY it carries nothing: who the client is was decided at admission and lives in the server's
     /// connection map; a field here would be a claim the server must ignore.
     /// <para>
-    /// Wire compatibility of the three messages below: they are additive, and mixed versions fail
-    /// loudly instead of half-working — provided Mirror's <c>exceptionsDisconnect</c> is on, its
-    /// default. A server that predates them has no handler for this one, so its Mirror disconnects a
-    /// newer client right after admission, with an error in the server log. A client that predates
-    /// them never sends it, so a newer server holds that client's reliable remotes and drops it at
-    /// the readiness deadline with a log line naming the cause; the clock anchor goes only to
-    /// acknowledged connections, so such a client is never sent a message it cannot read before
-    /// that. A field added to a message is not caught this way: a reader that meets fewer bytes than
-    /// it expects throws inside Mirror's handler, which disconnects only with
-    /// <c>exceptionsDisconnect</c> on and otherwise logs and keeps the connection, one message
-    /// lost. Server and client therefore run the same CoreAI version, as the admission response
-    /// already requires; nothing on the wire negotiates it.
+    /// Wire compatibility: the admission handshake carries <see cref="CoreAiMirrorProtocol.Version"/>
+    /// both ways, and a peer of another protocol is refused there with a reason, before this or any
+    /// later message is sent — so the two sides of an admitted connection always speak the same
+    /// protocol. Against a server older than the handshake, a current client refuses the admission
+    /// itself: such a server's response carries no protocol number.
     /// </para>
     /// </remarks>
     public struct CoreAiClientReadyMessage : NetworkMessage
@@ -194,5 +204,67 @@ namespace CoreAI.Net.Mirror
 
         /// <summary>The text shown to the player; the kick message a script gave, when it gave one.</summary>
         public string Message;
+    }
+
+    /// <summary>What one <see cref="CoreAiRosterMessage"/> does to the client's roster.</summary>
+    public enum CoreAiRosterChange : byte
+    {
+        /// <summary>Replaces the roster with these entries: the first message of a snapshot.</summary>
+        Snapshot = 1,
+
+        /// <summary>Appends these entries to the snapshot the previous message started.</summary>
+        SnapshotContinued = 2,
+
+        /// <summary>These members joined the room.</summary>
+        Joined = 3,
+
+        /// <summary>These members left the room; only their member ids are meaningful.</summary>
+        Left = 4
+    }
+
+    /// <summary>One member of the room, as a client is told it.</summary>
+    /// <remarks>
+    /// WHY no actor id: it is the server's routing key and can carry the host's account id; a
+    /// client needs who is in the room — the Roblox <c>Player</c> fields — and a key to remove an
+    /// entry by, which <see cref="MemberId"/> is.
+    /// </remarks>
+    public struct CoreAiRosterEntry
+    {
+        /// <summary>The server's key for this member, unique within the server's run.</summary>
+        public uint MemberId;
+
+        /// <summary>The admitted UserId.</summary>
+        public long UserId;
+
+        /// <summary>The admitted name, cut to <see cref="CoreAiMirrorRoster.MaxNameBytes"/> UTF-8 bytes.</summary>
+        public string Name;
+
+        /// <summary>The admitted display name, cut the same way.</summary>
+        public string DisplayName;
+
+        /// <summary>Whether this member is the host's own player (Mirror host mode).</summary>
+        public bool IsHost;
+    }
+
+    /// <summary>
+    /// Who is in the room, server to client: a snapshot when the client acknowledges readiness,
+    /// then every join and every leave, on the reliable channel.
+    /// </summary>
+    public struct CoreAiRosterMessage : NetworkMessage
+    {
+        /// <summary>What this message does, as <see cref="CoreAiRosterChange"/>.</summary>
+        public byte Change;
+
+        /// <summary>
+        /// The roster's revision after this message; a snapshot carries the current one and every
+        /// join or leave the next.
+        /// </summary>
+        public uint Revision;
+
+        /// <summary>The recipient's own member id in a snapshot; zero when the recipient is not a member.</summary>
+        public uint SelfMemberId;
+
+        /// <summary>The members this message is about.</summary>
+        public CoreAiRosterEntry[] Entries;
     }
 }

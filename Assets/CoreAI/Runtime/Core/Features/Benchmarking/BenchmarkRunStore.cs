@@ -24,6 +24,13 @@ namespace CoreAI.Benchmarking
         public string Model { get; set; } = "";
         public string BaseUrl { get; set; } = "";
         public string Label { get; set; } = "";
+
+        /// <summary>
+        /// The target's explicit display name, the model id its reports carry; empty for a target without one and
+        /// for a manifest written before display names existed.
+        /// </summary>
+        public string DisplayName { get; set; } = "";
+
         public string KeyReference { get; set; } = "";
         public bool RequiresExternalKey { get; set; }
         public bool UsesDefaultSecretSource { get; set; }
@@ -46,6 +53,7 @@ namespace CoreAI.Benchmarking
             return new BenchmarkStoredTarget
             {
                 Slug = slug, Model = target.Model, BaseUrl = target.BaseUrl, Label = target.Label,
+                DisplayName = target.ExplicitDisplayName,
                 KeyReference = target.HasKeyReference ? target.ApiKey : "",
                 RequiresExternalKey = !target.HasKeyReference && target.ApiKey.Length > 0,
                 ReasoningEffort = target.ReasoningEffort, Temperature = target.Temperature,
@@ -91,10 +99,14 @@ namespace CoreAI.Benchmarking
             {
                 throw new InvalidOperationException($"Target '{LabelOrModel}' needs {KeyReference} in this process.");
             }
-            return new BenchmarkTarget(Model, BaseUrl, key, Label, ReasoningEffort, ExtraBodyJson, Temperature);
+            return new BenchmarkTarget(Model, BaseUrl, key, Label, ReasoningEffort, ExtraBodyJson, Temperature,
+                DisplayName ?? "");
         }
 
         public string LabelOrModel => Label.Length > 0 ? Label : Model;
+
+        /// <summary>The model id this target's reports carry: <see cref="BenchmarkTarget.DisplayName"/> of the stored target.</summary>
+        public string ReportName => string.IsNullOrEmpty(DisplayName) ? LabelOrModel : DisplayName;
 
         /// <summary>Records only safe identity for an unselected legacy target; its config is resolved when selected later.</summary>
         public static BenchmarkStoredTarget Deferred(BenchmarkTarget target, string slug)
@@ -103,6 +115,7 @@ namespace CoreAI.Benchmarking
             return new BenchmarkStoredTarget
             {
                 Slug = slug, Model = target.Model, Label = target.Label, BaseUrl = endpoint.Uri.AbsoluteUri.TrimEnd('/'),
+                DisplayName = target.ExplicitDisplayName,
                 KeyReference = target.HasKeyReference ? target.ApiKey : "",
                 RequiresExternalKey = !target.HasKeyReference && target.ApiKey.Length > 0,
                 ConfigurationDeferred = true
@@ -112,6 +125,7 @@ namespace CoreAI.Benchmarking
         public void Validate(BenchmarkStoredTarget other)
         {
             if (Slug != other.Slug || Model != other.Model || BaseUrl != other.BaseUrl || Label != other.Label ||
+                (DisplayName ?? "") != (other.DisplayName ?? "") ||
                 ReasoningEffort != other.ReasoningEffort || Temperature != other.Temperature ||
                 KeyReference != other.KeyReference || RequiresExternalKey != other.RequiresExternalKey ||
                 !JToken.DeepEquals(ParseBody(ExtraBodyJson), ParseBody(other.ExtraBodyJson)))
@@ -123,7 +137,7 @@ namespace CoreAI.Benchmarking
         public void ValidateLegacyMetadata(BenchmarkRunMetadata metadata, bool selected, bool streaming, bool nativeTools)
         {
             if (!selected) return;
-            if (metadata.ModelId != LabelOrModel || metadata.ReasoningEffort != ReasoningEffort ||
+            if (metadata.ModelId != ReportName || metadata.ReasoningEffort != ReasoningEffort ||
                 metadata.Temperature != Temperature || metadata.Streaming != streaming || metadata.NativeToolCalling != nativeTools)
                 throw new InvalidOperationException($"Cannot resume: legacy report target configuration mismatch for '{LabelOrModel}'. Keep the original effort, temperature, streaming and native-tool settings.");
         }

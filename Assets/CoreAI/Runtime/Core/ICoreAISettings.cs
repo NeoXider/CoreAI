@@ -140,14 +140,23 @@ namespace CoreAI
         bool EnableStreaming { get; }
 
         /// <summary>
-        /// Run the Lua sandbox on the WebGL player. Default <c>true</c>.
-        /// Lua works on all other players regardless of this flag; it is meant to gate only the WebGL/IL2CPP
-        /// path, which additionally requires link.xml stripping protection (shipped). No Lua runtime reads the
-        /// flag yet, so <c>false</c> does not currently stop Lua on WebGL. The Full reflection tier
-        /// (<c>unity_*</c>) has no WebGL-specific block: it is granted only by the mods composition
-        /// (<c>CoreAiModsLifetimeScope</c>, "Enable Full Lua Access"), on WebGL as on every other player.
+        /// Obsolete and read by nothing; always <c>true</c> by default. It gated the old WebGL/IL2CPP VM path, but the
+        /// Lua-CSharp VM runs on the WebGL player like on every other one. The Full reflection tier (<c>unity_*</c>)
+        /// is granted only by the mods composition (<c>CoreAiModsLifetimeScope</c>, "Enable Full Lua Access").
         /// </summary>
+        [System.Obsolete("Read by nothing: Lua-CSharp runs on the WebGL player like on every other one, so there is no WebGL Lua switch. To ship a build without Lua, leave CoreAiModsLifetimeScope out of the scene (or build without the COREAI_LUA define); to keep mods but not AI-written Lua, leave the lua-builder tool profile off the roles.")]
         bool EnableLuaOnWebGl => true;
+
+        /// <summary>
+        /// The mod folder (a <c>/</c>-separated path such as <c>AI</c> or <c>AI/Made</c>) that <c>manage_mods</c>
+        /// puts a new mod in when the call names no folder and the mod's header declares no category; the tool
+        /// writes it into the mod's header as its <c>category:</c> entry. Empty (the default) keeps such mods at
+        /// the top level and their source exactly as the model wrote it.
+        /// </summary>
+        // WHY empty by default: a default folder has to be written into the header, which adds a line to a
+        // source the model wrote without one, so the text get_source returns and the line numbers of its
+        // errors would no longer match what the model sent. A host opts in by naming a folder.
+        string AiModsDefaultFolder => "";
 
         /// <summary>
         /// Maximum tokens.

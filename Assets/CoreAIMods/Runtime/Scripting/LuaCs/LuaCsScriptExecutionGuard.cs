@@ -49,13 +49,24 @@ namespace CoreAI.Scripting.LuaCs
             LuaFunction function = UnwrapCallable(callable);
 
             args ??= Array.Empty<object>();
-            LuaValue[] luaArgs = args.Length == 0 ? Array.Empty<LuaValue>() : new LuaValue[args.Length];
-            for (int i = 0; i < args.Length; i++)
+            LuaValue[] luaArgs = RentArguments(args.Length);
+            LuaValue[] results;
+            try
             {
-                luaArgs[i] = LuaCsValueMarshaller.Unbox(args[i]);
+                for (int i = 0; i < args.Length; i++)
+                {
+                    luaArgs[i] = LuaCsValueMarshaller.Unbox(args[i]);
+                }
+
+                results = _inner.Execute(lua, function, cancellationToken, luaArgs);
+            }
+            finally
+            {
+                // WHY cleared: the buffer outlives the call, and a script value left in it would keep a table
+                // or a string of an unloaded mod reachable.
+                Array.Clear(luaArgs, 0, luaArgs.Length);
             }
 
-            LuaValue[] results = _inner.Execute(lua, function, cancellationToken, luaArgs);
             if (results.Length == 0)
             {
                 return Array.Empty<object>();
@@ -68,6 +79,31 @@ namespace CoreAI.Scripting.LuaCs
             }
 
             return boxed;
+        }
+
+        private const int MaxPooledArguments = 8;
+
+        [ThreadStatic]
+        private static LuaValue[][] _argumentBuffers;
+
+        // WHY one reusable buffer per argument count: the guard copies the arguments onto the Lua stack before
+        // any script runs (LuaCsExecutionGuard.CallOnStack), so the buffer is free again before a script could
+        // re-enter this method, and a fresh array per handler call was garbage on every event and timer.
+        // The length is exact because the guard passes the whole array to the call.
+        private static LuaValue[] RentArguments(int count)
+        {
+            if (count == 0)
+            {
+                return Array.Empty<LuaValue>();
+            }
+
+            if (count > MaxPooledArguments)
+            {
+                return new LuaValue[count];
+            }
+
+            LuaValue[][] buffers = _argumentBuffers ??= new LuaValue[MaxPooledArguments + 1][];
+            return buffers[count] ??= new LuaValue[count];
         }
 
         /// <summary>Reads a seam-level callable back to a <see cref="LuaFunction"/>.</summary>

@@ -33,7 +33,10 @@ namespace CoreAI.Vision
         MovementDisabled,
 
         /// <summary>The camera is reserved for a different agent role.</summary>
-        WrongRole
+        WrongRole,
+
+        /// <summary>The free agent camera was asked for, but <see cref="AgentCameraOptions.AllowFreeCamera"/> is off.</summary>
+        FreeCameraDisabled
     }
 
     /// <summary>A camera pose snapshot (world position, Euler rotation, vertical FOV).</summary>
@@ -80,6 +83,9 @@ namespace CoreAI.Vision
         public bool IsMarked { get; set; }
         public bool Movable { get; set; }
         public CameraPose Pose { get; set; }
+
+        /// <summary>True for a free agent camera the service created on demand.</summary>
+        public bool IsFree { get; set; }
     }
 
     /// <summary>Outcome of a camera capture.</summary>
@@ -95,6 +101,12 @@ namespace CoreAI.Vision
         public string Format { get; set; }
         public byte[] Bytes { get; set; }
         public CameraPose Pose { get; set; }
+
+        /// <summary>Which readback path produced <see cref="Bytes"/>.</summary>
+        public CameraReadbackMode ReadbackMode { get; set; }
+
+        /// <summary>Failure detail when <see cref="Ok"/> is false; null otherwise.</summary>
+        public string Message { get; set; }
     }
 
     /// <summary>
@@ -113,6 +125,8 @@ namespace CoreAI.Vision
         /// Read-only capture-target resolution: explicit <paramref name="cameraName"/> →
         /// the agent's own marked camera → <see cref="Camera.main"/> → first active camera. Returns null
         /// when no camera exists. Capture never moves the camera, so this is always safe.
+        /// <see cref="AgentCameraService"/> also understands the reserved names <c>main</c>, <c>agent</c> and
+        /// <c>free</c>.
         /// </summary>
         Camera ResolveCaptureCamera(string cameraName, string agentRoleId, out bool isMain);
 
@@ -142,7 +156,26 @@ namespace CoreAI.Vision
     }
 
     /// <inheritdoc cref="IAgentCameraService"/>
-    public sealed class AgentCameraService : IAgentCameraService
+    /// <remarks>
+    /// <para>
+    /// <b>Whose camera.</b> An agent's own camera is a camera a designer marked for it with
+    /// <see cref="CoreAiAgentCamera"/>, else its free camera: a camera this service creates on demand the first time
+    /// the agent asks to move its own camera (or names <c>agent</c>/<c>free</c>). The free camera starts at the main
+    /// camera's pose and settings, stays disabled so it never draws to the screen and never becomes
+    /// <see cref="Camera.main"/>, is scoped to the role, and is destroyed by <see cref="Dispose"/>. A camera nobody
+    /// marked, the player's included, can be captured but never moved.
+    /// </para>
+    /// <para>
+    /// <b>Reserved names.</b> <c>main</c> is <see cref="Camera.main"/>; <c>agent</c> is the agent's own camera
+    /// (a marked one, else the free camera); <c>free</c> is always the free camera. An empty name means the own
+    /// camera when one exists, else the main camera for a capture and the free camera for a move.
+    /// </para>
+    /// <para>
+    /// Frames go through <see cref="ICameraFrameReadback"/> (async GPU readback where the platform has it), and
+    /// look/orbit go through <see cref="IAgentCameraRig"/>; both are replaceable through the constructor.
+    /// </para>
+    /// </remarks>
+    public sealed class AgentCameraService : IAgentCameraService, IAgentCameraRig, IDisposable
     {
         /// <summary>Default long-edge capture size in pixels.</summary>
         public const int DefaultMaxSize = 512;
@@ -156,25 +189,60 @@ namespace CoreAI.Vision
         /// <summary>Default minimum seconds between captures per agent.</summary>
         public const double DefaultMinCaptureIntervalSeconds = 1.0;
 
+        /// <summary>Reserved camera name for <see cref="Camera.main"/>.</summary>
+        public const string MainCameraAlias = "main";
+
+        /// <summary>Reserved camera name for the agent's own camera (a marked camera, else the free camera).</summary>
+        public const string AgentCameraAlias = "agent";
+
+        /// <summary>Reserved camera name for the free agent camera, created on demand.</summary>
+        public const string FreeCameraAlias = "free";
+
         private const int JpegQuality = 75;
 
         private readonly Func<double> _clockSeconds;
-        private readonly double _minCaptureIntervalSeconds;
+        private readonly AgentCameraOptions _options;
+        private readonly ICameraFrameReadback _readback;
+        private readonly IAgentCameraRig _rig;
         private readonly object _lock = new();
         private readonly Dictionary<string, double> _lastCaptureAtSeconds = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, Camera> _freeCameras = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>Production constructor: monotonic <see cref="System.Diagnostics.Stopwatch"/> clock, 1s rate limit.</summary>
         public AgentCameraService()
-            : this(DefaultStopwatchClock, DefaultMinCaptureIntervalSeconds)
+            : this(null, null, null, null)
         {
         }
 
         /// <summary>Test/config constructor: inject a clock (seconds) and rate-limit interval.</summary>
         public AgentCameraService(Func<double> clockSeconds, double minCaptureIntervalSeconds)
+            : this(new AgentCameraOptions { MinCaptureIntervalSeconds = minCaptureIntervalSeconds }, null, null,
+                clockSeconds)
         {
-            _clockSeconds = clockSeconds ?? DefaultStopwatchClock;
-            _minCaptureIntervalSeconds = minCaptureIntervalSeconds < 0 ? 0 : minCaptureIntervalSeconds;
         }
+
+        /// <summary>The given rules with the default readback, rig and clock.</summary>
+        public AgentCameraService(AgentCameraOptions options)
+            : this(options, null, null, null)
+        {
+        }
+
+        /// <summary>
+        /// Every block injectable; null picks the default: <see cref="AgentCameraOptions.CreateDefault"/>,
+        /// <see cref="CameraFrameReadback.CreateDefault"/>, an <see cref="AgentCameraRig"/> over the same options,
+        /// and a monotonic clock in seconds.
+        /// </summary>
+        public AgentCameraService(AgentCameraOptions options, ICameraFrameReadback readback, IAgentCameraRig rig,
+            Func<double> clockSeconds)
+        {
+            _options = options ?? AgentCameraOptions.CreateDefault();
+            _readback = readback ?? CameraFrameReadback.CreateDefault();
+            _rig = rig ?? new AgentCameraRig(_options, new SceneCameraTargetResolver());
+            _clockSeconds = clockSeconds ?? DefaultStopwatchClock;
+        }
+
+        /// <summary>The rules this service applies; changes take effect on the next call.</summary>
+        public AgentCameraOptions Options => _options;
 
         private static double DefaultStopwatchClock()
         {
@@ -189,23 +257,23 @@ namespace CoreAI.Vision
             Camera[] cameras = UnityEngine.Object.FindObjectsByType<Camera>(
                 FindObjectsInactive.Exclude, FindObjectsSortMode.None);
 
-            List<AgentCameraInfo> list = new(cameras.Length);
+            List<AgentCameraInfo> list = new(cameras.Length + _freeCameras.Count);
+            HashSet<Camera> listed = new();
             foreach (Camera cam in cameras)
             {
-                if (cam == null)
+                if (cam != null && listed.Add(cam))
                 {
-                    continue;
+                    list.Add(Describe(cam, main, agentRoleId));
                 }
+            }
 
-                CoreAiAgentCamera marker = cam.GetComponent<CoreAiAgentCamera>();
-                list.Add(new AgentCameraInfo
+            // WHY: an edit-mode free camera is DontSave, which object searches can skip, so the tracked ones are added explicitly.
+            foreach (Camera free in _freeCameras.Values)
+            {
+                if (free != null && free.gameObject.activeInHierarchy && listed.Add(free))
                 {
-                    Name = cam.name,
-                    IsMain = cam == main,
-                    IsMarked = marker != null,
-                    Movable = marker != null && marker.IsMovableBy(agentRoleId),
-                    Pose = CameraPose.FromCamera(cam)
-                });
+                    list.Add(Describe(free, main, agentRoleId));
+                }
             }
 
             return list;
@@ -213,7 +281,7 @@ namespace CoreAI.Vision
 
         public Camera ResolveCaptureCamera(string cameraName, string agentRoleId, out bool isMain)
         {
-            Camera cam = ResolveCameraCandidate(cameraName, agentRoleId, true);
+            Camera cam = ResolveCaptureCandidate(cameraName, agentRoleId);
             isMain = cam != null && cam == Camera.main;
             return cam;
         }
@@ -222,13 +290,23 @@ namespace CoreAI.Vision
             out CameraMoveDenial denial)
         {
             camera = null;
-            Camera candidate = ResolveMovableCandidate(cameraName, agentRoleId);
+            string trimmed = cameraName?.Trim();
+            if (IsReserved(trimmed, FreeCameraAlias) && !_options.AllowFreeCamera)
+            {
+                denial = new CameraMoveDenial(CameraMoveDenialReason.FreeCameraDisabled,
+                    "This game does not give agents a free camera. Call camera_list and move a camera marked " +
+                    "movable, if there is one.");
+                return false;
+            }
+
+            Camera candidate = ResolveMovableCandidate(trimmed, agentRoleId);
             if (candidate == null)
             {
                 denial = new CameraMoveDenial(CameraMoveDenialReason.NoCamera,
                     string.IsNullOrWhiteSpace(cameraName)
-                        ? "No camera found to move."
-                        : $"No camera named '{cameraName}' found.");
+                        ? "No camera found to move. Call camera_list to see the cameras."
+                        : $"No camera named '{cameraName}' found. Call camera_list to see the cameras, or leave " +
+                          "cameraName empty to move your own camera.");
                 return false;
             }
 
@@ -236,23 +314,26 @@ namespace CoreAI.Vision
             if (marker == null)
             {
                 denial = new CameraMoveDenial(CameraMoveDenialReason.NotMarked,
-                    $"Camera '{candidate.name}' is not agent-controllable, so it cannot be moved (the " +
-                    "player's camera is protected by default). Add a CoreAiAgentCamera component with " +
-                    "allowMove=true to a camera to let agents move it, then capture/list will report it as movable.");
+                    $"Camera '{candidate.name}' is not agent-controllable, so it cannot be moved (the player's " +
+                    "camera is protected). Leave cameraName empty or use 'agent' to move your own camera instead. " +
+                    "A designer can make a scene camera movable by adding a CoreAiAgentCamera component with " +
+                    "allowMove=true.");
                 return false;
             }
 
             if (!marker.AllowMove)
             {
                 denial = new CameraMoveDenial(CameraMoveDenialReason.MovementDisabled,
-                    $"Camera '{candidate.name}' is marked but has allowMove=false, so it is capture-only.");
+                    $"Camera '{candidate.name}' is marked but has allowMove=false, so it is capture-only." +
+                    (_options.AllowFreeCamera ? " Use cameraName 'free' to move a free camera of your own." : ""));
                 return false;
             }
 
             if (!marker.AppliesToRole(agentRoleId))
             {
                 denial = new CameraMoveDenial(CameraMoveDenialReason.WrongRole,
-                    $"Camera '{candidate.name}' is reserved for a different agent role.");
+                    $"Camera '{candidate.name}' is reserved for a different agent role. Leave cameraName empty to " +
+                    "move your own camera.");
                 return false;
             }
 
@@ -264,83 +345,37 @@ namespace CoreAI.Vision
         public bool TryApplyLook(Camera camera, float? px, float? py, float? pz, float? rx, float? ry, float? rz,
             string lookAtTarget, out string errorCode)
         {
-            errorCode = null;
-            if (camera == null)
+            CameraRigResult result = _rig.Look(camera, new CameraLookRequest
             {
-                errorCode = "no_camera";
-                return false;
-            }
+                PositionX = px,
+                PositionY = py,
+                PositionZ = pz,
+                RotationX = rx,
+                RotationY = ry,
+                RotationZ = rz,
+                LookAt = lookAtTarget
+            });
+            errorCode = result.Ok ? null : result.ErrorCode;
+            return result.Ok;
+        }
 
-            Transform t = camera.transform;
-            Vector3 originalPosition = t.position;
-            Vector3 pos = t.position;
-            Vector3 euler = t.eulerAngles;
-            bool hasLookAt = !string.IsNullOrWhiteSpace(lookAtTarget);
-            bool hasPos = px.HasValue || py.HasValue || pz.HasValue;
-            bool hasRot = rx.HasValue || ry.HasValue || rz.HasValue;
+        /// <inheritdoc/>
+        public CameraRigResult Look(Camera camera, CameraLookRequest request)
+        {
+            return _rig.Look(camera, request);
+        }
 
-            if (!hasPos && !hasRot && !hasLookAt)
-            {
-                errorCode = "no_change";
-                return false;
-            }
-
-            if (px.HasValue)
-            {
-                pos.x = px.Value;
-            }
-
-            if (py.HasValue)
-            {
-                pos.y = py.Value;
-            }
-
-            if (pz.HasValue)
-            {
-                pos.z = pz.Value;
-            }
-
-            // Apply position first so a look-at rotates from the final vantage point.
-            t.position = pos;
-
-            if (hasLookAt)
-            {
-                Transform target = FindActiveTransformByName(lookAtTarget.Trim());
-                if (target == null)
-                {
-                    // Restore position: nothing meaningful was applied.
-                    t.position = originalPosition;
-                    errorCode = "target_not_found";
-                    return false;
-                }
-
-                t.LookAt(target);
-                return true;
-            }
-
-            if (rx.HasValue)
-            {
-                euler.x = rx.Value;
-            }
-
-            if (ry.HasValue)
-            {
-                euler.y = ry.Value;
-            }
-
-            if (rz.HasValue)
-            {
-                euler.z = rz.Value;
-            }
-
-            t.eulerAngles = euler;
-            return true;
+        /// <inheritdoc/>
+        public CameraRigResult Orbit(Camera camera, CameraOrbitRequest request)
+        {
+            return _rig.Orbit(camera, request);
         }
 
         public bool TryReserveCapture(string agentRoleId, out double retryAfterSeconds)
         {
             retryAfterSeconds = 0;
-            if (_minCaptureIntervalSeconds <= 0)
+            double interval = _options.MinCaptureIntervalSeconds;
+            if (interval <= 0)
             {
                 return true;
             }
@@ -352,9 +387,9 @@ namespace CoreAI.Vision
                 if (_lastCaptureAtSeconds.TryGetValue(key, out double last))
                 {
                     double elapsed = now - last;
-                    if (elapsed < _minCaptureIntervalSeconds)
+                    if (elapsed < interval)
                     {
-                        retryAfterSeconds = _minCaptureIntervalSeconds - elapsed;
+                        retryAfterSeconds = interval - elapsed;
                         return false;
                     }
                 }
@@ -373,29 +408,126 @@ namespace CoreAI.Vision
             }
 
             await UniTask.SwitchToMainThread(cancellationToken);
-            // Let the current frame finish so the capture reflects a fully drawn frame.
-            await UniTask.Yield(PlayerLoopTiming.LastPostLateUpdate, cancellationToken);
+            if (camera == null)
+            {
+                return new CameraCaptureResult { Ok = false, Error = "no_camera" };
+            }
 
-            byte[] bytes = CaptureToBytes(camera, maxSize, format, out int width, out int height);
+            int longEdge = Mathf.Clamp(maxSize <= 0 ? DefaultMaxSize : maxSize, MinSize, MaxSize);
+            ComputeSize(camera, longEdge, out int width, out int height);
+            string cameraName = camera.name;
+            CameraPose pose = CameraPose.FromCamera(camera);
+
+            CameraFrameReadbackResult frame;
+            try
+            {
+                frame = await _readback.CaptureAsync(camera, width, height, format, JpegQuality, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return new CameraCaptureResult
+                {
+                    Ok = false, Error = "capture_failed", CameraName = cameraName, Message = ex.Message
+                };
+            }
+
+            byte[] bytes = frame?.Bytes;
+            if (bytes == null || bytes.Length == 0)
+            {
+                return new CameraCaptureResult { Ok = false, Error = "capture_failed", CameraName = cameraName };
+            }
+
             return new CameraCaptureResult
             {
                 Ok = true,
-                CameraName = camera.name,
+                CameraName = cameraName,
                 IsMain = isMain,
                 Width = width,
                 Height = height,
-                SizeBytes = bytes?.Length ?? 0,
+                SizeBytes = bytes.Length,
                 Format = format == CaptureImageFormat.Png ? "png" : "jpg",
                 Bytes = bytes,
-                Pose = CameraPose.FromCamera(camera)
+                Pose = pose,
+                ReadbackMode = frame.Mode
             };
+        }
+
+        /// <summary>
+        /// The free agent camera of <paramref name="agentRoleId"/>. With <paramref name="create"/> it is created on
+        /// demand when <see cref="AgentCameraOptions.AllowFreeCamera"/> is on; otherwise only an existing one is
+        /// returned. Must run on the Unity main thread.
+        /// </summary>
+        public bool TryGetFreeCamera(string agentRoleId, bool create, out Camera camera)
+        {
+            string key = NormalizeRole(agentRoleId);
+            if (_freeCameras.TryGetValue(key, out camera) && camera != null)
+            {
+                return true;
+            }
+
+            camera = null;
+            if (!create || !_options.AllowFreeCamera)
+            {
+                return false;
+            }
+
+            camera = CreateFreeCamera(agentRoleId);
+            _freeCameras[key] = camera;
+            return true;
+        }
+
+        /// <summary>True when <paramref name="camera"/> is a free agent camera this service created.</summary>
+        public bool IsFreeCamera(Camera camera)
+        {
+            if (camera == null)
+            {
+                return false;
+            }
+
+            foreach (Camera free in _freeCameras.Values)
+            {
+                if (free == camera)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>Destroys every free agent camera this service created. Must run on the Unity main thread.</summary>
+        public void Dispose()
+        {
+            foreach (Camera free in _freeCameras.Values)
+            {
+                if (free == null)
+                {
+                    continue;
+                }
+
+                if (Application.isPlaying)
+                {
+                    UnityEngine.Object.Destroy(free.gameObject);
+                }
+                else
+                {
+                    UnityEngine.Object.DestroyImmediate(free.gameObject);
+                }
+            }
+
+            _freeCameras.Clear();
         }
 
         /// <summary>
         /// Renders <paramref name="camera"/> to an offscreen target sized so its long edge is
         /// <paramref name="maxSize"/> (clamped to <see cref="MinSize"/>..<see cref="MaxSize"/>), preserving
         /// aspect ratio, and returns the encoded bytes. Restores the camera target texture and the active
-        /// render texture. Must run on the Unity main thread.
+        /// render texture. Must run on the Unity main thread. Synchronous: <see cref="CaptureAsync"/> uses the
+        /// non-blocking readback instead.
         /// </summary>
         public static byte[] CaptureToBytes(Camera camera, int maxSize, CaptureImageFormat format,
             out int width, out int height)
@@ -418,7 +550,7 @@ namespace CoreAI.Vision
             int ph = camera.pixelHeight;
             if (pw <= 0 || ph <= 0)
             {
-                // Off-display / uninitialized camera: assume 16:9.
+                // WHY: an off-display or uninitialized camera reports 0x0 pixels; assume 16:9.
                 pw = 1600;
                 ph = 900;
             }
@@ -436,28 +568,54 @@ namespace CoreAI.Vision
             }
         }
 
-        /// <summary>Read-only resolution shared by capture. Falls back to main then any active camera.</summary>
-        private Camera ResolveCameraCandidate(string cameraName, string agentRoleId, bool preferOwn)
+        private AgentCameraInfo Describe(Camera cam, Camera main, string agentRoleId)
+        {
+            CoreAiAgentCamera marker = cam.GetComponent<CoreAiAgentCamera>();
+            return new AgentCameraInfo
+            {
+                Name = cam.name,
+                IsMain = cam == main,
+                IsMarked = marker != null,
+                Movable = marker != null && marker.IsMovableBy(agentRoleId),
+                Pose = CameraPose.FromCamera(cam),
+                IsFree = IsFreeCamera(cam)
+            };
+        }
+
+        /// <summary>Read-only resolution for capture. Unknown names fall back to the defaults rather than failing.</summary>
+        private Camera ResolveCaptureCandidate(string cameraName, string agentRoleId)
         {
             string trimmed = cameraName?.Trim();
-            bool explicitMain = string.Equals(trimmed, "main", StringComparison.OrdinalIgnoreCase);
-
-            if (!string.IsNullOrEmpty(trimmed) && !explicitMain)
+            if (IsReserved(trimmed, AgentCameraAlias))
+            {
+                Camera own = FindMarkedOwnCamera(agentRoleId) ?? GetFreeCamera(agentRoleId, true);
+                if (own != null)
+                {
+                    return own;
+                }
+            }
+            else if (IsReserved(trimmed, FreeCameraAlias))
+            {
+                Camera free = GetFreeCamera(agentRoleId, true);
+                if (free != null)
+                {
+                    return free;
+                }
+            }
+            else if (string.IsNullOrEmpty(trimmed))
+            {
+                Camera own = FindMarkedOwnCamera(agentRoleId) ?? GetFreeCamera(agentRoleId, false);
+                if (own != null)
+                {
+                    return own;
+                }
+            }
+            else if (!IsReserved(trimmed, MainCameraAlias))
             {
                 Camera named = FindActiveCameraByName(trimmed);
                 if (named != null)
                 {
                     return named;
-                }
-                // Named camera not found: fall through to defaults rather than failing capture.
-            }
-
-            if (preferOwn && string.IsNullOrEmpty(trimmed))
-            {
-                Camera own = FindOwnCamera(agentRoleId);
-                if (own != null)
-                {
-                    return own;
                 }
             }
 
@@ -467,33 +625,74 @@ namespace CoreAI.Vision
                 return main;
             }
 
-            return UnityEngine.Object.FindFirstObjectByType<Camera>(FindObjectsInactive.Exclude);
+            return UnityEngine.Object.FindAnyObjectByType<Camera>(FindObjectsInactive.Exclude);
         }
 
-        /// <summary>Resolution for movement: explicit name → own movable camera → main (so it can be denied).</summary>
-        private Camera ResolveMovableCandidate(string cameraName, string agentRoleId)
+        /// <summary>
+        /// Resolution for movement: <c>main</c> → the main camera (so it can be denied); <c>free</c> → the free camera;
+        /// a name → that camera; empty or <c>agent</c> → the own marked camera, else the free camera, else the main
+        /// camera (denied).
+        /// </summary>
+        private Camera ResolveMovableCandidate(string trimmed, string agentRoleId)
         {
-            string trimmed = cameraName?.Trim();
-            bool explicitMain = string.Equals(trimmed, "main", StringComparison.OrdinalIgnoreCase);
+            if (IsReserved(trimmed, MainCameraAlias))
+            {
+                return Camera.main;
+            }
 
-            if (!string.IsNullOrEmpty(trimmed) && !explicitMain)
+            if (IsReserved(trimmed, FreeCameraAlias))
+            {
+                return GetFreeCamera(agentRoleId, true);
+            }
+
+            if (!string.IsNullOrEmpty(trimmed) && !IsReserved(trimmed, AgentCameraAlias))
             {
                 return FindActiveCameraByName(trimmed);
             }
 
-            if (!explicitMain)
-            {
-                Camera own = FindOwnCamera(agentRoleId);
-                if (own != null)
-                {
-                    return own;
-                }
-            }
-
-            return Camera.main;
+            return FindMarkedOwnCamera(agentRoleId) ?? GetFreeCamera(agentRoleId, true) ?? Camera.main;
         }
 
-        private static Camera FindActiveCameraByName(string cameraName)
+        private Camera GetFreeCamera(string agentRoleId, bool create)
+        {
+            return TryGetFreeCamera(agentRoleId, create, out Camera camera) ? camera : null;
+        }
+
+        private Camera CreateFreeCamera(string agentRoleId)
+        {
+            string role = string.IsNullOrWhiteSpace(agentRoleId) ? null : agentRoleId.Trim();
+            string baseName = string.IsNullOrWhiteSpace(_options.FreeCameraName)
+                ? AgentCameraOptions.DefaultFreeCameraName
+                : _options.FreeCameraName.Trim();
+            GameObject go = new(role == null ? baseName : $"{baseName} ({role})");
+            if (!Application.isPlaying)
+            {
+                // WHY: an edit-mode agent must not leave its camera in a scene the user later saves.
+                go.hideFlags = HideFlags.DontSave;
+            }
+
+            Camera camera = go.AddComponent<Camera>();
+            Camera main = Camera.main;
+            if (main != null)
+            {
+                // WHY: CopyFrom also copies the main camera's pose, so the first frame shows what the player sees.
+                camera.CopyFrom(main);
+                camera.targetTexture = null;
+            }
+            else
+            {
+                go.transform.SetPositionAndRotation(new Vector3(0f, 10f, -10f), Quaternion.Euler(45f, 0f, 0f));
+            }
+
+            // WHY: disabled, the camera never draws to the screen and never becomes Camera.main; captures call Render() on it explicitly.
+            camera.enabled = false;
+            go.tag = "Untagged";
+            CoreAiAgentCamera marker = go.AddComponent<CoreAiAgentCamera>();
+            marker.Configure(role, true);
+            return camera;
+        }
+
+        private Camera FindActiveCameraByName(string cameraName)
         {
             Camera[] cameras = UnityEngine.Object.FindObjectsByType<Camera>(
                 FindObjectsInactive.Exclude, FindObjectsSortMode.None);
@@ -505,44 +704,38 @@ namespace CoreAI.Vision
                 }
             }
 
-            return null;
-        }
-
-        private static Transform FindActiveTransformByName(string objectName)
-        {
-            Transform[] transforms = UnityEngine.Object.FindObjectsByType<Transform>(
-                FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-            foreach (Transform transform in transforms)
+            foreach (Camera free in _freeCameras.Values)
             {
-                if (transform == null || !string.Equals(transform.name, objectName, StringComparison.Ordinal))
+                if (free != null && free.gameObject.activeInHierarchy &&
+                    string.Equals(free.name, cameraName, StringComparison.Ordinal))
                 {
-                    continue;
-                }
-
-                Scene scene = transform.gameObject.scene;
-                if (scene.IsValid() && scene.isLoaded)
-                {
-                    return transform;
+                    return free;
                 }
             }
 
             return null;
         }
 
-        /// <summary>The first active marked camera that applies to <paramref name="agentRoleId"/>.</summary>
-        private static Camera FindOwnCamera(string agentRoleId)
+        /// <summary>The first active designer-marked camera (not a free camera) that applies to <paramref name="agentRoleId"/>.</summary>
+        private Camera FindMarkedOwnCamera(string agentRoleId)
         {
             CoreAiAgentCamera[] markers = UnityEngine.Object.FindObjectsByType<CoreAiAgentCamera>(
                 FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             foreach (CoreAiAgentCamera marker in markers)
             {
-                if (marker != null && marker.AppliesToRole(agentRoleId) && marker.TargetCamera != null)
+                if (marker != null && marker.AppliesToRole(agentRoleId) && marker.TargetCamera != null &&
+                    !IsFreeCamera(marker.TargetCamera))
                 {
                     return marker.TargetCamera;
                 }
             }
 
             return null;
+        }
+
+        private static bool IsReserved(string trimmed, string reservedName)
+        {
+            return string.Equals(trimmed, reservedName, StringComparison.OrdinalIgnoreCase);
         }
 
         private static string NormalizeRole(string agentRoleId)

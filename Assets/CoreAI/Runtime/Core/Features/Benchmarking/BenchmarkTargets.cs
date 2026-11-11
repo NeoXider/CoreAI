@@ -8,8 +8,15 @@ namespace CoreAI.Benchmarking
 {
     /// <summary>
     /// One model endpoint of a multi-target benchmark run: a model id served by an OpenAI-compatible base URL,
-    /// an optional API key and an optional display label. The label names the target in reports, progress and
-    /// artifact file names; without one the model id does.
+    /// an optional API key, an optional short label and an optional display name.
+    /// <para>
+    /// Three names, three jobs. <see cref="Model"/> is what the provider is asked for. <see cref="Label"/> is the
+    /// operator's handle: artifact file names, checkpoint slugs and the OnlyTargets filter use it (else the model
+    /// id). <see cref="ExplicitDisplayName"/> is the name a reader sees: reports record it as their model id, and
+    /// cards and charts print it. Without a display name the handle names the report, as before display names
+    /// existed, so existing target lists and resumed runs behave unchanged; give one so a short label never
+    /// becomes a report's model id.
+    /// </para>
     /// </summary>
     public sealed class BenchmarkTarget
     {
@@ -22,14 +29,17 @@ namespace CoreAI.Benchmarking
         /// <param name="model">Model id sent to the provider.</param>
         /// <param name="baseUrl">OpenAI-compatible base URL.</param>
         /// <param name="apiKey">Literal key, <c>env:VAR</c> reference, or empty.</param>
-        /// <param name="label">Optional display label.</param>
+        /// <param name="label">Optional short handle for file names and the target filter.</param>
         /// <param name="reasoningEffort">
         /// Optional <c>reasoning_effort</c>, stored lower-case; validate it with
         /// <see cref="BenchmarkTargetList.TryNormalizeReasoningEffort"/> first.
         /// </param>
         /// <param name="extraBodyJson">Optional provider body fields for this target: the text of one JSON object.</param>
+        /// <param name="temperature">Optional sampling temperature from 0 to 2.</param>
+        /// <param name="displayName">Optional name reports, cards and charts show, e.g. the provider's own model name.</param>
         public BenchmarkTarget(string model, string baseUrl, string apiKey = "", string label = "",
-            string reasoningEffort = "", string extraBodyJson = "", float? temperature = null)
+            string reasoningEffort = "", string extraBodyJson = "", float? temperature = null,
+            string displayName = "")
         {
             if (temperature.HasValue && (float.IsNaN(temperature.Value) ||
                 float.IsInfinity(temperature.Value) || temperature.Value < 0f || temperature.Value > 2f))
@@ -44,6 +54,7 @@ namespace CoreAI.Benchmarking
             ReasoningEffort = (reasoningEffort ?? "").Trim().ToLowerInvariant();
             ExtraBodyJson = (extraBodyJson ?? "").Trim();
             Temperature = temperature;
+            ExplicitDisplayName = (displayName ?? "").Trim();
         }
 
         /// <summary>Model id sent to the provider.</summary>
@@ -55,8 +66,11 @@ namespace CoreAI.Benchmarking
         /// <summary>Literal key, an <see cref="ApiKeyEnvPrefix"/> reference, or empty for keyless servers.</summary>
         public string ApiKey { get; }
 
-        /// <summary>Optional display label; empty when the model id names the target.</summary>
+        /// <summary>Optional short handle; empty when the model id is the handle.</summary>
         public string Label { get; }
+
+        /// <summary>The display name the target was given; empty when it has none (see <see cref="DisplayName"/>).</summary>
+        public string ExplicitDisplayName { get; }
 
         /// <summary>This target's own <c>reasoning_effort</c>; empty to use the suite default.</summary>
         public string ReasoningEffort { get; }
@@ -70,14 +84,29 @@ namespace CoreAI.Benchmarking
         /// <summary>Optional sampling temperature (0..2); null leaves the provider/model default unchanged.</summary>
         public float? Temperature { get; }
 
-        /// <summary>The name reports, progress lines and model cards use for this target.</summary>
-        public string DisplayName => Label.Length > 0 ? Label : Model;
+        /// <summary>
+        /// The operator's handle: the label, else the model id. Artifact file names, checkpoint slugs and the
+        /// OnlyTargets filter go by it, so a display name never renames files or breaks a filter.
+        /// </summary>
+        public string Handle => Label.Length > 0 ? Label : Model;
+
+        /// <summary>
+        /// The name reports (their <c>modelId</c>), progress lines, model cards and charts use for this target:
+        /// the display name, else the <see cref="Handle"/>.
+        /// </summary>
+        public string DisplayName => ExplicitDisplayName.Length > 0 ? ExplicitDisplayName : Handle;
 
         /// <summary>True when <see cref="ApiKey"/> names an environment variable instead of holding the key.</summary>
         public bool HasKeyReference => ApiKey.StartsWith(ApiKeyEnvPrefix, StringComparison.OrdinalIgnoreCase);
 
         /// <summary>True when the label adds information the model id does not carry.</summary>
         public bool HasDistinctLabel => Label.Length > 0 && !string.Equals(Label, Model, StringComparison.Ordinal);
+
+        /// <summary>
+        /// True when reports name the target by something other than the model id, so the report must record the
+        /// model id separately (the harness writes it into the backend field).
+        /// </summary>
+        public bool HasDistinctDisplayName => !string.Equals(DisplayName, Model, StringComparison.Ordinal);
 
         /// <summary>The key to send: a literal key as is, an <c>env:</c> reference read from the environment.</summary>
         public string ResolveApiKey()
@@ -99,7 +128,14 @@ namespace CoreAI.Benchmarking
 
         internal BenchmarkTarget WithLabel(string label)
         {
-            return new BenchmarkTarget(Model, BaseUrl, ApiKey, label, ReasoningEffort, ExtraBodyJson, Temperature);
+            return new BenchmarkTarget(Model, BaseUrl, ApiKey, label, ReasoningEffort, ExtraBodyJson, Temperature,
+                ExplicitDisplayName);
+        }
+
+        internal BenchmarkTarget WithDisplayName(string displayName)
+        {
+            return new BenchmarkTarget(Model, BaseUrl, ApiKey, Label, ReasoningEffort, ExtraBodyJson, Temperature,
+                displayName);
         }
     }
 
@@ -108,17 +144,21 @@ namespace CoreAI.Benchmarking
     /// (<see cref="EnvTargets"/>, the batchmode <c>-coreAiBenchmarkTargets</c> argument and the benchmark window).
     /// <para>Accepted forms:</para>
     /// <list type="bullet">
-    ///   <item>JSON array: <c>[{"label":"q4","model":"qwen3.5-4b","baseUrl":"http://127.0.0.1:8831/v1","apiKey":"env:KEY",
-    ///   "reasoningEffort":"high","extraBody":{"top_k":20}}]</c>. Keys are case-insensitive; <c>model</c> and <c>baseUrl</c>
-    ///   are required, <c>"enabled": false</c> skips an entry. <c>extraBody</c> is a JSON object (or a string holding
-    ///   one). Optional <c>temperature</c> (alias <c>temp</c>) is a number from 0 to 2, JSON only.</item>
+    ///   <item>JSON array: <c>[{"label":"q4","displayName":"Qwen 3.5 4B Q4","model":"qwen3.5-4b",
+    ///   "baseUrl":"http://127.0.0.1:8831/v1","apiKey":"env:KEY","reasoningEffort":"high","extraBody":{"top_k":20}}]</c>.
+    ///   Keys are case-insensitive; <c>model</c> and <c>baseUrl</c> are required, <c>"enabled": false</c> skips an
+    ///   entry. <c>extraBody</c> is a JSON object (or a string holding one). Optional <c>temperature</c> (alias
+    ///   <c>temp</c>) is a number from 0 to 2, and optional <c>displayName</c> (alias <c>display_name</c>) is the name
+    ///   reports show; both are JSON only.</item>
     ///   <item>Compact: entries separated by <c>;</c> or new lines, each <c>label|model|baseUrl|apiKey|effort</c>. The base
     ///   URL is found by its <c>http://</c>/<c>https://</c> scheme; one field before it is the model, two are label and
     ///   model; after it come the key and then the effort (<c>baseUrl||high</c> sets an effort without a key). Blank
     ///   entries and lines starting with <c>#</c> are ignored.</item>
     ///   <item><c>@path</c>: either form read from a file.</item>
     /// </list>
-    /// Targets that end up with the same display name get a <c>#2</c>, <c>#3</c>… label so every report stays distinct.
+    /// Targets that end up with the same handle get a <c>#2</c>, <c>#3</c>… label so every artifact stays distinct,
+    /// and targets that end up with the same display name get a <c>#2</c>, <c>#3</c>… display name so every report
+    /// stays distinct.
     /// </summary>
     public static class BenchmarkTargetList
     {
@@ -259,6 +299,11 @@ namespace CoreAI.Benchmarking
                 if (t.Label.Length > 0)
                 {
                     sb.Append(",\"label\":").Append(Quote(t.Label));
+                }
+
+                if (t.ExplicitDisplayName.Length > 0)
+                {
+                    sb.Append(",\"displayName\":").Append(Quote(t.ExplicitDisplayName));
                 }
 
                 if (t.ApiKey.Length > 0 && (includeLiteralKeys || t.HasKeyReference))
@@ -423,6 +468,7 @@ namespace CoreAI.Benchmarking
                 string baseUrl = null;
                 string key = null;
                 string label = null;
+                string displayName = null;
                 string effort = null;
                 string extraBody = null;
                 float? temperature = null;
@@ -451,6 +497,10 @@ namespace CoreAI.Benchmarking
                         case "label":
                         case "name":
                             valid &= ReadString(property, number, problems, out label);
+                            break;
+                        case "displayname":
+                        case "display_name":
+                            valid &= ReadString(property, number, problems, out displayName);
                             break;
                         case "reasoningeffort":
                         case "reasoning_effort":
@@ -500,7 +550,8 @@ namespace CoreAI.Benchmarking
 
                 if (valid && enabled)
                 {
-                    AddValidated(targets, problems, number, model, baseUrl, key, label, effort, extraBody, temperature);
+                    AddValidated(targets, problems, number, model, baseUrl, key, label, effort, extraBody, temperature,
+                        displayName);
                 }
             }
 
@@ -595,7 +646,7 @@ namespace CoreAI.Benchmarking
 
         private static void AddValidated(List<BenchmarkTarget> targets, List<string> problems, int number,
             string model, string baseUrl, string key, string label, string effort, string extraBody,
-            float? temperature = null)
+            float? temperature = null, string displayName = "")
         {
             if (string.IsNullOrWhiteSpace(model))
             {
@@ -616,19 +667,33 @@ namespace CoreAI.Benchmarking
                 return;
             }
 
-            targets.Add(new BenchmarkTarget(model, baseUrl, key, label, normalizedEffort, extraBody, temperature));
+            targets.Add(new BenchmarkTarget(model, baseUrl, key, label, normalizedEffort, extraBody, temperature,
+                displayName));
         }
 
+        /// <summary>
+        /// Makes handles and display names unique, in list order. A repeated handle gets a numbered label (the
+        /// artifact stem and filter follow it); a repeated display name then gets a numbered display name, so the
+        /// label of a target that already has a unique handle never changes. Without display names both sets hold
+        /// the same strings and this is the numbering lists always had.
+        /// </summary>
         private static List<BenchmarkTarget> DisambiguateDisplayNames(List<BenchmarkTarget> parsed)
         {
             List<BenchmarkTarget> result = new(parsed.Count);
-            HashSet<string> used = new(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> handles = new(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
             foreach (BenchmarkTarget target in parsed)
             {
                 BenchmarkTarget unique = target;
-                for (int n = 2; !used.Add(unique.DisplayName); n++)
+                for (int n = 2; !handles.Add(unique.Handle); n++)
                 {
-                    unique = target.WithLabel($"{target.DisplayName}#{n}");
+                    unique = target.WithLabel($"{target.Handle}#{n}");
+                }
+
+                string baseName = unique.DisplayName;
+                for (int n = 2; !names.Add(unique.DisplayName); n++)
+                {
+                    unique = unique.WithDisplayName($"{baseName}#{n}");
                 }
 
                 result.Add(unique);

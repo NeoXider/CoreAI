@@ -1857,7 +1857,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.AreEqual(RbxTweenPlaybackState.Completed, tween.PlaybackState);
         }
 
-        [TestCase("Camera", "FieldOfView", "Camera.FieldOfView (number)")]
+        [TestCase("Camera", "CameraType", "Camera.CameraType (EnumItem)")]
+        [TestCase("PointLight", "Enabled", "PointLight.Enabled (boolean)")]
         [TestCase("Part", "CanCollide", "Part.CanCollide (boolean)")]
         [TestCase("Humanoid", "UseJumpPower", "Humanoid.UseJumpPower (boolean)")]
         public void UntweenableKnownMember_RaisesTheLoudStub(string className, string property,

@@ -179,6 +179,47 @@ namespace CoreAI.Ai
         public bool? AllowTextShapedToolCallsOnNativeEndpoint { get; set; }
 
         /// <summary>
+        /// Whether this turn takes part in the role's chat history. <see cref="AiTaskHistoryMode.RoleDefault"/>
+        /// (the default) follows the role's memory policy; <see cref="AiTaskHistoryMode.None"/> makes the turn
+        /// neither read the stored conversation nor append to it, whatever the role or <see cref="SourceTag"/> says.
+        /// A sub-agent turn uses <c>None</c>: it starts with a clean context and leaves the role's history as it was.
+        /// </summary>
+        public AiTaskHistoryMode HistoryMode { get; set; }
+
+        /// <summary>
+        /// Whether this turn sees the role's durable memory snapshot. <see cref="AiTaskMemoryMode.RoleDefault"/>
+        /// (the default) follows the role's memory policy; <see cref="AiTaskMemoryMode.None"/> leaves the snapshot
+        /// out of the prompt and does not consolidate it. The memory tool itself is governed by
+        /// <see cref="AllowedToolNames"/> like any other role tool.
+        /// </summary>
+        public AiTaskMemoryMode MemoryMode { get; set; }
+
+        /// <summary>
+        /// Tools offered on this request only, in addition to the role's tools; <c>null</c> (the default) adds none.
+        /// A request tool replaces a role tool of the same name, and the merged list is then filtered by
+        /// <see cref="ForcedToolMode"/> and <see cref="AllowedToolNames"/> exactly like role tools, so an allowlist
+        /// must name a request tool to keep it. Use it for a tool bound to one conversation or plan (the
+        /// orchestrator mode's <c>delegate_task</c>), which a role-wide registration would share with every caller.
+        /// </summary>
+        public IReadOnlyList<ILlmTool> RequestTools { get; set; }
+
+        /// <summary>
+        /// The conversation this turn belongs to; empty (the default) means the role's single conversation, as
+        /// before. Two chats on one role use two ids. Orchestrator mode keys its plan, queue and budget by it
+        /// (falling back to the actor's session plus the role); history keyed by it is the conversation-identity
+        /// work of the memory store, which reads the same value.
+        /// </summary>
+        public string ConversationId { get; set; } = "";
+
+        /// <summary>
+        /// Optional "still working" signal for this turn; <c>null</c> (the default) adds none. Reports re-arm the
+        /// idle deadlines (<see cref="CoreAI.Infrastructure.Llm.TimeoutLlmClientDecorator"/> and the chat service's), so a turn that waits on
+        /// tools or sub-agents without streaming text is not cut off by the wall-clock window, while a turn nobody
+        /// reports for times out as before. Copied to <see cref="LlmCompletionRequest.Progress"/>.
+        /// </summary>
+        public LlmRequestProgress Progress { get; set; }
+
+        /// <summary>
         /// Creates an independent copy carrying every request-scoped field. Consumers that must observe a
         /// request without owning it (session inspection, retry of the same turn) copy through this helper
         /// instead of re-listing properties: a partial copy silently drops whatever the list forgot, and the
@@ -216,7 +257,12 @@ namespace CoreAI.Ai
                 Reasoning = Reasoning,
                 Sampling = Sampling,
                 MaxToolCallRoundtrips = MaxToolCallRoundtrips,
-                AllowTextShapedToolCallsOnNativeEndpoint = AllowTextShapedToolCallsOnNativeEndpoint
+                AllowTextShapedToolCallsOnNativeEndpoint = AllowTextShapedToolCallsOnNativeEndpoint,
+                HistoryMode = HistoryMode,
+                MemoryMode = MemoryMode,
+                RequestTools = RequestTools,
+                ConversationId = ConversationId,
+                Progress = Progress
             };
         }
 
@@ -228,6 +274,99 @@ namespace CoreAI.Ai
             AiTaskRequest clone = Clone();
             clone.RoleId = roleId;
             return clone;
+        }
+    }
+
+    /// <summary>How a turn uses the role's chat history (<see cref="AiTaskRequest.HistoryMode"/>).</summary>
+    public enum AiTaskHistoryMode
+    {
+        /// <summary>Follow the role's memory policy (and the chat source rule).</summary>
+        RoleDefault = 0,
+
+        /// <summary>Neither read nor append chat history for this turn.</summary>
+        None = 1
+    }
+
+    /// <summary>How a turn uses the role's durable memory (<see cref="AiTaskRequest.MemoryMode"/>).</summary>
+    public enum AiTaskMemoryMode
+    {
+        /// <summary>Follow the role's memory policy.</summary>
+        RoleDefault = 0,
+
+        /// <summary>Leave the role's memory snapshot out of this turn.</summary>
+        None = 1
+    }
+
+    /// <summary>
+    /// The request-scoped context rules shared by the orchestrator and the session inspector, so the two never
+    /// disagree about what a request with <see cref="AiTaskRequest.HistoryMode"/>,
+    /// <see cref="AiTaskRequest.MemoryMode"/> or <see cref="AiTaskRequest.RequestTools"/> sends.
+    /// </summary>
+    internal static class AiTaskRequestScopeRules
+    {
+        /// <summary>Turns chat history off (read and append) when the request asks for a history-free turn.</summary>
+        public static AgentMemoryPolicy.RoleMemoryConfig ApplyHistoryMode(
+            AgentMemoryPolicy.RoleMemoryConfig roleConfig,
+            AiTaskRequest task)
+        {
+            if (task?.HistoryMode != AiTaskHistoryMode.None)
+            {
+                return roleConfig;
+            }
+
+            roleConfig.WithChatHistory = false;
+            roleConfig.PersistChatHistory = false;
+            return roleConfig;
+        }
+
+        /// <summary>False when the request leaves the role's durable memory out.</summary>
+        public static bool AllowsDurableMemory(AiTaskRequest task)
+        {
+            return task?.MemoryMode != AiTaskMemoryMode.None;
+        }
+
+        /// <summary>
+        /// The role's tools followed by the request's own; a request tool replaces a role tool of the same name
+        /// (ordinal), so a stale role registration cannot shadow a tool bound to this request.
+        /// </summary>
+        public static IReadOnlyList<ILlmTool> MergeRequestTools(
+            IReadOnlyList<ILlmTool> roleTools,
+            IReadOnlyList<ILlmTool> requestTools)
+        {
+            if (requestTools == null || requestTools.Count == 0)
+            {
+                return roleTools;
+            }
+
+            HashSet<string> requestNames = new(System.StringComparer.Ordinal);
+            List<ILlmTool> added = new(requestTools.Count);
+            foreach (ILlmTool tool in requestTools)
+            {
+                if (tool != null && !string.IsNullOrWhiteSpace(tool.Name) && requestNames.Add(tool.Name))
+                {
+                    added.Add(tool);
+                }
+            }
+
+            if (added.Count == 0)
+            {
+                return roleTools;
+            }
+
+            List<ILlmTool> merged = new((roleTools?.Count ?? 0) + added.Count);
+            if (roleTools != null)
+            {
+                foreach (ILlmTool tool in roleTools)
+                {
+                    if (tool != null && !requestNames.Contains(tool.Name ?? ""))
+                    {
+                        merged.Add(tool);
+                    }
+                }
+            }
+
+            merged.AddRange(added);
+            return merged;
         }
     }
 }

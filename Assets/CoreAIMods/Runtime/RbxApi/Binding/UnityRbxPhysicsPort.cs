@@ -48,6 +48,9 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <inheritdoc />
         public event Action<InstanceId, InstanceId> ContactEnded;
 
+        /// <summary>Resolves rays that hit a Terrain chunk collider to the Terrain cell; null leaves Terrain unhit.</summary>
+        public CoreAI.Mods.Rbx.Binding.Terrain.IRbxTerrainHitResolver TerrainHits { get; set; }
+
         /// <summary>The gravity vector applied to bound bodies, in metres per second squared.</summary>
         public Vector3 GravityMetresPerSecondSquared => _gravityMetres;
 
@@ -126,9 +129,16 @@ namespace CoreAI.Mods.Rbx.Binding
             for (int index = 0; index < count; index++)
             {
                 RaycastHit candidate = _hitScratch[index];
-                if (candidate.distance >= bestDistance
-                    || candidate.collider == null
-                    || !_binder.TryResolvePartInstanceId(candidate.collider.gameObject, out InstanceId id))
+                if (candidate.distance >= bestDistance || candidate.collider == null)
+                {
+                    continue;
+                }
+
+                bool isPart = _binder.TryResolvePartInstanceId(candidate.collider.gameObject, out InstanceId id);
+                RbxMaterialId terrainMaterial = default;
+                RbxVector3 terrainNormal = default;
+                if (!isPart && (TerrainHits == null || !TerrainHits.TryResolveHit(candidate.collider,
+                        candidate.point, candidate.normal, out id, out terrainMaterial, out terrainNormal)))
                 {
                     continue;
                 }
@@ -147,8 +157,8 @@ namespace CoreAI.Mods.Rbx.Binding
                 hit = new RbxPhysicsRaycastHit(
                     id,
                     RbxSpace.FromUnity(candidate.point),
-                    RbxSpace.DirectionFromUnity(candidate.normal),
-                    MaterialOf(id),
+                    isPart ? RbxSpace.DirectionFromUnity(candidate.normal) : terrainNormal,
+                    isPart ? MaterialOf(id) : terrainMaterial,
                     RbxSpace.LengthFromUnity(candidate.distance));
                 found = true;
             }

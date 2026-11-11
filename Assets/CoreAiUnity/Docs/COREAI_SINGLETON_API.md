@@ -56,11 +56,14 @@ Both paths use **one** `CoreAILifetimeScope` registered on the scene and **one**
 
 | Method | Returns | When to use |
 |-------|------------|-------------------|
-| `AskAsync` | `Task<string?>` | You need the **full answer as one string** (logic, save, simple NPC). |
+| `AskAsync` | `Task<string?>` | You need the **full answer as one string** (logic, save, simple NPC). Throws when the turn fails — see [When a call fails](#when-a-call-fails). |
+| `AskResultAsync` | `Task<LlmCompletionResult>` | Same turn, but the outcome as data: `Ok`, `Content`, `ErrorCode`, `HttpStatus`, usage. Never throws for a failed turn. |
 | `StreamAsync` | `IAsyncEnumerable<string>` | **Live text** in UI (label, TMP, UI Toolkit). |
 | `StreamChunksAsync` | `IAsyncEnumerable<LlmStreamChunk>` | You need **IsDone, Error, usage** per chunk. The `StreamChunksAsync(AiTaskRequest)` overload streams a chat turn with per-call fields such as `AllowedToolNames` / `ForcedToolMode`. |
 | `SmartAskAsync` | `Task<string?>` | Both **stream to UI** and **full string** at the end (analytics, quests). Stream mode follows the settings hierarchy. |
+| `SmartAskResultAsync` | `Task<LlmCompletionResult>` | `SmartAskAsync` with the outcome as data; a failed stream returns `Ok = false` plus the text streamed so far. |
 | `OrchestrateAsync` | `Task<string?>` | Full **game pipeline**: session snapshot, authority, queue, validation, **publishing a command** to the bus. |
+| `OrchestrateResultAsync` | `Task<LlmCompletionResult>` | `OrchestrateAsync` with the outcome as data (a blocked turn is `Ok = false`, `InvalidRequest`). |
 | `OrchestrateStreamAsync` | `IAsyncEnumerable<LlmStreamChunk>` | Same, but **tokens as they generate** + final publish after the stream. |
 | `OrchestrateStreamCollectAsync` | `Task<string>` | Stream + **assemble full text** + `onChunk` for UI. |
 | `AskAsync` / `StreamAsync` / `StreamChunksAsync` / `SmartAskAsync` **+ attachments** | same as above | Send **images and files** with the prompt (one `AiAttachment` or a list) — see [3.7](#37-send-prompts-images-and-files). |
@@ -79,7 +82,53 @@ Both paths use **one** `CoreAILifetimeScope` registered on the scene and **one**
 | `GetChatService` / `GetOrchestrator` / `GetSettings` | services | Direct access when you need full control. |
 | `SetResolver` | `void` | Tests/CI: override how the orchestrator is resolved. |
 
-Backend switching (HTTP / LLMUnity / Offline, model, key, health probe) is a separate facade, `CoreAiBackend` — see [RUNTIME_BACKEND_SWITCHING](RUNTIME_BACKEND_SWITCHING.md).
+Backend switching (HTTP / LLMUnity / Offline, model, key, health probe) is a separate facade, `CoreAiBackend` — see [RUNTIME_BACKEND_SWITCHING](RUNTIME_BACKEND_SWITCHING.md). Its switches are session overrides: a key or model set at runtime is never written into `CoreAISettings.asset`, ends with Play Mode, and `CoreAiBackend.ClearSessionOverrides()` returns to the asset's values.
+
+### When a call fails
+
+One rule for every method that returns text (`AskAsync`, `SmartAskAsync`, `StreamAsync`, `OrchestrateAsync`,
+`OrchestrateStreamCollectAsync`, `AskWithCameraAsync`, `AskWithImageFollowUpAsync`): **a failure is never returned as
+the reply.** The text you get is always the model's answer.
+
+| What happened | What you get |
+|---------------|--------------|
+| Provider error (401, 429, 500, a dropped stream), no backend compiled in, an empty completion, a turn blocked by authority or validation | `LlmRequestFailedException` — an `InvalidOperationException`, so `catch (InvalidOperationException)` keeps working. `ErrorCode`, `HttpStatus`, `RetryAfterSeconds` and `Failure` (the typed `LlmClientException`) tell you what failed. A 401's text is redacted from the message. |
+| The turn was stopped (`StopAgent`, your token) | `OperationCanceledException` |
+| The library timeout fired | `LlmOperationTimeoutException` |
+| `SmartAskAsync` stream fails half-way | the fragments already passed to `onChunk` stay delivered, then the call throws |
+
+For the sentence a player may see, use `LlmErrorPresentation.ToUserMessage(failure.Failure)`; log
+`LlmErrorPresentation.ToDiagnosticText(failure.Failure)`:
+
+```csharp
+try
+{
+    npcLabel.text = await CoreAi.AskAsync("Greet the player", "Blacksmith");
+}
+catch (LlmRequestFailedException failure)
+{
+    npcLabel.text = "...";   // an in-character fallback, never the provider text
+    Debug.LogWarning(LlmErrorPresentation.ToDiagnosticText(failure.Failure));
+}
+```
+
+Prefer data over exceptions? Each text method has a `*ResultAsync` twin that returns `LlmCompletionResult`:
+
+```csharp
+LlmCompletionResult result = await CoreAi.AskResultAsync("Greet the player", "Blacksmith");
+npcLabel.text = result.Ok ? result.Content : "...";
+if (result.ErrorCode == LlmErrorCode.NotConfigured) Debug.LogError(result.Error); // names the fix
+```
+
+A build without the `COREAI_LLM` define fails every HTTP or local-model request with `LlmErrorCode.NotConfigured` and a
+message naming the fix (add the define, or set LLM Mode to Offline); only Offline keeps the deterministic offline stub.
+The rule needs an orchestrator with typed results — every built-in composition has one. With a custom
+`IAiOrchestrationService` that is not `IAiTaskResultService`, the buffered text methods return whatever that
+orchestrator returns, and the `*ResultAsync` twins throw `NotSupportedException`.
+
+`CoreAiChatService.SendMessageAsync` is the chat panel's transport, not part of this rule: for a `Chat`-tagged task it
+returns the failure text so the panel can show it in the bubble. Game logic uses the facade or
+`CoreAiChatService.SendMessageResultAsync`.
 
 Detailed scenarios — section [When to use what](#2-when-to-use-what-in-detail) below.
 
@@ -135,7 +184,7 @@ await foreach (string chunk in CoreAi.StreamAsync("Tell a joke", "SmartChat"))
     label.text += chunk;
 ```
 
-`StreamAsync` throws `InvalidOperationException` when the stream reports an error; use `StreamChunksAsync` to read `Error` yourself.
+`StreamAsync` throws `LlmRequestFailedException` (an `InvalidOperationException` with the error code) when the stream reports an error; use `StreamChunksAsync` to read `Error` yourself.
 
 ### 3.3. Smart: chunks in UI and full text in a variable
 
@@ -150,12 +199,13 @@ SaveToPlayerJournal(full);
 
 Override streaming: `uiStreamingOverride: false` — force full response in one piece.
 
-### 3.4. Safe call (no try when AI is absent)
+### 3.4. Safe call (no try when AI is absent or fails)
 
 ```csharp
-if (CoreAi.TryGetChatService(out CoreAiChatService chat))
+if (CoreAi.IsReady)
 {
-    string reply = await chat.SendMessageAsync("Hi", "SmartChat", ct);
+    LlmCompletionResult result = await CoreAi.AskResultAsync("Hi", "SmartChat", ct);
+    label.text = result.Ok ? result.Content : defaultNpcText;
 }
 else
 {
@@ -187,7 +237,9 @@ AiTaskRequest task = new AiTaskRequest
     CancellationScope = "creator"
 };
 
-string json = await CoreAi.OrchestrateAsync(task);
+string json = await CoreAi.OrchestrateAsync(task);   // throws when authority or validation blocks the turn
+// or, without exceptions:
+LlmCompletionResult outcome = await CoreAi.OrchestrateResultAsync(task);
 ```
 
 ### 3.6. Orchestrator with stream to a status line

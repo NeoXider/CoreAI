@@ -12,9 +12,14 @@ Internal design, planning and research notes. NOT user documentation — user/pr
 - MVP25_BUILD_PLAN_2026-09-04.md — build plan for the old MVP8 / MVP11 / MVP12 against those decisions, every repository fact read from source; history (superseded 2026-09-24)
 - MVP8_ACCEPTANCE_MANIFEST.md — the frozen MVP8 Tier-A fixture manifest gate P8.5 cites
 - REPLICATION_PHASE0.md — the engine-free replication core as it exists after 7.39.0: what is built and tested registry-to-registry, what is not wired, the two named limits
+- REPLICATION_CODEC.md — the binary delta codec and the per-tick publisher core (MVP6 part 1): wire format, the spike S2 numbers (18.9 B per CFrame patch against 196.7 B as JSON), what is not wired yet
+- MVP4_SCRIPT_CONTEXTS_DESIGN.md — script contexts (Script / LocalScript / ModuleScript, `require`, run contexts): decisions SC-1..SC-19, the legacy mode for undeclared mods, package format 2, the build steps A1–C6
+- RUNTIME_UI_SKILL_SECTION.md, TERRAIN_SKILL_SECTION.md, AI_SERVICE_SKILL_SECTION.md — sections written by the feature authors for the Rbx API skill text (`UxmlService`, `workspace.Terrain`, `AIService` / `TextGenerator`); the source for the skill merge, kept until the merge is verified
+- RUNTIME_UI_LUA_SURFACE.md — the Lua surface over the runtime UXML/USS interpreter (`UxmlService`): members, capability, focus and hot-reload rules (P18)
 - MOD_INSTANCE_OWNERSHIP_PLAN.md — mod-owned instances + cleanup-on-unload design
 - MOD_SYSTEM_DESIGN_NOTES.md — the mod-panel 6 FPS investigation and the original mod-system phase plan (moved here from `Docs/CoreAIMods/mod-system.md`)
 - PERF_VS_ROBLOX.md — can CoreAI's runtime be faster than Roblox: an engineering assessment
+- DEPENDENCY_VERSIONS_2026-11-11.md — every pinned library against its latest release (Lua-CSharp 0.5.6 → 0.5.8 in depth, Mirror, Microsoft.Extensions.AI, the git and registry packages): what is behind, what to update and the risks
 - COMPETITIVE_SCAN_2026-11-11.md — what Roblox and others ship for AI creation, the gaps they leave, and the decision-model protocol; the evidence behind the 2026-11-11 plan order
 - LUA_VM_BENCHMARK_PLAN.md — Lua-CSharp vs Roblox Luau micro-benchmark kit and results table
 - opencode-free-bench-2026-10-16/RUN.md — the 2026-10-17 OpenCode free-tier benchmark sweep: target list, the free-tier `FreeTierError` gate that blocked it, the neoxider-agents fix, and results (7 of 9 scored, 2 routes down with provider 502)
@@ -24,6 +29,7 @@ Internal design, planning and research notes. NOT user documentation — user/pr
 - SCALE_CHARACTERIZATION.md — the 20 / 50 / 100 / 200 actor staircase: methodology, frozen workload, results
 - CAPACITY_UNBLOCKED_2026-09-05.md — the 100–200 actor target was blocked by two defaults and one broken metric
 - G11_RUN_RECORD_2026-09-02.md — the G11 WebGL browser-run record
+- PERF_BASELINE_2026-11.md — P19 measurement baseline: method, reference scenes, the engine-free numbers (vmbench, `tools/perfbench`, allocation budgets), the verified performance findings, the ranked optimization list and the commands that fill the Unity rows
 
 ## Chat, LLM path and context
 

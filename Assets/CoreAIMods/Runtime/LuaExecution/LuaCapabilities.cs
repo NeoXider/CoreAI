@@ -31,14 +31,25 @@ namespace CoreAI.Ai
         Full = 1 << 4,
 
         /// <summary>
+        /// Runtime UI from Lua: <c>game:GetService("UxmlService")</c> screens built from UXML and USS
+        /// text. Part of <see cref="All"/>, so an ordinary gameplay mod draws its HUD without
+        /// configuration; a host masks it (<c>LuaCapabilities.All &amp; ~LuaCapabilities.Ui</c>) to keep
+        /// mods off the screen.
+        /// </summary>
+        Ui = 1 << 5,
+
+        /// <summary>AI from Lua (AIService agents, TextGenerator) for hosts that grant it per mod; not part of All.</summary>
+        Ai = 1 << 6,
+
+        /// <summary>
         /// Every standard tier: <see cref="Read"/> | <see cref="Gameplay"/> | <see cref="WorldEdit"/> |
-        /// <see cref="LogicOverride"/>. WARNING: despite the name, All EXCLUDES <see cref="Full"/> —
+        /// <see cref="LogicOverride"/> | <see cref="Ui"/>. WARNING: despite the name, All EXCLUDES <see cref="Full"/> —
         /// Full-tier reflection is opt-in and must be OR-ed in explicitly
         /// (<c>LuaCapabilities.All | LuaCapabilities.Full</c>). A mod header that declares
         /// <c>capabilities: All, Full</c> still gets Full masked away unless the host granted it.
         /// WHY: no duplicate-value alias — a second member with this exact value would make
         /// ToString()/serialized headers print an unspecified name on IL2CPP/WebGL.
         /// </summary>
-        All = Read | Gameplay | WorldEdit | LogicOverride
+        All = Read | Gameplay | WorldEdit | LogicOverride | Ui
     }
 }

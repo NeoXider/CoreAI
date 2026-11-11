@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
@@ -76,31 +77,63 @@ namespace CoreAI.Mods.WorldPackages
             CancellationToken cancellationToken);
     }
 
-    /// <summary>Requires a durable world-package autosave before allowing a runtime mutation.</summary>
-    public sealed class ConfirmedWorldMutationGate : IStartupAwareWorldMutationGate
+    /// <summary>
+    /// Requires a pre-mutation world-package autosave before allowing a runtime mutation. By default
+    /// the autosave is durable before the mutation runs. With <see cref="WriteBehindBackups"/> on and a
+    /// store that implements <see cref="IRbxWorldAutoSaveWriteBehindStore"/>, the snapshot is captured and
+    /// encoded in memory first, or proven encodable and encoded behind (so every capture and encoding
+    /// refusal is decided exactly as before), the
+    /// mutation runs at once, and the durable write follows behind it; the next gated mutation waits for
+    /// that write and, when it failed, backs itself up durably first again. The safety autosave of a
+    /// player-confirmed world load always stays durable-first.
+    /// </summary>
+    public sealed class ConfirmedWorldMutationGate
+        : IStartupAwareWorldMutationGate, IAttributedWorldMutationGate, IObservableWorldMutationGate,
+            IMeasuredWorldMutationGate
     {
         /// <summary>The manage_mods result field that carries the after-mutation note.</summary>
         internal const string StartupNoteField = "startup_warning";
 
         /// <summary>
         /// The manage_mods result field that says a mutation ran without its pre-mutation backup,
-        /// because the live world cannot be encoded as a package at all, and why.
+        /// because the live world cannot be encoded as a package at all, and why; or that the backup
+        /// written behind the previous mutation failed.
         /// </summary>
         internal const string BackupNoteField = "backup_warning";
 
         private readonly Func<CancellationToken, UniTask<RbxWorldPackagePayload>> _captureCurrentAsync;
         private readonly IRbxWorldPackageStore _packageStore;
+        private readonly IRbxWorldAutoSaveWriteBehindStore _writeBehindStore;
         private readonly SemaphoreSlim _singleFlight = new(1, 1);
+        private readonly object _observerGate = new();
+        private readonly List<IRbxWorldMutationObserver> _observers = new();
+        private readonly List<IRbxWorldBackupMetricsObserver> _metricsObservers = new();
         private int _held;
+        private long _sequence;
+        private Task<RbxWorldPackageWriteResult> _pendingBackup;
+        private string _pendingTrigger = "";
+        private string _lastBackupFailure = "";
+        private RbxWorldBackupMetrics _latestMetrics;
 
         /// <summary>Creates a shared gate over the host capture port and durable package store.</summary>
         public ConfirmedWorldMutationGate(
             Func<CancellationToken, UniTask<RbxWorldPackagePayload>> captureCurrentAsync,
             IRbxWorldPackageStore packageStore)
+            : this(captureCurrentAsync, packageStore, false)
+        {
+        }
+
+        /// <summary>Creates a shared gate; <paramref name="writeBehindBackups"/> sets <see cref="WriteBehindBackups"/>.</summary>
+        public ConfirmedWorldMutationGate(
+            Func<CancellationToken, UniTask<RbxWorldPackagePayload>> captureCurrentAsync,
+            IRbxWorldPackageStore packageStore,
+            bool writeBehindBackups)
         {
             _captureCurrentAsync = captureCurrentAsync
                                    ?? throw new ArgumentNullException(nameof(captureCurrentAsync));
             _packageStore = packageStore ?? throw new ArgumentNullException(nameof(packageStore));
+            _writeBehindStore = packageStore as IRbxWorldAutoSaveWriteBehindStore;
+            WriteBehindBackups = writeBehindBackups;
         }
 
         /// <inheritdoc />
@@ -112,9 +145,138 @@ namespace CoreAI.Mods.WorldPackages
         /// <inheritdoc />
         public bool IsHeld => Volatile.Read(ref _held) != 0;
 
+        /// <summary>
+        /// Asks for the autosave to be written behind the mutation instead of before it. It takes effect
+        /// only with a store that implements <see cref="IRbxWorldAutoSaveWriteBehindStore"/>
+        /// (<see cref="WritesBehind"/>); set it before the first mutation. Off by default.
+        /// </summary>
+        public bool WriteBehindBackups { get; set; }
+
+        /// <summary>True when the next mutation's autosave is written behind it.</summary>
+        public bool WritesBehind => WriteBehindBackups && _writeBehindStore != null;
+
+        /// <summary>Optional sink for a write-behind autosave that failed; the composition points it at its log.</summary>
+        public Action<string> Diagnostics { get; set; }
+
+        /// <summary>True while an autosave written behind the last mutation has not finished.</summary>
+        public bool HasPendingBackup
+        {
+            get
+            {
+                Task<RbxWorldPackageWriteResult> pending = Volatile.Read(ref _pendingBackup);
+                return pending != null && !pending.IsCompleted;
+            }
+        }
+
+        /// <summary>Why the latest autosave written behind a mutation failed; empty once a later one succeeded.</summary>
+        public string LastBackupFailure => Volatile.Read(ref _lastBackupFailure) ?? "";
+
+        /// <summary>
+        /// The autosaves that a crash interrupted after their mutation had run, found when the store
+        /// opened; empty for a store without write-behind support.
+        /// </summary>
+        public IReadOnlyList<RbxMissingAutoSave> MissingBackupsAtStart =>
+            _writeBehindStore?.MissingAutoSavesAtOpen ?? Array.Empty<RbxMissingAutoSave>();
+
         /// <inheritdoc />
-        public async Task<TResult> ExecuteAsync<TResult>(
+        public RbxWorldBackupMetrics LatestBackupMetrics => Volatile.Read(ref _latestMetrics);
+
+        /// <summary>
+        /// Completes when the autosave written behind the last mutation finished, with its result; at once
+        /// with a success when none is pending. Never throws. No thread and no blocking wait (WebGL).
+        /// </summary>
+        public async Task<RbxWorldPackageWriteResult> WaitForPendingBackupAsync()
+        {
+            Task<RbxWorldPackageWriteResult> pending = Volatile.Read(ref _pendingBackup);
+            if (pending == null)
+            {
+                return new RbxWorldPackageWriteResult(true, "", "");
+            }
+
+            try
+            {
+                return await pending ?? new RbxWorldPackageWriteResult(false, "", "The package store returned no result.");
+            }
+            catch (Exception ex)
+            {
+                return new RbxWorldPackageWriteResult(false, "", ex.Message);
+            }
+        }
+
+        /// <inheritdoc />
+        public void AddObserver(IRbxWorldMutationObserver observer)
+        {
+            if (observer == null)
+            {
+                throw new ArgumentNullException(nameof(observer));
+            }
+
+            lock (_observerGate)
+            {
+                if (!_observers.Contains(observer))
+                {
+                    _observers.Add(observer);
+                }
+            }
+        }
+
+        /// <inheritdoc />
+        public void RemoveObserver(IRbxWorldMutationObserver observer)
+        {
+            lock (_observerGate)
+            {
+                _observers.Remove(observer);
+            }
+        }
+
+        /// <inheritdoc />
+        public void AddMetricsObserver(IRbxWorldBackupMetricsObserver observer)
+        {
+            if (observer == null)
+            {
+                throw new ArgumentNullException(nameof(observer));
+            }
+
+            lock (_observerGate)
+            {
+                if (!_metricsObservers.Contains(observer))
+                {
+                    _metricsObservers.Add(observer);
+                }
+            }
+        }
+
+        /// <inheritdoc />
+        public void RemoveMetricsObserver(IRbxWorldBackupMetricsObserver observer)
+        {
+            lock (_observerGate)
+            {
+                _metricsObservers.Remove(observer);
+            }
+        }
+
+        /// <inheritdoc />
+        public Task<TResult> ExecuteAsync<TResult>(
             string trigger,
+            Func<CancellationToken, Task<TResult>> mutationAsync,
+            CancellationToken cancellationToken)
+        {
+            return ExecuteCoreAsync(trigger, "", mutationAsync, cancellationToken);
+        }
+
+        /// <inheritdoc />
+        public Task<TResult> ExecuteAsync<TResult>(
+            string trigger,
+            string actorId,
+            Func<CancellationToken, Task<TResult>> mutationAsync,
+            CancellationToken cancellationToken)
+        {
+            return ExecuteCoreAsync(trigger, actorId ?? "", mutationAsync, cancellationToken);
+        }
+
+        private async Task<TResult> ExecuteCoreAsync<TResult>(
+            string trigger,
+            string actorId,
             Func<CancellationToken, Task<TResult>> mutationAsync,
             CancellationToken cancellationToken)
         {
@@ -133,6 +295,19 @@ namespace CoreAI.Mods.WorldPackages
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                // WHY settled first: the gate keeps one autosave in flight at most, so the ring never
+                // holds two half-written backups, and a failed one makes this mutation back itself up
+                // durably before it runs, as every mutation did before write-behind.
+                string previousBackupFailure = await SettlePendingBackupAsync();
+                // WHY a confirmed load stays durable-first: the player chose to replace the whole world, the
+                // outgoing world exists nowhere else afterwards, and a load is never on the AI's hot path.
+                bool writeBehind = WritesBehind
+                                   && previousBackupFailure.Length == 0
+                                   && !string.Equals(
+                                       trigger,
+                                       RbxWorldRuntimeSessionController.PreLoadAutosaveTrigger,
+                                       StringComparison.Ordinal);
+                Stopwatch watch = Stopwatch.StartNew();
                 RbxWorldPackagePayload payload;
                 string backupNote = "";
                 try
@@ -142,12 +317,15 @@ namespace CoreAI.Mods.WorldPackages
                 catch (RbxWorldPackageFormatLimitException ex) when (MayRunWithoutAnImpossibleBackup(trigger))
                 {
                     // WHY: a world past a format limit cannot be captured, so no backup of it can exist.
-                    // Forget and a confirmed load are the ways back under the limit; refusing them too
-                    // would leave the world unable to change or save forever.
+                    // Forget, a confirmed load and an undo or redo are the ways back under the limit;
+                    // refusing them too would leave the world unable to change or save forever.
                     payload = null;
                     backupNote = DescribeSkippedBackup(trigger, ex.Message);
                 }
 
+                double captureMilliseconds = watch.Elapsed.TotalMilliseconds;
+                double encodeMilliseconds = 0d;
+                RbxPreparedAutoSave prepared = null;
                 if (backupNote.Length == 0)
                 {
                     if (payload == null)
@@ -156,46 +334,106 @@ namespace CoreAI.Mods.WorldPackages
                             "Confirmed pre-mutation backup capture returned no world payload.");
                     }
 
-                    RbxWorldPackageWriteResult backup;
-                    try
+                    if (writeBehind)
                     {
-                        backup = await _packageStore.CreateAutoAsync(
-                            trigger,
-                            payload,
-                            cancellationToken);
-                    }
-                    catch (Exception ex) when (IsEncodingFailure(ex) && MayRunWithoutAnImpossibleBackup(trigger))
-                    {
-                        backup = new RbxWorldPackageWriteResult(false, "", ex.Message, true);
-                    }
-
-                    if (backup == null || !backup.Success)
-                    {
-                        string reason = backup == null || string.IsNullOrWhiteSpace(backup.Error)
-                            ? "the package store did not confirm durability"
-                            : backup.Error;
-                        // WHY only an encoding failure: the captured world itself cannot become a
-                        // package (a format limit or a platform budget met at write time), so it fails
-                        // the same way on every retry, exactly like a capture past a format limit. A
-                        // durability or I/O failure may pass on retry and keeps refusing everything.
-                        if (backup == null
-                            || !backup.PackageCannotBeEncoded
-                            || !MayRunWithoutAnImpossibleBackup(trigger))
+                        prepared = await PrepareBehindAsync(trigger, payload, cancellationToken);
+                        encodeMilliseconds = watch.Elapsed.TotalMilliseconds - captureMilliseconds;
+                        if (!prepared.Success)
                         {
-                            throw new InvalidOperationException(
-                                "Confirmed pre-mutation backup '" + trigger + "' failed: " + reason);
+                            if (!MayRunWithoutAnImpossibleBackup(trigger))
+                            {
+                                PublishMetrics(RbxWorldBackupMetrics.Refused(
+                                    trigger, _sequence + 1, true, captureMilliseconds, encodeMilliseconds,
+                                    prepared.Error));
+                                throw new InvalidOperationException(
+                                    "Confirmed pre-mutation backup '" + trigger + "' failed: " + prepared.Error
+                                    + DescribeWayBackUnderTheLimits());
+                            }
+
+                            backupNote = DescribeSkippedBackup(trigger, prepared.Error);
+                            prepared = null;
+                        }
+                    }
+                    else
+                    {
+                        RbxWorldPackageWriteResult backup;
+                        try
+                        {
+                            backup = await _packageStore.CreateAutoAsync(
+                                trigger,
+                                payload,
+                                cancellationToken);
+                        }
+                        catch (Exception ex) when (IsEncodingFailure(ex) && MayRunWithoutAnImpossibleBackup(trigger))
+                        {
+                            backup = new RbxWorldPackageWriteResult(false, "", ex.Message, true);
                         }
 
-                        backupNote = DescribeSkippedBackup(trigger, reason);
+                        PublishMetrics(new RbxWorldBackupMetrics(
+                            trigger, _sequence + 1, false, captureMilliseconds, 0d,
+                            watch.Elapsed.TotalMilliseconds - captureMilliseconds, -1L,
+                            backup != null && backup.Success, backup?.Error ?? "no result"));
+                        if (backup == null || !backup.Success)
+                        {
+                            string reason = backup == null || string.IsNullOrWhiteSpace(backup.Error)
+                                ? "the package store did not confirm durability"
+                                : backup.Error;
+                            // WHY only an encoding failure: the captured world itself cannot become a
+                            // package (a format limit or a platform budget met at write time), so it fails
+                            // the same way on every retry, exactly like a capture past a format limit. A
+                            // durability or I/O failure may pass on retry and keeps refusing everything.
+                            if (backup == null
+                                || !backup.PackageCannotBeEncoded
+                                || !MayRunWithoutAnImpossibleBackup(trigger))
+                            {
+                                throw new InvalidOperationException(
+                                    "Confirmed pre-mutation backup '" + trigger + "' failed: " + reason
+                                    + (backup != null && backup.PackageCannotBeEncoded
+                                        ? DescribeWayBackUnderTheLimits()
+                                        : ""));
+                            }
+
+                            backupNote = DescribeSkippedBackup(trigger, reason);
+                        }
                     }
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
+                RbxWorldMutationInfo mutation = new(trigger, actorId, ++_sequence);
+                RbxWorldSnapshot before = payload == null
+                    ? null
+                    : RbxWorldSnapshot.Of(trigger, payload.CapturedAtUtc, payload, prepared);
                 NotifyMutationStarting(trigger);
-                TResult result = await mutationAsync(cancellationToken);
-                if (backupNote.Length > 0)
+                NotifyObserversStarting(mutation);
+                Task<TResult> running = StartMutation(mutationAsync, cancellationToken);
+                // WHY after the mutation has started: its synchronous part (all of a one-off execute_lua
+                // build) is visible before any storage work, and the write that follows still takes the
+                // store before anything the mutation itself writes there (a startup record).
+                if (prepared != null)
                 {
-                    result = WithNote(result, backupNote, BackupNoteField);
+                    BeginWriteBehind(prepared, mutation.Sequence, captureMilliseconds, encodeMilliseconds);
+                }
+
+                TResult result;
+                try
+                {
+                    result = await running;
+                }
+                catch (Exception)
+                {
+                    NotifyObserversFinished(mutation, before, false);
+                    throw;
+                }
+
+                NotifyObserversFinished(mutation, before, true);
+                // WHY a load result never carries the earlier loss: its BackupWarning speaks about the load's
+                // own safety autosave; the earlier loss is still in LastBackupFailure and the diagnostics.
+                string combinedBackupNote = result is RbxWorldLoadResult
+                    ? backupNote
+                    : CombineNotes(backupNote, previousBackupFailure);
+                if (combinedBackupNote.Length > 0)
+                {
+                    result = WithNote(result, combinedBackupNote, BackupNoteField);
                 }
 
                 string note = await NotifyAfterMutationAsync(trigger);
@@ -235,8 +473,9 @@ namespace CoreAI.Mods.WorldPackages
         /// <summary>
         /// True for the triggers that may run without a backup when the live world cannot be encoded
         /// as a package at all: forget, the one mutation that removes a mod's source and so can bring
-        /// the world back under a limit, and the safety autosave of a confirmed world load, which
-        /// replaces the whole world with a package that was already read and validated.
+        /// the world back under a limit; the safety autosave of a confirmed world load; and an undo or
+        /// redo of an AI change. The last three replace the whole world with a package that was already
+        /// read and validated (a load) or captured and encoded (an undo or redo snapshot).
         /// </summary>
         /// <remarks>
         /// WHY not unload as well: an unloaded mod keeps its source, so an unload never brings the
@@ -250,7 +489,9 @@ namespace CoreAI.Mods.WorldPackages
                    || string.Equals(
                        trigger,
                        RbxWorldRuntimeSessionController.PreLoadAutosaveTrigger,
-                       StringComparison.Ordinal);
+                       StringComparison.Ordinal)
+                   || string.Equals(trigger, RbxWorldUndoService.UndoTrigger, StringComparison.Ordinal)
+                   || string.Equals(trigger, RbxWorldUndoService.RedoTrigger, StringComparison.Ordinal);
         }
 
         /// <summary>True for a failure of the payload itself, as opposed to cancellation or I/O.</summary>
@@ -266,6 +507,229 @@ namespace CoreAI.Mods.WorldPackages
             return "No pre-mutation backup was written for '" + trigger + "': the live world cannot be "
                    + "encoded as a world package (" + (reason ?? "").Trim() + "). The action ran without "
                    + "one, because it is the way to bring the world back within the package limits.";
+        }
+
+        /// <summary>
+        /// What a refused mutation's caller can do when the live world cannot be encoded as a package:
+        /// appended to the refusal so it never reads as a transient error worth retrying.
+        /// </summary>
+        internal static string DescribeWayBackUnderTheLimits()
+        {
+            return " The live world cannot be backed up as a world package, so this change was NOT made and "
+                   + "the same call fails until the world fits again. Ways back within the package limits: "
+                   + "the player can undo the last AI change (it restores the smaller world kept in memory), "
+                   + "forget a mod that is no longer needed (manage_mods action 'forget'), or load a smaller "
+                   + "save or autosave on the World Loads page.";
+        }
+
+        private async Task<RbxPreparedAutoSave> PrepareBehindAsync(
+            string trigger,
+            RbxWorldPackagePayload payload,
+            CancellationToken cancellationToken)
+        {
+            RbxPreparedAutoSave prepared;
+            try
+            {
+                prepared = await _writeBehindStore.PrepareAutoAsync(trigger, payload, cancellationToken);
+            }
+            catch (Exception ex) when (IsEncodingFailure(ex))
+            {
+                prepared = RbxPreparedAutoSave.Unencodable(trigger, payload.CapturedAtUtc, ex.Message);
+            }
+
+            return prepared ?? throw new InvalidOperationException(
+                "Confirmed pre-mutation backup '" + trigger + "' failed: the package store prepared no autosave.");
+        }
+
+        private void BeginWriteBehind(
+            RbxPreparedAutoSave prepared,
+            long sequence,
+            double captureMilliseconds,
+            double encodeMilliseconds)
+        {
+            _pendingTrigger = prepared.Trigger;
+            Volatile.Write(
+                ref _pendingBackup,
+                CommitBehindAsync(prepared, sequence, captureMilliseconds, encodeMilliseconds));
+        }
+
+        /// <summary>Writes a prepared autosave durably behind its mutation. Never throws.</summary>
+        private async Task<RbxWorldPackageWriteResult> CommitBehindAsync(
+            RbxPreparedAutoSave prepared,
+            long sequence,
+            double captureMilliseconds,
+            double encodeMilliseconds)
+        {
+            Stopwatch watch = Stopwatch.StartNew();
+            RbxWorldPackageWriteResult result;
+            try
+            {
+                // WHY uncancelled: the mutation already ran, so abandoning its backup half-way would only
+                // lose it; the caller's token has no say over the write any more.
+                result = await _writeBehindStore.CommitAutoAsync(prepared, CancellationToken.None)
+                         ?? new RbxWorldPackageWriteResult(false, "", "the package store returned no result");
+            }
+            catch (Exception ex)
+            {
+                result = new RbxWorldPackageWriteResult(false, "", ex.Message);
+            }
+
+            if (result.Success)
+            {
+                Volatile.Write(ref _lastBackupFailure, "");
+            }
+            else
+            {
+                string failure = DescribeLostBehindBackup(prepared.Trigger, result);
+                Volatile.Write(ref _lastBackupFailure, failure);
+                ReportDiagnostic(failure);
+            }
+
+            PublishMetrics(new RbxWorldBackupMetrics(
+                prepared.Trigger, sequence, true, captureMilliseconds, encodeMilliseconds,
+                watch.Elapsed.TotalMilliseconds, prepared.PackageBytes?.LongLength ?? -1L,
+                result.Success, result.Error));
+            return result;
+        }
+
+        /// <summary>Waits for the autosave written behind the previous mutation; answers why it failed, or empty.</summary>
+        private async Task<string> SettlePendingBackupAsync()
+        {
+            Task<RbxWorldPackageWriteResult> pending = Volatile.Read(ref _pendingBackup);
+            if (pending == null)
+            {
+                return "";
+            }
+
+            RbxWorldPackageWriteResult result;
+            try
+            {
+                result = await pending;
+            }
+            catch (Exception ex)
+            {
+                result = new RbxWorldPackageWriteResult(false, "", ex.Message);
+            }
+
+            Volatile.Write(ref _pendingBackup, null);
+            return result != null && result.Success ? "" : DescribeLostBehindBackup(_pendingTrigger, result);
+        }
+
+        private static string DescribeLostBehindBackup(string trigger, RbxWorldPackageWriteResult result)
+        {
+            string reason = result == null || string.IsNullOrWhiteSpace(result.Error)
+                ? "the package store did not confirm durability"
+                : result.Error.Trim();
+            return "The autosave of the world before the previous change ('" + trigger + "') could not be "
+                   + "written behind it: " + reason + " That one change has no autosave; the next change is "
+                   + "backed up before it runs.";
+        }
+
+        private static string CombineNotes(string first, string second)
+        {
+            if (first.Length == 0)
+            {
+                return second;
+            }
+
+            return second.Length == 0 ? first : first + " " + second;
+        }
+
+        private static Task<TResult> StartMutation<TResult>(
+            Func<CancellationToken, Task<TResult>> mutationAsync,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                return mutationAsync(cancellationToken)
+                       ?? Task.FromException<TResult>(
+                           new InvalidOperationException("The gated mutation returned no task."));
+            }
+            catch (Exception ex)
+            {
+                return Task.FromException<TResult>(ex);
+            }
+        }
+
+        private void ReportDiagnostic(string message)
+        {
+            Action<string> diagnostics = Diagnostics;
+            if (diagnostics == null)
+            {
+                return;
+            }
+
+            try
+            {
+                diagnostics(message);
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private void NotifyObserversStarting(RbxWorldMutationInfo mutation)
+        {
+            foreach (IRbxWorldMutationObserver observer in SnapshotObservers())
+            {
+                // WHY contained: the backup is taken and the mutation is about to run; an observer's
+                // failure must not refuse it.
+                try
+                {
+                    observer.OnMutationStarting(mutation);
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
+
+        private void NotifyObserversFinished(RbxWorldMutationInfo mutation, RbxWorldSnapshot before, bool completed)
+        {
+            foreach (IRbxWorldMutationObserver observer in SnapshotObservers())
+            {
+                try
+                {
+                    observer.OnMutationFinished(mutation, before, completed);
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
+
+        private IRbxWorldMutationObserver[] SnapshotObservers()
+        {
+            lock (_observerGate)
+            {
+                return _observers.Count == 0 ? Array.Empty<IRbxWorldMutationObserver>() : _observers.ToArray();
+            }
+        }
+
+        private void PublishMetrics(RbxWorldBackupMetrics metrics)
+        {
+            Volatile.Write(ref _latestMetrics, metrics);
+            IRbxWorldBackupMetricsObserver[] observers;
+            lock (_observerGate)
+            {
+                if (_metricsObservers.Count == 0)
+                {
+                    return;
+                }
+
+                observers = _metricsObservers.ToArray();
+            }
+
+            foreach (IRbxWorldBackupMetricsObserver observer in observers)
+            {
+                try
+                {
+                    observer.OnBackupMeasured(metrics);
+                }
+                catch (Exception)
+                {
+                }
+            }
         }
 
         private void NotifyMutationStarting(string trigger)
@@ -545,6 +1009,7 @@ namespace CoreAI.Ai.LuaCs
             try
             {
                 return await ExecuteWithBackupAsync(
+                    "",
                     token => ExecuteCoreAsync(
                         code,
                         token,
@@ -577,6 +1042,7 @@ namespace CoreAI.Ai.LuaCs
             try
             {
                 return await ExecuteWithBackupAsync(
+                    actorContext.ActorId,
                     token => Task.FromResult(
                         scopedBindings.MutationRegistry.ApplyServerGeneratedMutation(
                             actorContext.ActorId,
@@ -631,6 +1097,7 @@ namespace CoreAI.Ai.LuaCs
             try
             {
                 return await ExecuteWithBackupAsync(
+                    actorContext.ActorId,
                     token => Task.FromResult(
                         scopedBindings.MutationRegistry.ApplyMutation(
                             mutationEnvelope,
@@ -656,7 +1123,9 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
+        /// <param name="actorId">The actor the gate attributes the change to; empty on the plain seam.</param>
         private Task<LuaTool.LuaResult> ExecuteWithBackupAsync(
+            string actorId,
             Func<CancellationToken, Task<LuaTool.LuaResult>> executeAsync,
             CancellationToken cancellationToken)
         {
@@ -665,8 +1134,9 @@ namespace CoreAI.Ai.LuaCs
                 return executeAsync(cancellationToken);
             }
 
-            return _worldMutationGate.ExecuteAsync(
+            return _worldMutationGate.ExecuteAttributedAsync(
                 ExecuteLuaBackupTrigger,
+                actorId,
                 executeAsync,
                 cancellationToken);
         }

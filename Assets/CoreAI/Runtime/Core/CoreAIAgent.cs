@@ -63,7 +63,9 @@
         }
 
         /// <summary>
-        /// Registers the orchestration service, memory policy, and memory store used by the global CoreAI facade.
+        /// Registers the orchestration service, memory policy, and memory store used by the global CoreAI facade,
+        /// then applies every <see cref="AgentBuilder.Build"/> that ran before CoreAI started
+        /// (<see cref="AgentBuilder.ApplyPendingBuilds"/>) to <paramref name="policy"/>.
         /// </summary>
         public static void Initialize(
             IAiOrchestrationService orchestrator,
@@ -75,10 +77,15 @@
             Policy = policy;
             MemoryStore = memoryStore;
             ActorIdentityProvider = actorIdentityProvider ?? new CoreAI.Authority.LocalActorIdentityProvider();
+            if (policy != null)
+            {
+                AgentBuilder.ApplyPendingBuilds(policy);
+            }
         }
 
         /// <summary>
-        /// Clears the global CoreAI facade registrations.
+        /// Clears the global CoreAI facade registrations and drops the agent builds still queued for the next
+        /// start (<see cref="AgentBuilder.ClearPendingBuilds"/>), so a session never inherits another's agents.
         /// </summary>
         /// <remarks>
         /// CoreAI.Core is portable (no <c>UnityEngine</c> reference), so the Unity-specific
@@ -92,6 +99,7 @@
             Policy = null;
             MemoryStore = null;
             ActorIdentityProvider = null;
+            AgentBuilder.ClearPendingBuilds();
         }
     }
 }

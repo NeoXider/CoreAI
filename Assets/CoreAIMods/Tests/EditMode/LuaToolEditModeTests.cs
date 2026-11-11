@@ -161,6 +161,46 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task ExecuteAsync_RateLimited_TheRefusalSaysTheCodeDidNotRunAndNamesTheResetTime()
+        {
+            double now = 100d;
+            FakeExecutor executor = new(new LuaTool.LuaResult { Success = true, Output = "ok" });
+            LuaGenerationRateLimiter limiter = new(1, 10d, () => now);
+            LuaTool tool = new(executor, new FakeSettings(), new NullLog(), limiter);
+
+            LuaTool.LuaResult first = JsonConvert.DeserializeObject<LuaTool.LuaResult>(
+                await tool.ExecuteAsync("print('a')"));
+            now = 104d;
+            LuaTool.LuaResult refused = JsonConvert.DeserializeObject<LuaTool.LuaResult>(
+                await tool.ExecuteAsync("print('b')"));
+
+            Assert.IsTrue(first.Success, first.Error);
+            Assert.IsFalse(refused.Success);
+            StringAssert.Contains("NOT executed", refused.Error);
+            StringAssert.Contains("next one is accepted in 6.0 s", refused.Error,
+                "the refusal names the reset time from the shared budget, not just the limit");
+            Assert.AreEqual(1, executor.CallCount, "a refused call never reaches the executor");
+        }
+
+        [Test]
+        public async Task ExecuteAsync_RateLimitSwitchedOff_NoCallIsRefused()
+        {
+            FakeExecutor executor = new(new LuaTool.LuaResult { Success = true, Output = "ok" });
+            LuaGenerationRateLimiter limiter = new(1, 10d, () => 0d);
+            limiter.Reconfigure(false, 1, 10d);
+            LuaTool tool = new(executor, new FakeSettings(), new NullLog(), limiter);
+
+            for (int index = 0; index < 5; index++)
+            {
+                LuaTool.LuaResult result = JsonConvert.DeserializeObject<LuaTool.LuaResult>(
+                    await tool.ExecuteAsync("print(" + index + ")"));
+                Assert.IsTrue(result.Success, result.Error);
+            }
+
+            Assert.AreEqual(5, executor.CallCount);
+        }
+
+        [Test]
         public async Task ExecuteAsync_SuccessWithNilOutput_TrimsOutputAndErrorFromJson()
         {
             FakeExecutor executor = new(new LuaTool.LuaResult

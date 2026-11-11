@@ -101,6 +101,23 @@ A `MaterialVariant` that brings its own normal map drops the cavity strength, be
 belongs to the base normal map. Regenerate the maps with
 **CoreAI > Materials > Bake cavity maps for packaged textures**, then rebuild the packaged catalog.
 
+## Emission: CrackedLava glows
+
+The textured shader has an emission slot, behind the `_RBX_EMISSION` keyword. It reads no extra
+texture: the hot texels of the colour map glow. A texel glows when its linear red channel is above
+`_EmissionThreshold` and it is warm (red above green and blue). It then emits `_EmissionColor`, an HDR
+colour that reaches the bloom threshold.
+
+Each catalog entry has an `EmissionMode`:
+
+- `MaterialDefault`, which every entry saved before this field existed loads as, lets
+  `RbxMaterialEmissionDefaults` decide. CrackedLava glows (colour `(3.2, 0.95, 0.22)`, threshold 0.5)
+  and every other material does not, so no catalog asset has to be rebuilt.
+- `None` switches the default glow off.
+- `FromAlbedo` with your own colour and threshold makes any entry glow.
+
+A MaterialVariant that brings its own `ColorMap` does not inherit the base glow.
+
 ## Metal reflectance lift
 
 The packaged ambientCG metal colour maps are photographs with a linear reflectance of about

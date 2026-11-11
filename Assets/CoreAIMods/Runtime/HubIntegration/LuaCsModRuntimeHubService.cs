@@ -174,6 +174,13 @@ namespace CoreAI.Ai.Hub
             return _runtime.TryGetModSource(_actorContext, id, out source);
         }
 
+        /// <inheritdoc />
+        protected override bool RuntimeRetitle(string id, string newSource)
+        {
+            return _runtime is ILuaModSourceRetitler retitler &&
+                   retitler.TryRetitleModSource(_actorContext, id, newSource);
+        }
+
         protected override void RuntimeLoad(string id, string code, LuaCapabilities caps)
         {
             _runtime.LoadMod(_actorContext, id, code, caps);

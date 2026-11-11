@@ -1926,6 +1926,12 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         private static MEAI.ChatResponseUpdate ParseSseLine(string line, SseToolCallAccumulator accumulator)
         {
+            return ParseSseLine(line, accumulator, true);
+        }
+
+        private static MEAI.ChatResponseUpdate ParseSseLine(string line, SseToolCallAccumulator accumulator,
+            bool contentFastPath)
+        {
             if (!TryGetSseDataRange(line, out int start, out int end) ||
                 end <= start ||
                 IsSseDoneRange(line, start, end))
@@ -1933,7 +1939,72 @@ namespace CoreAI.Infrastructure.Llm
                 return null;
             }
 
+            if (contentFastPath && SseContentDeltaReader.TryRead(line, start, end, out SseContentDeltaReader.Delta delta))
+            {
+                return BuildContentDeltaUpdate(in delta, accumulator);
+            }
+
             return ExtractDeltaUpdate(line.Substring(start, end - start), accumulator);
+        }
+
+        /// <summary>
+        /// The update <see cref="ExtractDeltaUpdate"/> builds for a chunk <see cref="SseContentDeltaReader"/>
+        /// accepted, step for step: the wire id is latched first, then the content (with its reasoning) or the
+        /// reasoning alone, the served model, and the response and message ids. An accepted chunk has no tool
+        /// calls, no usage and no finish reason, so those steps of the full path do nothing for it.
+        /// </summary>
+        private static MEAI.ChatResponseUpdate BuildContentDeltaUpdate(in SseContentDeltaReader.Delta delta,
+            SseToolCallAccumulator accumulator)
+        {
+            accumulator.LatchWireId(delta.Id);
+            MEAI.ChatResponseUpdate update;
+            if (!string.IsNullOrEmpty(delta.Content))
+            {
+                update = new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, delta.Content);
+                if (!string.IsNullOrEmpty(delta.Reasoning))
+                {
+                    update.Contents.Add(new MEAI.TextReasoningContent(delta.Reasoning));
+                }
+            }
+            else
+            {
+                update = new MEAI.ChatResponseUpdate(MEAI.ChatRole.Assistant, "");
+                update.Contents = new List<MEAI.AIContent> { new MEAI.TextReasoningContent(delta.Reasoning) };
+            }
+
+            if (!string.IsNullOrWhiteSpace(delta.Model))
+            {
+                update.ModelId = delta.Model.Trim();
+            }
+
+            update.ResponseId = accumulator.LatchedOrSyntheticId();
+            update.MessageId = accumulator.MessageId;
+            return update;
+        }
+
+        /// <summary>
+        /// EditMode tests: every line of <paramref name="lines"/> through ONE accumulator (as one streamed
+        /// attempt), with the content fast path on or off, so the two paths can be compared update by update.
+        /// </summary>
+        internal static List<MEAI.ChatResponseUpdate> ParseSseLinesForTests(IReadOnlyList<string> lines,
+            bool contentFastPath)
+        {
+            SseToolCallAccumulator accumulator = new();
+            List<MEAI.ChatResponseUpdate> updates = new(lines.Count);
+            for (int index = 0; index < lines.Count; index++)
+            {
+                updates.Add(ParseSseLine(lines[index], accumulator, contentFastPath));
+            }
+
+            return updates;
+        }
+
+        /// <summary>EditMode tests: true when the content fast path accepts the data line <paramref name="line"/>.</summary>
+        internal static bool SseContentFastPathAcceptsForTests(string line)
+        {
+            return TryGetSseDataRange(line, out int start, out int end) && end > start &&
+                   !IsSseDoneRange(line, start, end) &&
+                   SseContentDeltaReader.TryRead(line, start, end, out SseContentDeltaReader.Delta _);
         }
 
         private static IEnumerable<MEAI.ChatResponseUpdate> ParseSseUpdates(string raw,

@@ -74,6 +74,7 @@ namespace CoreAI
         // host that had DISABLED primitive spawning got it re-enabled the moment its settings round-tripped
         // through this class, and the per-token prices reset to 0 (cost overlay shows tokens only).
         public bool AllowWorldPrimitives { get; set; } = true;
+        [System.Obsolete("Read by nothing: Lua-CSharp runs on the WebGL player like on every other one, so there is no WebGL Lua switch. To ship a build without Lua, leave CoreAiModsLifetimeScope out of the scene (or build without the COREAI_LUA define); to keep mods but not AI-written Lua, leave the lua-builder tool profile off the roles.")]
         public bool EnableLuaOnWebGl { get; set; } = true;
         public float InputTokenPricePer1KUsd { get; set; }
         public float OutputTokenPricePer1KUsd { get; set; }
@@ -131,7 +132,10 @@ namespace CoreAI
                 MaxToolCallHistoryMessages = source.MaxToolCallHistoryMessages,
                 MaxParallelToolCalls = source.MaxParallelToolCalls,
                 AllowWorldPrimitives = source.AllowWorldPrimitives,
+#pragma warning disable CS0618
+                // WHY copied although obsolete: a host that still reads it gets back the value it wrote.
                 EnableLuaOnWebGl = source.EnableLuaOnWebGl,
+#pragma warning restore CS0618
                 InputTokenPricePer1KUsd = source.InputTokenPricePer1KUsd,
                 OutputTokenPricePer1KUsd = source.OutputTokenPricePer1KUsd
             };

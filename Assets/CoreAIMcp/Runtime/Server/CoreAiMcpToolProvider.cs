@@ -29,9 +29,21 @@ namespace CoreAI.Mcp.Server
         /// <param name="worldTool">Constructed world tool (world_command). Optional - absent when no executor resolved.</param>
         /// <param name="skills">Programmer-role skills (read_skill). Optional - absent when empty/null.</param>
         /// <param name="screenshotSource">Screenshot source (screenshot). Optional - absent when null.</param>
-        /// <param name="residencyPolicy">Host residency override (delegate channel). Null means all Native.</param>
+        /// <param name="residencyPolicy">
+        /// Host residency override (delegate channel). Null means all Native except
+        /// <paramref name="brokeredTools"/>, which default to Dynamic.
+        /// </param>
         /// <param name="readEnvironmentVariable">Variable reader (variable channel). Null reads the process environment.</param>
         /// <param name="warningSink">Unknown variable names warn here. Null sinks to the CoreAI log.</param>
+        /// <param name="brokeredTools">
+        /// Additional tools reached through <c>coreai_tools</c> by default, so they cost no <c>tools/list</c>
+        /// context until used. <c>COREAI_MCP_NATIVE</c> or an explicit <paramref name="residencyPolicy"/>
+        /// can still list them. Null adds none.
+        /// </param>
+        /// <param name="modRateLimiter">
+        /// The mods scope's shared limiter of AI world changes, which MCP <c>manage_mods</c> then spends like the
+        /// in-game tools. Null leaves it unlimited.
+        /// </param>
         public static McpToolRegistry Build(
             LuaTool.ILuaExecutor luaExecutor,
             ILuaModRuntime modRuntime,
@@ -45,7 +57,40 @@ namespace CoreAI.Mcp.Server
             IScreenshotSource screenshotSource,
             IMcpToolResidencyPolicy residencyPolicy = null,
             Func<string, string> readEnvironmentVariable = null,
-            Action<string> warningSink = null)
+            Action<string> warningSink = null,
+            IReadOnlyList<IMcpTool> brokeredTools = null,
+            LuaGenerationRateLimiter modRateLimiter = null)
+        {
+            return BuildWithModFolders(luaExecutor, modRuntime, settings, logger, modCapabilities,
+                modActorIdentityProvider, logService, worldTool, skills, screenshotSource, residencyPolicy,
+                readEnvironmentVariable, warningSink, brokeredTools, modRateLimiter, null);
+        }
+
+        /// <summary>
+        /// <see cref="Build"/> whose <c>manage_mods</c> also shares the mod store's folder list (the one the in-game
+        /// tool, the Hub Mods page and the world session use); null keeps one in-memory list.
+        /// </summary>
+        /// <remarks>
+        /// WHY a separate name and not another optional parameter of Build: a parameter of the folder type would
+        /// make every caller of Build reference the mod-folders assembly.
+        /// </remarks>
+        internal static McpToolRegistry BuildWithModFolders(
+            LuaTool.ILuaExecutor luaExecutor,
+            ILuaModRuntime modRuntime,
+            ICoreAISettings settings,
+            ILog logger,
+            LuaCapabilities modCapabilities,
+            IActorIdentityProvider modActorIdentityProvider,
+            ILuaLogService logService,
+            WorldLlmTool worldTool,
+            IReadOnlyList<SkillSet> skills,
+            IScreenshotSource screenshotSource,
+            IMcpToolResidencyPolicy residencyPolicy,
+            Func<string, string> readEnvironmentVariable,
+            Action<string> warningSink,
+            IReadOnlyList<IMcpTool> brokeredTools,
+            LuaGenerationRateLimiter modRateLimiter,
+            CoreAI.Mods.Folders.IModFolderListStore modFolderList)
         {
             List<IMcpTool> tools = new();
 
@@ -66,7 +111,9 @@ namespace CoreAI.Mcp.Server
                     settings,
                     logger,
                     modCapabilities,
-                    modActorIdentityProvider));
+                    modActorIdentityProvider,
+                    modRateLimiter,
+                    modFolderList));
             }
 
             if (logService != null)
@@ -89,15 +136,31 @@ namespace CoreAI.Mcp.Server
                 tools.Add(new ScreenshotMcpTool(screenshotSource));
             }
 
+            HashSet<string> brokeredByDefault = new(StringComparer.Ordinal);
+            if (brokeredTools != null)
+            {
+                foreach (IMcpTool tool in brokeredTools)
+                {
+                    if (tool == null) continue;
+                    tools.Add(tool);
+                    brokeredByDefault.Add(tool.Name);
+                }
+            }
+
             List<string> knownNames = new(tools.Count);
             foreach (IMcpTool tool in tools)
             {
                 knownNames.Add(tool.Name);
             }
 
+            IMcpToolResidencyPolicy hostPolicy = residencyPolicy ?? (brokeredByDefault.Count == 0
+                ? null
+                : new FuncMcpToolResidencyPolicy(tool => brokeredByDefault.Contains(tool.Name)
+                    ? McpToolResidency.Dynamic
+                    : McpToolResidency.Native));
             IMcpToolResidencyPolicy effectivePolicy = McpToolResidencyPolicies.FromEnvironment(
                 knownNames,
-                residencyPolicy,
+                hostPolicy,
                 readEnvironmentVariable,
                 warningSink ?? (static message => Log.Instance.Warn(message)));
             return new McpToolRegistry(tools, effectivePolicy, true);

@@ -22,6 +22,7 @@
     <Compile Include="$(SourceRoot)/AssemblyInfo.cs" Link="Source/AssemblyInfo.cs" />
     <Compile Include="$(SourceRoot)/Features/Chat/CoreAiChatExamples.cs" Link="Source/Features/Chat/CoreAiChatExamples.cs" />
     <Compile Include="$(SourceRoot)/Infrastructure/CoreAiPersistentPaths.cs" Link="Source/Infrastructure/CoreAiPersistentPaths.cs" />
+    <Compile Include="$(SourceRoot)/Infrastructure/CoreAiStorageRoot.cs" Link="Source/Infrastructure/CoreAiStorageRoot.cs" />
     <Compile Include="$(SourceRoot)/Infrastructure/CoreAiWebGlPersistence.cs" Link="Source/Infrastructure/CoreAiWebGlPersistence.cs" />
     <Compile Include="$(SourceRoot)/Features/Logging/UnityLog.cs" Link="Source/Features/Logging/UnityLog.cs" />
     <Compile Include="$(SourceRoot)/Features/Logging/Infrastructure/IGameLogger.cs" Link="Source/Features/Logging/Infrastructure/IGameLogger.cs" />

@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.ComponentModel;
+using CoreAI.Mods.Rbx.Instances.Scripts;
 using Newtonsoft.Json;
 
 namespace CoreAI.Ai
@@ -32,7 +34,9 @@ namespace CoreAI.Ai
         public string Version = "";
 
         /// <summary>
-        /// Optional "/"-separated category path used for tree grouping in mod UI.
+        /// The mod's folder: a "/"-separated path (Games/Arcade); empty is the top level. Read it with
+        /// ModFolderPath.FromStored (lenient); it is written from the @coreai header's category entry, which
+        /// ModFolderHeaderEditor.SetCategory rewrites when a mod moves. A one-level category is a one-folder path.
         /// </summary>
         public string Category = "";
 
@@ -108,6 +112,35 @@ namespace CoreAI.Ai
         // byte-identical to one written before this field existed.
         [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
         public bool SuspendedAfterBudgetTrips;
+
+        /// <summary>
+        /// The script context the mod's source declares (MVP4 SC-5): <c>server</c>, <c>client</c> or <c>shared</c>,
+        /// or empty for a mod that declares none and runs as a legacy script (SC-8). The copy every manifest writer
+        /// derives through <see cref="ResolveContext"/>; the header stays the authoring truth.
+        /// </summary>
+        // WHY omitted when empty, like LoadOrder: every manifest of a mod that declares no context stays
+        // byte-identical to one written before this field existed. A world-package reader that predates it
+        // refuses a mod manifest that carries it, explicitly ("Could not find member 'Context'").
+        [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
+        [DefaultValue("")]
+        public string Context = "";
+
+        /// <summary>
+        /// The <see cref="Context"/> a manifest of a mod with <paramref name="header"/> carries: the header's
+        /// declared context in its canonical spelling when it declares a valid one, otherwise the context
+        /// <paramref name="existing"/> already holds, otherwise empty (legacy). A header value that is not a
+        /// context counts as no declaration here; the load refuses it.
+        /// </summary>
+        public static string ResolveContext(LuaModHeader header, LuaModManifest existing)
+        {
+            if (!string.IsNullOrWhiteSpace(header.Context)
+                && ScriptContexts.TryParseDeclared(header.Context, out ScriptContext declared, out string _))
+            {
+                return ScriptContexts.ToDeclaredName(declared);
+            }
+
+            return existing?.Context ?? "";
+        }
 
         /// <summary>
         /// The largest <see cref="LoadOrder"/> a store records: 2^53. The order counts first loads, so no

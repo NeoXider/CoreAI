@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace CoreAI.Mcp.Server
@@ -20,10 +21,25 @@ namespace CoreAI.Mcp.Server
     }
 
     /// <summary>
+    /// A main-thread dispatcher that can withdraw queued work. The RPC dispatcher uses it when present, so
+    /// a <c>notifications/cancelled</c> for a call still waiting for the game thread frees its queue slot
+    /// at once instead of when the next frame (or the queue deadline) reaches it.
+    /// </summary>
+    public interface ICancellableMainThreadDispatcher : IMainThreadDispatcher
+    {
+        /// <summary>
+        /// Like <see cref="IMainThreadDispatcher.RunOnMainThreadAsync{T}(Func{Task{T}})"/>, but a
+        /// cancellation that arrives before <paramref name="work"/> starts removes it from the queue and
+        /// completes the task as cancelled without running it. Work that has started is not interrupted.
+        /// </summary>
+        Task<T> RunOnMainThreadAsync<T>(Func<Task<T>> work, CancellationToken cancellationToken);
+    }
+
+    /// <summary>
     /// Runs work immediately on the calling thread. Used by tests and headless callers that have no
     /// Unity player loop; never use it when handlers touch the scene from a background thread.
     /// </summary>
-    public sealed class InlineMainThreadDispatcher : IMainThreadDispatcher
+    public sealed class InlineMainThreadDispatcher : ICancellableMainThreadDispatcher
     {
         /// <inheritdoc />
         public Task<T> RunOnMainThreadAsync<T>(Func<Task<T>> work)
@@ -34,6 +50,17 @@ namespace CoreAI.Mcp.Server
             }
 
             return work();
+        }
+
+        /// <inheritdoc />
+        public Task<T> RunOnMainThreadAsync<T>(Func<Task<T>> work, CancellationToken cancellationToken)
+        {
+            if (work == null)
+            {
+                throw new ArgumentNullException(nameof(work));
+            }
+
+            return cancellationToken.IsCancellationRequested ? Task.FromCanceled<T>(cancellationToken) : work();
         }
     }
 }

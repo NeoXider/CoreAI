@@ -91,7 +91,8 @@ namespace CoreAI.Ai.Hub
             LuaCapabilities grant = allowFullTier
                 ? LuaCapabilities.All | LuaCapabilities.Full
                 : LuaCapabilities.All;
-            HubModsPages.Register(registry, runtime, actorContext, sourceStore, grant, allowFullTier,
+            HubModsPages.RegisterWithFolderList(registry, runtime, actorContext,
+                container.ResolveOrDefault<CoreAI.Mods.Folders.IModFolderListStore>(), sourceStore, grant, allowFullTier,
                 rbxApiAvailable: IsRbxApiWired(container));
             _registeredRegistry = registry;
             registry.TryGet(HubModsPages.ModsPageId, out _modsFactory);

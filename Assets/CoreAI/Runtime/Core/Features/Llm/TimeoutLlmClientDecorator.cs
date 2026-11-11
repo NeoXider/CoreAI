@@ -651,6 +651,7 @@ namespace CoreAI.Infrastructure.Llm
             CancellationTokenSource timeoutCts = null;
             CancellationSignal signal = null;
             IdleDeadline deadline = null;
+            IDisposable progressSubscription = null;
             Task<LlmCompletionResult> operation = null;
             LlmCompletionResult completed = null;
             Exception failure = null;
@@ -661,6 +662,10 @@ namespace CoreAI.Infrastructure.Llm
                 timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 signal = new CancellationSignal(timeoutCts.Token);
                 deadline = new IdleDeadline(_asyncMarshaler, timeoutCts, timeoutSeconds, _onDeadlineTimerFault);
+                // WHY: a non-streaming call shows no chunks, so without a progress signal its window is a
+                // wall-clock one. A request whose owner reports progress (its tools, a sub-agent it waits for)
+                // re-arms the window on each report; a request nobody reports for keeps the plain deadline.
+                progressSubscription = request?.Progress?.Subscribe(deadline.Touch);
 
                 operation = _inner.CompleteAsync(request, timeoutCts.Token);
                 LlmCompletionResult result =
@@ -741,6 +746,8 @@ namespace CoreAI.Infrastructure.Llm
                 // is exactly this shape.) Each dispose is attempted independently so one throwing does
                 // not skip the other two; the first exception seen wins, matching how this file already
                 // swallows secondary failures elsewhere (e.g. inside IdleDeadline itself).
+                progressSubscription?.Dispose();
+
                 try
                 {
                     deadline?.Dispose();
@@ -813,6 +820,9 @@ namespace CoreAI.Infrastructure.Llm
                 CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             using CancellationSignal signal = new(timeoutCts.Token);
             using IdleDeadline deadline = new(_asyncMarshaler, timeoutCts, timeoutSeconds, _onDeadlineTimerFault);
+            // WHY: the window is re-armed per chunk; a turn that streams nothing while its tools or sub-agents
+            // work (a lead waiting for a delegation) is re-armed by its owner's progress reports instead.
+            using IDisposable progressSubscription = request?.Progress?.Subscribe(deadline.Touch);
             using MoveNextRace race = new(timeoutCts.Token);
 
             IAsyncEnumerator<LlmStreamChunk> enumerator =

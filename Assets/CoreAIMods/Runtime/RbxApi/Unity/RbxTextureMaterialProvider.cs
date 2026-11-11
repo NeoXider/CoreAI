@@ -11,7 +11,7 @@ namespace CoreAI.Mods.Rbx.Rendering
     /// <summary>Runtime catalog provider that overlays textured Rbx materials on the complete
     /// procedural catalog.</summary>
     public sealed class RbxTextureMaterialProvider : IRbxMaterialLeaseProvider<Material>,
-        IRbxMaterialVariantConsumer, IDisposable
+        IRbxMaterialVariantConsumer, IRbxTransparentMaterialProvider, IDisposable
     {
         internal const string DefaultCatalogResource =
             "CoreAIRbxTextures/RbxMaterialTextureCatalog";
@@ -21,6 +21,7 @@ namespace CoreAI.Mods.Rbx.Rendering
         private const string MetallicMapKeyword = "_RBX_METALLIC_MAP";
         private const string OcclusionMapKeyword = "_RBX_OCCLUSION_MAP";
         private const string DirectXNormalKeyword = "_RBX_NORMAL_DIRECTX";
+        private const string EmissionKeyword = "_RBX_EMISSION";
 
         private static readonly ReadOnlyCollection<RbxMaterialId> PackagedTexturedMaterialIds =
             Array.AsReadOnly(new[]
@@ -216,6 +217,12 @@ namespace CoreAI.Mods.Rbx.Rendering
             return found;
         }
 
+        /// <inheritdoc />
+        public bool TryGetTransparentMaterial(Material opaqueMaterial, out Material transparentMaterial)
+        {
+            return RbxTransparentTwins.TryGet(opaqueMaterial, out transparentMaterial);
+        }
+
         /// <summary>Releases one renderer reference; the final release destroys its mutable material.</summary>
         public void ReleaseMaterial(Material visualMaterial)
         {
@@ -327,6 +334,7 @@ namespace CoreAI.Mods.Rbx.Rendering
                     ApplyVariantOverrides(record.Material, record.BaseEntry, in data,
                         material.Variant);
                     record.Snapshot = data;
+                    RbxTransparentTwins.Refresh(record.Material);
                 }
 
                 SyncTextureScaleToSessionScale();
@@ -473,6 +481,11 @@ namespace CoreAI.Mods.Rbx.Rendering
                             !string.IsNullOrEmpty(data.MetalnessMap);
             material.SetFloat(PropertyIds.CavityStrength, ownNormal ? 0f : baseEntry.CavityStrength);
             material.SetFloat(PropertyIds.MetalAlbedoLift, ownColor ? 0f : baseEntry.MetalAlbedoLift);
+            // WHY: the base glow is read from the base colour map's hot texels; a variant that brings its
+            // own colour map would glow wherever its picture happens to be red.
+            ApplyEmission(material, string.IsNullOrEmpty(data.ColorMap)
+                ? baseEntry.ResolveEmission()
+                : RbxMaterialEmission.None);
         }
 
         private Texture2D ResolveVariantMap(string variantName, string slotName,
@@ -572,6 +585,7 @@ namespace CoreAI.Mods.Rbx.Rendering
                     float textureAspect = pair.Value.GetFloat(PropertyIds.TextureAspect);
                     pair.Value.SetFloat(PropertyIds.TextureScale,
                         ComputeTextureScale(textureAspect, entry.TileWidthStuds, metersPerStud));
+                    RbxTransparentTwins.Refresh(pair.Value);
                 }
 
                 _cachedMetersPerStud = metersPerStud;
@@ -588,6 +602,7 @@ namespace CoreAI.Mods.Rbx.Rendering
                 record.Material.SetFloat(PropertyIds.TextureScale,
                     ComputeTextureScale(textureAspect, record.EffectiveTileWidthStuds,
                         metersPerStud));
+                RbxTransparentTwins.Refresh(record.Material);
             }
 
             _variantMetersPerStud = metersPerStud;
@@ -771,12 +786,29 @@ namespace CoreAI.Mods.Rbx.Rendering
                 material.EnableKeyword(OcclusionMapKeyword);
             }
 
+            ApplyEmission(material, entry.ResolveEmission());
             _sharedMaterialAllocationCount++;
             return material;
         }
 
+        private static void ApplyEmission(Material material, RbxMaterialEmission emission)
+        {
+            if (emission.Emits)
+            {
+                material.SetColor(PropertyIds.EmissionColor, emission.Color);
+                material.SetFloat(PropertyIds.EmissionThreshold, emission.Threshold);
+                material.EnableKeyword(EmissionKeyword);
+            }
+            else
+            {
+                material.SetColor(PropertyIds.EmissionColor, Color.black);
+                material.DisableKeyword(EmissionKeyword);
+            }
+        }
+
         private static void DestroyMaterial(Material material)
         {
+            RbxTransparentTwins.Forget(material);
             if (material == null)
             {
                 return;
@@ -813,6 +845,8 @@ namespace CoreAI.Mods.Rbx.Rendering
             public static readonly int OcclusionMap = Shader.PropertyToID("_OcclusionMap");
             public static readonly int CavityStrength = Shader.PropertyToID("_CavityStrength");
             public static readonly int MetalAlbedoLift = Shader.PropertyToID("_MetalAlbedoLift");
+            public static readonly int EmissionColor = Shader.PropertyToID("_EmissionColor");
+            public static readonly int EmissionThreshold = Shader.PropertyToID("_EmissionThreshold");
         }
     }
 }

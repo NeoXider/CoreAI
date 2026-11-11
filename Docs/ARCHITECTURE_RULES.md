@@ -138,7 +138,7 @@ CoreAI is a framework for many AI-driven games, not one game (`AGENTS.md`). Norm
 ## 7. Installed dependency baseline (manifest)
 
 Already in `Packages/manifest.json` — use these, do not hand-roll equivalents:
-`jp.hadashikick.vcontainer` 1.17.0 (DI), `com.cysharp.unitask` (async),
+`jp.hadashikick.vcontainer` 1.19.0 (DI), `com.cysharp.unitask` (async),
 `com.cysharp.messagepipe` + `.vcontainer` (events), `com.cysharp.r3` (reactive),
 `com.neoxider.tools` (gameplay modules for the example game and demo scenes; the framework packages
 take no dependency on it — owner decision 2, `Docs/ROADMAP.md` §3, Track E), `com.unity.dedicated-server`,

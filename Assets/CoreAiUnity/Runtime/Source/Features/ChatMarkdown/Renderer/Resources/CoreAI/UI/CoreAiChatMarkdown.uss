@@ -1,0 +1,130 @@
+/* CoreAI chat Markdown: the default look of CoreAiMarkdownView on the dark chat theme.
+   Text colour, size and wrapping are inherited from the bubble (.coreai-chat-message). This sheet sits on each view,
+   so a host sheet higher up needs a more specific selector; or replace it with NeoxiderMarkdownRenderer.StyleSheet. */
+
+.coreai-markdown {
+  flex-direction: column;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.coreai-markdown .mainBody {
+  margin: 0;
+  padding: 0;
+  background-color: rgba(0, 0, 0, 0);
+}
+
+.coreai-markdown Label {
+  margin: 0;
+  padding: 0;
+  white-space: normal;
+}
+
+.coreai-markdown__segment {
+  margin-bottom: 8px;
+}
+
+.coreai-markdown__segment--last {
+  margin-bottom: 0;
+}
+
+.coreai-markdown .block {
+  margin: 0 0 8px 0;
+}
+
+.coreai-markdown .block.markdown-last-child {
+  margin-bottom: 0;
+}
+
+.coreai-markdown .h1 {
+  font-size: 135%;
+  -unity-font-style: bold;
+}
+
+.coreai-markdown .h2 {
+  font-size: 120%;
+  -unity-font-style: bold;
+}
+
+.coreai-markdown .h3 {
+  font-size: 110%;
+  -unity-font-style: bold;
+}
+
+.coreai-markdown .h4,
+.coreai-markdown .h5,
+.coreai-markdown .h6 {
+  -unity-font-style: bold;
+}
+
+.coreai-markdown .codeblock {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border-width: 1px;
+  border-color: rgba(77, 208, 225, 0.18);
+  background-color: rgba(0, 0, 0, 0.35);
+}
+
+.coreai-markdown .codeblock Label {
+  font-size: 90%;
+  color: rgb(212, 216, 224);
+}
+
+.coreai-markdown .quote {
+  padding-left: 10px;
+  border-left-width: 3px;
+  border-left-color: rgba(77, 208, 225, 0.55);
+  color: rgba(220, 232, 240, 0.82);
+}
+
+.coreai-markdown .line {
+  height: 1px;
+  background-color: rgba(220, 232, 240, 0.25);
+}
+
+.coreai-markdown .md-image {
+  max-width: 100%;
+  border-radius: 6px;
+}
+
+.coreai-markdown .linkHovered {
+  cursor: link;
+}
+
+.coreai-markdown__table {
+  border-width: 1px;
+  border-radius: 6px;
+  border-color: rgba(77, 208, 225, 0.25);
+  overflow: hidden;
+}
+
+.coreai-markdown__table-row {
+  border-bottom-width: 1px;
+  border-bottom-color: rgba(77, 208, 225, 0.12);
+}
+
+.coreai-markdown__table-row--header {
+  background-color: rgba(17, 160, 181, 0.16);
+}
+
+.coreai-markdown .coreai-markdown__table-row--header .coreai-markdown__table-cell {
+  -unity-font-style: bold;
+}
+
+.coreai-markdown .coreai-markdown__table-cell {
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 90%;
+}
+
+.coreai-markdown .coreai-markdown__table-cell--center {
+  -unity-text-align: upper-center;
+}
+
+.coreai-markdown .coreai-markdown__table-cell--right {
+  -unity-text-align: upper-right;
+}
+
+.coreai-markdown.coreai-streaming-active {
+  border-color: rgba(77, 208, 225, 0.5);
+}

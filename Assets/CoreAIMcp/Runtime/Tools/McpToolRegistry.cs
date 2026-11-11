@@ -76,6 +76,48 @@ namespace CoreAI.Mcp.Tools
             Changed?.Invoke();
         }
 
+        /// <summary>Names of the published tools, without the broker the registry manages.</summary>
+        internal IReadOnlyCollection<string> ToolNames
+        {
+            get
+            {
+                List<string> names = new();
+                foreach (Entry entry in Volatile.Read(ref _snapshot).Entries) names.Add(entry.Name);
+                return names;
+            }
+        }
+
+        /// <summary>
+        /// In one revision, removes the tools named in <paramref name="withdraw"/> and publishes
+        /// <paramref name="source"/>'s tools (null publishes none) with the residency that catalog resolved
+        /// for them; every other tool stays. Rebinds a live catalog to a rebuilt composition without changing
+        /// its identity, its revision history, its open notification streams or the tools a host added.
+        /// Returns the names now published from <paramref name="source"/>.
+        /// </summary>
+        internal IReadOnlyCollection<string> Rebind(IReadOnlyCollection<string> withdraw, McpToolRegistry source)
+        {
+            List<Entry> incoming = source == null ? new List<Entry>() : new List<Entry>(Volatile.Read(ref source._snapshot).Entries);
+            HashSet<string> removed = new(withdraw ?? Array.Empty<string>(), StringComparer.Ordinal);
+            List<string> published = new(incoming.Count);
+            foreach (Entry entry in incoming)
+            {
+                removed.Add(entry.Name);
+                published.Add(entry.Name);
+            }
+
+            lock (_gate)
+            {
+                List<Entry> entries = new();
+                foreach (Entry entry in _snapshot.Entries)
+                    if (!removed.Contains(entry.Name)) entries.Add(entry);
+                entries.AddRange(incoming);
+                Volatile.Write(ref _snapshot, Build(entries, checked(_snapshot.Revision + 1)));
+            }
+
+            Changed?.Invoke();
+            return published;
+        }
+
         /// <summary>True when a tool is currently available.</summary>
         public bool Contains(string name) => Find(name) != null;
 
@@ -160,10 +202,12 @@ namespace CoreAI.Mcp.Tools
         {
             Snapshot snapshot = Volatile.Read(ref _snapshot);
             JArray result = new();
+            // WHY: DeepClone of the frozen schema - callers own the returned tree, and re-parsing every
+            // schema string on every tools/list cost a full JSON parse per tool per request.
             foreach (Entry entry in snapshot.ByName.Values)
                 if (entry.Residency == McpToolResidency.Native)
                     result.Add(new JObject { ["name"] = entry.Name, ["description"] = entry.Description,
-                        ["inputSchema"] = JObject.Parse(entry.InputSchemaJson) });
+                        ["inputSchema"] = entry.Schema.DeepClone() });
             return result;
         }
 
@@ -227,6 +271,7 @@ namespace CoreAI.Mcp.Tools
                     ? "{\"type\":\"object\"}" : body.InputSchemaJson);
                 if ((string)schema["type"] != "object")
                     throw new ArgumentException($"Tool '{Name}' requires an object input schema.", nameof(body));
+                Schema = schema;
                 InputSchemaJson = schema.ToString(Newtonsoft.Json.Formatting.None);
                 Description = body.Description ?? "";
                 Residency = residency;
@@ -235,6 +280,7 @@ namespace CoreAI.Mcp.Tools
             public string Name { get; }
             public string Description { get; }
             public string InputSchemaJson { get; }
+            public JObject Schema { get; }
             public McpToolResidency Residency { get; }
             public Task<Protocol.McpToolResult> InvokeAsync(JObject arguments, CancellationToken cancellationToken)
             {

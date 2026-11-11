@@ -8,8 +8,12 @@
     "CoreAI.RbxApi.Instances",
     "CoreAI.RbxApi.Binding",
     "CoreAI.RbxApi.Unity",
+    "CoreAI.Source",
+    "VContainer",
     "UnityEngine.TestRunner",
-    "UnityEditor.TestRunner"
+    "UnityEditor.TestRunner",
+    "Unity.InputSystem",
+    "Unity.InputSystem.TestFramework"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
@@ -22,6 +26,12 @@
   "defineConstraints": [
     "UNITY_INCLUDE_TESTS"
   ],
-  "versionDefines": [],
+  "versionDefines": [
+    {
+      "name": "com.unity.inputsystem",
+      "expression": "1.0.0",
+      "define": "COREAI_HAS_INPUT_SYSTEM"
+    }
+  ],
   "noEngineReferences": false
 }

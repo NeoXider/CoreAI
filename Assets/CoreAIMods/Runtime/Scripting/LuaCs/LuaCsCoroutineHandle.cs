@@ -203,6 +203,9 @@ namespace CoreAI.Sandbox.LuaCs
         /// <summary>
         /// Instruction steps consumed across all resumes so far, those of the runs nested in them (a raw coroutine a
         /// resume ran, a thread a <c>task.spawn</c> in it ran at once) included. The lifetime cap counts them.
+        /// Exact for a handle with a lifetime cap. A handle without one (every scheduler thread) is charged per
+        /// finished hook window of <see cref="LuaCsExecutionGuard.HookInstructionBatch"/> instructions, so up to
+        /// three instructions at the end of each resume are not counted: a lower bound, like the guard's steps.
         /// </summary>
         public long ConsumedSteps => _consumedSteps;
 
@@ -359,11 +362,14 @@ namespace CoreAI.Sandbox.LuaCs
                 _maxAllocatedBytes, enclosing, _coroutine);
 
             int count = 0;
-            CancellationTokenRegistration cancellationRegistration = cancellationToken.Register(
-                CancelResumeFromCaller, _cts);
+            // WHY a cached delegate, and none at all for a token that cannot cancel: the method group built a
+            // delegate on every resume of every thread, and the scheduler's own resumes pass no caller token.
+            CancellationTokenRegistration cancellationRegistration = cancellationToken.CanBeCanceled
+                ? cancellationToken.Register(CancelResumeFromCallerCallback, _cts)
+                : default;
             try
             {
-                _coroutine.SetHook(_hook.Function, string.Empty, 1);
+                _coroutine.SetHook(_hook.Function, string.Empty, _hook.Window);
                 // WHY: Single-step drive: a well-behaved handler reaches coroutine.yield synchronously, so
                 // GetResult does not block the (single WASM) thread. A runaway is cut by the hook above.
                 count = _coroutine.ResumeAsync(_callStack, _cts.Token).GetAwaiter().GetResult();
@@ -403,6 +409,8 @@ namespace CoreAI.Sandbox.LuaCs
             CaptureResults(count);
             return _lastValues;
         }
+
+        private static readonly Action<object> CancelResumeFromCallerCallback = CancelResumeFromCaller;
 
         private static void CancelResumeFromCaller(object source)
         {
@@ -687,25 +695,43 @@ namespace CoreAI.Sandbox.LuaCs
         /// </summary>
         private sealed class ResumeGuardHook : LuaCsGuardedRun
         {
-            // WHY the allocation budget is sampled per MILLISECOND of execution, not every few
-            // instructions like LuaCsExecutionGuard: this hook fires on every instruction of every
-            // scheduler thread, the hottest path in the runtime, and a GC.GetTotalMemory(false) read was
-            // measured at ~5.4 us on Unity's bundled Mono CLI against ~27 ns on CoreCLR
-            // (tools/vmbench/RESULTS.md) — more than the ~0.55 us this whole hook costs per instruction
-            // there. A 4-instruction batch would have tripled the cost of every handler and task.wait
-            // loop; one sample per millisecond costs under 1%, plus the one baseline read per resume in
-            // Arm. The bound the guard's small batch gives still holds: the growth between two samples
-            // is limited by what the VM can copy in one millisecond, and an instruction that takes
-            // longer than that (a large concat) is followed by a sample at once, so a doubling bomb
-            // overshoots by about one doubling at most.
+            // WHY the allocation budget is sampled per MILLISECOND of execution, not at every fire like
+            // LuaCsExecutionGuard: this hook runs every scheduler thread, the hottest path in the runtime,
+            // and a GC.GetTotalMemory(false) read costs about 6.5 us on a Mono built with the SGen collector
+            // (the standalone Mono CLI) against 9-35 ns on Boehm and CoreCLR (tools/vmbench/RESULTS.md).
+            // One sample per millisecond costs under 1% everywhere, plus the one baseline read per resume in
+            // Arm. The growth between two samples is limited by what the VM can allocate in one
+            // millisecond plus the instructions of one hook window.
+            // WHY the hook fires once per LuaCsExecutionGuard.HookInstructionBatch instructions and no longer
+            // on every one: the VM's dispatch into a hook, not the hook's body, is the cost (about 0.5 us on
+            // Mono against 0.06 us for the instruction itself), so a fire per instruction ran a thread at a
+            // tenth of the VM's speed. The window is the one LuaCsExecutionGuard has always had, and it narrows
+            // to a single instruction after a window that lasted a whole sample interval: such a window held a
+            // slow instruction (a large concat, a slow host call), and while slow instructions keep coming each
+            // of them is followed by a sample at once, as before. It widens again only after
+            // NarrowFiresAfterSlowWindow instructions in a row that were all fast, so one collector pause or
+            // one slow host call does not slow the rest of a long resume. What changed is bounded: up to three
+            // more instructions may run before the sample that follows a slow instruction, and only when the
+            // instructions before it were all fast (tools/vmbench/RESULTS.md, "Allocation exposure").
             private static readonly long AllocationSampleIntervalTicks =
                 Math.Max(1L, Stopwatch.Frequency / 1000);
+
+            /// <summary>
+            /// Fires at a window of one instruction, each shorter than the sample interval, before the hook
+            /// goes back to <see cref="LuaCsExecutionGuard.HookInstructionBatch"/>.
+            /// </summary>
+            internal const int NarrowFiresAfterSlowWindow = 256;
 
             public readonly LuaFunction Function;
 
             private readonly CancellationTokenSource _runSource;
             private long _steps;
             private long _stepLimit;
+            private int _window;
+            private bool _narrow;
+            private bool _alwaysNarrow;
+            private int _fastFiresWhileNarrow;
+            private long _windowStartTimestamp;
             private int _budget;
             private bool _lifetimeBinds;
             private long _lifetimeCap;
@@ -723,8 +749,17 @@ namespace CoreAI.Sandbox.LuaCs
                 Function = new LuaFunction("coreai_luacs_coroutine_guard", Hook);
             }
 
-            /// <summary>Instruction steps charged during the current resume.</summary>
+            /// <summary>
+            /// Instruction steps charged during the current resume: those of every finished hook window, so up to
+            /// <c>Window - 1</c> instructions of the window the resume ended in are not in it.
+            /// </summary>
             public long Steps => _steps;
+
+            /// <summary>
+            /// The instructions the hook lets run before it fires next (the count the VM is armed with). Read by
+            /// the handle right after <see cref="Arm"/>, to install the hook.
+            /// </summary>
+            public int Window => _window;
 
             /// <summary>Which budget tripped during the current resume, or <see cref="LuaCsGuardTripKind.None"/>.</summary>
             public LuaCsGuardTripKind Trip => _trip;
@@ -784,6 +819,37 @@ namespace CoreAI.Sandbox.LuaCs
                 _nextAllocationSampleTimestamp = _allocation.IsEnabled
                     ? startTimestamp + AllocationSampleIntervalTicks
                     : long.MaxValue;
+                // WHY a handle with a lifetime cap keeps a window of one: its cap counts the steps of every
+                // resume, and a wider window leaves the last few instructions of each resume uncounted, so a
+                // body that yields every three instructions would never reach its cap. Scheduler threads have
+                // no cap (UnlimitedLifetimeSteps); for them the uncounted tail only lowers a metric.
+                _alwaysNarrow = lifetimeCap != UnlimitedLifetimeSteps;
+                _narrow = _alwaysNarrow;
+                _fastFiresWhileNarrow = 0;
+                _windowStartTimestamp = startTimestamp;
+                _window = NextWindow();
+            }
+
+            /// <summary>
+            /// The instructions the next hook window may run: one while the hook is narrow, else
+            /// <see cref="LuaCsExecutionGuard.HookInstructionBatch"/>, and never past the instruction whose
+            /// execution takes the steps over the limit, so a step trip lands on the same instruction as it did
+            /// when the hook fired on every one.
+            /// </summary>
+            private int NextWindow()
+            {
+                if (_narrow)
+                {
+                    return 1;
+                }
+
+                long untilTrip = _stepLimit - _steps + 1;
+                if (untilTrip >= LuaCsExecutionGuard.HookInstructionBatch)
+                {
+                    return LuaCsExecutionGuard.HookInstructionBatch;
+                }
+
+                return untilTrip < 1 ? 1 : (int)untilTrip;
             }
 
             /// <summary>
@@ -864,7 +930,7 @@ namespace CoreAI.Sandbox.LuaCs
                     return SignalTrip(ctx, ct);
                 }
 
-                _steps++;
+                _steps += _window;
                 if (_steps > _stepLimit)
                 {
                     return RecordTrip(ctx, ct, LuaCsGuardTripKind.Steps, false);
@@ -876,9 +942,30 @@ namespace CoreAI.Sandbox.LuaCs
                     return RecordTrip(ctx, ct, LuaCsGuardTripKind.Timeout, false);
                 }
 
+                if (now - _windowStartTimestamp >= AllocationSampleIntervalTicks)
+                {
+                    _narrow = true;
+                    _fastFiresWhileNarrow = 0;
+                }
+                else if (_narrow && !_alwaysNarrow && ++_fastFiresWhileNarrow >= NarrowFiresAfterSlowWindow)
+                {
+                    _narrow = false;
+                }
+
+                _windowStartTimestamp = now;
                 if (now >= _nextAllocationSampleTimestamp && IsAllocationExceeded(now))
                 {
                     return RecordTrip(ctx, ct, LuaCsGuardTripKind.Memory, _allocation.CeilingExceeded);
+                }
+
+                int next = NextWindow();
+                if (next != _window)
+                {
+                    // WHY SetHook from inside the hook: it is the only public way to change the count, and the
+                    // VM reads the count it sets when the hook returns, so the next fire comes exactly `next`
+                    // instructions later (pinned by HandleHookWindow_* in LuaCsHookBatchEditModeTests).
+                    _window = next;
+                    ctx.State.SetHook(Function, string.Empty, next);
                 }
 
                 return new ValueTask<int>(ctx.Return());

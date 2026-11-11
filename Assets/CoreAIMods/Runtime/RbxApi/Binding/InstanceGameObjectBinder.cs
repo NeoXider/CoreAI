@@ -1773,7 +1773,7 @@ namespace CoreAI.Mods.Rbx.Binding
             if (_materialLeaseProvider == null)
             {
                 _materialProvider.TryGetMaterial(in materialId, out sharedMaterial);
-                renderer.sharedMaterial = sharedMaterial;
+                renderer.sharedMaterial = SelectTransparencyMaterial(sharedMaterial, properties.Transparency);
             }
             else
             {
@@ -1787,7 +1787,8 @@ namespace CoreAI.Mods.Rbx.Binding
 
                 try
                 {
-                    renderer.sharedMaterial = sharedMaterial;
+                    renderer.sharedMaterial = SelectTransparencyMaterial(sharedMaterial,
+                        properties.Transparency);
                 }
                 catch
                 {
@@ -1820,10 +1821,25 @@ namespace CoreAI.Mods.Rbx.Binding
             block.SetColor(BaseColorPropertyId, color);
             renderer.SetPropertyBlock(block);
 
-            // TODO: MVP1 follow-up — Material catalog with a transparent-blend variant so
-            // 0 < Transparency < 1 actually alpha-blends; today partial transparency only
-            // carries the alpha value, full transparency hides the renderer.
             renderer.enabled = properties.Transparency < 1f;
+        }
+
+        /// <summary>
+        /// The material a renderer draws with: the provider's alpha-blended twin while
+        /// 0 &lt; Transparency &lt; 1, otherwise the resolved material itself. The lease stays on the
+        /// resolved material; the provider owns the twin for as long as that material lives.
+        /// </summary>
+        private Material SelectTransparencyMaterial(Material resolved, float transparency)
+        {
+            if (resolved == null || transparency <= 0f || transparency >= 1f ||
+                !(_materialProvider is IRbxTransparentMaterialProvider twins))
+            {
+                return resolved;
+            }
+
+            return twins.TryGetTransparentMaterial(resolved, out Material twin) && twin != null
+                ? twin
+                : resolved;
         }
 
         private static void ApplyAnchored(BindingEntry entry, bool anchored)

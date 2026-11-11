@@ -60,6 +60,11 @@ CoreAI → Setup → Install Git Dependencies
 ```
 
 It merges only the *missing* keys into `Packages/manifest.json` (your pinned versions stay untouched).
+The menu ships inside `com.neoxider.coreaiunity`, so on a fresh project add the packages first (§1.2) or
+paste the manual block below. It lives in its own editor assembly with no references at all
+(`CoreAI.Editor.Setup`), so it appears even while VContainer, MessagePipe, UniTask, MEAI or LLMUnity are still
+missing and the rest of CoreAI does not compile yet; **CoreAI → Setup → Install LLM Pipeline (NuGet)...**
+(§2.1) is in the same assembly.
 Besides the four entries below, the menu also adds **LLMUnity** (`ai.undream.llm`, see
 [§2.4](#24-local-on-device-models-optional)), which brings native libraries and sets
 `COREAI_HAS_LLMUNITY`. The preview dialog applies all missing entries at once, so if you only call an
@@ -74,6 +79,10 @@ or use the manual list below.
 "com.cysharp.messagepipe.vcontainer": "https://github.com/Cysharp/MessagePipe.git?path=src/MessagePipe.Unity/Assets/Plugins/MessagePipe.VContainer",
 "com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask"
 ```
+
+**Newtonsoft.Json** (`com.unity.nuget.newtonsoft-json`, 3.2.1 or newer) is the one registry dependency:
+`com.neoxider.coreai` declares it, so Package Manager installs it with the core package. It no longer depends on
+LLMUnity being present — removing `ai.undream.llm` keeps it.
 
 ### 1.2 The CoreAI packages
 
@@ -93,7 +102,9 @@ CoreAI → Setup → Create Bare Scene (advanced)   (scope + settings, no demo U
 
 > The default no-symbol build keeps portable orchestration/chat and scripted/stub clients but has no
 > provider-backed HTTP or LLMUnity execution. The required MEAI DLLs from section **2** remain part of
-> the Core contract in either mode. Add `COREAI_LLM` when you want concrete providers; see 2.3.
+> the Core contract in either mode. Add `COREAI_LLM` when you want concrete providers; see 2.3. Until you do,
+> an HTTP or local-model **LLM Mode** fails every request with `LlmErrorCode.NotConfigured` and a message
+> naming the fix, instead of answering with canned stub text; only **Offline** serves the offline stub.
 
 ### 1.4 If you build for the Web (WebGL)
 
@@ -161,6 +172,12 @@ the MEAI-dependent public contracts. To compile concrete HTTP/OpenAI-compatible 
 implementations, add the scripting define `COREAI_LLM` (Player Settings → Scripting Define Symbols),
 or use **CoreAI → Setup → Modules → LLM Providers → Enable Providers**. Without the define,
 provider transports/clients and their focused tests compile out while offline/scripted orchestration remains.
+Defines are per build target: the menu sets the define for the **active** target only, so add it to every
+platform you ship. Without it, a mode that needs a provider (any HTTP mode, the local model, or Auto with a model
+configured) fails each request with `LlmErrorCode.NotConfigured`, the composition logs one warning at startup,
+and a player build is refused by `CoreAILlmModuleBuildGuard` when the shipped `Resources/CoreAISettings` asset
+selects such a mode for a target without `COREAI_LLM`. Set **LLM Mode** to **Offline** to build without
+providers on purpose.
 `COREAI_LUA` is independent; enable both symbols for the full provider + Lua runtime.
 
 ### 2.4 Local on-device models (optional)
@@ -207,8 +224,8 @@ not need any modding assets or APIs.
   `CoreAI → Setup → Modules → Lua (Lua-CSharp) → Disable Lua`.
   Lua-dependent runtime and tests are guarded by `#if COREAI_LUA`.
 - **WebGL:** when `COREAI_LUA` is compiled in, Lua runs on the WebGL player; Lua-CSharp is AOT-safe,
-  so it runs under IL2CPP. `CoreAISettingsAsset.EnableLuaOnWebGl` exists (default on), but no Lua
-  runtime reads it yet, so turning it off does not stop Lua on WebGL. The Full `unity_*` reflection
+  so it runs under IL2CPP. There is no WebGL Lua switch (`EnableLuaOnWebGl` is obsolete): leave the mods
+  scope out, or build without `COREAI_LUA`, for a browser build without Lua. The Full `unity_*` reflection
   tier has no WebGL-specific block: it is granted only by *Enable Full Lua Access* on
   `CoreAiModsLifetimeScope` — keep that off in browser builds. Managed stripping is handled by the `link.xml`
   shipped in the CoreAiUnity package, which preserves the Lua VM, the CoreAI assemblies, the Rbx API

@@ -273,7 +273,8 @@ namespace CoreAI.Net.Mirror.Tests
         {
             OfflineMirror.DeliverToServer(connectionId, new CoreAiAdmissionRequestMessage
             {
-                Credential = Encoding.UTF8.GetBytes(credential)
+                Credential = Encoding.UTF8.GetBytes(credential),
+                ProtocolVersion = CoreAiMirrorProtocol.Version
             });
         }
 
@@ -286,7 +287,8 @@ namespace CoreAI.Net.Mirror.Tests
             {
                 Admitted = true,
                 Reason = "",
-                ActorId = actorId
+                ActorId = actorId,
+                ProtocolVersion = CoreAiMirrorProtocol.Version
             });
         }
 

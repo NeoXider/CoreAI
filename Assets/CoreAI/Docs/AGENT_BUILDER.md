@@ -506,8 +506,12 @@ AgentConfig agent = new AgentBuilder("GameMaster")
 - With skills: 2 meta-tools × ~80 tokens + catalog ~200 tokens = **~360 tokens** per request
 - **Saving: ~91%** of tool-related context
 
-This is arithmetic on the assumed sizes above, not a measurement; real tool definitions and catalogs
-vary, so count your own with the provider-reported token usage before relying on the figure.
+This is arithmetic on the assumed sizes above, not a measurement. The measured table for the tools,
+skills and prompts this package ships is [PROMPT_TOKEN_COSTS.md](PROMPT_TOKEN_COSTS.md): the three bundled
+skills cost about 366 tokens per request behind the two meta-tools against about 14,126 inlined (counted
+with the repository's fallback counter, about 0.25 tokens per Latin character, so an estimate of the
+provider's count). Real tool definitions and catalogs vary, so count your own with the provider-reported
+token usage before relying on a figure.
 
 ### How the proxy works (for advanced users)
 

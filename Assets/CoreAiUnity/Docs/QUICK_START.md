@@ -155,8 +155,8 @@ This is the quickest path for local development with LM Studio.
 > the player and the string is recoverable. Even a harmless placeholder such as `lm-studio` fails the
 > build: leave the field empty. Supply real keys at runtime (environment variable, secure storage,
 > `CoreAiBackend.SetApiKey`) or keep the settings asset outside `Resources/` and assign it on
-> `CoreAILifetimeScope`. `CoreAiBackend.SetApiKey` writes into the loaded settings asset itself, so a
-> key set during Play Mode in the Editor stays in that asset afterwards: clear it before you build.
+> `CoreAILifetimeScope`. `CoreAiBackend.SetApiKey` is a session override: the key is never written into
+> the asset and is gone when Play Mode ends, so it cannot leak into a build.
 
 ### ClientLimited
 

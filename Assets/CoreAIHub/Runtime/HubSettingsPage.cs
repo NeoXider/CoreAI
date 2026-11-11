@@ -1515,47 +1515,22 @@ namespace CoreAI.Hub.UI
         }
 
         /// <summary>
-        /// Applies the HTTP fields while keeping a ClientLimited / ServerManagedApi backend on its own
-        /// execution mode: <see cref="CoreAiBackend.ApplyHttpApi"/> always rewrites the mode to
-        /// ClientOwnedApi, which silently downgraded these backends on any Apply.
+        /// Applies the HTTP fields while keeping a ClientLimited / ServerManagedApi backend on its own execution
+        /// mode (the plain <see cref="CoreAiBackend.ApplyHttpApi(string,string,string,float?,int?,int?,bool?)"/>
+        /// switches to ClientOwnedApi). Like every runtime switch it is a session override: the asset's serialized
+        /// fields are not written, so a key typed here is never saved into the asset or a build.
         /// </summary>
         private bool ApplyPreservedHttpMode(LlmExecutionMode mode, bool overrideTemperature)
         {
-            CoreAISettingsAsset asset = ResolveSettingsAsset();
-            if (asset == null)
-            {
-                return false;
-            }
-
-            string baseUrl = (_baseUrl.value ?? "").Trim();
-            string model = (_model.value ?? "").Trim();
-            string key = ResolveApiKey();
-            float temperature = overrideTemperature ? Mathf.Clamp(_temperature.value, 0f, 2f) : asset.Temperature;
-            int timeoutSeconds = _timeoutSeconds.value <= 0 ? asset.RequestTimeoutSeconds : _timeoutSeconds.value;
-            int maxTokens = _maxTokens.value <= 0 ? asset.MaxTokens : _maxTokens.value;
-
-            if (mode == LlmExecutionMode.ServerManagedApi)
-            {
-                asset.ConfigureServerManagedApi(
-                    baseUrl, model, key, temperature, timeoutSeconds, maxTokens, overrideTemperature);
-            }
-            else
-            {
-                asset.ConfigureClientLimited(
-                    baseUrl,
-                    key,
-                    model,
-                    asset.MaxClientLimitedRequestsPerSession,
-                    asset.MaxClientLimitedPromptChars,
-                    temperature,
-                    timeoutSeconds,
-                    maxTokens,
-                    overrideTemperature);
-            }
-
-            // HACK: CoreAiBackend exposes no mode-preserving apply, so re-set the (already written) model
-            // through it purely to hot-swap the live client and raise OnBackendChanged.
-            return CoreAiBackend.SetModel(model);
+            return CoreAiBackend.ApplyHttpApi(
+                mode,
+                (_baseUrl.value ?? "").Trim(),
+                ResolveApiKey(),
+                (_model.value ?? "").Trim(),
+                overrideTemperature ? Mathf.Clamp(_temperature.value, 0f, 2f) : null,
+                _timeoutSeconds.value <= 0 ? null : _timeoutSeconds.value,
+                _maxTokens.value <= 0 ? null : _maxTokens.value,
+                overrideTemperature);
         }
 
         private async void TestBackend()

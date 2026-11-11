@@ -75,6 +75,21 @@ namespace CoreAI.Net.Mirror
         [SerializeField]
         private CoreAiMirrorAuthenticator authenticator;
 
+        [Tooltip("What a server does with Mirror's host-mode local client: serve it as the host's own "
+            + "Player (in process), or refuse it as a player and leave it connected to Mirror.")]
+        [SerializeField]
+        private CoreAiMirrorHostModePolicy hostMode = CoreAiMirrorHostModePolicy.ServeAsHostPlayer;
+
+        [Tooltip("Whether a server sends ready clients the roster: who is in the room, at readiness "
+            + "and on every join and leave.")]
+        [SerializeField]
+        private bool publishRoster = true;
+
+        [Tooltip("What a server lets each admitted connection send it before dropping and counting "
+            + "the excess; unused on a client.")]
+        [SerializeField]
+        private CoreAiMirrorInboundLimits inboundLimits = new();
+
         private readonly Queue<NetworkConnectionToClient> _pendingDrops = new();
         private MirrorNetworkBridge _bridge;
         private CoreAiMirrorSessionHost _sessionHost;
@@ -118,6 +133,56 @@ namespace CoreAI.Net.Mirror
                 }
 
                 role = value;
+            }
+        }
+
+        /// <summary>
+        /// The admission authenticator the NetworkManager uses; settable only until the bridge
+        /// exists, for a composition that builds its scene from code.
+        /// </summary>
+        public CoreAiMirrorAuthenticator Authenticator
+        {
+            get => authenticator;
+            set
+            {
+                RequireNoBridge(nameof(Authenticator));
+                authenticator = value;
+            }
+        }
+
+        /// <summary>What a server does with Mirror's host-mode local client; settable only until the bridge exists.</summary>
+        public CoreAiMirrorHostModePolicy HostMode
+        {
+            get => hostMode;
+            set
+            {
+                RequireNoBridge(nameof(HostMode));
+                hostMode = value;
+            }
+        }
+
+        /// <summary>Whether a server sends ready clients the roster; settable only until the bridge exists.</summary>
+        public bool PublishRoster
+        {
+            get => publishRoster;
+            set
+            {
+                RequireNoBridge(nameof(PublishRoster));
+                publishRoster = value;
+            }
+        }
+
+        /// <summary>
+        /// A copy of the inbound limits a server bridge is built with; set before the bridge exists
+        /// to change them, and read <see cref="MirrorNetworkBridge.InboundLimits"/> for the ones in force.
+        /// </summary>
+        public CoreAiMirrorInboundLimits InboundLimits
+        {
+            get => (inboundLimits ?? new CoreAiMirrorInboundLimits()).Clone();
+            set
+            {
+                RequireNoBridge(nameof(InboundLimits));
+                inboundLimits = value?.Clone() ?? new CoreAiMirrorInboundLimits();
             }
         }
 
@@ -267,7 +332,7 @@ namespace CoreAI.Net.Mirror
 
             _bridgeIsServer = isServer;
             _bridge = new MirrorNetworkBridge(isServer, authenticator, clockSeconds: ClockSeconds,
-                wallClock: WallClock);
+                wallClock: WallClock, inboundLimits: inboundLimits);
             if (!isServer)
             {
                 if (authenticator != null)
@@ -286,7 +351,12 @@ namespace CoreAI.Net.Mirror
             _sessionHost = new CoreAiMirrorSessionHost(
                 _bridge,
                 context => _connectActor != null && _connectActor(context),
-                context => _disconnectActor != null && _disconnectActor(context));
+                context => _disconnectActor != null && _disconnectActor(context),
+                options: new CoreAiMirrorSessionOptions
+                {
+                    HostMode = hostMode,
+                    PublishRoster = publishRoster
+                });
             if (authenticator != null)
             {
                 authenticator.OnServerAuthenticated.AddListener(OnServerAuthenticated);
@@ -527,9 +597,8 @@ namespace CoreAI.Net.Mirror
                 admitted = false;
             }
 
-            // WHY the host's own local client is never dropped: the session host refused it as a
-            // world player because host mode is unsupported, and dropping it would take the host's
-            // local player off Mirror altogether (A4-10).
+            // WHY the host's own local client is never dropped, even when it holds no player:
+            // dropping it would take the host's local player off Mirror altogether (A4-10).
             if (!admitted && !(conn is LocalConnectionToClient) && !_pendingDrops.Contains(conn))
             {
                 _pendingDrops.Enqueue(conn);
@@ -732,6 +801,16 @@ namespace CoreAI.Net.Mirror
             Debug.LogWarning("[CoreAI.Mirror] the attached world's Players.IdentitySource is a "
                              + current.GetType().Name + ", not this provider's session host; it is "
                              + "left as the host set it, so admitted players get their UserIds from it");
+        }
+
+        private void RequireNoBridge(string setting)
+        {
+            if (_bridge != null)
+            {
+                throw new InvalidOperationException(
+                    "the Mirror network bridge was already built, so " + setting + " can no longer "
+                    + "change; set it before the mods scope builds or rebuild the composition");
+            }
         }
 
         private void RequireNoWorldAttached()

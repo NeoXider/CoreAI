@@ -1844,16 +1844,63 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
             /// build and refine it. Only meaningful in the visual world executor (which renders real
             /// GameObjects and a preview camera the service can resolve). Returns null otherwise, so a
             /// scenario can gate the tool on <c>CameraTool() != null</c>.
+            /// <para>
+            /// The model moves only the preview camera the visual world marks for it, as before free agent
+            /// cameras existed: the service gets no free camera unless <paramref name="allowFreeCamera"/> asks
+            /// for one, so a run keeps one agent camera per scene. Every service is disposed with the scenario
+            /// (<see cref="DisposeCameraServices"/>).
+            /// </para>
             /// </summary>
-            public CoreAI.Vision.CameraLlmTool CameraTool(string agentRoleId)
+            public CoreAI.Vision.CameraLlmTool CameraTool(string agentRoleId, bool allowFreeCamera = false)
             {
                 if (World is not VisualBenchmarkWorldExecutor)
                 {
                     return null;
                 }
 
-                return new CoreAI.Vision.CameraLlmTool(
-                    new Vision.AgentCameraService(), agentRoleId);
+                CoreAI.Vision.AgentCameraOptions options = CoreAI.Vision.AgentCameraOptions.CreateDefault();
+                options.AllowFreeCamera = allowFreeCamera;
+                CoreAI.Vision.AgentCameraService service = new(options);
+                _cameraServices.Add((service, agentRoleId));
+                return new CoreAI.Vision.CameraLlmTool(service, agentRoleId);
+            }
+
+            /// <summary>The camera services this scenario created, oldest first; empty once disposed.</summary>
+            public IReadOnlyList<CoreAI.Vision.AgentCameraService> CameraServices
+            {
+                get
+                {
+                    List<CoreAI.Vision.AgentCameraService> services = new(_cameraServices.Count);
+                    foreach ((CoreAI.Vision.AgentCameraService service, string _) in _cameraServices)
+                    {
+                        services.Add(service);
+                    }
+
+                    return services;
+                }
+            }
+
+            private readonly List<(CoreAI.Vision.AgentCameraService Service, string Role)> _cameraServices = new();
+
+            /// <summary>
+            /// Disposes every camera service of this scenario, destroying any free agent camera one created.
+            /// Runs on the Unity main thread with the rest of the scenario teardown.
+            /// </summary>
+            public void DisposeCameraServices()
+            {
+                foreach ((CoreAI.Vision.AgentCameraService service, string role) in _cameraServices)
+                {
+                    // WHY: in Play Mode Dispose destroys a free camera only at the end of the frame; deactivating
+                    // it first keeps it out of the next scenario's scene searches at once.
+                    if (service.TryGetFreeCamera(role, false, out Camera free) && free != null)
+                    {
+                        free.gameObject.SetActive(false);
+                    }
+
+                    service.Dispose();
+                }
+
+                _cameraServices.Clear();
             }
         }
 
@@ -2436,6 +2483,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
 
             if (config == null)
             {
+                env.DisposeCameraServices();
                 (env.World as VisualBenchmarkWorldExecutor)?.Cleanup();
                 env.DisposeRbxWorld();
                 onResult?.Invoke(FailedResult(scenario, modelId, FailureAttribution.Framework,
@@ -2858,6 +2906,7 @@ namespace CoreAI.Tests.PlayMode.Benchmarks
                             TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
                     }
 
+                    env.DisposeCameraServices();
                     env.DisposeRbxWorld();
                     (env.World as VisualBenchmarkWorldExecutor)?.Cleanup();
                 }

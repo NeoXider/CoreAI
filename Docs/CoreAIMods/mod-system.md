@@ -14,7 +14,8 @@ iteration and identity-verified legacy storage migration.
 - The **game ships with mods** (bundled), some enabled by default, and a newer bundled version
   updates the installed copy at the next start (§3).
 - The world changes **at runtime**: the AI and the player write and edit mods without a rebuild.
-- **Categories** group mods on the Hub's Mods tab.
+- **Folders** organise mods on the Hub's Mods tab: a mod's `category` is a folder path, folders hold mods
+  and other folders.
 - One **CoreAI Hub** window (UI Toolkit, event-driven) hosts the Mods tab.
 
 ## 1. Mod identity & in-source manifest (the "passport")
@@ -42,7 +43,13 @@ tags: movement, camera
 - `version` — semantic version; a higher bundled version triggers an update (§3.2).
 - `active` — the enabled state at the **first** seed only.
 - `capabilities` — the requested tiers, intersected with the host grant on load.
-- `category` — a `/`-separated path; the Hub groups mods by it.
+- `category` — the mod's folder, a `/`-separated path (`Games/Arcade`); empty is the top level. A
+  one-level category such as `Samples` is a one-folder path, so older mods load unchanged. Rules for a
+  folder that is written (by a player, the AI or a move): letters, digits and combining marks of any
+  script, spaces and `_ - . ( ) & + ! ' , #`; at most 64 characters per folder name, 8 levels and 255
+  characters in all; names compare case-insensitively. A broken rule is refused with a named code
+  (`INVALID_CHARACTER`, `EMPTY_SEGMENT`, `SEGMENT_TOO_LONG`, `TOO_DEEP`, `PATH_TOO_LONG`, `RESERVED_NAME`).
+  Moving a mod rewrites only this line (`Assets/CoreAIMods/Runtime/ModFolders/README.md`).
 - `tags` — optional, comma-separated.
 
 Parsing rules:
@@ -152,13 +159,33 @@ failing source or mod is logged and skipped, and never stops startup.
 ### 4.1 LLM
 
 `manage_mods` (`Assets/CoreAIMods/Runtime/LuaExecution/LuaModsLlmTool.cs`) handles
-list/get_source/load/reload/unload/forget/export/import/versions/revert/diagnostics. `reload` cleans the
+list/get_source/load/reload/unload/forget/export/import/versions/revert/diagnostics and the folder actions
+below. `reload` cleans the
 previous run's startup objects (§5c) unless the optional `keep_objects: true` is passed (the MCP wrapper
 `ManageModsMcpTool` forwards it); its result says which mode ran (`clean_startup_objects` or
 `keep_objects`) and what it cleaned. When a mutating action changed the live startup world but the change
 will not reopen after a restart, the result carries a `startup_warning`
 ([`WORLD_PACKAGE.md`](WORLD_PACKAGE.md), "Startup selection"). The `category` from the `@coreai` header
 is persisted into the manifest.
+
+Folders through `manage_mods` (parameters `folder` and `target`):
+
+| Action | Arguments | Does |
+|---|---|---|
+| `list` | optional `folder` | each mod carries its `folder`; a `folders` array lists every folder (`path`, `mods`); with `folder` only that branch, an unknown one is `FOLDER_NOT_FOUND` |
+| `load` | `mod_id`, `code`, optional `folder` | writes `category: <folder>` into the header before loading (the existing casing of a folder is reused) |
+| `move` | `mod_id`, `folder` (empty = top level) | moves a loaded mod without running it again: only its header line and stored manifest change |
+| `create_folder` | `folder` | creates an empty folder; `FOLDER_ALREADY_EXISTS` when it exists in any casing |
+| `rename_folder` | `folder`, `target` = new name | renames in place; a case-only rename is allowed |
+| `move_folder` | `folder`, `target` = new parent (empty = top level) | moves the folder with everything in it; `MOVE_INTO_ITSELF` into itself or a subfolder |
+| `delete_folder` | `folder` | deletes an empty folder with its empty subfolders; `FOLDER_NOT_EMPTY` while a mod is inside |
+
+A refused call's message starts with the code. Every folder action that changes something spends the
+same rate limit as `execute_lua` and the other changing `manage_mods` actions, and a read-only agent gets
+none of them. A folder that a move empties is kept until it is deleted. Without `folder`, `load` keeps the
+source exactly as sent unless the host names a default folder for AI mods
+(`ICoreAISettings.AiModsDefaultFolder`, empty by default): adding the `category:` line would otherwise shift
+the line numbers of the mod's errors.
 
 ### 4.2 Player — CoreAI Hub (UI Toolkit, event-driven)
 
@@ -175,13 +202,27 @@ ready prefab (install/usage: `INSTALL.md` §4). The window collapses to a compac
 - **About**, and more pages from C# modules and Lua mods.
 
 The Mods sub-tab:
-- Toolbar: a search box (name / category / tags), **Refresh**, **Add** (new mod in the editor),
-  **Paste** (opens the Lua in the system clipboard, `GUIUtility.systemCopyBuffer`, in the editor) and
-  **Import** (installs an export bundle from the clipboard).
-- Mods are grouped into one collapsible group per `Category` (blank → `Uncategorized`).
-- Each row: an **On/Off** toggle (load / unload), name and status line, **Edit**, **Export** (bundle to
-  the clipboard) and **Delete**; **Update available** with **Apply update** when the manifest's
-  `UpdateAvailable` is set.
+- Toolbar: a search box (name / folder / tags), **Refresh**, **Add** (new mod in the editor),
+  **Paste** (opens the Lua in the system clipboard, `GUIUtility.systemCopyBuffer`, in the editor),
+  **Import** (installs an export bundle from the clipboard) and **New folder**.
+- Mods are shown as a folder tree: a folder holds mods and other folders, folders first, each with a fold
+  arrow and the count of its mods that are on (`3/12`; `empty` for a folder without mods). A mod without a
+  folder sits at the top level. The list is virtualized, so a thousand mods scroll like ten, and the folds
+  you choose are remembered (PlayerPrefs key `CoreAI.Hub.Mods.FoldState`).
+- Search filters by name, id, tags and folder path and opens every folder that holds a match; clearing it
+  brings your folds back.
+- A folder's toggle switches its whole branch on or off (mixed when only some are on); a folder next to it
+  is never touched, even one whose name starts the same.
+- **Move** on any row starts "Move to": the folders that can take the item show **Here**, the banner offers
+  **Top level** and **Cancel**. Moving a running mod does not restart it. Folder rows also have **New
+  folder**, **Rename** and **Delete** (only an empty folder; a folder with mods says `FOLDER_NOT_EMPTY`).
+  A folder a move empties is kept; created and kept folders are stored in PlayerPrefs
+  (`CoreAI.Hub.Mods.Folders`) unless the host passes its own folder list to `HubModsPage`.
+- Each mod row: an **On/Off** toggle (load / unload), name and status line, **Edit**, **Export** (bundle to
+  the clipboard) and **Delete**; **Apply update** appears when the manifest's `UpdateAvailable` is set, and
+  **About** when the mod has a `description:`. About opens a panel under the tree with the description as
+  Markdown (`CoreAiMarkdownView`: rendered when the optional renderer package is installed, plain text
+  otherwise); About on the same mod or **Close** hides it, and it follows a refresh.
 - Editor: a top **← Back** to the list plus a **Save & run** / **Copy** / **Paste** /
   **Refresh diagnostics** / **History** action bar above the code area (**History** lists revisions,
   each with **Revert**). Save runs the mod (errors shown in the status line) and records a revision.
@@ -365,7 +406,8 @@ call, which is exactly why it must stay off per-frame paths.
 ## 7. Not built yet
 
 - Bundled sources other than `Resources` (StreamingAssets, Addressables, a remote download).
-- A `category` argument and a category column in `manage_mods`.
+- Empty folders in a world package, and a folder list shared by the Hub and `manage_mods` from the
+  composition root (today the tool keeps its own in-memory list unless the host passes one).
 - An in-memory cache for `FileLuaScriptVersionStore`.
 - Standard host world events for mods (§5).
 - Routing the §5b write-policy core over a network transport.

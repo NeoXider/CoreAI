@@ -42,14 +42,27 @@ namespace CoreAI.Benchmarking
         {
             BenchmarkRunMetadata m = report.Metadata;
             StringBuilder sb = new();
+            bool graded = report.HasGradedScenarios;
 
-            sb.AppendLine($"# 🎮 {m.ModelId} — {F(report.SuiteBaseScore)}/100");
-            sb.AppendLine();
-            sb.AppendLine($"> **{Grade(report.SuiteBaseScore)}** · " +
-                          $"PASS {report.PassCount} / PARTIAL {report.PartialCount} / FAIL {report.FailCount} " +
-                          $"of {report.ScenarioCount} graded scenarios " +
-                          $"· pass-rate {F(report.PassRate * 100)}% · mean bonus {F(report.MeanBonus)} " +
-                          $"· reps {m.Repetitions} · {BenchmarkInfo.SuiteName} {BenchmarkInfo.Version}");
+            if (graded)
+            {
+                sb.AppendLine($"# 🎮 {m.ModelId} — {F(report.SuiteBaseScore)}/100");
+                sb.AppendLine();
+                sb.AppendLine($"> **{Grade(report.SuiteBaseScore)}** · " +
+                              $"PASS {report.PassCount} / PARTIAL {report.PartialCount} / FAIL {report.FailCount} " +
+                              $"of {report.ScenarioCount} graded scenarios " +
+                              $"· pass-rate {F(report.PassRate * 100)}% · mean bonus {F(report.MeanBonus)} " +
+                              $"· reps {m.Repetitions} · {BenchmarkInfo.SuiteName} {BenchmarkInfo.Version}");
+            }
+            else
+            {
+                sb.AppendLine($"# 🎮 {m.ModelId} — {NoGradedScenarios}");
+                sb.AppendLine();
+                sb.AppendLine($"> **No graded scenarios** · {UngradedLine(report)} · this run has no score " +
+                              $"and is not a model measurement · reps {m.Repetitions} · " +
+                              $"{BenchmarkInfo.SuiteName} {BenchmarkInfo.Version}");
+            }
+
             sb.AppendLine();
 
             if (m.Segments.Count > 0)
@@ -66,12 +79,14 @@ namespace CoreAI.Benchmarking
                 if (!string.IsNullOrEmpty(prefabResult.CastlePrefabPath))
                     sb.AppendLine($"- **{prefabResult.ScenarioName} prefab:** [{prefabResult.CastlePrefabPath}](../../../{prefabResult.CastlePrefabPath})");
             }
-            sb.AppendLine($"- **Scores:** suite **{F(report.SuiteBaseScore)}**/100 · regular tier " +
-                          $"{F(report.RegularBaseScore)}/100 ({report.RegularScenarioCount} scenarios) · " +
-                          (report.HasExtreme
-                              ? $"extreme tier **{F(report.ExtremeBaseScore)}**/100 " +
-                                $"({report.ExtremePassCount}/{report.ExtremeScenarioCount} pass)"
-                              : "extreme tier n/a (no extreme scenario graded)"));
+            sb.AppendLine(graded
+                ? $"- **Scores:** suite **{F(report.SuiteBaseScore)}**/100 · regular tier " +
+                  $"{F(report.RegularBaseScore)}/100 ({report.RegularScenarioCount} scenarios) · " +
+                  (report.HasExtreme
+                      ? $"extreme tier **{F(report.ExtremeBaseScore)}**/100 " +
+                        $"({report.ExtremePassCount}/{report.ExtremeScenarioCount} pass)"
+                      : "extreme tier n/a (no extreme scenario graded)")
+                : "- **Scores:** unrated — no scenario was graded, so there is no suite, regular or extreme score.");
 
             sb.Append("- **By group:** ");
             IReadOnlyList<GroupScore> groups = report.GroupBreakdown();
@@ -145,17 +160,23 @@ namespace CoreAI.Benchmarking
             RoleFitness.Result fit = RoleFitness.Evaluate(report);
             sb.AppendLine();
             bool anyAssessed = fit.Roles.Any(r => r.Assessed);
-            string overallCell = anyAssessed ? $"{F(fit.Overall)}/10  (best: {fit.BestRole})" : "n/a (partial run)";
+            string overallCell = anyAssessed ? $"{F(fit.Overall)}/10  (best: {fit.BestRole})"
+                : graded ? "n/a (partial run)" : "n/a (no graded scenarios)";
             sb.AppendLine($"## 🎯 Game-fitness — {overallCell}");
             sb.AppendLine();
-            if (fit.TinyModelWarning)
+            if (fit.TinyModelWarning && graded)
             {
                 sb.AppendLine("> ⚠ **Not suitable for agentic game-dev roles** — tool correctness is below the " +
                               "minimum a model needs to drive tools reliably.");
                 sb.AppendLine();
             }
 
-            if (!anyAssessed)
+            if (!graded)
+            {
+                sb.AppendLine("> ℹ No scenario was graded, so no role is rated.");
+                sb.AppendLine();
+            }
+            else if (!anyAssessed)
             {
                 sb.AppendLine("> ℹ Run the full suite (all groups) for a complete role assessment — this run only " +
                               "measured some dimensions, so each role's score is left unrated below.");
@@ -355,7 +376,8 @@ namespace CoreAI.Benchmarking
                 GroupLegend(sc, pad + leftW, titleY, 11);
             }
 
-            double groupsBottom = GroupRows(sc, report.GroupBreakdown(), pad, titleY + 10, leftW, 22, 11.5, 2);
+            double groupsBottom = GroupRows(sc, report.GroupBreakdown(), AttemptedGroups(report), pad, titleY + 10,
+                leftW, 22, 11.5, 2);
 
             sc.Text(rightX, titleY, "Dimensions", 13, CardInk.Ink, CardAnchor.Start, true);
             double dimsBottom = DimensionBars(sc, report.DimensionBreakdown(), rightX, titleY + 10, rightW, 22, 11.5);
@@ -411,7 +433,7 @@ namespace CoreAI.Benchmarking
                 sc.Text(groupsX, captionY, "mean base per group, 0–100", 22, CardInk.Muted);
             }
 
-            GroupRows(sc, report.GroupBreakdown(), groupsX, rowsTop, groupsW, 42, 24, 4);
+            GroupRows(sc, report.GroupBreakdown(), AttemptedGroups(report), groupsX, rowsTop, groupsW, 42, 24, 4);
 
             sc.Text(dimsX, titleY, "Dimensions", 28, CardInk.Ink, CardAnchor.Start, true);
             sc.Text(dimsX, captionY, "dot plot, axis 50–100, line at 90 = pass", 22, CardInk.Muted,
@@ -452,9 +474,18 @@ namespace CoreAI.Benchmarking
                 sc.Line(dx, y + 2, dx, subY + subSize * 0.3, CardInk.Grid, scale / 2);
             }
 
-            Tile(sc, x, labelY, valueY, subY, tileW - inner, "Suite score", F1(report.SuiteBaseScore), "/100",
-                $"{Grade(report.SuiteBaseScore)} · regular tier {F1(report.RegularBaseScore)}",
-                labelSize, valueSize, unitSize, subSize);
+            bool graded = report.HasGradedScenarios;
+            if (graded)
+            {
+                Tile(sc, x, labelY, valueY, subY, tileW - inner, "Suite score", F1(report.SuiteBaseScore), "/100",
+                    $"{Grade(report.SuiteBaseScore)} · regular tier {F1(report.RegularBaseScore)}",
+                    labelSize, valueSize, unitSize, subSize);
+            }
+            else
+            {
+                Tile(sc, x, labelY, valueY, subY, tileW - inner, "Suite score", "–", string.Empty,
+                    "no graded scenarios", labelSize, valueSize, unitSize, subSize);
+            }
 
             double tx = x + tileW + inner;
             if (report.HasExtreme)
@@ -469,14 +500,24 @@ namespace CoreAI.Benchmarking
             else
             {
                 Tile(sc, tx, labelY, valueY, subY, tileW - 2 * inner, "Extreme tier", "–", string.Empty,
-                    "not in this run", labelSize, valueSize, unitSize, subSize);
+                    graded ? "not in this run" : "unrated", labelSize, valueSize, unitSize, subSize);
             }
 
             tx = x + 2 * tileW + inner;
             int total = report.PassCount + report.PartialCount + report.FailCount;
-            Tile(sc, tx, labelY, valueY, subY, tileW - 2 * inner, "Scenario verdicts",
-                $"{report.PassCount}/{total}", "pass",
-                $"{report.PartialCount} partial · {report.FailCount} fail", labelSize, valueSize, unitSize, subSize);
+            if (graded)
+            {
+                Tile(sc, tx, labelY, valueY, subY, tileW - 2 * inner, "Scenario verdicts",
+                    $"{report.PassCount}/{total}", "pass",
+                    $"{report.PartialCount} partial · {report.FailCount} fail", labelSize, valueSize, unitSize,
+                    subSize);
+            }
+            else
+            {
+                Tile(sc, tx, labelY, valueY, subY, tileW - 2 * inner, "Scenario verdicts", "–", string.Empty,
+                    $"0 of {report.Results.Count} results graded", labelSize, valueSize, unitSize, subSize);
+            }
+
             double vbY = valueY + subSize * 0.55;
             VerdictBar(sc, tx, vbY, (tileW - 2 * inner) * 0.8, 3 * scale, report.PassCount, report.PartialCount,
                 report.FailCount);
@@ -484,8 +525,53 @@ namespace CoreAI.Benchmarking
             tx = x + 3 * tileW + inner;
             Tile(sc, tx, labelY, valueY, subY, tileW - inner, "Game-fit",
                 anyAssessed ? F1(fit.Overall) : "–", anyAssessed ? "/10" : string.Empty,
-                anyAssessed ? $"best: {RoleFitness.ShortName(fit.BestRole)}" : "partial run, roles not rated",
+                anyAssessed ? $"best: {RoleFitness.ShortName(fit.BestRole)}"
+                : graded ? "partial run, roles not rated" : "no graded scenarios",
                 labelSize, valueSize, unitSize, subSize);
+        }
+
+        /// <summary>The title, tile and table label of a run without one graded scenario.</summary>
+        public const string NoGradedScenarios = "no graded scenarios";
+
+        /// <summary>
+        /// Why nothing was graded, by attribution: "4 result(s), none graded: 3 environment, 1 framework". Only
+        /// the non-zero causes are named.
+        /// </summary>
+        private static string UngradedLine(BenchmarkReport report)
+        {
+            int environment = report.EnvironmentFailures;
+            int framework = report.FrameworkFailures;
+            int other = System.Math.Max(0, report.UngradedResults - environment - framework);
+            List<string> causes = new();
+            if (environment > 0)
+            {
+                causes.Add($"{environment} environment");
+            }
+
+            if (framework > 0)
+            {
+                causes.Add($"{framework} framework");
+            }
+
+            if (other > 0)
+            {
+                causes.Add($"{other} not graded");
+            }
+
+            string head = $"{report.Results.Count} result(s), none graded";
+            return causes.Count == 0 ? head : head + ": " + string.Join(", ", causes);
+        }
+
+        /// <summary>Groups that produced at least one result, graded or not.</summary>
+        private static HashSet<string> AttemptedGroups(BenchmarkReport report)
+        {
+            HashSet<string> groups = new(System.StringComparer.Ordinal);
+            foreach (ScenarioResult result in report.Results)
+            {
+                groups.Add(result.Group ?? string.Empty);
+            }
+
+            return groups;
         }
 
         private static void Tile(BenchmarkCardScene sc, double x, double labelY, double valueY, double subY,
@@ -552,10 +638,12 @@ namespace CoreAI.Benchmarking
         /// <summary>
         /// One row per group G1–G8 (plus any unknown group the run reported): a 0–100 meter for the group mean
         /// with surface notches at 50 and 90, an extreme-scenario diamond on the same scale, and fixed value
-        /// columns so the two numbers never collide. Returns the y below the axis labels.
+        /// columns so the two numbers never collide. A group without a graded scenario stays unrated: "not
+        /// graded" when it produced results (<paramref name="attempted"/>), "not run" otherwise. Returns the y
+        /// below the axis labels.
         /// </summary>
-        private static double GroupRows(BenchmarkCardScene sc, IReadOnlyList<GroupScore> groups, double x, double y,
-            double width, double rowH, double font, double scale)
+        private static double GroupRows(BenchmarkCardScene sc, IReadOnlyList<GroupScore> groups,
+            ICollection<string> attempted, double x, double y, double width, double rowH, double font, double scale)
         {
             Dictionary<string, GroupScore> byId = new();
             foreach (GroupScore g in groups)
@@ -598,7 +686,8 @@ namespace CoreAI.Benchmarking
 
                 if (!byId.TryGetValue(id, out GroupScore g))
                 {
-                    sc.Text(barX, baseline, "not run", font * 0.92, CardInk.Muted);
+                    sc.Text(barX, baseline, attempted.Contains(id) ? "not graded" : "not run", font * 0.92,
+                        CardInk.Muted);
                     continue;
                 }
 
@@ -782,7 +871,9 @@ namespace CoreAI.Benchmarking
                 parts.Add("run " + m.RunId);
             }
 
-            parts.Add($"{report.ScenarioCount} scenarios × {System.Math.Max(1, m.Repetitions)} rep");
+            parts.Add(report.HasGradedScenarios
+                ? $"{report.ScenarioCount} scenarios × {System.Math.Max(1, m.Repetitions)} rep"
+                : $"0 of {report.Results.Count} results graded");
             if (!string.IsNullOrEmpty(m.Backend))
             {
                 parts.Add(m.Backend);
@@ -810,6 +901,13 @@ namespace CoreAI.Benchmarking
 
         private static string SpeedFooter(BenchmarkReport report)
         {
+            if (!report.HasGradedScenarios)
+            {
+                return $"No model measurement: {UngradedLine(report)} · {N0(report.TotalTokens)} tokens · " +
+                       $"{report.TotalToolCalls} tool calls, {report.TotalFailedToolCalls} failed · " +
+                       $"{Duration(report.TotalLatencyMs)}";
+            }
+
             return $"{N0(report.TotalTokens)} tokens ({N0(report.TotalCompletionTokens)} generated) · " +
                    $"{F1(report.ClientTurnTokensPerSecond)} tok/s client-turn · {Duration(report.TotalLatencyMs)} · " +
                    $"{report.TotalToolCalls} tool calls, {report.TotalFailedToolCalls} failed · " +
@@ -819,6 +917,11 @@ namespace CoreAI.Benchmarking
         /// <summary>Plain-text summary of the card for screen readers (SVG <c>&lt;desc&gt;</c>).</summary>
         private static string Describe(BenchmarkReport report)
         {
+            if (!report.HasGradedScenarios)
+            {
+                return $"No graded scenarios: {UngradedLine(report)}. This run has no suite score.";
+            }
+
             StringBuilder sb = new();
             sb.Append($"Suite score {F1(report.SuiteBaseScore)} of 100 ({Grade(report.SuiteBaseScore)}), regular tier ")
                 .Append(F1(report.RegularBaseScore));
@@ -933,8 +1036,12 @@ namespace CoreAI.Benchmarking
             // WHY: INDEX.md keeps its header from the first run, so the extreme sub-score rides inside the
             // existing Score cell instead of adding a column that older rows would not have.
             string extreme = report.HasExtreme ? $" (ext {F(report.ExtremeBaseScore)})" : string.Empty;
-            return $"| {m.TimestampUtc} | `{m.ModelId}` | **{F(report.SuiteBaseScore)}**{extreme} | " +
-                   $"{report.PassCount}/{report.PartialCount}/{report.FailCount} | {F(report.PassRate * 100)}% | " +
+            string score = report.HasGradedScenarios
+                ? $"**{F(report.SuiteBaseScore)}**{extreme}"
+                : $"n/a ({NoGradedScenarios})";
+            string passRate = report.HasGradedScenarios ? $"{F(report.PassRate * 100)}%" : "–";
+            return $"| {m.TimestampUtc} | `{m.ModelId}` | {score} | " +
+                   $"{report.PassCount}/{report.PartialCount}/{report.FailCount} | {passRate} | " +
                    $"{groups} | {report.TotalTokens} | [{reportFileName}]({reportFileName}) |";
         }
 
@@ -1146,6 +1253,8 @@ namespace CoreAI.Benchmarking
         {
             if (r.Interrupted) return "INTERRUPTED (not scored)";
             if (r.ExcludeFromScoring || r.Attribution == FailureAttribution.NotGraded) return "NOT GRADED";
+            if (r.Attribution == FailureAttribution.Environment) return "ENVIRONMENT (not scored)";
+            if (r.Attribution == FailureAttribution.Framework) return "FRAMEWORK (not scored)";
             return VerdictText(r.Classification);
         }
 

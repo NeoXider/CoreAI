@@ -116,41 +116,40 @@ Moved here from `Assets/CoreAiUnity/Docs/` on 2026-10-15.
 > All prior optimizations verified still holding (binder per-aspect apply, cached components + reused
 > MaterialPropertyBlock, cached primitive meshes, `RbxScriptSignal.Fire` reuse, `RbxCFrame` struct fields,
 > input gating on `HasConnections`). The remaining cost moved UPSTREAM of the binder, into the guard /
-> marshalling boundary every Lua handler call crosses. All findings cite v6.3.2.
+> marshalling boundary every Lua handler call crosses. The findings cited v6.3.2.
+>
+> **Re-verified 2026-11-11** against HEAD `654bb318` with measurements: status, file:line and the measured
+> bytes and times for every item below are in [PERF_BASELINE_2026-11.md](PERF_BASELINE_2026-11.md) §5,
+> together with twelve newer findings (the per-Part enum rebuild in the world-package capture, the idle-frame
+> garbage, the per-fire and per-write allocations) and the ranked optimization list (§7) P19 works from.
 
-- **[HIGH] Per-guarded-call allocation storm** — `LuaCsExecutionGuard.ExecuteGuarded` (`:156,:171`) and
-  `LuaCsScriptExecutionGuard.Invoke` (`:47,:54,:57`) allocate PER CALL: a fresh `LuaFunction` hook + its
-  capture closure, `Stopwatch.StartNew()` (ref type), `new LuaValue[]`/`new object[]`, and a box per
-  returned `LuaValue`. At `MinTimerIntervalSeconds = 0.05` a `hooks_on("tick")` fires at 20 Hz, so a
-  couple of timers/handlers = hundreds of allocs/sec → periodic GC stutter on the single-threaded WebGL
-  Boehm GC. Fix: one reusable hook whose closure holds a resettable mutable state object (re-entrancy is
-  already covered by `InstalledHooks`); `Stopwatch.GetTimestamp()` (long) instead of `StartNew()`;
-  thread-static scratch `LuaValue[]` buffers by arity; skip building `boxed[]` when results are discarded.
-- **[HIGH] Per-instruction guard overhead** — the hook is installed with count = 1
-  (`LuaCsExecutionGuard.cs:223`), so it runs on EVERY VM instruction, each paying
-  `sw.ElapsedMilliseconds` + `GC.GetTotalMemory(false)` (`:207`). A few-thousand-instruction handler pays
-  that thousands of times/frame; on IL2CPP this ~multiplies interpreter cost. Fix: sample — install with
-  count ≈ 128–256 and scale the step budget, or read `GC.GetTotalMemory` every Nth hook. A doubling
-  alloc-bomb still trips within one window, so detection latency is unaffected; per-instruction cost
-  drops ~100×.
-- **[MEDIUM] Per-event-dispatch churn** — `LuaCsModRuntime.DispatchPendingEvents` (`:1020,:1037`):
-  `handlers.ToArray()` per dispatched event + `params object[2]` per handler invoke. Reuse a per-mod
-  scratch snapshot list; add a 2-arg `InvokeGuarded` overload avoiding the params array.
-- **[MEDIUM] Var-args marshalling boxes every `LuaValue`** — `LuaCsValueMarshaller.Box` at the
-  `RegisterVarArgs` surfaces (`hooks_on`, `events_emit`, `mods_export/call`, `print`). Typed accessors and
-  the `part.CFrame=` write path already avoid it. Prefer typed accessors; longer-term a `LuaValue`-typed
-  fast path on the seam.
-- **[MEDIUM] SSE streaming parses a full `JObject` per token** — `MeaiOpenAiChatClient` (`:614,:1754,
-  :1811`) does `line+"\n"` → `Split('\n')` → `JObject.Parse` per delta + per-delta LINQ. Network-bound,
-  but token-rate JObject churn can hitch the chat UI on WebGL. Parse the single line directly with a
-  lightweight reader for the common `choices[0].delta.content` shape; fall back to `JObject.Parse` only
-  for tool-call/usage chunks.
-- **[MEDIUM] Camera capture stalls the main thread** — `CameraLlmTool.CaptureCameraJpeg` (`:91-128`)
-  allocates a `RenderTexture`+`Texture2D` per call, `ReadPixels` (GPU→CPU sync stall) + `EncodeToJPG` +
-  `ToBase64String`, all on the main thread. On-demand, but each vision capture visibly hitches the frame.
-  Pool the offscreen targets; use `AsyncGPUReadback` where supported.
-- **[LOW] `RbxCFrame.GetComponents()`/`ToString()`** allocate arrays — fine unless a mod polls them per
-  frame.
+- **[HIGH] Per-guarded-call allocation storm** — **partly fixed.** The hook is pooled and re-armed, the clock is
+  `Stopwatch.GetTimestamp()` and the token source is pooled (`LuaCsExecutionGuard`). Still allocating:
+  `LuaCsScriptExecutionGuard.Invoke` (`new LuaValue[]`, an `object[]` and a box per result: 240 B for a
+  1-argument call) and the VM call's `Task<LuaValue[]>` (72 B per guarded call). Original: `ExecuteGuarded`
+  and `Invoke` allocated a fresh hook, closure, `Stopwatch`, argument and result arrays per call.
+- **[HIGH] Per-instruction guard overhead** — **partly fixed.** `LuaCsExecutionGuard` fires every 4 instructions,
+  but every scheduler thread, signal runner and main chunk still runs under `LuaCsCoroutineHandle`'s hook at
+  count 1 (a clock read per instruction, a heap read per millisecond and per resume). Measured 8.9 M vs
+  18.9 M instructions/s (CoreCLR) and 1.17 M vs 2.95 M (Mono, Boehm). The SGen-based 158 k figure in
+  `tools/vmbench/RESULTS.md` overstates the heap-read cost: Unity's Boehm collector answers
+  `GC.GetTotalMemory(false)` in about 20 ns, not 14 µs.
+- **[MEDIUM] Per-event-dispatch churn** — **present.** `handlers.ToArray()` per event and `params object[]` per
+  handler in `LuaCsModRuntime.DispatchPendingEvents`, plus, since the audit, a string concatenation and a
+  closure per invocation for the mutation envelope: 600 B per event.
+- **[MEDIUM] Var-args marshalling boxes every `LuaValue`** — **present.** `LuaCsValueMarshaller.Box` (40 B per
+  number) at every `LuaCsScriptCallContext` read; `RegisterVarArgs` allocates a call context per call and a
+  `LuaValue[]` per return.
+- **[MEDIUM] SSE streaming parses a full `JObject` per token** — **fixed for content and reasoning deltas**
+  (2026-11-11): `SseContentDeltaReader` reads that shape in place (7,528 → 368 B per token on CoreCLR) and
+  hands every other chunk to the unchanged full parse. Tool-call argument fragments still take the
+  `JObject` path (about 8.9 KB per fragment); the remaining streaming costs are ranked in
+  [PERF_BASELINE_2026-11.md](PERF_BASELINE_2026-11.md) §11.
+- **[MEDIUM] Camera capture stalls the main thread** — **partly fixed.** The render target is pooled and the
+  readback texture cached (`AiAttachmentUnityExtensions`); the synchronous `ReadPixels` and `EncodeToJPG`
+  remain on the main thread, no `AsyncGPUReadback`. Not measured yet (needs Unity).
+- **[LOW] `RbxCFrame.GetComponents()`/`ToString()`** allocate arrays — **present** (72 B and 936 B per call);
+  fine unless a mod polls them per frame. The world-package capture calls `GetComponents()` for every Part.
 
 ## Roblox-API parity (blocks MVP — no CoreAI-own Lua API)
 

@@ -22,8 +22,9 @@ namespace CoreAI.Vision
         [SerializeField]
         private string agentRoleId = string.Empty;
 
-        [Tooltip("When true, agents may move/rotate this camera via the 'camera_look' tool. When false the " +
-                 "camera is capture-only but still counts as the agent's assigned camera for capture defaulting.")]
+        [Tooltip("When true, agents may move/rotate this camera via 'camera_look' and 'camera_orbit'. When " +
+                 "false the camera is capture-only but still counts as the agent's assigned camera for capture " +
+                 "defaulting.")]
         [SerializeField]
         private bool allowMove = true;
 
@@ -79,7 +80,13 @@ namespace CoreAI.Vision
         /// </summary>
         internal void SetConfigurationForTests(string role, bool move)
         {
-            agentRoleId = role;
+            Configure(role, move);
+        }
+
+        /// <summary>Sets the role scope and movement flag of a marker created in code (the free agent camera).</summary>
+        internal void Configure(string role, bool move)
+        {
+            agentRoleId = role ?? string.Empty;
             allowMove = move;
         }
     }

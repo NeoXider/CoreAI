@@ -5,6 +5,8 @@
     "CoreAI.Core",
     "CoreAI.Source",
     "CoreAI.Mods",
+    "CoreAI.Mods.Folders",
+    "CoreAI.Mods.Folders.Unity",
     "CoreAI.RbxApi.Instances",
     "CoreAI.Hub.UI",
     "VContainer",

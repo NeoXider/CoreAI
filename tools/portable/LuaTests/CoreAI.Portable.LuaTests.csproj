@@ -30,6 +30,7 @@
     <ProjectReference Include="../CoreAI.RbxApi.Datatypes/CoreAI.RbxApi.Datatypes.csproj" />
     <ProjectReference Include="../CoreAI.RbxApi.Instances/CoreAI.RbxApi.Instances.csproj" />
     <ProjectReference Include="../CoreAI.LuauDownlevel/CoreAI.LuauDownlevel.csproj" />
+    <ProjectReference Include="../CoreAI.Mods.Folders/CoreAI.Mods.Folders.csproj" />
     <ProjectReference Include="../LuaTier/UnityEngine/UnityEngine.csproj" />
     <ProjectReference Include="../LuaTier/CoreAI.Source/CoreAI.Source.csproj" />
     <ProjectReference Include="../LuaTier/CoreAI.RbxApi.Unity/CoreAI.RbxApi.Unity.csproj" />
@@ -62,6 +63,7 @@
     <Compile Include="../Tests/RepositoryTestSetup.cs" Link="RepositoryTestSetup.cs" />
     <Compile Include="PortableUnityTestScope.cs" />
     <Compile Include="$(TestsRoot)/ModsContractRegressionTests.cs" />
+    <Compile Include="$(TestsRoot)/SubAgentEnvelopeLuaEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/SubAgentEnvelopeLuaEditModeTests.cs" />
     <Compile Include="PortableRunnerSelfTests.cs" />
     <Compile Include="UnityTestToolsConstraints.cs" />
   </ItemGroup>
@@ -78,15 +80,24 @@
     <Compile Include="$(TestsRoot)/LoggingSeamHonestyEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LoggingSeamHonestyEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaCsGuardFrameAndAllocationEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaCsGuardFrameAndAllocationEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaCsGuardObserverEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaCsGuardObserverEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/Sandbox/LuaCsHookBatchEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/Sandbox/LuaCsHookBatchEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/Sandbox/LuaCsGuardedPathAllocationBudgetEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/Sandbox/LuaCsGuardedPathAllocationBudgetEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/Sandbox/LuauMathLibraryEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/Sandbox/LuauMathLibraryEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaCsModRuntimeEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaCsModRuntimeEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaCsModRuntimePersistenceEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaCsModRuntimePersistenceEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaCsSecureSandboxEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaCsSecureSandboxEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaCsTableSummaryEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaCsTableSummaryEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaCsWithheldApiStubEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaCsWithheldApiStubEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaGenerationRateLimiterEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaGenerationRateLimiterEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/P3InstantEditFixtures.cs" Link="Assets/CoreAIMods/Tests/EditMode/P3InstantEditFixtures.cs" />
+    <Compile Include="$(TestsRoot)/P3InstantEditLoopEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/P3InstantEditLoopEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/P3WorldUndoEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/P3WorldUndoEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaLogFormatterEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaLogFormatterEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaLogServiceEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaLogServiceEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaModHeaderEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaModHeaderEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/Mvp4ScriptManifestEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/Mvp4ScriptManifestEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/ModFolders/ModFolderHeaderParityEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/ModFolders/ModFolderHeaderParityEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/ModFolders/ModFolderRuntimeWiringEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/ModFolders/ModFolderRuntimeWiringEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaModReportBufferEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaModReportBufferEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaModdingSkillEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaModdingSkillEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaRichTextFormatterEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaRichTextFormatterEditModeTests.cs" />
@@ -103,6 +114,13 @@
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp2StanceConformanceEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp2StanceConformanceEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp3WorldPackageEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp3WorldPackageEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp3WorldPackageQaEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp3WorldPackageQaEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Acceptance/WorldPackageCeilingEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/WorldPackageCeilingEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Acceptance/WorldPackageEncodeBehindEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/WorldPackageEncodeBehindEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Acceptance/WorldPackageTerrainEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/WorldPackageTerrainEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Acceptance/WorldPackageLightingEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/WorldPackageLightingEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Acceptance/WorldPackageStarterPlayerEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/WorldPackageStarterPlayerEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp4ReplicaStagingEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp4ReplicaStagingEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Acceptance/WorldPackageModFoldersEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/WorldPackageModFoldersEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp8CollectionServiceEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp8CollectionServiceEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp8DebrisAddItemEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp8DebrisAddItemEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp8HumanoidEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp8HumanoidEditModeTests.cs" />
@@ -133,6 +151,11 @@
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/RbxClockLuaBindingsEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/RbxClockLuaBindingsEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/RbxHeartbeatBudgetKillEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/RbxHeartbeatBudgetKillEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/RbxInputLuaBindingsEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/RbxInputLuaBindingsEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/P1PlayerControlsLuaEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/P1PlayerControlsLuaEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/P1CameraLuaEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/P1CameraLuaEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/P9LightingLuaEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/P9LightingLuaEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/P4TerrainShippedRegistrationEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/P4TerrainShippedRegistrationEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Binding/P1UiFocusBridgeEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Binding/P1UiFocusBridgeEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/RbxJsonContractEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/RbxJsonContractEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/RbxMaterialVariantLuaBindingsEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/RbxMaterialVariantLuaBindingsEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/RbxRunServiceLuaBindingsEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/RbxRunServiceLuaBindingsEditModeTests.cs" />
@@ -143,10 +166,43 @@
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/RbxSignalConnectionTeardownEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/RbxSignalConnectionTeardownEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/RbxSignalHandlerThreadReuseEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/RbxSignalHandlerThreadReuseEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/RbxTaskSchedulerLuaBindingsEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/RbxTaskSchedulerLuaBindingsEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/RuntimeUi/FakeRbxUiBackend.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/RuntimeUi/FakeRbxUiBackend.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/RuntimeUi/RuntimeUiHotbarFixture.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/RuntimeUi/RuntimeUiHotbarFixture.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/RuntimeUi/UxmlServiceTestWorld.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/RuntimeUi/UxmlServiceTestWorld.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/RuntimeUi/RbxUiWorldEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/RuntimeUi/RbxUiWorldEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/RuntimeUi/UxmlServiceLuaEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/RuntimeUi/UxmlServiceLuaEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/RuntimeUi/RuntimeUiHotbarFixtureEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/RuntimeUi/RuntimeUiHotbarFixtureEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/RuntimeUi/UxmlServiceArchitectureFitnessEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/RuntimeUi/UxmlServiceArchitectureFitnessEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/GuiLua/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/GuiLua/%(Filename)%(Extension)" />
     <Compile Include="$(TestsRoot)/RbxApi/Networking/BridgeTopologyAndClockEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Networking/BridgeTopologyAndClockEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RecordingLog.cs" Link="Assets/CoreAIMods/Tests/EditMode/RecordingLog.cs" />
     <Compile Include="$(TestsRoot)/ScriptEngineSeamEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/ScriptEngineSeamEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/ScriptingSeamHonestyEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/ScriptingSeamHonestyEditModeTests.cs" />
     <Compile Include="$(RepoRoot)/Assets/CoreAiUnity/Tests/EditMode/LuaModAutoRepairPolicyEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/LuaModAutoRepairPolicyEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Terrain/P4TerrainTestWorld.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Terrain/P4TerrainTestWorld.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/TerrainLua/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/TerrainLua/%(Filename)%(Extension)" />
+    <Compile Include="$(TestsRoot)/RbxApi/BlockWorld/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/BlockWorld/%(Filename)%(Extension)" />
+    <Compile Include="$(TestsRoot)/RbxApi/Ai/P12TextGeneratorAndAiServiceEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Ai/P12TextGeneratorAndAiServiceEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Ai/RbxJsonSchemaCheckEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Ai/RbxJsonSchemaCheckEditModeTests.cs" />
+  </ItemGroup>
+  <!--
+    P19 allocation budgets and the engine-free harness contract (dev-docs/PERF_BASELINE_2026-11.md).
+    The Scenarios files are the engine-free half of the CoreAI.Mods.PerformanceScenarios assembly; the
+    contract tests need them. The budgets are Ignored on Unity's Mono (its allocation counter answers 0),
+    so this leg is where they are enforced.
+  -->
+  <ItemGroup>
+    <Compile Include="$(RepoRoot)/Assets/CoreAIMods/Tests/EditMode/Performance/AllocationMeter.cs" Link="Assets/CoreAIMods/Tests/EditMode/Performance/AllocationMeter.cs" />
+    <Compile Include="$(RepoRoot)/Assets/CoreAIMods/Tests/EditMode/Performance/HotPathAllocationBudgetEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/Performance/HotPathAllocationBudgetEditModeTests.cs" />
+    <Compile Include="$(RepoRoot)/Assets/CoreAIMods/Tests/EditMode/Performance/PartWriteAllocationBudgetEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/Performance/PartWriteAllocationBudgetEditModeTests.cs" />
+    <Compile Include="$(RepoRoot)/Assets/CoreAIMods/Tests/PlayMode/Performance/PerfHarnessContractTests.cs" Link="Assets/CoreAIMods/Tests/PlayMode/Performance/PerfHarnessContractTests.cs" />
+    <Compile Include="$(RepoRoot)/Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios/PerfScenario.cs" Link="Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios/PerfScenario.cs" />
+    <Compile Include="$(RepoRoot)/Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios/PerfLuaSources.cs" Link="Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios/PerfLuaSources.cs" />
+    <Compile Include="$(RepoRoot)/Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios/PerfRuntimeCounters.cs" Link="Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios/PerfRuntimeCounters.cs" />
+    <Compile Include="$(RepoRoot)/Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios/PerfDistribution.cs" Link="Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios/PerfDistribution.cs" />
+    <Compile Include="$(RepoRoot)/Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios/PerfReport.cs" Link="Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios/PerfReport.cs" />
+    <Compile Include="$(RepoRoot)/Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios/PerfReportJson.cs" Link="Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios/PerfReportJson.cs" />
+    <Compile Include="$(RepoRoot)/Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios/PerfModWorld.cs" Link="Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios/PerfModWorld.cs" />
+    <Compile Include="$(RepoRoot)/Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios/PerfRunnerOptions.cs" Link="Assets/CoreAIMods/Tests/PlayMode/Performance/Scenarios/PerfRunnerOptions.cs" />
   </ItemGroup>
 </Project>

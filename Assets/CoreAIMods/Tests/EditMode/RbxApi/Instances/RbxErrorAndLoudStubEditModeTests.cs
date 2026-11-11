@@ -175,11 +175,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [TestCase("Workspace", "Spherecast", "WorldRoot", true)]
         [TestCase("Workspace", "BulkMoveTo", "WorldRoot", true)]
         [TestCase("Workspace", "FindPartOnRay", "WorldRoot", true)]
-        [TestCase("Camera", "FieldOfView", "Camera", false)]
-        [TestCase("Camera", "ViewportSize", "Camera", false)]
+        [TestCase("Camera", "FieldOfViewMode", "Camera", false)]
+        [TestCase("Camera", "NearPlaneZ", "Camera", false)]
         [TestCase("Camera", "Focus", "Camera", false)]
-        [TestCase("Camera", "ScreenPointToRay", "Camera", true)]
-        [TestCase("Camera", "WorldToViewportPoint", "Camera", true)]
+        [TestCase("Camera", "GetPartsObscuringTarget", "Camera", true)]
+        [TestCase("Camera", "ZoomToExtents", "Camera", true)]
         [TestCase("DataModel", "PlaceId", "DataModel", false)]
         [TestCase("DataModel", "JobId", "DataModel", false)]
         [TestCase("Part", "BrickColor", "BasePart", false)]
@@ -232,6 +232,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
                 ("Workspace", "GetServerTimeNow"), ("Workspace", "Camera"),
                 ("Camera", "CFrame"), ("Camera", "CameraType"), ("Camera", "CameraSubject"),
                 ("Camera", "GetPivot"), ("Camera", "PivotTo"), ("Camera", "Changed"),
+                ("Camera", "FieldOfView"), ("Camera", "ViewportSize"), ("Camera", "ScreenPointToRay"),
+                ("Camera", "ViewportPointToRay"), ("Camera", "WorldToScreenPoint"),
+                ("Camera", "WorldToViewportPoint"), ("Player", "CameraMode"),
+                ("Player", "CameraMaxZoomDistance"), ("Player", "CameraMinZoomDistance"),
                 ("Part", "Position"), ("Part", "Size"), ("Part", "CFrame"), ("Part", "Color"),
                 ("Part", "Transparency"), ("Part", "Anchored"), ("Part", "CanCollide"),
                 ("Part", "Material"), ("Part", "MaterialVariant"), ("Part", "Shape"),
@@ -277,7 +281,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             string[] known =
             {
                 "WedgePart", "SpawnLocation", "MeshPart", "Weld", "WeldConstraint", "Attachment",
-                "BindableEvent", "Sound", "ParticleEmitter", "ScreenGui", "BodyVelocity", "Tool"
+                "BindableEvent", "Sound", "ParticleEmitter", "BillboardGui", "BodyVelocity", "Tool"
             };
             foreach (string className in known)
             {
@@ -295,7 +299,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             }
 
             foreach (string real in new[] { "Part", "Folder", "Model", "Workspace", "Camera", "Script",
-                         "StarterGui", "Bogus" })
+                         "StarterGui", "ScreenGui", "TextLabel", "UICorner", "Bogus" })
             {
                 Assert.IsFalse(catalog.TryGetKnownUnimplementedClass(real, out _),
                     real + " must not be a known-unimplemented class");
@@ -307,7 +311,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
                 "Sound", out RbxKnownUnimplementedClassDescriptor sound));
             RbxError planned = sound.CreateInstanceNewError();
             Assert.AreEqual(RbxErrorCode.NotImplemented, planned.Code);
-            Assert.AreEqual("Instance.new(\"Sound\") is planned for MVP15.", planned.RawMessage);
+            Assert.AreEqual("Instance.new(\"Sound\") is planned for MVP17.", planned.RawMessage);
 
             Assert.IsTrue(catalog.TryGetKnownUnimplementedClass(
                 "WeldConstraint", out RbxKnownUnimplementedClassDescriptor weld));

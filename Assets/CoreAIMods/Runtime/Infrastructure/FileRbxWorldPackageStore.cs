@@ -408,7 +408,8 @@ namespace CoreAI.Mods.WorldPackages
     /// <c>&lt;N&gt;.json</c> never needed to boot; the highest N among the entries is the selection.
     /// </para>
     /// </summary>
-    public sealed class FileRbxWorldPackageStore : IRbxWorldPackageStore, IRbxWorldStartupStore
+    public sealed class FileRbxWorldPackageStore
+        : IRbxWorldPackageStore, IRbxWorldStartupStore, IRbxWorldAutoSaveWriteBehindStore
     {
         private sealed class StartupEntry
         {
@@ -486,6 +487,14 @@ namespace CoreAI.Mods.WorldPackages
         private const string TemporaryExtension = ".tmp";
         private const int TemporaryGuidLength = 32;
 
+        /// <summary>
+        /// Extension of the empty <c>&lt;timestamp&gt;-&lt;trigger&gt;.&lt;guid&gt;.pending</c> marker a write-behind
+        /// autosave creates in the autosave folder before it is installed and deletes afterwards.
+        /// </summary>
+        private const string PendingMarkerExtension = ".pending";
+
+        private const string AutoTimestampFormat = "yyyyMMdd'T'HHmmssfff'Z'";
+
         private static readonly string[] StartupEntryExtensions =
         {
             Extension,
@@ -504,6 +513,23 @@ namespace CoreAI.Mods.WorldPackages
         private readonly IRbxWorldPackageFileSystem _fileSystem;
         private readonly string _transactionRoot;
         private readonly object _transactionFileSystem;
+        private readonly List<RbxMissingAutoSave> _missingAutoSavesAtOpen = new();
+        private readonly List<string> _unacknowledgedMarkers = new();
+        private readonly Func<CancellationToken, UniTask> _waitBeforeDeferredEncodeAsync;
+        private readonly bool _defersProvenEncodes;
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+        // WHY the baseline entry limit on WebGL: a browser decodes in one frame with the heap it has, and
+        // a WebGL world (4,032 instances at most) fits 16 MiB, so the raised desktop limit adds nothing there
+        // but decode memory; every package a WebGL player writes stays readable by every release.
+        private static readonly RbxWorldPackageLimits WriteLimits = RbxWorldPackageLimits.Version1Baseline;
+        private static readonly RbxWorldPackageLimits ReadLimits = RbxWorldPackageLimits.WebGl;
+        private static readonly RbxWorldPackageLimits DeferralLimits = RbxWorldPackageLimits.WebGl;
+#else
+        private static readonly RbxWorldPackageLimits WriteLimits = RbxWorldPackageLimits.Format;
+        private static readonly RbxWorldPackageLimits ReadLimits = RbxWorldPackageLimits.Format;
+        private static readonly RbxWorldPackageLimits DeferralLimits = RbxWorldPackageLimits.Format;
+#endif
 
         /// <param name="startupNamespace">
         /// Composition namespace of the startup area (production passes the mods store id), so a world
@@ -514,6 +540,15 @@ namespace CoreAI.Mods.WorldPackages
         /// <param name="maximumManualSlotBytes">
         /// Total bytes all manual slots may take together; a save that would pass it is refused.
         /// </param>
+        /// <param name="defersProvenEncodes">
+        /// When true (the default), <see cref="PrepareAutoAsync"/> encodes nothing for a payload it can prove
+        /// encodable, and <see cref="CommitAutoAsync"/> encodes it behind the mutation; false encodes every
+        /// prepared autosave in front of the mutation.
+        /// </param>
+        /// <param name="waitBeforeDeferredEncodeAsync">
+        /// What a commit awaits before a deferred encode; null waits for the next player-loop frame in a
+        /// running player and not at all elsewhere. Tests pass their own to observe the order.
+        /// </param>
         public FileRbxWorldPackageStore(
             string rootDirectory = null,
             int autoBackupCapacity = DefaultAutoBackupCapacity,
@@ -522,7 +557,9 @@ namespace CoreAI.Mods.WorldPackages
             IRbxWorldPackageFileSystem fileSystem = null,
             string startupNamespace = null,
             int maximumManualSlots = DefaultMaximumManualSlots,
-            long maximumManualSlotBytes = DefaultMaximumManualSlotBytes)
+            long maximumManualSlotBytes = DefaultMaximumManualSlotBytes,
+            bool defersProvenEncodes = true,
+            Func<CancellationToken, UniTask> waitBeforeDeferredEncodeAsync = null)
         {
             if (autoBackupCapacity <= 0)
             {
@@ -561,6 +598,8 @@ namespace CoreAI.Mods.WorldPackages
             _maximumManualSlotBytes = maximumManualSlotBytes;
             _persistenceSyncAsync = persistenceSyncAsync ?? RequestPersistenceCompletionAsync;
             _utcNow = utcNow ?? (() => DateTime.UtcNow);
+            _defersProvenEncodes = defersProvenEncodes;
+            _waitBeforeDeferredEncodeAsync = waitBeforeDeferredEncodeAsync ?? WaitOneFrameBeforeDeferredEncodeAsync;
             _fileSystem = fileSystem ?? new SystemRbxWorldPackageFileSystem();
             _transactionRoot = Path.GetFullPath(resolvedRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             _transactionFileSystem = _fileSystem is SystemRbxWorldPackageFileSystem
@@ -570,8 +609,309 @@ namespace CoreAI.Mods.WorldPackages
                 if (transaction != null)
                 {
                     SweepCrashLeftTemporaryFiles();
+                    CollectInterruptedWriteBehindAutoSaves();
                 }
             }
+        }
+
+        /// <inheritdoc />
+        public IReadOnlyList<RbxMissingAutoSave> MissingAutoSavesAtOpen => _missingAutoSavesAtOpen;
+
+        /// <inheritdoc />
+        public void AcknowledgeMissingAutoSaves()
+        {
+            string[] markers;
+            lock (_unacknowledgedMarkers)
+            {
+                markers = _unacknowledgedMarkers.ToArray();
+                _unacknowledgedMarkers.Clear();
+            }
+
+            foreach (string marker in markers)
+            {
+                TryDeleteFile(marker);
+            }
+        }
+
+        /// <inheritdoc />
+        public async UniTask<RbxPreparedAutoSave> PrepareAutoAsync(
+            string trigger,
+            RbxWorldPackagePayload payload,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            DateTime capturedAtUtc = NormalizeUtc(_utcNow());
+            try
+            {
+                if (_defersProvenEncodes && TryProveEncodableForStore(payload, out long packageBound))
+                {
+                    return RbxPreparedAutoSave.ProvenEncodable(trigger, capturedAtUtc, payload, packageBound);
+                }
+
+                byte[] bytes = await EncodeForStoreAsync(payload, cancellationToken);
+                return RbxPreparedAutoSave.Encoded(trigger, capturedAtUtc, bytes);
+            }
+            catch (Exception ex) when (IsEncodingFailure(ex))
+            {
+                return RbxPreparedAutoSave.Unencodable(trigger, capturedAtUtc, ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// True when every refusal <see cref="EncodeForStoreAsync"/> could raise for <paramref name="payload"/>
+        /// is ruled out now: the payload validates as the writer validates it (a refusal throws here, as the
+        /// encode would), the platform work budget holds, and the bound on every entry and on the compressed
+        /// package stays within this platform's limits.
+        /// </summary>
+        private static bool TryProveEncodableForStore(RbxWorldPackagePayload payload, out long packageBound)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            ValidateWebGlWorkBudget(payload);
+#endif
+            return RbxWorldPackageSerializer.TryProveEncodable(payload, DeferralLimits, out packageBound);
+        }
+
+        /// <inheritdoc />
+        /// <remarks>
+        /// WHY the marker is written before the store's transaction is taken: a startup record or a
+        /// manual save may hold the transaction for many frames, and a crash in that time must still be
+        /// reported as one missing backup at the next start. A crash after the install but before the
+        /// marker's removal reached storage is told apart by the installed autosave itself.
+        /// </remarks>
+        public async UniTask<RbxWorldPackageWriteResult> CommitAutoAsync(
+            RbxPreparedAutoSave prepared,
+            CancellationToken cancellationToken = default)
+        {
+            if (prepared == null)
+            {
+                throw new ArgumentNullException(nameof(prepared));
+            }
+
+            if (!prepared.Success)
+            {
+                return prepared.ToFailedWrite();
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            string safeTrigger = SanitizeTrigger(prepared.Trigger);
+            string timestamp = NormalizeUtc(prepared.CapturedAtUtc).ToString(
+                AutoTimestampFormat, CultureInfo.InvariantCulture);
+            string marker = await TryCreatePendingMarkerAsync(timestamp, safeTrigger, cancellationToken);
+            try
+            {
+                RbxWorldPackageWriteResult encodeFailure = await CompleteDeferredEncodeAsync(prepared, cancellationToken);
+                if (encodeFailure != null)
+                {
+                    return encodeFailure;
+                }
+
+                IDisposable transaction = await WorldPackageTransactions.EnterAsync(
+                    _transactionRoot, _transactionFileSystem, cancellationToken);
+                try
+                {
+                    string path;
+                    try
+                    {
+                        _fileSystem.CreateDirectory(_autoDirectory);
+                        path = AllocateUniqueAutoPath(timestamp, safeTrigger);
+                    }
+                    catch (Exception ex)
+                    {
+                        return new RbxWorldPackageWriteResult(
+                            false,
+                            _autoDirectory,
+                            "The autosave was not written: the autosave folder could not be prepared ("
+                            + ex.Message + ").");
+                    }
+
+                    return await WriteCreateOnceAsync(
+                        path, null, true, cancellationToken, prepared.PackageBytes);
+                }
+                finally
+                {
+                    transaction.Dispose();
+                }
+            }
+            finally
+            {
+                if (marker != null)
+                {
+                    TryDeleteFile(marker);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Encodes an autosave whose encode was deferred, after the wait that lets the mutation's frame be
+        /// drawn; null when it is encoded (or needed no encode), otherwise the failed write to return.
+        /// </summary>
+        /// <remarks>
+        /// WHY after the pending marker: a crash during the encode is then reported at the next start as a
+        /// missing backup, like a crash during the write. A failure here contradicts the proof made before
+        /// the mutation (the payload changed after it, or a bug), so it is reported as a lost backup and the
+        /// gate backs the next mutation up durably first.
+        /// </remarks>
+        private async UniTask<RbxWorldPackageWriteResult> CompleteDeferredEncodeAsync(
+            RbxPreparedAutoSave prepared,
+            CancellationToken cancellationToken)
+        {
+            RbxWorldPackagePayload deferred = prepared.DeferredPayload;
+            if (deferred == null)
+            {
+                return null;
+            }
+
+            await _waitBeforeDeferredEncodeAsync(cancellationToken);
+            try
+            {
+                prepared.CompleteDeferredEncode(await EncodeForStoreAsync(deferred, cancellationToken));
+                return null;
+            }
+            catch (Exception ex) when (IsEncodingFailure(ex))
+            {
+                prepared.AbandonDeferredEncode();
+                return new RbxWorldPackageWriteResult(
+                    false,
+                    _autoDirectory,
+                    "The autosave proven encodable before the mutation could not be encoded behind it: "
+                    + ex.Message,
+                    true);
+            }
+        }
+
+        private async UniTask<string> TryCreatePendingMarkerAsync(
+            string timestamp,
+            string safeTrigger,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                _fileSystem.CreateDirectory(_autoDirectory);
+                string marker = Path.Combine(
+                    _autoDirectory,
+                    timestamp + "-" + safeTrigger + "." + Guid.NewGuid().ToString("N") + PendingMarkerExtension);
+                await _fileSystem.WriteAllBytesCreateNewAsync(marker, Array.Empty<byte>(), cancellationToken);
+                return marker;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                // WHY no failure: the marker only lets the next start report a crash; the install that
+                // follows reports any real I/O fault of this folder itself.
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Records every pending marker a write-behind autosave left when the process stopped before it
+        /// finished; <see cref="AcknowledgeMissingAutoSaves"/> removes them once reported. A marker whose
+        /// autosave was installed (only its removal was lost) is removed at once without a report. Never
+        /// throws.
+        /// </summary>
+        private void CollectInterruptedWriteBehindAutoSaves()
+        {
+            try
+            {
+                if (!_fileSystem.DirectoryExists(_autoDirectory))
+                {
+                    return;
+                }
+
+                IReadOnlyList<string> installed = _fileSystem.GetFiles(_autoDirectory, Extension);
+                foreach (string path in _fileSystem.GetFiles(_autoDirectory, PendingMarkerExtension))
+                {
+                    string fileName = Path.GetFileName(path);
+                    if (!TryParsePendingMarker(fileName, out string stamp, out string trigger))
+                    {
+                        continue;
+                    }
+
+                    if (HasInstalledAutoSave(installed, stamp, trigger))
+                    {
+                        TryDeleteFile(path);
+                        continue;
+                    }
+
+                    DateTime.TryParseExact(
+                        stamp,
+                        AutoTimestampFormat,
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                        out DateTime timestamp);
+                    _missingAutoSavesAtOpen.Add(new RbxMissingAutoSave(trigger, timestamp, fileName));
+                    _unacknowledgedMarkers.Add(path);
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        /// <summary>Splits <c>&lt;stamp&gt;-&lt;trigger&gt;.&lt;32 lowercase hex&gt;.pending</c>; false for any other name.</summary>
+        internal static bool TryParsePendingMarker(string fileName, out string stamp, out string trigger)
+        {
+            stamp = null;
+            trigger = null;
+            if (string.IsNullOrEmpty(fileName)
+                || !fileName.EndsWith(PendingMarkerExtension, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            int guidEnd = fileName.Length - PendingMarkerExtension.Length;
+            int guidStart = guidEnd - TemporaryGuidLength;
+            if (guidStart < 2 || fileName[guidStart - 1] != '.')
+            {
+                return false;
+            }
+
+            for (int index = guidStart; index < guidEnd; index++)
+            {
+                char character = fileName[index];
+                if (!((character >= '0' && character <= '9') || (character >= 'a' && character <= 'f')))
+                {
+                    return false;
+                }
+            }
+
+            string stem = fileName.Substring(0, guidStart - 1);
+            int stampEnd = stem.IndexOf('-');
+            if (stampEnd <= 0 || stampEnd == stem.Length - 1 || !IsAutoTimestamp(stem.Substring(0, stampEnd)))
+            {
+                return false;
+            }
+
+            stamp = stem.Substring(0, stampEnd);
+            trigger = stem.Substring(stampEnd + 1);
+            return true;
+        }
+
+        /// <summary>
+        /// True when an installed autosave of <paramref name="trigger"/> is named at or after
+        /// <paramref name="stamp"/>: the one the marker announced (its name can only move later, after a
+        /// backwards clock step), since the gate starts the next write-behind only after this one ended.
+        /// </summary>
+        private static bool HasInstalledAutoSave(IReadOnlyList<string> installed, string stamp, string trigger)
+        {
+            foreach (string path in installed)
+            {
+                string fileName = Path.GetFileName(path);
+                if (!TrySplitAutoFileName(fileName, out string installedStamp, out long _))
+                {
+                    continue;
+                }
+
+                if (string.CompareOrdinal(installedStamp, stamp) >= 0
+                    && string.Equals(ParseTrigger(fileName), trigger, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -1337,7 +1677,34 @@ namespace CoreAI.Mods.WorldPackages
 
             byte[] bytes = await _fileSystem.ReadAllBytesAsync(path, cancellationToken);
             await UniTask.Yield(PlayerLoopTiming.Update, cancellationToken);
-            return RbxWorldPackageSerializer.ReadPackage(bytes);
+            return RbxWorldPackageSerializer.ReadPackage(bytes, ReadLimits);
+        }
+
+        /// <summary>
+        /// The default wait before a deferred encode: until the next player-loop frame in a running player
+        /// (a frame later than the mutation's, which a plain yield does not promise), so the frame that shows
+        /// the mutation is drawn before the encode runs; none where no player loop runs (Edit Mode,
+        /// the engine-free build), whose callers must not wait for a frame that never comes.
+        /// </summary>
+        private static UniTask WaitOneFrameBeforeDeferredEncodeAsync(CancellationToken token)
+        {
+#if UNITY_EDITOR
+            bool loopRunning;
+            try
+            {
+                loopRunning = Application.isPlaying;
+            }
+            catch (Exception)
+            {
+                loopRunning = false;
+            }
+
+            return loopRunning ? UniTask.NextFrame(PlayerLoopTiming.Update, token) : UniTask.CompletedTask;
+#elif UNITY_5_3_OR_NEWER
+            return UniTask.NextFrame(PlayerLoopTiming.Update, token);
+#else
+            return UniTask.CompletedTask;
+#endif
         }
 
         /// <summary>
@@ -1357,7 +1724,7 @@ namespace CoreAI.Mods.WorldPackages
             ValidateWebGlWorkBudget(payload);
             await UniTask.Yield(PlayerLoopTiming.Update, cancellationToken);
 #endif
-            byte[] bytes = RbxWorldPackageSerializer.WritePackage(payload);
+            byte[] bytes = RbxWorldPackageSerializer.WritePackage(payload, WriteLimits);
 #if UNITY_WEBGL && !UNITY_EDITOR
             if (bytes.Length > MaximumWebGlSafePackageBytes)
             {
@@ -1482,7 +1849,14 @@ namespace CoreAI.Mods.WorldPackages
                     AddTextLength(ref textCharacters, mod.Manifest.OwnerActorId);
                     AddTextLength(ref textCharacters, mod.Manifest.Capabilities);
                     AddTextLength(ref textCharacters, mod.Manifest.Entry);
+                    AddTextLength(ref textCharacters, mod.Manifest.Context);
                 }
+            }
+
+            foreach (string folder in payload.ModFolders)
+            {
+                collectionItems++;
+                AddTextLength(ref textCharacters, folder);
             }
 
             if (payload.Parts == null)

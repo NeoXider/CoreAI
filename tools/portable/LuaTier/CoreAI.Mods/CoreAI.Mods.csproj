@@ -27,7 +27,9 @@
     <Compile Include="$(ModsRoot)/AssemblyInfo.cs" Link="Mods/AssemblyInfo.cs" />
     <Compile Include="$(ModsRoot)/Scripting/**/*.cs"
              Exclude="$(ModsRoot)/Scripting/PlayerLoopScriptFrameYielder.cs;
-                      $(ModsRoot)/Scripting/LuaCs/LuaCsCoroutineRunner.cs"
+                      $(ModsRoot)/Scripting/LuaCs/LuaCsCoroutineRunner.cs;
+                      $(ModsRoot)/Scripting/LuaCs/RuntimeUi/RuntimeUiHostBackend.cs;
+                      $(ModsRoot)/Scripting/LuaCs/RuntimeUi/RuntimeUiLuaInstaller.cs"
              LinkBase="Mods/Scripting" />
     <Compile Include="$(ModsRoot)/LuaExecution/**/*.cs" LinkBase="Mods/LuaExecution" />
     <Compile Include="$(ModsRoot)/LuaAssets/**/*.cs" LinkBase="Mods/LuaAssets" />
@@ -44,6 +46,7 @@
     <ProjectReference Include="$(PortableRoot)/CoreAI.LuauDownlevel/CoreAI.LuauDownlevel.csproj" />
     <ProjectReference Include="$(PortableRoot)/CoreAI.RbxApi.Datatypes/CoreAI.RbxApi.Datatypes.csproj" />
     <ProjectReference Include="$(PortableRoot)/CoreAI.RbxApi.Instances/CoreAI.RbxApi.Instances.csproj" />
+    <ProjectReference Include="$(PortableRoot)/CoreAI.Mods.Folders/CoreAI.Mods.Folders.csproj" />
     <ProjectReference Include="../CoreAI.RbxApi.Binding/CoreAI.RbxApi.Binding.csproj" />
     <ProjectReference Include="../CoreAI.Source/CoreAI.Source.csproj" />
     <ProjectReference Include="../CoreAI.RbxApi.Unity/CoreAI.RbxApi.Unity.csproj" />

@@ -34,6 +34,7 @@ Package manifests:
 | [EXAMPLES.md](EXAMPLES.md) | Copy-paste gameplay examples: NPCs, quests, narration, tools. |
 | [COREAI_SETTINGS.md](COREAI_SETTINGS.md) | Inspector settings, routing modes, models, timeouts, streaming. |
 | [RUNTIME_BACKEND_SWITCHING.md](RUNTIME_BACKEND_SWITCHING.md) | Runtime multi-endpoint registry, provider switching, Hub endpoint editor, and agent assignments. |
+| [DECISION_MODELS_LOCAL_SETUP.md](DECISION_MODELS_LOCAL_SETUP.md) | Running a decision model locally (`llama-server` with Liquid `d1-2B`) and wiring it into a scene. |
 | [LLMUNITY_SETUP_AND_MODELS.md](LLMUNITY_SETUP_AND_MODELS.md) | Local GGUF setup, LLMUnity, OpenAI-compatible HTTP backends. |
 | [SUBSCRIPTION_BRIDGE.md](SUBSCRIPTION_BRIDGE.md) | Bring your own subscription: power the in-game AI from a Claude Code / Codex CLI via a local OpenAI-compatible bridge (dev/testing). |
 | [OPTIONAL_MODULES.md](OPTIONAL_MODULES.md) | Enable/disable Lua (Lua-CSharp) & LLMUnity via the `CoreAI ▸ Setup ▸ Modules` editor tool; defines and CI parity. |
@@ -45,6 +46,11 @@ Package manifests:
 |---|---|
 | [COREAI_SINGLETON_API.md](COREAI_SINGLETON_API.md) | `CoreAi.AskAsync`, streaming, orchestration, and helper access. |
 | [README_CHAT](../Runtime/Source/Features/Chat/README_CHAT.md) | Drop-in chat panel, config assets, hotkeys, stop path, persisted session. |
+| [CHAT_OVERLAY.md](CHAT_OVERLAY.md) | In-world chat overlay over the running game: one-line input, fading feed, agent status line, slash commands. |
+| [CHAT_MARKDOWN.md](CHAT_MARKDOWN.md) | Optional Markdown rendering of chat answers (headings, lists, code blocks, tables) through a separately installed renderer package; links, copy, styling, switching it off. |
+| [ORCHESTRATOR_MODE.md](ORCHESTRATOR_MODE.md) | Orchestrator mode: a lead agent plans, declares tasks and hands them to sub-agents; how to switch it on, what Stop does, limits. |
+| [RUNTIME_UI.md](RUNTIME_UI.md) | Game interfaces built from UXML and USS text while the game runs (editor, player, WebGL): the interpreter, the supported subset, the host. |
+| [GRAPHICS_AND_LOOK.md](GRAPHICS_AND_LOOK.md) | The default look (tonemapping, bloom, sky, fog) and the Hub Graphics page; how a game switches it off. |
 | [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md) | SSE, LLMUnity streaming, think-block filtering, cancellation, UI flow. |
 | [HTTP_TRANSPORT_SPEC.md](HTTP_TRANSPORT_SPEC.md) | OpenAI-compatible transport contracts: `HttpClient`, `UnityWebRequest`, WebGL fetch. |
 | [WEBGL_BUILD_TROUBLESHOOTING.md](WEBGL_BUILD_TROUBLESHOOTING.md) | WebGL player build issues, IL2CPP memory, package/settings file problems. |

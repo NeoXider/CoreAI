@@ -21,4 +21,17 @@ namespace CoreAI.Mcp.Tools
         /// <returns>True when <paramref name="base64Png"/> holds an image; false with <paramref name="error"/> set.</returns>
         bool TryCaptureBase64Png(int maxResolution, out string base64Png, out string error);
     }
+
+    /// <summary>
+    /// A screenshot source that can also capture one named camera, so an agent can look through a camera
+    /// it placed instead of only the main one. The <c>screenshot</c> tool's <c>camera</c> argument needs it.
+    /// </summary>
+    public interface ICameraScreenshotSource : IScreenshotSource
+    {
+        /// <summary>
+        /// Captures the active camera named <paramref name="cameraName"/>. An unknown name MUST fail (never
+        /// fall back to another camera) with an <paramref name="error"/> that names the cameras available.
+        /// </summary>
+        bool TryCaptureBase64Png(string cameraName, int maxResolution, out string base64Png, out string error);
+    }
 }

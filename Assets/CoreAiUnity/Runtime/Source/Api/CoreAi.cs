@@ -36,6 +36,17 @@ namespace CoreAI
     ///     Debug.Log(chunk.Text);
     /// </code>
     /// <para>
+    /// <b>Failures.</b> A string-returning call never hands a failure back as the reply: a provider error, a
+    /// missing backend or an empty completion throws <see cref="LlmRequestFailedException"/> (an
+    /// <see cref="InvalidOperationException"/> carrying <see cref="LlmErrorCode"/>; pass its
+    /// <see cref="LlmRequestFailedException.Failure"/> to <see cref="LlmErrorPresentation.ToUserMessage(LlmClientException, string)"/>
+    /// for a player-facing sentence), a stopped turn throws <see cref="OperationCanceledException"/> and a library
+    /// timeout <see cref="LlmOperationTimeoutException"/>. The <c>*ResultAsync</c> twins return the same failure as an
+    /// <see cref="LlmCompletionResult"/> with <c>Ok = false</c> instead. With a host orchestrator that exposes no typed
+    /// results (not <see cref="IAiTaskResultService"/>) the buffered string calls return what that orchestrator
+    /// returns, because nothing else is known about the turn.
+    /// </para>
+    /// <para>
     /// Services resolve lazily from the first located <see cref="CoreAILifetimeScope"/>.
     /// Cached instances retire when the resolved scope disappears or its container changes.
     /// Use <see cref="Invalidate"/> for other host composition changes that require a fresh resolution.
@@ -122,14 +133,74 @@ namespace CoreAI
         /// <paramref name="roleId"/> when ChatHistory is enabled.
         /// </summary>
         /// <remarks>Use <c>await</c> only; blocking the Unity main thread via <c>.Result</c>/<c>.Wait()</c> risks deadlocks with MEAI marshaling.</remarks>
+        /// <exception cref="LlmRequestFailedException">The turn failed (see the class summary).</exception>
         public static async Task<string?> AskAsync(
             string userMessage,
             string roleId = BuiltInAgentRoleIds.SmartChat,
             CancellationToken cancellationToken = default)
         {
             CoreAiChatService svc = RequireChatService();
-            AiTaskRequest task = svc.CreateTaskRequest(userMessage, roleId);
-            return await svc.SendMessageAsync(task, cancellationToken);
+            return await SendTextAsync(svc, svc.CreateTaskRequest(userMessage, roleId), AskOperation,
+                cancellationToken);
+        }
+
+        /// <summary>
+        /// <see cref="AskAsync(string, string, CancellationToken)"/> that returns the whole outcome: the reply, or
+        /// <c>Ok = false</c> with <see cref="LlmCompletionResult.ErrorCode"/>, the HTTP status and the error text,
+        /// plus usage. Never throws for a failed turn; a stopped turn throws <see cref="OperationCanceledException"/>.
+        /// Needs an orchestrator with typed results (every built-in composition).
+        /// </summary>
+        /// <exception cref="NotSupportedException">The host orchestrator exposes no typed task results.</exception>
+        public static Task<LlmCompletionResult> AskResultAsync(
+            string userMessage,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            CancellationToken cancellationToken = default)
+        {
+            CoreAiChatService svc = RequireChatService();
+            return svc.SendMessageResultAsync(svc.CreateTaskRequest(userMessage, roleId), cancellationToken);
+        }
+
+        /// <summary><see cref="AskResultAsync(string, string, CancellationToken)"/> with one attachment.</summary>
+        public static Task<LlmCompletionResult> AskResultAsync(
+            string userMessage,
+            AiAttachment attachment,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            CancellationToken cancellationToken = default)
+        {
+            return AskResultAsync(userMessage, AiAttachmentList.Of(attachment), roleId, cancellationToken);
+        }
+
+        /// <summary><see cref="AskResultAsync(string, string, CancellationToken)"/> with any number of attachments.</summary>
+        public static Task<LlmCompletionResult> AskResultAsync(
+            string userMessage,
+            IReadOnlyList<AiAttachment>? attachments,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            CancellationToken cancellationToken = default)
+        {
+            CoreAiChatService svc = RequireChatService();
+            return svc.SendMessageResultAsync(svc.CreateTaskRequest(userMessage, roleId, attachments),
+                cancellationToken);
+        }
+
+        private const string AskOperation = "CoreAi.AskAsync";
+
+        /// <summary>
+        /// The buffered string path: the typed result when the orchestrator has one (a failure throws), the legacy
+        /// string otherwise.
+        /// </summary>
+        private static async Task<string?> SendTextAsync(
+            CoreAiChatService svc,
+            AiTaskRequest task,
+            string operation,
+            CancellationToken cancellationToken)
+        {
+            if (!svc.SupportsTaskResults)
+            {
+                return await svc.SendMessageAsync(task, cancellationToken);
+            }
+
+            LlmCompletionResult result = await svc.SendMessageResultAsync(task, cancellationToken);
+            return LlmTurnFailure.ContentOrThrow(result, operation);
         }
 
         /// <summary>
@@ -168,8 +239,8 @@ namespace CoreAI
             CancellationToken cancellationToken = default)
         {
             CoreAiChatService svc = RequireChatService();
-            AiTaskRequest task = svc.CreateTaskRequest(userMessage, roleId, attachments);
-            return await svc.SendMessageAsync(task, cancellationToken);
+            return await SendTextAsync(svc, svc.CreateTaskRequest(userMessage, roleId, attachments), AskOperation,
+                cancellationToken);
         }
 
         /// <summary>
@@ -445,10 +516,7 @@ namespace CoreAI
                                ? svc.SendMessageStreamingAsync(userMessage, roleId, cancellationToken)
                                : svc.SendMessageStreamingAsync(userMessage, attachments, roleId, cancellationToken))
             {
-                if (!string.IsNullOrEmpty(chunk.Error))
-                {
-                    throw new InvalidOperationException($"CoreAi.StreamAsync failed: {chunk.Error}");
-                }
+                LlmTurnFailure.ThrowIfFailed(chunk, "CoreAi.StreamAsync");
 
                 if (chunk.IsDone && string.IsNullOrEmpty(chunk.Text))
                 {
@@ -514,7 +582,10 @@ namespace CoreAI
         /// <summary>
         /// Chooses streaming vs buffered mode using <see cref="CoreAiChatService.IsStreamingEnabled(string, bool?)"/>.
         /// Optional <paramref name="onChunk"/> receives live text fragments; returns the full concatenated string.
+        /// A stream that ends with an error throws like <see cref="StreamAsync(string, string, CancellationToken)"/>
+        /// (the fragments already delivered stay delivered); a failed buffered turn throws the same way.
         /// </summary>
+        /// <exception cref="LlmRequestFailedException">The turn failed (see the class summary).</exception>
         public static Task<string?> SmartAskAsync(
             string userMessage,
             string roleId = BuiltInAgentRoleIds.SmartChat,
@@ -554,6 +625,50 @@ namespace CoreAI
                 uiStreamingOverride, cancellationToken)!;
         }
 
+        /// <summary>
+        /// <see cref="SmartAskAsync(string, string, Action{string}, bool?, CancellationToken)"/> that returns the whole
+        /// outcome: <c>Ok = false</c> with the error category and the text streamed so far for a failed turn, instead
+        /// of an exception. A stopped turn throws <see cref="OperationCanceledException"/>.
+        /// </summary>
+        public static Task<LlmCompletionResult> SmartAskResultAsync(
+            string userMessage,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            Action<string>? onChunk = null,
+            bool? uiStreamingOverride = null,
+            CancellationToken cancellationToken = default)
+        {
+            CoreAiChatService svc = RequireChatService();
+            return svc.SendMessageSmartResultAsync(svc.CreateTaskRequest(userMessage, roleId), AdaptTextChunks(onChunk),
+                uiStreamingOverride, cancellationToken);
+        }
+
+        /// <summary><see cref="SmartAskResultAsync(string, string, Action{string}, bool?, CancellationToken)"/> with one attachment.</summary>
+        public static Task<LlmCompletionResult> SmartAskResultAsync(
+            string userMessage,
+            AiAttachment attachment,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            Action<string>? onChunk = null,
+            bool? uiStreamingOverride = null,
+            CancellationToken cancellationToken = default)
+        {
+            return SmartAskResultAsync(userMessage, AiAttachmentList.Of(attachment), roleId, onChunk,
+                uiStreamingOverride, cancellationToken);
+        }
+
+        /// <summary><see cref="SmartAskResultAsync(string, string, Action{string}, bool?, CancellationToken)"/> with any number of attachments.</summary>
+        public static Task<LlmCompletionResult> SmartAskResultAsync(
+            string userMessage,
+            IReadOnlyList<AiAttachment>? attachments,
+            string roleId = BuiltInAgentRoleIds.SmartChat,
+            Action<string>? onChunk = null,
+            bool? uiStreamingOverride = null,
+            CancellationToken cancellationToken = default)
+        {
+            CoreAiChatService svc = RequireChatService();
+            return svc.SendMessageSmartResultAsync(svc.CreateTaskRequest(userMessage, roleId, attachments),
+                AdaptTextChunks(onChunk), uiStreamingOverride, cancellationToken);
+        }
+
         private static Action<LlmStreamChunk>? AdaptTextChunks(Action<string>? onChunk)
         {
             return onChunk == null
@@ -569,14 +684,49 @@ namespace CoreAI
 
         /// <summary>
         /// Full orchestrator pass: telemetry snapshot, prompt composition, authority, queued execution,
-        /// structured-response policy, <c>ApplyAiGameCommand</c> publication, metrics. Returns <c>null</c> when authority/validation blocks the turn.
+        /// structured-response policy, <c>ApplyAiGameCommand</c> publication, metrics. A turn that authority or
+        /// validation blocks, or that the provider fails, throws <see cref="LlmRequestFailedException"/> (the code
+        /// says which: <see cref="LlmErrorCode.InvalidRequest"/> for a blocked or invalid turn), never <c>null</c>
+        /// and never the error text. <see cref="OrchestrateResultAsync"/> returns the outcome without throwing.
         /// </summary>
+        /// <exception cref="LlmRequestFailedException">The turn failed (see the class summary).</exception>
         public static Task<string?> OrchestrateAsync(
             AiTaskRequest task,
             CancellationToken cancellationToken = default)
         {
             IAiOrchestrationService svc = RequireOrchestrator();
-            return svc.RunTaskAsync(ResolveActorBeforeAdmission(svc, task), cancellationToken)!;
+            AiTaskRequest admitted = ResolveActorBeforeAdmission(svc, task);
+            return svc is IAiTaskResultService typed && typed.SupportsTaskResults
+                ? OrchestrateTypedAsync(typed, admitted, cancellationToken)
+                : svc.RunTaskAsync(admitted, cancellationToken)!;
+        }
+
+        private static async Task<string?> OrchestrateTypedAsync(
+            IAiTaskResultService typed,
+            AiTaskRequest admitted,
+            CancellationToken cancellationToken)
+        {
+            LlmCompletionResult result = await typed.RunTaskResultAsync(admitted, cancellationToken);
+            return LlmTurnFailure.ContentOrThrow(result, "CoreAi.OrchestrateAsync");
+        }
+
+        /// <summary>
+        /// <see cref="OrchestrateAsync"/> that returns the whole outcome (<c>Ok = false</c> with the error category
+        /// for a blocked or failed turn) instead of throwing; a stopped turn throws
+        /// <see cref="OperationCanceledException"/>.
+        /// </summary>
+        /// <exception cref="NotSupportedException">The host orchestrator exposes no typed task results.</exception>
+        public static Task<LlmCompletionResult> OrchestrateResultAsync(
+            AiTaskRequest task,
+            CancellationToken cancellationToken = default)
+        {
+            IAiOrchestrationService svc = RequireOrchestrator();
+            if (svc is not IAiTaskResultService typed || !typed.SupportsTaskResults)
+            {
+                throw new NotSupportedException("The orchestrator does not expose typed task results.");
+            }
+
+            return typed.RunTaskResultAsync(ResolveActorBeforeAdmission(svc, task), cancellationToken);
         }
 
         /// <summary>
@@ -602,10 +752,7 @@ namespace CoreAI
             StringBuilder sb = new();
             await foreach (LlmStreamChunk chunk in OrchestrateStreamAsync(task, cancellationToken))
             {
-                if (!string.IsNullOrEmpty(chunk.Error))
-                {
-                    throw new InvalidOperationException($"CoreAi.OrchestrateStream failed: {chunk.Error}");
-                }
+                LlmTurnFailure.ThrowIfFailed(chunk, "CoreAi.OrchestrateStream");
 
                 if (chunk.IsDone)
                 {

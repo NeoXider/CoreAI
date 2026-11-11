@@ -11,11 +11,13 @@ namespace CoreAI.Mods.Rbx.Binding
     /// at composition (RbxWorldHost) — no scene searches in hot paths. Pose conversion goes
     /// through RbxSpace (D2, this file is inside the lint-allowed Binding folder). Follow
     /// resolves the target's backing GameObject through the binder and drives a
-    /// <see cref="RbxCameraFollower"/> on the camera.
+    /// <see cref="RbxCameraFollower"/> on the camera. The lens (field of view, viewport) is the
+    /// <see cref="Camera"/> component on the same object; a Transform without one has no lens.
     /// </summary>
     public sealed class UnityCameraRig : IRbxCameraRig
     {
         private readonly Transform _camera;
+        private readonly Camera _lens;
         private readonly InstanceGameObjectBinder _binder;
         private readonly RbxCameraFollower _follower;
 
@@ -29,6 +31,7 @@ namespace CoreAI.Mods.Rbx.Binding
             }
 
             _camera = camera;
+            _lens = camera.GetComponent<Camera>();
             _binder = binder;
             _follower = camera.GetComponent<RbxCameraFollower>();
             if (_follower == null)
@@ -73,6 +76,32 @@ namespace CoreAI.Mods.Rbx.Binding
         {
             _follower.Target = null;
             _follower.enabled = false;
+        }
+
+        /// <inheritdoc />
+        public double GetFieldOfView()
+        {
+            // WHY Unity's fieldOfView: it is the vertical angle in degrees, the same quantity Roblox's
+            // FieldOfView names, so no conversion is needed.
+            return _lens != null ? _lens.fieldOfView : double.NaN;
+        }
+
+        /// <inheritdoc />
+        public bool TrySetFieldOfView(double degrees)
+        {
+            if (_lens == null)
+            {
+                return false;
+            }
+
+            _lens.fieldOfView = (float)degrees;
+            return true;
+        }
+
+        /// <inheritdoc />
+        public RbxVector2 GetViewportSize()
+        {
+            return _lens != null ? new RbxVector2(_lens.pixelWidth, _lens.pixelHeight) : RbxVector2.Zero;
         }
     }
 }

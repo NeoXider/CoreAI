@@ -570,6 +570,7 @@ namespace CoreAI.Editor
 
         private static readonly string[] FrozenScenePaths =
         {
+            "Assets/CoreAI.Demos/BlockWorld/BlockWorld.unity",
             "Assets/CoreAI.Demos/FullAccess/FullAccessDemo.unity",
             "Assets/CoreAI.Demos/GameplayServices/GameplayServicesDemo.unity",
             "Assets/CoreAI.Demos/Hub/CoreAiHubDemo.unity",
@@ -590,7 +591,7 @@ namespace CoreAI.Editor
         };
 
         /// <summary>
-        /// Builds the frozen 17-scene G11 demo set into <c>artifacts/G11-WebGL</c> without prompts.
+        /// Builds the frozen 18-scene G11 demo set into <c>artifacts/G11-WebGL</c> without prompts.
         /// Launch Unity with <c>-buildTarget WebGL</c> because batch mode cannot switch targets while
         /// an execute method is running.
         /// </summary>

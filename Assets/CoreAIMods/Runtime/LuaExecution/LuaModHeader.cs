@@ -1,4 +1,5 @@
 using System;
+using CoreAI.Mods.Folders;
 
 namespace CoreAI.Ai
 {
@@ -14,6 +15,19 @@ namespace CoreAI.Ai
         public readonly string Tags;
         public readonly bool Active;
 
+        /// <summary>
+        /// The <c>context:</c> key as written (MVP4 SC-5: <c>server</c>, <c>client</c> or <c>shared</c>, any
+        /// case); empty when the header has none. Parsing never judges it: the load refuses a value that is not
+        /// a context, and <see cref="LuaModManifest.ResolveContext"/> stores only a valid one.
+        /// </summary>
+        public readonly string Context;
+
+        /// <summary>The <c>parent:</c> key as written (MVP4 SC-6, a <c>/</c>-separated path from <c>game</c>); empty when absent.</summary>
+        public readonly string Parent;
+
+        /// <summary>The mod's folder (P20): <see cref="Category"/> read leniently; the category itself stays raw.</summary>
+        public ModFolderPath FolderPath => ModFolderPath.FromStored(Category);
+
         private LuaModHeader(
             string id,
             string name,
@@ -23,7 +37,9 @@ namespace CoreAI.Ai
             string author,
             string description,
             string tags,
-            bool active)
+            bool active,
+            string context,
+            string parent)
         {
             Id = id;
             Name = name;
@@ -34,6 +50,8 @@ namespace CoreAI.Ai
             Description = description;
             Tags = tags;
             Active = active;
+            Context = context;
+            Parent = parent;
         }
 
         public static LuaModHeader Parse(string source, string fallbackId)
@@ -224,6 +242,8 @@ namespace CoreAI.Ai
             private string _description;
             private string _tags;
             private bool _active;
+            private string _context;
+            private string _parent;
 
             public Builder(string fallbackId)
             {
@@ -236,6 +256,8 @@ namespace CoreAI.Ai
                 _description = "";
                 _tags = "";
                 _active = true;
+                _context = "";
+                _parent = "";
             }
 
             public void Apply(string key, string value)
@@ -276,6 +298,14 @@ namespace CoreAI.Ai
                 {
                     _active = !value.Equals("false", StringComparison.OrdinalIgnoreCase);
                 }
+                else if (key.Equals("context", StringComparison.OrdinalIgnoreCase))
+                {
+                    _context = value;
+                }
+                else if (key.Equals("parent", StringComparison.OrdinalIgnoreCase))
+                {
+                    _parent = value;
+                }
             }
 
             public LuaModHeader Build()
@@ -290,7 +320,9 @@ namespace CoreAI.Ai
                     _author ?? "",
                     _description ?? "",
                     _tags ?? "",
-                    _active);
+                    _active,
+                    _context ?? "",
+                    _parent ?? "");
             }
 
             private static string NormalizeCapabilities(string value)

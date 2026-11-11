@@ -30,12 +30,10 @@ namespace CoreAI.Net.Mirror.Tests
     /// is built before the server starts and the provider is never driven through Update: a host's
     /// provider refuses a client bridge beside a live server, a separate and open defect, and the
     /// frame is not what is under test here — the accept-event wiring the provider installs when
-    /// the bridge is built is. WHY a refusal is observed where the authenticator hands it to
-    /// Mirror and not on the wire: the authenticator disconnects inline, right after queueing the
-    /// refusal, and Mirror's default transport (kcp2k) reports the drop before that call returns —
-    /// at which point Mirror clears the connection's unsent batches — so the harness, which echoes
-    /// a drop the same way, carries nothing to a refused client; a wire assertion would therefore
-    /// assert the harness, not the product.
+    /// the bridge is built is. WHY a refusal is observed on the client: the authenticator now drops
+    /// a refused connection on a later frame, after Mirror has flushed the refusal, and the harness
+    /// echoes a drop the way kcp2k does — discarding what was not flushed — so a refusal that
+    /// reaches the client proves the deferral, not the harness.
     /// </remarks>
     [TestFixture]
     public sealed class MirrorClientRemotesEndToEndEditModeTests
@@ -184,8 +182,11 @@ namespace CoreAI.Net.Mirror.Tests
         }
 
         [Test]
-        public void Negative_ARefusedClient_IsAuthenticatedNowhere_AndTheServerHoldsNoActorForIt()
+        public void Negative_ARefusedClient_IsToldWhy_IsAuthenticatedNowhere_AndTheServerHoldsNoActorForIt()
         {
+            List<bool> connectedWhenTold = new();
+            _authenticator.ClientRefused += _ => connectedWhenTold.Add(NetworkClient.isConnected);
+
             Join("guess");
 
             Assert.AreEqual(0, _authenticator.AdmittedCount);
@@ -194,18 +195,48 @@ namespace CoreAI.Net.Mirror.Tests
             CollectionAssert.IsEmpty(_serverActors, "a refusal must create nothing in the world");
             CollectionAssert.IsEmpty(_server.ActorIds);
             Assert.AreEqual(0, _clientAccepts, "the client side must never hear an accept");
-            CollectionAssert.AreEqual(new[] { OfflineMirror.LoopbackConnectionId },
-                _mirror.ServerDisconnectRequests,
-                "the refusal must ask the transport to drop that connection, and only that one");
+            CollectionAssert.AreEqual(new[] { true }, connectedWhenTold,
+                "the refusal reaches the client while it is still connected: it is told, not just dropped");
+            Assert.IsTrue(_authenticator.ClientRefusal.HasValue);
+            Assert.AreEqual(CoreAiAdmissionRefusalKind.NotAdmitted, _authenticator.ClientRefusal.Value.Kind);
+            Assert.AreEqual("not admitted", _authenticator.ClientRefusal.Value.Reason,
+                "the client is shown the fixed refusal, never the provider's reason");
+            Assert.IsFalse(NetworkClient.isConnected, "a refused client closes its own connection");
             CollectionAssert.IsEmpty(NetworkServer.connections,
-                "once the transport reports the drop the server holds nothing for it");
-            Assert.IsFalse(NetworkClient.isConnected,
-                "and the client learns of the drop from the transport, not from a message");
+                "and the server learns of it from the transport and holds nothing for it");
+            CollectionAssert.IsEmpty(_mirror.ServerDisconnectRequests,
+                "the drop the server owed waited a frame, by which time the client had gone");
             CoreAiAdmissionResponseMessage told = TheOneAdmissionResponseHandedToMirror();
             Assert.IsFalse(told.Admitted);
             Assert.AreEqual("not admitted", told.Reason,
                 "what leaves the authenticator is the fixed refusal, never the provider's reason");
             Assert.AreEqual("", told.ActorId, "and it names nobody");
+        }
+
+        [Test]
+        public void Negative_ARefusedClientThatIgnoresItsRefusal_IsDroppedByTheServer_OnALaterFrame()
+        {
+            // WHY a client that ignores the answer: a custom client need not close on a refusal, and
+            // the server must not depend on it.
+            double authenticatorNow = 0d;
+            _authenticator.ClockSeconds = () => authenticatorNow;
+
+            JoinFiringFirst("guess", () => NetworkClient.ReplaceHandler<CoreAiAdmissionResponseMessage>(
+                _ => { }, requireAuthentication: false));
+
+            Assert.IsTrue(NetworkClient.isConnected, "the client ignored its refusal");
+            CollectionAssert.IsEmpty(_mirror.ServerDisconnectRequests, "the server's drop waits for a later frame");
+            Assert.IsFalse(NetworkServer.connections[OfflineMirror.LoopbackConnectionId].isAuthenticated);
+
+            authenticatorNow = 1d;
+            _authenticator.PerformDueRefusalDrops();
+            _mirror.PumpLoopback();
+
+            CollectionAssert.AreEqual(new[] { OfflineMirror.LoopbackConnectionId }, _mirror.ServerDisconnectRequests,
+                "the refused connection is closed by the server, once");
+            Assert.IsFalse(NetworkClient.isConnected);
+            Assert.AreEqual(1, _authenticator.RefusalDropsPerformed);
+            CollectionAssert.IsEmpty(_serverActors);
         }
 
         [Test]

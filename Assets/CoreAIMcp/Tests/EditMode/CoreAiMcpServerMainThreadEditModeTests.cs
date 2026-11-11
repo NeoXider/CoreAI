@@ -143,6 +143,59 @@ namespace CoreAI.Mcp.Tests
         }
 
         [Test]
+        public async Task CancelledWhileQueued_IsWithdrawnAtOnce_NeverRuns_AndFreesItsSlot()
+        {
+            _server.MainThreadTimeoutSeconds = 0f;
+            bool executed = false;
+            using CancellationTokenSource cancellation = new();
+            Task<int> pending = _server.RunOnMainThreadAsync(() =>
+            {
+                executed = true;
+                return Task.FromResult(1);
+            }, cancellation.Token);
+            Assert.AreEqual(1, _server.AdmittedMainThreadCalls);
+
+            cancellation.Cancel();
+            Exception observed = await CaptureAsync(pending);
+            _server.PumpMainThreadQueue(TimeSpan.MaxValue);
+
+            Assert.IsInstanceOf<OperationCanceledException>(observed);
+            StringAssert.Contains("did not run", observed.Message);
+            Assert.IsFalse(executed, "a call the client cancelled must not mutate the game on a later frame.");
+            Assert.AreEqual(0, _server.AdmittedMainThreadCalls, "the withdrawn call must not hold a queue slot.");
+        }
+
+        [Test]
+        public async Task CancelledAfterItStarted_KeepsRunningAndKeepsItsSlotUntilItFinishes()
+        {
+            _server.MainThreadTimeoutSeconds = 0f;
+            TaskCompletionSource<int> body = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            using CancellationTokenSource cancellation = new();
+            Task<int> running = _server.RunOnMainThreadAsync(() => body.Task, cancellation.Token);
+            _server.PumpMainThreadQueue();
+
+            cancellation.Cancel();
+
+            Assert.IsFalse(running.IsCompleted, "cancellation never fakes the completion of a started body.");
+            Assert.AreEqual(1, _server.AdmittedMainThreadCalls);
+            body.SetResult(5);
+            Assert.AreEqual(5, await running);
+            Assert.AreEqual(0, _server.AdmittedMainThreadCalls);
+        }
+
+        [Test]
+        public async Task PreCancelledToken_IsRefusedWithoutQueueing()
+        {
+            using CancellationTokenSource cancellation = new();
+            cancellation.Cancel();
+
+            Exception observed = await CaptureAsync(_server.RunOnMainThreadAsync(() => Task.FromResult(1), cancellation.Token));
+
+            Assert.IsInstanceOf<OperationCanceledException>(observed);
+            Assert.AreEqual(0, _server.AdmittedMainThreadCalls);
+        }
+
+        [Test]
         public async Task ZeroTimeout_DisablesTheWatchdog()
         {
             _server.MainThreadTimeoutSeconds = 0f;

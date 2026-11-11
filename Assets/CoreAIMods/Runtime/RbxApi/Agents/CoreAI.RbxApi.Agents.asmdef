@@ -1,0 +1,18 @@
+{
+  "name": "CoreAI.RbxApi.Agents",
+  "rootNamespace": "CoreAI.Mods.Rbx.Agents",
+  "references": [
+    "CoreAI.Core",
+    "CoreAI.RbxApi.Instances",
+    "CoreAI.RbxApi.Datatypes"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

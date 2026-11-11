@@ -23,7 +23,70 @@ namespace CoreAI.Mods.Rbx.Binding
     // this backend can be replaced (legacy Input or a custom poll) without touching the Lua API.
     public sealed class UnityNewInputSource : IInputSource
     {
+        /// <summary>Reads devices; <paramref name="focusState"/> and <paramref name="cursorPort"/> are the
+        /// host's, handed to UserInputService through this seam (both may be null).</summary>
+        public UnityNewInputSource(IInputFocusState focusState = null, IRbxCursorPort cursorPort = null)
+        {
+            FocusState = focusState;
+            CursorPort = cursorPort;
+        }
+
+        /// <inheritdoc />
+        public IInputFocusState FocusState { get; private set; }
+
+        /// <inheritdoc />
+        public IRbxCursorPort CursorPort { get; private set; }
+
+        /// <summary>
+        /// Gives a source built without host ports the host's own, keeping any it already has; used when
+        /// a replacement world arrives with a fresh source.
+        /// </summary>
+        public void AdoptHostPorts(IInputFocusState focusState, IRbxCursorPort cursorPort)
+        {
+            FocusState ??= focusState;
+            CursorPort ??= cursorPort;
+        }
+
 #if ENABLE_INPUT_SYSTEM && (COREAI_HAS_INPUT_SYSTEM || UNITY_6000_7_OR_NEWER)
+        /// <inheritdoc />
+        public bool TryReadMouseDelta(out RbxVector2 delta)
+        {
+            Mouse mouse = Mouse.current;
+            if (mouse == null)
+            {
+                delta = RbxVector2.Zero;
+                return false;
+            }
+
+            Vector2 raw = mouse.delta.ReadValue();
+            // WHY: the Input System reports y up; Roblox screen deltas grow downward.
+            delta = new RbxVector2(raw.x, -raw.y);
+            return true;
+        }
+
+        /// <inheritdoc />
+        public float ReadMouseWheel()
+        {
+            Mouse mouse = Mouse.current;
+            return mouse == null ? 0f : mouse.scroll.ReadValue().y;
+        }
+
+        /// <inheritdoc />
+        public bool TryReadThumbstick(int stick, out RbxVector2 position)
+        {
+            Gamepad gamepad = Gamepad.current;
+            if (gamepad == null || (stick != 1 && stick != 2))
+            {
+                position = RbxVector2.Zero;
+                return false;
+            }
+
+            // WHY no flip: the Input System's stick y is up, exactly as Roblox's thumbstick Position.Y.
+            Vector2 raw = (stick == 1 ? gamepad.leftStick : gamepad.rightStick).ReadValue();
+            position = new RbxVector2(raw.x, raw.y);
+            return true;
+        }
+
         private static readonly (Key Key, int KeyCode)[] KeyMap = BuildKeyMap();
         private static readonly Dictionary<int, Key> KeyByKeyCode = BuildKeyByKeyCode();
 
@@ -189,6 +252,14 @@ namespace CoreAI.Mods.Rbx.Binding
         public bool IsMouseButtonDown(int button) => false;
 
         public RbxVector2 GetMouseLocation() => RbxVector2.Zero;
+
+        public bool TryReadMouseDelta(out RbxVector2 delta)
+        {
+            delta = RbxVector2.Zero;
+            return false;
+        }
+
+        public float ReadMouseWheel() => 0f;
 #endif
     }
 }

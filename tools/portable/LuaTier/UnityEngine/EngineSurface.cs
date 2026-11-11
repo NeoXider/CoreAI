@@ -219,6 +219,26 @@ namespace UnityEngine
             get => throw PortableEngine.Unavailable("Rigidbody.useGravity");
             set => throw PortableEngine.Unavailable("Rigidbody.useGravity");
         }
+
+        public bool detectCollisions
+        {
+            get => throw PortableEngine.Unavailable("Rigidbody.detectCollisions");
+            set => throw PortableEngine.Unavailable("Rigidbody.detectCollisions");
+        }
+
+        public void AddForce(Vector3 force, ForceMode mode)
+        {
+            throw PortableEngine.Unavailable("Rigidbody.AddForce");
+        }
+    }
+
+    /// <summary>Unity's force modes, with Unity's numeric values.</summary>
+    public enum ForceMode
+    {
+        Force = 0,
+        Impulse = 1,
+        VelocityChange = 2,
+        Acceleration = 5
     }
 
     /// <summary>Unity's primitive mesh kinds, with Unity's numeric values.</summary>

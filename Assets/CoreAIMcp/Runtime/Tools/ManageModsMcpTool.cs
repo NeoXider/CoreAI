@@ -25,6 +25,29 @@ namespace CoreAI.Mcp.Tools
         /// <param name="actorIdentityProvider">Explicit identity assigned to MCP mod calls by the host.</param>
         public ManageModsMcpTool(ILuaModRuntime runtime, ICoreAISettings settings, ILog logger,
             LuaCapabilities grantedCapabilities, IActorIdentityProvider actorIdentityProvider)
+            : this(runtime, settings, logger, grantedCapabilities, actorIdentityProvider, null)
+        {
+        }
+
+        /// <summary>
+        /// The tool with a rate limit on its mutating actions: pass the limiter the mods scope registers, so an
+        /// external agent spends the same budget of AI world changes as the in-game <c>execute_lua</c> and
+        /// <c>manage_mods</c>; null leaves MCP <c>manage_mods</c> unlimited.
+        /// </summary>
+        public ManageModsMcpTool(ILuaModRuntime runtime, ICoreAISettings settings, ILog logger,
+            LuaCapabilities grantedCapabilities, IActorIdentityProvider actorIdentityProvider,
+            LuaGenerationRateLimiter rateLimiter)
+            : this(runtime, settings, logger, grantedCapabilities, actorIdentityProvider, rateLimiter, null)
+        {
+        }
+
+        /// <summary>
+        /// The tool with the shared rate limit and the mod store's folder list (the one the in-game
+        /// <c>manage_mods</c>, the Hub Mods page and the world session use); null keeps one in-memory list.
+        /// </summary>
+        public ManageModsMcpTool(ILuaModRuntime runtime, ICoreAISettings settings, ILog logger,
+            LuaCapabilities grantedCapabilities, IActorIdentityProvider actorIdentityProvider,
+            LuaGenerationRateLimiter rateLimiter, CoreAI.Mods.Folders.IModFolderListStore folderList)
         {
             if (runtime == null)
             {
@@ -43,8 +66,14 @@ namespace CoreAI.Mcp.Tools
                 grantedCapabilities,
                 allowModManagement: true,
                 actorIdentityProvider: actorIdentityProvider,
-                roleId: BuiltInAgentRoleIds.Programmer);
+                roleId: BuiltInAgentRoleIds.Programmer,
+                worldMutationGate: null,
+                rateLimiter: rateLimiter,
+                folderList: folderList);
         }
+
+        /// <summary>The limiter the mutating actions spend; null when they are not limited.</summary>
+        public LuaGenerationRateLimiter RateLimiter => _inner.RateLimiter;
 
         /// <inheritdoc />
         public string Name => "manage_mods";
@@ -72,9 +101,12 @@ namespace CoreAI.Mcp.Tools
             string bundle = McpArguments.String(arguments, "bundle");
             int revision = McpArguments.Int(arguments, "revision", -1);
             bool keepObjects = McpArguments.Bool(arguments, "keep_objects");
+            // WHY null when absent and never "": move reads an empty folder as the top level.
+            string folder = McpArguments.String(arguments, "folder");
+            string target = McpArguments.String(arguments, "target");
 
             string json = await _inner
-                .ExecuteAsync(action, modId, code, bundle, revision, cancellationToken, keepObjects)
+                .ExecuteAsync(action, modId, code, bundle, revision, cancellationToken, keepObjects, folder, target)
                 .ConfigureAwait(false);
 
             bool isError = TryReadSuccessFalse(json);

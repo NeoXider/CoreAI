@@ -545,10 +545,16 @@ scope)**
       fixed cost and the frame time at N=100 in this file. A recorded measurement, no pass/fail; it decides
       whether MVP9 needs the server-only native Luau fallback (plan decision D8). It also answers the per-resume
       heap-read cost on IL2CPP of "Allocation-budget follow-ups" below.
-- [ ] **Spike S2: bytes per update (risk R2).** *Owner:* replication. *Plan:* encode one CFrame patch through
-      `LuaCsRbxNetworkCodec` (JSON) and as a hand-packed binary record (id, revision, quantized position and
-      rotation); record both sizes and the encode/decode cost here; they set the bytes-per-patch bar of MVP6's
-      delta codec (the draft bar is ≤24 B).
+      *Partial, 2026-11-11 (P19 baseline, `dev-docs/PERF_BASELINE_2026-11.md`):* the 148–158 k instructions/s
+      figure was Mono on the SGen collector. Unity's Mono is Boehm; on Unity's bundled x86 Boehm Mono the
+      production batch 4 runs 5.27 M instructions/s (36.6% of unguarded), and the larger tax there is the
+      scheduler-thread hook at count 1. Still open: the same numbers inside a Standalone Mono x64 player and
+      an IL2CPP Linux server, and the frame time at N=100.
+- [x] **Spike S2: bytes per update (risk R2).** Measured 2026-11-11 with the MVP6 codec core
+      (`tools/portable/ReplicationWireS2`, note `dev-docs/REPLICATION_CODEC.md`): a binary CFrame patch costs
+      18.9 B (200 parts at 20 Hz, headers included; 13.6 B on a grid) against 196.7 B as JSON; encode
+      0.23–0.43 µs against 6.5–13.4 µs, with no allocation on encode. The ≤24 B draft bar of MVP6 holds.
+      Not covered: fragmentation above the packet cap and the interpolation timestamp.
 - [x] Bump and release: 7.47.0 (2026-09-25), together with main's 7.46.0.
 - Further follow-ups: "Persistence (MVP3 tail)" in the next section.
 

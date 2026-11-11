@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- CoreAI.RbxApi.Unity, every runtime file of the asmdef folder. See ../UnityCompileCheck.props. -->
+  <Import Project="../UnityCompileCheck.props" />
+  <PropertyGroup>
+    <AssemblyName>CoreAI.RbxApi.Unity</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(ModsRuntime)/RbxApi/Unity/**/*.cs" LinkBase="Unity" />
+  </ItemGroup>
+</Project>
