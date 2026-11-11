@@ -15,18 +15,31 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
     /// <summary>
     /// The default Terrain renderer: per chunk one GameObject with a MeshFilter, a MeshRenderer and a
     /// MeshCollider for the solid faces, and a child with a transparent Water surface and no collider.
-    /// A store change queues only the chunks its <see cref="TerrainChangeSet.RemeshChunks"/> names;
-    /// <see cref="ProcessDirty"/> re-meshes them under a budget on the main thread.
+    /// A store change queues the chunks its <see cref="TerrainChangeSet.RemeshChunks"/> names, plus a
+    /// light-only refresh of the chunks whose sky exposure it moved (<see cref="TerrainSkyExposure"/>);
+    /// <see cref="ProcessDirty"/> works through them under a budget on the main thread.
     /// </summary>
     /// <remarks>
-    /// Materials are the shared handles of the existing material catalog (the same Grass a Part shows),
-    /// one submesh per material, with no MaterialPropertyBlock, so every chunk stays on the SRP Batcher
-    /// path and draw calls grow with visible chunks and the materials in them, never with cells.
+    /// Materials are the material catalog's own (the same Grass a Part shows) in a terrain copy that
+    /// reads the sky exposure from the mesh's vertex colours; one submesh per material, with no
+    /// MaterialPropertyBlock, so every chunk stays on the SRP Batcher path and draw calls grow with
+    /// visible chunks and the materials in them, never with cells.
     /// WHY no jobs: the same code runs in a WebGL player, which has no worker threads, and a chunk
     /// meshes in a fraction of a millisecond; baking colliders off-thread is a desktop-only option.
     /// </remarks>
-    public sealed class RbxTerrainRenderer : IRbxTerrainRenderer
+    public sealed class RbxTerrainRenderer : IRbxTerrainRenderer, IRbxTerrainColliderReadiness
     {
+        /// <summary>Material property the terrain copy sets to 1: read the exposure from the vertex colour's alpha.</summary>
+        public const string SkyExposureSourceProperty = "_RbxSkyExposureSource";
+
+        /// <summary>
+        /// Light-only refreshes one <see cref="ProcessDirty"/> call still runs once its chunk or time budget is
+        /// spent, so the light a write changed is drawn in the frame its geometry is.
+        /// </summary>
+        public const int MaxLightRefreshesPastBudget = 32;
+
+        private static readonly int SkyExposureSourceId = Shader.PropertyToID(SkyExposureSourceProperty);
+
         private readonly RbxTerrain _terrain;
         private readonly IRbxMaterialProvider<Material> _materials;
         private readonly bool _ownsMaterials;
@@ -35,11 +48,14 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         private readonly GameObject _root;
         private readonly TerrainChunkMeshBuffers _buffers = new();
         private readonly RbxTerrainMeshBuilder _builder = new();
+        private readonly TerrainSkyExposure _exposure;
         private readonly Queue<TerrainChunkCoord> _dirty = new();
-        private readonly HashSet<long> _dirtyKeys = new();
+        private readonly Dictionary<long, bool> _dirtyFull = new();
         private readonly Dictionary<long, ChunkView> _views = new();
         private readonly Dictionary<Collider, TerrainChunkCoord> _colliders = new();
         private readonly Dictionary<int, Material[]> _materialSets = new();
+        private readonly Dictionary<Material, Material> _terrainCopies = new();
+        private readonly List<Material> _ownedCopies = new();
         private readonly Material[] _slotMaterials = new Material[TerrainMaterials.SlotCount];
         private readonly List<TerrainChunkCoord> _lastProcessed = new();
         private readonly List<TerrainChunkCoord> _coordScratch = new();
@@ -49,12 +65,15 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         /// Draws <paramref name="terrain"/> under <paramref name="parent"/>. A null
         /// <paramref name="materials"/> uses the hybrid texture/procedural catalog; a null
         /// <paramref name="mesher"/> uses <see cref="BlockyTerrainChunkMesher"/>. Every chunk already
-        /// in the store is queued, so a loaded world appears without a write.
+        /// in the store is queued, so a loaded world appears without a write. Light fades out
+        /// <paramref name="skyReach"/> cells past a cave mouth (<see cref="TerrainSkyExposure.Reach"/>).
         /// </summary>
         public RbxTerrainRenderer(RbxTerrain terrain, Transform parent,
-            IRbxMaterialProvider<Material> materials = null, ITerrainChunkMesher mesher = null, ILog log = null)
+            IRbxMaterialProvider<Material> materials = null, ITerrainChunkMesher mesher = null, ILog log = null,
+            int skyReach = TerrainSkyExposure.DefaultReach)
         {
             _terrain = terrain ?? throw new ArgumentNullException(nameof(terrain));
+            _exposure = new TerrainSkyExposure(terrain.Store, skyReach);
             _ownsMaterials = materials == null;
             _materials = materials ?? new RbxTextureMaterialProvider();
             _mesher = mesher ?? new BlockyTerrainChunkMesher();
@@ -70,7 +89,7 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             _terrain.Store.CopyChunkCoords(_coordScratch);
             for (int index = 0; index < _coordScratch.Count; index++)
             {
-                Enqueue(_coordScratch[index]);
+                Enqueue(_coordScratch[index], true);
             }
         }
 
@@ -78,7 +97,7 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         public RbxTerrain Terrain => _terrain;
 
         /// <inheritdoc />
-        public int PendingChunkCount => _dirty.Count;
+        public int PendingChunkCount => _dirtyFull.Count;
 
         /// <summary>The GameObject every chunk object sits under.</summary>
         public GameObject Root => _root;
@@ -86,35 +105,107 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         /// <summary>Chunks that currently have a rendered or colliding object.</summary>
         public int ChunkObjectCount => _views.Count;
 
-        /// <summary>Chunk re-meshes since construction (a PM/EM counter).</summary>
+        /// <summary>Chunk re-meshes since construction (a PM/EM counter); light-only refreshes are not counted.</summary>
         public long RemeshCount { get; private set; }
 
-        /// <summary>The chunks the last <see cref="ProcessDirty"/> call re-meshed; reused between calls.</summary>
+        /// <summary>Light-only refreshes since construction: chunks whose exposure changed while their faces did not.</summary>
+        public long LightRefreshCount { get; private set; }
+
+        /// <summary>The sky exposure this renderer lights its chunks with; also answers how exposed any cell is.</summary>
+        public TerrainSkyExposure SkyExposure => _exposure;
+
+        /// <summary>The chunks the last <see cref="ProcessDirty"/> call re-meshed or relit; reused between calls.</summary>
         public IReadOnlyList<TerrainChunkCoord> LastProcessedChunks => _lastProcessed;
 
         /// <inheritdoc />
         public int ProcessDirty(int maxChunks, double maxMilliseconds)
         {
             _lastProcessed.Clear();
-            if (_disposed || _dirty.Count == 0)
+            if (_disposed || _dirtyFull.Count == 0)
             {
                 return 0;
             }
 
             double start = Time.realtimeSinceStartupAsDouble;
             int processed = 0;
-            while (_dirty.Count > 0 && (processed == 0
-                                        || (processed < maxChunks
-                                            && (Time.realtimeSinceStartupAsDouble - start) * 1000d < maxMilliseconds)))
+            int relitPastBudget = 0;
+            while (_dirty.Count > 0)
             {
-                TerrainChunkCoord coord = _dirty.Dequeue();
-                _dirtyKeys.Remove(coord.Key);
-                Remesh(coord);
+                TerrainChunkCoord coord = _dirty.Peek();
+                // WHY a skipped coordinate: EnsureColliders may have built a chunk out of turn, leaving its
+                // old place in the queue behind.
+                if (!_dirtyFull.TryGetValue(coord.Key, out bool full))
+                {
+                    _dirty.Dequeue();
+                    continue;
+                }
+
+                bool withinBudget = processed == 0 || (processed < maxChunks
+                                                       && (Time.realtimeSinceStartupAsDouble - start) * 1000d
+                                                       < maxMilliseconds);
+                // WHY light refreshes may run past the budget: a write queues them right behind its own chunks,
+                // and the light it changed must land in the same frame as the geometry; they cost no collider.
+                bool ridesAlong = !full && relitPastBudget < MaxLightRefreshesPastBudget;
+                if (!withinBudget && !ridesAlong)
+                {
+                    break;
+                }
+
+                _dirty.Dequeue();
+                _dirtyFull.Remove(coord.Key);
+                Refresh(coord, full);
                 _lastProcessed.Add(coord);
-                processed++;
+                if (withinBudget)
+                {
+                    processed++;
+                }
+                else
+                {
+                    relitPastBudget++;
+                }
             }
 
-            return processed;
+            return processed + relitPastBudget;
+        }
+
+        /// <inheritdoc />
+        public int EnsureColliders(Bounds unityBounds)
+        {
+            if (_disposed || _dirtyFull.Count == 0)
+            {
+                return 0;
+            }
+
+            RbxVector3 first = RbxSpace.FromUnity(unityBounds.min);
+            RbxVector3 second = RbxSpace.FromUnity(unityBounds.max);
+            double cell = TerrainBoxRasterizer.CellStuds;
+            int minX = (int)Math.Floor(Math.Min(first.X, second.X) / cell) >> TerrainChunkCoord.Shift;
+            int minY = (int)Math.Floor(Math.Min(first.Y, second.Y) / cell) >> TerrainChunkCoord.Shift;
+            int minZ = (int)Math.Floor(Math.Min(first.Z, second.Z) / cell) >> TerrainChunkCoord.Shift;
+            int maxX = (int)Math.Floor(Math.Max(first.X, second.X) / cell) >> TerrainChunkCoord.Shift;
+            int maxY = (int)Math.Floor(Math.Max(first.Y, second.Y) / cell) >> TerrainChunkCoord.Shift;
+            int maxZ = (int)Math.Floor(Math.Max(first.Z, second.Z) / cell) >> TerrainChunkCoord.Shift;
+            int built = 0;
+            for (int cy = minY; cy <= maxY; cy++)
+            {
+                for (int cz = minZ; cz <= maxZ; cz++)
+                {
+                    for (int cx = minX; cx <= maxX; cx++)
+                    {
+                        TerrainChunkCoord coord = new(cx, cy, cz);
+                        if (!_dirtyFull.TryGetValue(coord.Key, out bool full) || !full)
+                        {
+                            continue;
+                        }
+
+                        _dirtyFull.Remove(coord.Key);
+                        Refresh(coord, true);
+                        built++;
+                    }
+                }
+            }
+
+            return built;
         }
 
         /// <summary>The object of a chunk, or false when the chunk draws nothing.</summary>
@@ -128,6 +219,12 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
 
             chunkObject = null;
             return false;
+        }
+
+        /// <summary>True while chunk <paramref name="coord"/> waits for a re-mesh that changes its faces or collider.</summary>
+        public bool IsGeometryPending(TerrainChunkCoord coord)
+        {
+            return _dirtyFull.TryGetValue(coord.Key, out bool full) && full;
         }
 
         /// <inheritdoc />
@@ -154,7 +251,7 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             return true;
         }
 
-        /// <summary>Stops observing the store and destroys every chunk object and mesh.</summary>
+        /// <summary>Stops observing the store and destroys every chunk object, mesh and terrain material copy.</summary>
         public void Dispose()
         {
             if (_disposed)
@@ -172,8 +269,15 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             _views.Clear();
             _colliders.Clear();
             _dirty.Clear();
-            _dirtyKeys.Clear();
+            _dirtyFull.Clear();
             DestroyObject(_root);
+            for (int index = 0; index < _ownedCopies.Count; index++)
+            {
+                DestroyObject(_ownedCopies[index]);
+            }
+
+            _ownedCopies.Clear();
+            _terrainCopies.Clear();
             if (_ownsMaterials && _materials is IDisposable disposable)
             {
                 disposable.Dispose();
@@ -182,26 +286,56 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
 
         private void OnStoreChanged(TerrainChangeSet change)
         {
+            _exposure.OnStoreChanged(change);
             IReadOnlyList<TerrainChunkCoord> remesh = change.RemeshChunks;
             for (int index = 0; index < remesh.Count; index++)
             {
-                Enqueue(remesh[index]);
+                Enqueue(remesh[index], true);
             }
-        }
 
-        private void Enqueue(TerrainChunkCoord coord)
-        {
-            if (_dirtyKeys.Add(coord.Key))
+            _coordScratch.Clear();
+            _exposure.CollectLightAffectedChunks(change, _coordScratch);
+            for (int index = 0; index < _coordScratch.Count; index++)
             {
-                _dirty.Enqueue(coord);
+                if (_views.ContainsKey(_coordScratch[index].Key))
+                {
+                    Enqueue(_coordScratch[index], false);
+                }
             }
         }
 
-        private void Remesh(TerrainChunkCoord coord)
+        private void Enqueue(TerrainChunkCoord coord, bool full)
         {
+            long key = coord.Key;
+            if (_dirtyFull.TryGetValue(key, out bool queuedFull))
+            {
+                if (full && !queuedFull)
+                {
+                    _dirtyFull[key] = true;
+                }
+
+                return;
+            }
+
+            _dirtyFull.Add(key, full);
+            _dirty.Enqueue(coord);
+        }
+
+        private void Refresh(TerrainChunkCoord coord, bool full)
+        {
+            long key = coord.Key;
+            if (!full)
+            {
+                if (_views.TryGetValue(key, out ChunkView lit))
+                {
+                    Relight(coord, lit);
+                }
+
+                return;
+            }
+
             RemeshCount++;
             _mesher.BuildChunk(_terrain.Store, coord, _buffers);
-            long key = coord.Key;
             if (_buffers.QuadCount == 0)
             {
                 if (_views.TryGetValue(key, out ChunkView empty))
@@ -219,7 +353,8 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
                 _views.Add(key, view);
             }
 
-            int solidFaces = _builder.BuildSolid(_buffers, view.SolidMesh, out int slotMask);
+            _exposure.PrepareChunk(coord);
+            int solidFaces = _builder.BuildSolid(_buffers, view.SolidMesh, out int slotMask, _exposure);
             bool hasSolid = solidFaces > 0;
             view.Renderer.enabled = hasSolid;
             if (hasSolid)
@@ -240,13 +375,30 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             if (waterFaces > 0)
             {
                 EnsureWater(view, coord);
-                _builder.BuildWater(_buffers, view.WaterMesh);
+                _builder.BuildWater(_buffers, view.WaterMesh, _exposure);
                 view.Water.SetActive(true);
             }
             else if (view.Water != null)
             {
                 view.Water.SetActive(false);
                 view.WaterMesh.Clear();
+            }
+        }
+
+        private void Relight(TerrainChunkCoord coord, ChunkView view)
+        {
+            LightRefreshCount++;
+            _mesher.BuildChunk(_terrain.Store, coord, _buffers);
+            _exposure.PrepareChunk(coord);
+            bool solidMatches = _builder.UpdateSolidExposure(_buffers, view.SolidMesh, _exposure);
+            bool waterMatches = view.WaterMesh == null || !view.Water.activeSelf
+                ? _buffers.GetQuads(TerrainMaterials.Water).Count == 0
+                : _builder.UpdateWaterExposure(_buffers, view.WaterMesh, _exposure);
+            if (!solidMatches || !waterMatches)
+            {
+                // WHY a full rebuild: the faces no longer match the mesh, so a write this renderer was not
+                // told about changed them; rebuilding is always correct.
+                Refresh(coord, true);
             }
         }
 
@@ -332,8 +484,42 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
                            + "its cells draw with the diagnostic fallback.", LogTag.World);
             }
 
+            material = TerrainCopy(material);
             _slotMaterials[slot] = material;
             return material;
+        }
+
+        /// <summary>
+        /// The copy of a catalog material that reads the sky exposure from the vertex colours. A material
+        /// whose shader has no exposure input is drawn as it is.
+        /// </summary>
+        /// <remarks>
+        /// WHY a copy and not a keyword or a property block: a Part never draws with the copy, so it never
+        /// reads a vertex colour its mesh does not have; the switch is a material float, so no shader
+        /// variant is added; and without a property block the chunks stay on the SRP Batcher.
+        /// </remarks>
+        private Material TerrainCopy(Material source)
+        {
+            if (source == null || !source.HasProperty(SkyExposureSourceId))
+            {
+                return source;
+            }
+
+            if (_terrainCopies.TryGetValue(source, out Material copy) && copy != null)
+            {
+                return copy;
+            }
+
+            copy = new Material(source)
+            {
+                name = source.name,
+                hideFlags = source.hideFlags,
+                enableInstancing = source.enableInstancing
+            };
+            copy.SetFloat(SkyExposureSourceId, 1f);
+            _terrainCopies[source] = copy;
+            _ownedCopies.Add(copy);
+            return copy;
         }
 
         private void DestroyView(ChunkView view)

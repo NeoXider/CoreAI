@@ -20,7 +20,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Terrain
         private static TerrainChunkMeshBuffers Mesh(TerrainChunkStore store, TerrainChunkCoord coord)
         {
             TerrainChunkMeshBuffers buffers = new();
-            new BlockyTerrainChunkMesher().BuildChunk(store, coord, buffers);
+            // WHY no face rules: these tests count faces per cell material; the grass-block rule has its own tests.
+            new BlockyTerrainChunkMesher(TerrainFaceMaterialRules.None).BuildChunk(store, coord, buffers);
             return buffers;
         }
 

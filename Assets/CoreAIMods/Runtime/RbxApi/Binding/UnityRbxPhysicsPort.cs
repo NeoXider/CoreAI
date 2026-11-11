@@ -48,7 +48,11 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <inheritdoc />
         public event Action<InstanceId, InstanceId> ContactEnded;
 
-        /// <summary>Resolves rays that hit a Terrain chunk collider to the Terrain cell; null leaves Terrain unhit.</summary>
+        /// <summary>
+        /// Resolves rays that hit a Terrain chunk collider to the Terrain cell; null leaves Terrain unhit. When it
+        /// also implements <see cref="CoreAI.Mods.Rbx.Binding.Terrain.IRbxTerrainColliderReadiness"/>, rays and
+        /// simulated bodies have the queued Terrain colliders in their way built first.
+        /// </summary>
         public CoreAI.Mods.Rbx.Binding.Terrain.IRbxTerrainHitResolver TerrainHits { get; set; }
 
         /// <summary>The gravity vector applied to bound bodies, in metres per second squared.</summary>
@@ -62,12 +66,18 @@ namespace CoreAI.Mods.Rbx.Binding
         }
 
         /// <summary>
-        /// Applies world gravity to every bound unanchored body. Call once per fixed step.
+        /// Applies world gravity to every bound unanchored body. Call once per fixed step. When
+        /// <see cref="TerrainHits"/> also builds colliders on demand
+        /// (<see cref="CoreAI.Mods.Rbx.Binding.Terrain.IRbxTerrainColliderReadiness"/>), the Terrain chunks
+        /// around each body and its next step are built first, so no body falls through a chunk whose
+        /// collider is still queued behind the frame budget.
         /// </summary>
         public void ApplyGravity()
         {
             _bodyScratch.Clear();
             _binder.CollectSimulatedBodies(_bodyScratch);
+            CoreAI.Mods.Rbx.Binding.Terrain.IRbxTerrainColliderReadiness terrain =
+                TerrainHits as CoreAI.Mods.Rbx.Binding.Terrain.IRbxTerrainColliderReadiness;
             for (int index = 0; index < _bodyScratch.Count; index++)
             {
                 Rigidbody body = _bodyScratch[index];
@@ -76,12 +86,29 @@ namespace CoreAI.Mods.Rbx.Binding
                     continue;
                 }
 
+                terrain?.EnsureColliders(SweptBounds(body));
+
                 // WHY Acceleration rather than Force: it is mass-independent, so a part's weight
                 // cannot change how fast it falls — matching Roblox, where Gravity is an
                 // acceleration and two parts of different size land together.
                 body.useGravity = false;
                 body.AddForce(_gravityMetres, ForceMode.Acceleration);
             }
+        }
+
+        /// <summary>The body's collider box, stretched along two steps of its velocity and grown by a Terrain cell.</summary>
+        private static Bounds SweptBounds(Rigidbody body)
+        {
+            Bounds bounds = body.TryGetComponent(out Collider collider)
+                ? collider.bounds
+                : new Bounds(body.position, Vector3.zero);
+            Vector3 travel = body.linearVelocity * (Time.fixedDeltaTime * 2f);
+            Vector3 min = bounds.min;
+            Vector3 max = bounds.max;
+            bounds.Encapsulate(min + travel);
+            bounds.Encapsulate(max + travel);
+            bounds.Expand(RbxSpace.LengthToUnity((float)Instances.Terrain.TerrainBoxRasterizer.CellStuds) * 2f);
+            return bounds;
         }
 
         /// <inheritdoc />
@@ -95,6 +122,13 @@ namespace CoreAI.Mods.Rbx.Binding
             if (distance <= 0f || float.IsNaN(distance) || float.IsInfinity(distance))
             {
                 return false;
+            }
+
+            if (TerrainHits is CoreAI.Mods.Rbx.Binding.Terrain.IRbxTerrainColliderReadiness terrain)
+            {
+                Bounds span = new(origin, Vector3.zero);
+                span.Encapsulate(origin + direction);
+                terrain.EnsureColliders(span);
             }
 
             // WHY every hit and not Physics.Raycast: the nearest collider may belong to a part the

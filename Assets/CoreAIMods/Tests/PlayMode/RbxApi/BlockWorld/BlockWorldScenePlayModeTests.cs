@@ -279,6 +279,78 @@ return 'watchtower built'";
             Report();
         }
 
+        [UnityTest]
+        public IEnumerator BlockWorldScene_TheCharacters_InTheShoulderView_IdleAndWalking_AndTimeTypedInTheChat()
+        {
+            yield return OpenScene(null);
+            for (int frame = 0; frame < 1800 && !Equals(Workspace().GetAttribute("BlockWorldOpened"), true); frame++)
+            {
+                yield return null;
+            }
+
+            yield return Frames(180);
+            yield return CheckCharacterLooks();
+            yield return CheckTimeTypedInTheChat();
+            Report();
+        }
+
+        // ---- how the characters look -------------------------------------------------------------------------------
+
+        private IEnumerator CheckCharacterLooks()
+        {
+            yield return Tap(_keyboard.vKey);
+            yield return Frames(45);
+            yield return ShootWithUi("look_player_shoulder.png");
+            yield return Tap(_keyboard.vKey);
+            yield return Frames(10);
+
+            StringBuilder seen = new();
+            foreach (string name in new[] { "Mira", "Tobin" })
+            {
+                RunAsPlayer("test_look_" + name, "local root = workspace." + name + ".HumanoidRootPart "
+                                                 + "workspace:SetAttribute('TestLookAt', root.Position) "
+                                                 + "workspace:SetAttribute('TestLookAlong', root.CFrame.LookVector)");
+                RbxVector3 at = (RbxVector3)Workspace().GetAttribute("TestLookAt");
+                RbxVector3 along = (RbxVector3)Workspace().GetAttribute("TestLookAlong");
+                RbxVector3 front = at + along * 7f + new RbxVector3(0f, 3f, 0f);
+                yield return Aim(front, at + new RbxVector3(0f, 2.5f, 0f));
+                yield return Frames(5);
+                yield return ShootWithUi("look_" + name.ToLowerInvariant() + "_idle.png");
+                seen.Append(name).Append(" at ").Append(at).Append(" facing ").Append(along).Append("; ");
+            }
+
+            RunAsPlayer("test_walk_tobin", "local tobin = workspace.Tobin "
+                                           + "local root = tobin.HumanoidRootPart "
+                                           + "tobin.Humanoid:MoveTo(root.Position + root.CFrame.LookVector * 24) "
+                                           + "workspace:SetAttribute('TestWalkFrom', root.Position)");
+            RbxVector3 from = (RbxVector3)Workspace().GetAttribute("TestWalkFrom");
+            yield return Frames(24);
+            RbxInstance tobinRoot = Workspace().FindFirstChild("Tobin")?.FindFirstChild("HumanoidRootPart");
+            RbxVector3 now = tobinRoot != null ? CurrentWorld().PartSink.GetLivePositionStuds(tobinRoot.Id) : from;
+            RbxVector3 side = new RbxVector3(now.Z - from.Z, 0f, from.X - now.X);
+            side = side.Magnitude > 0.01f ? side.Unit : new RbxVector3(1f, 0f, 0f);
+            yield return Aim(now + side * 8f + new RbxVector3(0f, 2.5f, 0f), now + new RbxVector3(0f, 2f, 0f));
+            yield return ShootWithUi("look_tobin_walking.png");
+            Record("looks: " + seen + "Tobin walked from " + from + " to " + now + " ("
+                   + (now - from).Magnitude.ToString("0.0") + " studs in 24 frames)");
+            Expect((now - from).Magnitude > 1f, "a villager told to MoveTo walks there");
+        }
+
+        // ---- /time typed in the chat --------------------------------------------------------------------------------
+
+        private IEnumerator CheckTimeTypedInTheChat()
+        {
+            ChatOverlayController overlay = Overlay();
+            int start = overlay.Feed.Lines.Count;
+            overlay.Submit("/time midnight");
+            yield return Frames(20);
+            RbxLighting lighting = (RbxLighting)CurrentWorld().Game.FindFirstChildOfClass("Lighting");
+            string lines = Lines(overlay, start);
+            yield return ShootWithUi("time_midnight_typed.png");
+            Record("/time midnight typed: clock " + lighting.ClockTime.ToString("0.00") + ", chat '" + lines + "'");
+            Expect(lighting.ClockTime < 0.2f || lighting.ClockTime > 23.8f, "/time midnight typed in the chat sets the clock");
+        }
+
         // ---- opening the scene ------------------------------------------------------------------------------------
 
         private IEnumerator OpenScene(ILlmClient model)
@@ -447,6 +519,15 @@ return 'watchtower built'";
                 // WHY before any aim: this is the view the default camera gives a new player.
                 yield return ShootWithUi(firstFrameShot);
                 Record("first frame at clock " + ClockTime());
+                RunAsPlayer("test_first_person", "local c = game:GetService('Players'):GetPlayers()[1].Character "
+                                                 + "workspace:SetAttribute('TestHeadHidden', c.Head.LocalTransparencyModifier) "
+                                                 + "workspace:SetAttribute('TestEyeY', workspace.CurrentCamera.CFrame.Position.Y)");
+                double hidden = Convert.ToDouble(Workspace().GetAttribute("TestHeadHidden") ?? 0d);
+                double eyeAboveFloor = Convert.ToDouble(Workspace().GetAttribute("TestEyeY") ?? 0d) - (below + 1) * Cell;
+                Record("first person: the head's LocalTransparencyModifier " + hidden.ToString("0.00") + ", the eye "
+                       + eyeAboveFloor.ToString("0.00") + " studs above the floor");
+                Expect(hidden > 0.99d, "in first person the player's own body is not drawn");
+                Expect(eyeAboveFloor > 4f && eyeAboveFloor < 5f, "the first-person eye is at head height (about 4.5 studs)");
             }
 
             yield return CheckGrassIsGreen(root);

@@ -17,10 +17,16 @@ namespace CoreAI.Mods.Rbx.Binding
     /// <c>RenderSettings</c> and that one light, records what it changes on the first apply and puts it
     /// back in <see cref="Revert"/>. From the first apply until that revert it holds a
     /// <see cref="LookAmbientOwnership"/> claim, so the default look leaves the ambient to the day cycle and
-    /// takes it back once the revert has restored the scene.
+    /// takes it back once the revert has restored the scene. It also publishes <c>Ambient</c> as the light of
+    /// surfaces the sky does not reach (the Rbx materials' <c>_RbxOccludedAmbient</c>), which a cave falls to.
     /// </summary>
     public sealed class UnityRbxLightingSink : IRbxLightingSink
     {
+        /// <summary>The global shader colour that receives <c>Lighting.Ambient</c>, in linear space.</summary>
+        public const string OccludedAmbientProperty = "_RbxOccludedAmbient";
+
+        private static readonly int OccludedAmbientId = Shader.PropertyToID(OccludedAmbientProperty);
+
         private Light _sun;
         private bool _sunResolved;
         private bool _captured;
@@ -108,6 +114,9 @@ namespace CoreAI.Mods.Rbx.Binding
             RenderSettings.ambientSkyColor = ToColor(skyFacing);
             RenderSettings.ambientEquatorColor = ToColor(skyFacing);
             RenderSettings.ambientGroundColor = ToColor(state.Ambient);
+            // WHY linear: RenderSettings colours are gamma and Unity converts them for its own probe; this
+            // global is read by the shaders directly.
+            Shader.SetGlobalColor(OccludedAmbientId, ToColor(state.Ambient).linear);
             // WHY through the ownership seam: the sky reflections are the look's probe, which this sink does not
             // own; the look scales them by this value for as long as the claim is held.
             _ambientOwnership.SetSkyReflectionScale(state.EnvironmentSpecularScale);
@@ -137,6 +146,7 @@ namespace CoreAI.Mods.Rbx.Binding
             RenderSettings.ambientSkyColor = _originalAmbientSky;
             RenderSettings.ambientEquatorColor = _originalAmbientEquator;
             RenderSettings.ambientGroundColor = _originalAmbientGround;
+            Shader.SetGlobalColor(OccludedAmbientId, Color.clear);
             RenderSettings.sun = _originalSunSetting;
             if (_sun != null)
             {

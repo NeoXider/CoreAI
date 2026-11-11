@@ -23,6 +23,20 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
     }
 
     /// <summary>
+    /// Builds chunk colliders out of turn, so a body never falls through Terrain whose collider is still
+    /// queued behind the per-frame budget. The physics port asks it about every simulated body each fixed
+    /// step, before gravity moves the body.
+    /// </summary>
+    public interface IRbxTerrainColliderReadiness
+    {
+        /// <summary>
+        /// Re-meshes now, outside the frame budget, every queued chunk whose faces or collider will change
+        /// and whose cells overlap <paramref name="unityBounds"/>; returns the chunks built.
+        /// </summary>
+        int EnsureColliders(Bounds unityBounds);
+    }
+
+    /// <summary>
     /// The Unity face of one Terrain: turns changed chunks into rendered, colliding meshes under a
     /// per-frame budget. The default is <see cref="RbxTerrainRenderer"/>; a host that wants another look
     /// (a texture-array material, smooth meshing) supplies its own through

@@ -67,7 +67,12 @@ namespace CoreAI.Tests.PlayMode.RbxApi
                 TerrainLimits.Desktop);
             _host = new GameObject("Terrain look host");
             _owned.Add(_host);
-            RbxTerrainPresenter.Attach(_host, game);
+            RbxTerrainPresenter presenter = _host.AddComponent<RbxTerrainPresenter>();
+            // WHY the plain face rules: the block comparison below sets a LeafyGrass side face against a Grass
+            // side face to check the two materials' albedo, which the grass-block rule would draw as earth.
+            presenter.RendererFactory = (terrain, parent) => new RbxTerrainRenderer(terrain, parent,
+                mesher: new BlockyTerrainChunkMesher(TerrainFaceMaterialRules.None));
+            presenter.Bind(_terrain);
 
             GameObject cameraObject = new("Terrain look camera");
             _owned.Add(cameraObject);
@@ -212,6 +217,138 @@ namespace CoreAI.Tests.PlayMode.RbxApi
             Assert.Greater(shadedLeaves, shadedGrass * 0.75f, "LeafyGrass in shade is not black next to the grass");
             Assert.Less(magenta, 0.005f, "no wave reflects the sky's ground hemisphere");
             Assert.Less(notBlue, 0.01f, "a sea seen from a grazing angle stays blue, without grey or brown blotches");
+        }
+
+        /// <summary>
+        /// The lawn of (a) drawn with this project's own texture catalog, the git-ignored override a developer
+        /// imports locally, so a machine whose override still carries the old glossy tuning is caught. Ignored
+        /// where the project has no override catalog.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator GrassField_WithTheProjectCatalog_DoesNotGlitterUnderALowSun()
+        {
+            if (Resources.Load<RbxMaterialTextureCatalog>("CoreAIRbxTextureCatalogOverride") == null)
+            {
+                Assert.Ignore("This project has no override texture catalog.");
+            }
+
+            UsePackagedCatalogOnly(false);
+            _terrain.FillBlock(RbxCFrame.FromPosition(0f, -2f, -100f), new RbxVector3(400f, 4f, 240f), Slot("Grass"));
+            CoreAiLookProfile profile = CoreAiLookProfile.CreateDefault();
+            _owned.Add(profile);
+            _applier = CoreAiLookApplierRegistry.CreateDefault();
+            _applier.Apply(profile, GraphicsOptionsResolver.Resolve(GraphicsOptions.Default, GraphicsQualityPreset.High),
+                LookMode.Apply);
+            for (int frame = 0; frame < 600 && !HasMaterial("Grass"); frame++)
+            {
+                yield return null;
+            }
+
+            for (int frame = 0; frame < 30; frame++)
+            {
+                yield return null;
+            }
+
+            Material grass = FindMaterial("Grass");
+            RenderSettings.sun.transform.rotation = Quaternion.Euler(15f, 170f, 0f);
+            Field("project", out float nearShimmer, out float farShimmer, out float nearDetail, out float farDetail);
+            TestContext.WriteLine("[TerrainLook] project catalog grass: roughness scale " +
+                                  grass.GetFloat("_RoughnessScale") + ", normal strength " + grass.GetFloat("_BumpScale") +
+                                  ", colour map " + (grass.GetTexture("_BaseMap") != null
+                                      ? grass.GetTexture("_BaseMap").name + " " + grass.GetTexture("_BaseMap").width
+                                      : "none") + "; shimmer near " + nearShimmer + ", far " + farShimmer +
+                                  "; high-frequency near " + nearDetail + ", far " + farDetail);
+            Assert.Less(nearShimmer, 0.015f, "a near lawn under a low sun barely changes when the camera moves");
+        }
+
+        /// <summary>
+        /// The sea of (c) under an open sky, with the packaged catalog and with this project's own, each shot with
+        /// the sky exposure the Terrain draws with and with it switched off: an open sea is fully exposed, so it
+        /// mirrors the sky either way, stays blue at a grazing angle, and the two shots agree.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator AnOpenSea_ReflectsTheSky_WithEitherCatalog_WithAndWithoutTheSkyExposure()
+        {
+            _terrain.FillBlock(RbxCFrame.FromPosition(0f, -2f, -340f), new RbxVector3(400f, 4f, 240f),
+                TerrainMaterials.Water);
+            _terrain.FillBlock(RbxCFrame.FromPosition(0f, -6f, -340f), new RbxVector3(400f, 4f, 240f), Slot("Sand"));
+            CoreAiLookProfile profile = CoreAiLookProfile.CreateDefault();
+            _owned.Add(profile);
+            _applier = CoreAiLookApplierRegistry.CreateDefault();
+            _applier.Apply(profile, GraphicsOptionsResolver.Resolve(GraphicsOptions.Default, GraphicsQualityPreset.High),
+                LookMode.Apply);
+            RbxWaterTime.SetOverride(0f);
+            RenderSettings.sun.transform.rotation = Quaternion.Euler(18f, 120f, 0f);
+            bool hasOverride = Resources.Load<RbxMaterialTextureCatalog>("CoreAIRbxTextureCatalogOverride") != null;
+            List<string> lines = new();
+            foreach (bool packaged in new[] { true, false })
+            {
+                if (!packaged && !hasOverride)
+                {
+                    lines.Add("project catalog: none in this project");
+                    continue;
+                }
+
+                UsePackagedCatalogOnly(packaged);
+                RbxTerrainPresenter presenter = _host.GetComponent<RbxTerrainPresenter>();
+                presenter.Bind(null);
+                presenter.Bind(_terrain);
+                for (int frame = 0; frame < 600 && !HasMaterial("Water"); frame++)
+                {
+                    yield return null;
+                }
+
+                // WHY thirty frames, as in the field test: the look's sky reflection probe renders over several
+                // frames, and a sea shot before it has finished mirrors an unfinished probe.
+                for (int frame = 0; frame < 30; frame++)
+                {
+                    yield return null;
+                }
+
+                string label = packaged ? "packaged" : "project";
+                Material water = FindMaterial("Water");
+                Assert.AreEqual(1f, water.GetFloat(RbxTerrainRenderer.SkyExposureSourceProperty),
+                    "the sea draws with the Terrain's exposure on");
+                foreach (Color32 vertex in WaterMeshColours())
+                {
+                    Assert.AreEqual(255, vertex.a, "every vertex of a sea under the open sky is fully exposed");
+                }
+
+                Aim(new RbxVector3(0f, 2f, -230f), new RbxVector3(0f, 0f, -450f));
+                RectInt sea = new(0, 0, ShotWidth, SeaRows);
+                Color[] withExposure = Shoot("terrain_sea_" + label + "_exposure_on.png");
+                water.SetFloat(RbxTerrainRenderer.SkyExposureSourceProperty, 0f);
+                Color[] withoutExposure = Shoot("terrain_sea_" + label + "_exposure_off.png");
+                water.SetFloat(RbxTerrainRenderer.SkyExposureSourceProperty, 1f);
+                Color on = Mean(withExposure, sea);
+                Color off = Mean(withoutExposure, sea);
+                float dull = Share(withExposure, sea, IsDullGreyOrBrown);
+                lines.Add(label + ": sea mean with the exposure " + on + ", without " + off + ", grey-or-brown share "
+                          + dull);
+                Assert.Greater(Luminance(on), 0.25f, label + ": the open sea mirrors the bright sky");
+                Assert.Less(dull, 0.01f, label + ": the open sea stays blue at a grazing angle");
+                Assert.Less(Mathf.Abs(Luminance(on) - Luminance(off)), 0.01f,
+                    label + ": a fully exposed sea looks the same with the exposure term and without it");
+            }
+
+            RbxWaterTime.ClearOverride();
+            TestContext.WriteLine("[TerrainLook] " + string.Join(" | ", lines));
+        }
+
+        private IEnumerable<Color32> WaterMeshColours()
+        {
+            foreach (MeshFilter filter in _host.GetComponentsInChildren<MeshFilter>())
+            {
+                if (!filter.gameObject.name.StartsWith("Water", System.StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                foreach (Color32 colour in filter.sharedMesh.colors32)
+                {
+                    yield return colour;
+                }
+            }
         }
 
         [UnityTest]

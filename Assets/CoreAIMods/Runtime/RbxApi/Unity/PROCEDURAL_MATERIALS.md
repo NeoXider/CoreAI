@@ -165,6 +165,17 @@ untouched, so Part.Color stays as authored. Rubber and Snow share those shader m
 The opaque Surface, Textured, Neon and Fallback shaders also draw URP Lit's DepthNormals pass, so parts
 receive SSAO.
 
+## Sky exposure
+
+Procedural Surface, Procedural Transparent, Textured Surface and Water read a sky exposure (0..1) through
+`RbxSkyExposure.hlsl`: the vertex colour's alpha when the material float `_RbxSkyExposureSource` is 1 (the
+Terrain's material copies), otherwise the material float `_RbxSkyExposure` (default 1; a part's property
+block sets it in a cave). It scales URP's indirect diffuse and environment reflections through
+`surfaceData.occlusion` and adds the global `_RbxOccludedAmbient` (`Lighting.Ambient`, linear) on the diffuse
+part for what the sky no longer gives. Water scales its own environment term and the light its body scatters
+back; the glass's Fresnel glow, which stands in for a sky reflection, scales with it. Both switches are
+floats, so no shader variant is added.
+
 ## Visible fallback
 
 An id is valid only when both its integer value and canonical enum name match a catalog entry. Any

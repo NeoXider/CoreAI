@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_villagers
 name: Block World 6 - Villagers
-version: 1.1.0
+version: 1.2.0
 active: false
 capabilities: All
 category: Samples/Block World
@@ -36,28 +36,30 @@ local FACE_DISTANCE = 18        -- studs: a villager with no brain turns to a pl
 local PLACE_TIMEOUT = 2         -- seconds to wait for the ground under a villager before using the spawn height
 local STATE_SECONDS = 5         -- how often the villagers' facts (NpcState) are refreshed
 local BRAIN = "idle, wander, greet, face_player, follow_player, go_home"
-local SKIN = Color3.fromRGB(232, 190, 150)
 
 -- Homes around the spawn in studs, in the frame of the heading a new player first faces (BlockWorldSpawnLook):
 -- `ahead` along it, `right` across it. Mira stands in that first view, a little to the left; Tobin and Elda are
 -- found by turning round.
 local VILLAGERS = {
     {
-        name = "Mira", ahead = 14, right = -4, shirt = Color3.fromRGB(196, 72, 64),
+        name = "Mira", ahead = 14, right = -4, shirt = Color3.fromRGB(204, 74, 62),
+        trousers = Color3.fromRGB(96, 66, 50), skin = Color3.fromRGB(238, 198, 162), hair = Color3.fromRGB(92, 52, 34),
         persona = "Mira, the village baker of a little block village by the sea. Warm, busy and proud of her "
             .. "brick oven; she dreams of a bigger bakery made of Brick with a Cobblestone chimney.",
         voice = "Two short sentences at most. Calls the player by name. Mentions bread or the oven now and then.",
         fallback = "Mira smiles but says nothing: no AI model answered. Pick a model in the Hub so the villagers can talk.",
     },
     {
-        name = "Tobin", ahead = 4, right = 16, shirt = Color3.fromRGB(70, 110, 190),
+        name = "Tobin", ahead = 4, right = 16, shirt = Color3.fromRGB(64, 116, 200),
+        trousers = Color3.fromRGB(48, 54, 70), skin = Color3.fromRGB(196, 146, 108), hair = Color3.fromRGB(34, 28, 26),
         persona = "Tobin, the village builder. Loves tall watchtowers, straight walls and WoodPlanks; always "
             .. "suggests something to build next and where to put it.",
         voice = "Short, practical, enthusiastic. Talks in blocks and cells. Calls the player by name.",
         fallback = "Tobin scratches his head: no AI model answered. Pick a model in the Hub so the villagers can talk.",
     },
     {
-        name = "Elda", ahead = -14, right = -6, shirt = Color3.fromRGB(80, 150, 90),
+        name = "Elda", ahead = -14, right = -6, shirt = Color3.fromRGB(78, 156, 96),
+        trousers = Color3.fromRGB(72, 82, 96), skin = Color3.fromRGB(226, 190, 170), hair = Color3.fromRGB(200, 200, 204),
         persona = "Elda, an old fisher who knows the shore, the sea and the weather; she warns about the dark and "
             .. "tells players to carry torches at night.",
         voice = "Calm, a little mysterious, two sentences at most. Calls the player by name.",
@@ -93,20 +95,23 @@ local function newPart(model, name, size, color, anchored)
     return part
 end
 
--- Roblox's R6 body with its standard sizes, laid out as the rig rests it: the root's box on the floor, the Torso
--- 2 studs above it, the Head 3.5. "shirt" takes the villager's own colour.
-local PANTS = Color3.fromRGB(60, 52, 70)
+-- Roblox's R6 body, laid out as the rig rests it: the root's box on the floor, the Torso 2 studs above it, the Head
+-- 3.5. The Head is the size Roblox draws its head mesh at (a 1.25-stud block, narrower than the shoulders); the
+-- colours are the villager's own ("shirt", "trousers", "skin").
 local BODY = {
     { name = "Torso", size = Vector3.new(2, 2, 1), offset = Vector3.new(0, 2, 0), color = "shirt" },
-    { name = "Head", size = Vector3.new(2, 1, 1), offset = Vector3.new(0, 3.5, 0), color = SKIN },
+    { name = "Head", size = Vector3.new(1.25, 1.25, 1.25), offset = Vector3.new(0, 3.5, 0), color = "skin" },
     { name = "Left Arm", size = Vector3.new(1, 2, 1), offset = Vector3.new(-1.5, 2, 0), color = "shirt" },
     { name = "Right Arm", size = Vector3.new(1, 2, 1), offset = Vector3.new(1.5, 2, 0), color = "shirt" },
-    { name = "Left Leg", size = Vector3.new(1, 2, 1), offset = Vector3.new(-0.5, 0, 0), color = PANTS },
-    { name = "Right Leg", size = Vector3.new(1, 2, 1), offset = Vector3.new(0.5, 0, 0), color = PANTS },
+    { name = "Left Leg", size = Vector3.new(1, 2, 1), offset = Vector3.new(-0.5, 0, 0), color = "trousers" },
+    { name = "Right Leg", size = Vector3.new(1, 2, 1), offset = Vector3.new(0.5, 0, 0), color = "trousers" },
 }
-local HAIR_SIZE = Vector3.new(2.1, 0.4, 1.1)
+local HAIR_SIZE = Vector3.new(1.35, 0.3, 1.35)
 local HAIR_ON_HEAD = CFrame.new(0, 0.7, 0)
-local HAIR_COLOR = Color3.fromRGB(90, 60, 40)
+-- Two eyes on the Head's front (a character faces -Z), so a villager reads as a person and shows where it looks.
+local EYE_SIZE = Vector3.new(0.2, 0.26, 0.05)
+local EYE_COLOR = Color3.fromRGB(28, 30, 38)
+local EYES = { CFrame.new(-0.27, 0.1, -0.64), CFrame.new(0.27, 0.1, -0.64) }
 
 local function buildBody(villager)
     local model = Instance.new("Model")
@@ -116,12 +121,17 @@ local function buildBody(villager)
     root.Transparency = 1
     root.CFrame = CFrame.new()
     for _, piece in ipairs(BODY) do
-        local color = piece.color == "shirt" and villager.shirt or piece.color
-        newPart(model, piece.name, piece.size, color, false).CFrame = CFrame.new(piece.offset)
+        newPart(model, piece.name, piece.size, villager[piece.color], false).CFrame = CFrame.new(piece.offset)
     end
     villager.head = model:FindFirstChild("Head")
-    villager.hair = newPart(model, "Hair", HAIR_SIZE, HAIR_COLOR, true)
-    villager.hair.CFrame = villager.head.CFrame * HAIR_ON_HEAD
+    villager.extras = { { part = newPart(model, "Hair", HAIR_SIZE, villager.hair, true), offset = HAIR_ON_HEAD } }
+    for index, offset in ipairs(EYES) do
+        villager.extras[#villager.extras + 1] = { part = newPart(model, "Eye" .. index, EYE_SIZE, EYE_COLOR, true),
+            offset = offset }
+    end
+    for _, extra in ipairs(villager.extras) do
+        extra.part.CFrame = villager.head.CFrame * extra.offset
+    end
     local humanoid = Instance.new("Humanoid")
     humanoid.WalkSpeed = 8
     humanoid.Parent = model
@@ -130,13 +140,15 @@ local function buildBody(villager)
     villager.model, villager.root = model, root
 end
 
--- The hair is not an R6 part, so the rig leaves it alone: it follows the Head from RenderStepped, which runs after
--- the rig has posed the body this frame. A head that has not moved is not written again.
+-- The hair and the eyes are not R6 parts, so the rig leaves them alone: they follow the Head from RenderStepped,
+-- which runs after the rig has posed the body this frame. A head that has not moved is not written again.
 local function followHead(villager)
     local cframe = villager.head.CFrame
-    if villager.hairOn ~= cframe then
-        villager.hairOn = cframe
-        villager.hair.CFrame = cframe * HAIR_ON_HEAD
+    if villager.headAt ~= cframe then
+        villager.headAt = cframe
+        for _, extra in ipairs(villager.extras) do
+            extra.part.CFrame = cframe * extra.offset
+        end
     end
 end
 

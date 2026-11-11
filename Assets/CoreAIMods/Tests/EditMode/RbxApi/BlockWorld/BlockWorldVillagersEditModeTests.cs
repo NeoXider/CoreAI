@@ -78,7 +78,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
                 Assert.AreEqual("Model", body.ClassName);
                 Assert.IsNotNull(body.FindFirstChild("HumanoidRootPart"), name);
                 Assert.IsNotNull(body.FindFirstChildOfClass("Humanoid"), name + " can be walked by a brain");
-                Assert.AreEqual(9, body.GetChildren().Count, "root, Humanoid, the six R6 parts and hair");
+                Assert.AreEqual(11, body.GetChildren().Count, "root, Humanoid, the six R6 parts, hair and two eyes");
                 foreach (string part in new[] { "Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg" })
                 {
                     Assert.IsNotNull(body.FindFirstChild(part), name + " has the R6 part " + part);

@@ -115,6 +115,7 @@
     <Compile Include="$(TestsRoot)/LuaToolWebGlPublishEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaToolWebGlPublishEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuauDownlevelWiringEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuauDownlevelWiringEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuauDownlevelerExecutionEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuauDownlevelerExecutionEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/LuauDownlevelerLuauParityEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuauDownlevelerLuauParityEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuauDownlevelerRbxCorpusEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuauDownlevelerRbxCorpusEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/HttpServiceOneOffRefusalEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/HttpServiceOneOffRefusalEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp1ConversionLintEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp1ConversionLintEditModeTests.cs" />

@@ -218,6 +218,49 @@ frame 856 B/frame; signal fire into a C# connection 142.8 B/fire; Lua handler fi
 Part write 176 B; guarded call 72 B; coroutine resume 64 B; var-args seam 240 B; legacy event 600 B; timer
 448 B; SSE delta about 6.9 KB. Each fix should land with the budget it earns.
 
+### 4.6 Terrain chunk build: mesher, sky exposure, edits (2026-11-11)
+
+Group `terrain` of `tools/perfbench` (`TerrainCases.cs`): the P4 reference world (256 x 64 x 256 cells, 675
+chunks, rolling ground over rock with sealed caves, a sea; one shaft opened into a cave so a cave is lit from the
+side). Engine-free cost only; the Unity half of a chunk build (mesh upload, MeshCollider cooking) is the P4
+capture's. `--only terrain`, Release, commit 9dbc685 plus the uncommitted terrain work, contended machine (other
+Unity editors compiling).
+
+| Case | CoreCLR µs/op | CoreCLR B/op | Mono Boehm µs/op |
+|---|---:|---:|---:|
+| mesh one chunk (face culling + the grass-block face rule), per chunk | 145.6 | 0 | 349.6 |
+| sky exposure: light one chunk's window (gather, classify, flood), per chunk | 164.5 | 0 | 300.0 |
+| sky exposure: light one chunk and every face corner, per chunk (64 surface chunks) | 192.5 | 0 | 358.4 |
+| edit next to a lit cave: the write, then re-mesh and light every chunk it queues | 1,467.1 | 0 | 3,401.2 |
+| edit on an open plain: the same | 914.8 | 4,163 (the store allocating and releasing a chunk) | 1,415.9 |
+
+Unity, the P4 capture (`P4TerrainPlayModeTests.P4_Capture_ReferenceWorld_FrameTimeAndDrawCallBound`, Editor,
+Mono, the presenter's default budget of 6 ms a frame), same contended machine:
+
+| Build | Frames to mesh the reference world | Wall time | Chunks per frame | Draw-call bound | Mean frame after |
+|---|---:|---:|---:|---:|---:|
+| before (snapshot 18:10) | 93 | 2,534 ms | 7.3 | 1,476 | 0.40 ms |
+| sky exposure + grass-block rule (pmG) | 220 | 2,275 ms | 3.1 | 1,638 | 1.53 ms |
+
+Derived:
+
+- The sky exposure about doubles the engine-free cost of a chunk build on CoreCLR (about 0.2 ms on top of 0.1 ms).
+  On the Editor's Mono it costs about as much as the rest of the chunk build: the budget now meshes 3.1 chunks a
+  frame instead of 7.3, so a streamed world appears in about twice the frames while every frame stays inside the
+  6 ms budget. An IL2CPP player sits between the two runtimes; WebGL is IL2CPP without threads, so expect the
+  Mono-like ratio there. The draw-call bound grows 11% because grass blocks add an earth submesh to the chunks
+  whose sides show. The mean frame after meshing moved with the machine's load (0.91 to 1.53 ms in three runs of
+  the same build) and is not a measurement of this change.
+- A chunk with no shaded cell within one cell of it (the open world) skips the flood and reports every corner as
+  fully exposed without a lookup; a window with no open cell (deep rock) skips it too.
+- An edit relights only chunks a shaded cell within reach of the changed cells can affect (a walk from the
+  changed cells through non-blocking cells): a block placed on open ground relights nothing; carving a sealed
+  cavity relights nothing; breaking a wall of a lit cave relit the chunks around it (a light-only refresh: colours
+  only, no geometry upload, no collider) in the same `ProcessDirty` call, up to 32 past the time budget.
+- Shader cost: no keyword, so no new variant on any platform (WebGL included); the four Rbx lit shaders read one
+  more vertex attribute (COLOR) and one more interpolator, and the fragment does one select and a few multiplies.
+  Terrain vertices grow from 24 to 28 bytes (the colour); Parts' meshes are unchanged.
+
 ## 5. Verified findings
 
 File and line references are against HEAD `654bb318`. Other agents had uncommitted edits in some of the cited

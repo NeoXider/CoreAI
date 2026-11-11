@@ -637,11 +637,28 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
         private void CollectRemesh()
         {
             _remeshKeys.Clear();
+            int minX = int.MaxValue;
+            int minY = int.MaxValue;
+            int minZ = int.MaxValue;
+            int maxX = int.MinValue;
+            int maxY = int.MinValue;
+            int maxZ = int.MinValue;
             for (int index = 0; index < _touched.Count; index++)
             {
                 TouchedChunk touched = _touched[index];
                 _changeSet.Changed.Add(touched.Coord);
                 _remeshKeys.Add(touched.Coord.Key);
+                minX = Math.Min(minX, touched.Coord.MinCellX + touched.MinX);
+                minY = Math.Min(minY, touched.Coord.MinCellY + touched.MinY);
+                minZ = Math.Min(minZ, touched.Coord.MinCellZ + touched.MinZ);
+                maxX = Math.Max(maxX, touched.Coord.MinCellX + touched.MaxX + 1);
+                maxY = Math.Max(maxY, touched.Coord.MinCellY + touched.MaxY + 1);
+                maxZ = Math.Max(maxZ, touched.Coord.MinCellZ + touched.MaxZ + 1);
+            }
+
+            if (_touched.Count > 0)
+            {
+                _changeSet.ChangedCells = TerrainCellBox.FromMinMax(minX, minY, minZ, maxX, maxY, maxZ);
             }
 
             for (int index = 0; index < _touched.Count; index++)

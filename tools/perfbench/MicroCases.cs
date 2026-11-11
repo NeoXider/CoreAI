@@ -46,6 +46,7 @@ namespace CoreAI.PerfBench
             AddWorldCaptureCases(cases);
             AddSseCases(cases);
             StreamingCases.Add(cases);
+            TerrainCases.Add(cases);
             return cases;
         }
 

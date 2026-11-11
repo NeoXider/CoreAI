@@ -106,7 +106,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.TerrainUnity
             _host = new GameObject("P4 terrain host");
             _owned.Add(_host);
             _materials = new NamedMaterialProvider(_owned);
-            _renderer = new RbxTerrainRenderer(_terrain, _host.transform, _materials);
+            // WHY no face rules: these tests count faces and submeshes per cell material.
+            _renderer = new RbxTerrainRenderer(_terrain, _host.transform, _materials,
+                new BlockyTerrainChunkMesher(TerrainFaceMaterialRules.None));
         }
 
         [TearDown]
@@ -257,7 +259,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.TerrainUnity
                 catalog.TryGetMaterial(in water, out Material expected);
 
                 Assert.IsTrue(renderer.TryGetChunkObject(new TerrainChunkCoord(0, 0, 0), out GameObject chunk));
-                Assert.AreSame(expected, chunk.transform.GetChild(0).GetComponent<MeshRenderer>().sharedMaterial);
+                Material drawn = chunk.transform.GetChild(0).GetComponent<MeshRenderer>().sharedMaterial;
+                // WHY not the same object: the Terrain draws a copy that reads its sky exposure from the mesh.
+                Assert.AreSame(expected.shader, drawn.shader);
+                Assert.AreEqual(expected.name, drawn.name);
+                Assert.AreEqual(1f, drawn.GetFloat(RbxTerrainRenderer.SkyExposureSourceProperty));
                 Assert.IsFalse(chunk.GetComponent<MeshRenderer>().enabled, "a chunk of only water has no solid faces");
                 Assert.IsFalse(chunk.GetComponent<MeshCollider>().enabled);
             }

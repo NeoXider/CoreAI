@@ -12,6 +12,8 @@ Shader "CoreAI/Rbx/Procedural Transparent"
         [HideInInspector] _SrcBlend("Source Blend", Float) = 5
         [HideInInspector] _DstBlend("Destination Blend", Float) = 10
         [HideInInspector] _SceneRefraction("Scene Refraction", Float) = 0
+        [HideInInspector] _RbxSkyExposure("Sky Exposure", Range(0,1)) = 1
+        [HideInInspector] _RbxSkyExposureSource("Sky Exposure From Vertex Colour", Float) = 0
     }
 
     SubShader
@@ -60,6 +62,7 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareOpaqueTexture.hlsl"
             #endif
             #include "RbxProceduralCommon.hlsl"
+            #include "RbxSkyExposure.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
@@ -72,12 +75,15 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                 float _SrcBlend;
                 float _DstBlend;
                 float _SceneRefraction;
+                float _RbxSkyExposure;
+                float _RbxSkyExposureSource;
             CBUFFER_END
 
             struct Attributes
             {
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
+                half4 color : COLOR;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -87,6 +93,7 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                 float3 positionWS : TEXCOORD0;
                 half3 normalWS : TEXCOORD1;
                 float fogDepth : TEXCOORD2;
+                half skyExposure : TEXCOORD3;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
                 UNITY_VERTEX_OUTPUT_STEREO
             };
@@ -108,6 +115,7 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                 output.fogDepth = -positionInputs.positionVS.z;
                 output.positionWS = positionInputs.positionWS;
                 output.normalWS = TransformObjectToWorldNormal(input.normalOS);
+                output.skyExposure = RbxVertexSkyExposure(input.color, _RbxSkyExposureSource, _RbxSkyExposure);
                 return output;
             }
 
@@ -238,6 +246,10 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                     surfaceData.alpha = materialAlpha *
                         (0.64h + fracture * 0.22h + fresnel * 0.1h);
                 }
+
+                // WHY the emission too: its Fresnel term stands in for the sky this pane reflects.
+                surfaceData.emission *= (half)saturate(input.skyExposure);
+                RbxApplySkyExposure(input.skyExposure, surfaceData);
 
                 InputData inputData = (InputData)0;
                 inputData.positionWS = input.positionWS;

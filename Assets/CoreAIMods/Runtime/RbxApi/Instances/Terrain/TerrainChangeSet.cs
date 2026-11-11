@@ -24,6 +24,12 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
         /// <summary>True when the operation replaced the whole store (Clear, snapshot restore, load).</summary>
         public bool IsReset { get; internal set; }
 
+        /// <summary>
+        /// The smallest cell box holding every changed cell. Empty for a reset, where
+        /// <see cref="ChangedChunks"/> is the only extent known.
+        /// </summary>
+        public TerrainCellBox ChangedCells { get; internal set; }
+
         /// <summary>Chunks with at least one changed cell, a removed (now empty) chunk included.</summary>
         public IReadOnlyList<TerrainChunkCoord> ChangedChunks => Changed;
 
@@ -40,6 +46,7 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
             Revision = revision;
             ChangedCellCount = 0;
             IsReset = false;
+            ChangedCells = default;
         }
     }
 }

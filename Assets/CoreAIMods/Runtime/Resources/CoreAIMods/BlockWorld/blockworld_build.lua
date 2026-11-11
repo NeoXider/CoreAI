@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_build
 name: Block World 2 - Build
-version: 1.1.0
+version: 1.2.0
 active: false
 capabilities: All
 category: Samples/Block World

@@ -15,6 +15,8 @@ Shader "CoreAI/Rbx/Water"
         _Refraction("Refraction Strength", Range(0,0.2)) = 0.035
         _ShoreFade("Shore Fade (metres)", Float) = 0.2
         _FallbackOpacity("Opacity Without Scene Textures", Range(0,1)) = 0.7
+        [HideInInspector] _RbxSkyExposure("Sky Exposure", Range(0,1)) = 1
+        [HideInInspector] _RbxSkyExposureSource("Sky Exposure From Vertex Colour", Float) = 0
     }
 
     SubShader
@@ -65,6 +67,7 @@ Shader "CoreAI/Rbx/Water"
                 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareOpaqueTexture.hlsl"
             #endif
             #include "RbxProceduralCommon.hlsl"
+            #include "RbxSkyExposure.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
@@ -80,6 +83,8 @@ Shader "CoreAI/Rbx/Water"
                 float _Refraction;
                 float _ShoreFade;
                 float _FallbackOpacity;
+                float _RbxSkyExposure;
+                float _RbxSkyExposureSource;
             CBUFFER_END
 
             // WHY: globals set by RbxWaterTime; both stay zero, so the waves follow _Time, until a
@@ -91,6 +96,7 @@ Shader "CoreAI/Rbx/Water"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
+                half4 color : COLOR;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -100,6 +106,7 @@ Shader "CoreAI/Rbx/Water"
                 float3 positionWS : TEXCOORD0;
                 half3 normalWS : TEXCOORD1;
                 float fogDepth : TEXCOORD2;
+                half skyExposure : TEXCOORD3;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
                 UNITY_VERTEX_OUTPUT_STEREO
             };
@@ -121,6 +128,7 @@ Shader "CoreAI/Rbx/Water"
                 output.fogDepth = -positionInputs.positionVS.z;
                 output.positionWS = positionInputs.positionWS;
                 output.normalWS = TransformObjectToWorldNormal(input.normalOS);
+                output.skyExposure = RbxVertexSkyExposure(input.color, _RbxSkyExposureSource, _RbxSkyExposure);
                 return output;
             }
 
@@ -162,6 +170,10 @@ Shader "CoreAI/Rbx/Water"
                 half3 waterColor = RbxComposeMaterialColor(_Color.rgb, _MaterialColor.rgb,
                     _PartColorInfluence);
                 half partOpacity = saturate(_Color.a);
+                half skyExposure = saturate(input.skyExposure);
+                // WHY: the light the water body scatters back is the sky's in the open; under rock only the
+                // occluded ambient is left to scatter.
+                half scatterLight = lerp(saturate(Luminance(_RbxOccludedAmbient.rgb)), 1.0h, skyExposure);
 
                 SurfaceData surfaceData = (SurfaceData)0;
                 surfaceData.albedo = waterColor * 0.06h;
@@ -182,7 +194,7 @@ Shader "CoreAI/Rbx/Water"
                 inputData.shadowCoord = TransformWorldToShadowCoord(input.positionWS);
                 inputData.fogCoord = ComputeFogFactorZ0ToFar(max(input.fogDepth - _ProjectionParams.y, 0.0));
                 inputData.vertexLighting = VertexLighting(input.positionWS, normalWS);
-                inputData.bakedGI = SampleSH(normalWS);
+                inputData.bakedGI = RbxExposedAmbient(skyExposure, SampleSH(normalWS));
                 inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);
                 inputData.shadowMask = half4(1.0h, 1.0h, 1.0h, 1.0h);
 
@@ -200,7 +212,7 @@ Shader "CoreAI/Rbx/Water"
                 reflectVector = SafeNormalize(reflectVector
                     - min(dot(reflectVector, geometricNormalWS), 0.0) * geometricNormalWS);
                 half3 environment = GlossyEnvironmentReflection((half3)reflectVector, input.positionWS,
-                    brdfData.perceptualRoughness, 1.0h, inputData.normalizedScreenSpaceUV);
+                    brdfData.perceptualRoughness, 1.0h, inputData.normalizedScreenSpaceUV) * skyExposure;
                 half environmentFresnel = Pow4(1.0h - saturate(dot(normalWS, (float3)viewDirectionWS)));
                 surface += EnvironmentBRDF(brdfData, inputData.bakedGI, environment, environmentFresnel);
                 half3 color;
@@ -226,11 +238,11 @@ Shader "CoreAI/Rbx/Water"
                     half3 transmittance = (half3)exp(-thickness * _Absorption
                         * (1.0 - (float3)saturate(waterColor)));
                     half3 transmitted = sceneColor * transmittance
-                        + waterColor * 0.3h * (1.0h - transmittance);
+                        + waterColor * (0.3h * scatterLight) * (1.0h - transmittance);
                     color = transmitted * (1.0h - fresnel) + surface;
                     alpha = (half)saturate(straightThickness / max(_ShoreFade, 0.0001)) * partOpacity;
                 #else
-                    color = waterColor * 0.3h * (1.0h - fresnel) + surface;
+                    color = waterColor * (0.3h * scatterLight) * (1.0h - fresnel) + surface;
                     alpha = saturate(lerp((half)_FallbackOpacity, 1.0h, fresnel)) * partOpacity;
                 #endif
 

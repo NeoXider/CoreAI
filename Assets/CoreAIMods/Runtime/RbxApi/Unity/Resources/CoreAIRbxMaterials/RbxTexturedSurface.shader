@@ -26,6 +26,8 @@ Shader "CoreAI/Rbx/Textured Surface"
         _TextureScale("Texture Scale", Float) = 1
         _TextureAspect("Texture Aspect", Float) = 1
         [HideInInspector] _Cutoff("Alpha Cutoff", Range(0,1)) = 0.5
+        [HideInInspector] _RbxSkyExposure("Sky Exposure", Range(0,1)) = 1
+        [HideInInspector] _RbxSkyExposureSource("Sky Exposure From Vertex Colour", Float) = 0
     }
 
     SubShader
@@ -73,6 +75,7 @@ Shader "CoreAI/Rbx/Textured Surface"
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "RbxSkyExposure.hlsl"
 
             TEXTURE2D(_BaseMap);
             SAMPLER(sampler_BaseMap);
@@ -100,12 +103,15 @@ Shader "CoreAI/Rbx/Textured Surface"
                 half4 _EmissionColor;
                 float _EmissionThreshold;
                 float _AlphaFromPartColor;
+                float _RbxSkyExposure;
+                float _RbxSkyExposureSource;
             CBUFFER_END
 
             struct Attributes
             {
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
+                half4 color : COLOR;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -118,6 +124,7 @@ Shader "CoreAI/Rbx/Textured Surface"
                 float3 normalAligned : TEXCOORD3;
                 float2 halfExtentXZ : TEXCOORD4;
                 float fogDepth : TEXCOORD5;
+                half skyExposure : TEXCOORD6;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
                 UNITY_VERTEX_OUTPUT_STEREO
             };
@@ -331,6 +338,7 @@ Shader "CoreAI/Rbx/Textured Surface"
                 // half the axis scale is that half size. The cylinder mesh spans +-1 along its own Y,
                 // which is why Y is not passed: top and bottom faces carry no size term.
                 output.halfExtentXZ = objectAxisScale.xz * 0.5;
+                output.skyExposure = RbxVertexSkyExposure(input.color, _RbxSkyExposureSource, _RbxSkyExposure);
                 return output;
             }
 
@@ -435,6 +443,7 @@ Shader "CoreAI/Rbx/Textured Surface"
                 surfaceData.emission = emission;
                 surfaceData.occlusion = occlusion;
                 surfaceData.alpha = 1.0h;
+                RbxApplySkyExposure(input.skyExposure, surfaceData);
 
                 InputData inputData = (InputData)0;
                 inputData.positionWS = input.positionWS;

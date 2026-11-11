@@ -17,6 +17,8 @@ Shader "CoreAI/Rbx/Procedural Surface"
         [HideInInspector] _ZWrite("Depth Write", Float) = 1
         [HideInInspector] _BaseMap("Base Map", 2D) = "white" {}
         [HideInInspector] _Cutoff("Alpha Cutoff", Range(0,1)) = 0.5
+        [HideInInspector] _RbxSkyExposure("Sky Exposure", Range(0,1)) = 1
+        [HideInInspector] _RbxSkyExposureSource("Sky Exposure From Vertex Colour", Float) = 0
     }
 
     SubShader
@@ -61,6 +63,7 @@ Shader "CoreAI/Rbx/Procedural Surface"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             #include "RbxProceduralCommon.hlsl"
+            #include "RbxSkyExposure.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
@@ -73,12 +76,15 @@ Shader "CoreAI/Rbx/Procedural Surface"
                 float _GrainStrength;
                 float _SurfaceDetail;
                 float _AlphaFromPartColor;
+                float _RbxSkyExposure;
+                float _RbxSkyExposureSource;
             CBUFFER_END
 
             struct Attributes
             {
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
+                half4 color : COLOR;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -90,6 +96,7 @@ Shader "CoreAI/Rbx/Procedural Surface"
                 float3 positionAligned : TEXCOORD2;
                 half3 normalAligned : TEXCOORD3;
                 float fogDepth : TEXCOORD4;
+                half skyExposure : TEXCOORD5;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
                 UNITY_VERTEX_OUTPUT_STEREO
             };
@@ -116,6 +123,7 @@ Shader "CoreAI/Rbx/Procedural Surface"
                 // WHY: projection positions include physical axis scale, so their geometric
                 // normal needs its inverse transpose independently of the world lighting normal.
                 output.normalAligned = normalize(input.normalOS / max(objectAxisScale, 0.00001));
+                output.skyExposure = RbxVertexSkyExposure(input.color, _RbxSkyExposureSource, _RbxSkyExposure);
                 return output;
             }
 
@@ -151,6 +159,7 @@ Shader "CoreAI/Rbx/Procedural Surface"
                 surfaceData.emission = half3(0.0h, 0.0h, 0.0h);
                 surfaceData.occlusion = procedural.occlusion;
                 surfaceData.alpha = 1.0h;
+                RbxApplySkyExposure(input.skyExposure, surfaceData);
 
                 InputData inputData = (InputData)0;
                 inputData.positionWS = input.positionWS;

@@ -124,12 +124,16 @@ namespace CoreAI.Infrastructure.Luau
             public LuauToken DotName;
             public LuauToken OpenBracket;
             public LuauToken CloseBracket;
+            public LuauToken Primary;
         }
 
-        public LuauRewriteParser(RewriteContext ctx, List<LuauToken> tokens)
+        private ILuauSyntaxObserver _observer;
+
+        public LuauRewriteParser(RewriteContext ctx, List<LuauToken> tokens, ILuauSyntaxObserver observer = null)
         {
             _ctx = ctx;
             _toks = tokens;
+            _observer = observer;
         }
 
         public void ParseChunk()
@@ -371,9 +375,18 @@ namespace CoreAI.Infrastructure.Luau
 
         // ---------------------------------------------------------------- statements
 
-        private void ParseBlock()
+        /// <param name="ownScope">
+        /// False when the caller holds the block's scope open past its end: <c>repeat</c>, whose condition sees the
+        /// body's locals.
+        /// </param>
+        private void ParseBlock(bool ownScope = true)
         {
             _blockDepth++;
+            if (ownScope)
+            {
+                _observer?.OpenScope();
+            }
+
             try
             {
                 while (!IsBlockEnd())
@@ -384,6 +397,10 @@ namespace CoreAI.Infrastructure.Luau
             finally
             {
                 _blockDepth--;
+                if (ownScope)
+                {
+                    _observer?.CloseScope();
+                }
             }
         }
 
@@ -421,20 +438,17 @@ namespace CoreAI.Infrastructure.Luau
                 return;
             }
 
-            if (IsPunct(t, "@") && Peek(1).Kind == LuauTokenKind.Name)
+            if (SkipAttributes())
             {
-                DeleteKeepNewlines(t.Start, Peek(1).End);
-                _ctx.Note("attribute", t);
-                Advance();
-                Advance();
                 return;
             }
 
             if (IsPunct(t, "::"))
             {
                 Advance();
-                ExpectIdentifier();
+                LuauToken label = ExpectIdentifier();
                 ExpectPunct("::");
+                _observer?.Label(t, label);
                 return;
             }
 
@@ -461,8 +475,7 @@ namespace CoreAI.Infrastructure.Luau
                         return;
                     case "function":
                         Advance();
-                        ParseFuncName();
-                        ParseFuncBody();
+                        ParseFuncBody(ParseFuncName());
                         return;
                     case "local":
                         ParseLocalStatement();
@@ -477,6 +490,7 @@ namespace CoreAI.Infrastructure.Luau
                     case "goto":
                         if (Peek(1).Kind == LuauTokenKind.Name && !Keywords.Contains(Peek(1).Text))
                         {
+                            _observer?.Goto(t, Peek(1));
                             Advance();
                             Advance();
                             return;
@@ -507,11 +521,23 @@ namespace CoreAI.Infrastructure.Luau
                             return;
                         }
 
+                        if (IsTypeFunctionAhead(0))
+                        {
+                            ParseTypeFunction(t, false);
+                            return;
+                        }
+
                         break;
                     case "export":
                         if (IsName(Peek(1), "type") && IsTypeStatementAhead(1))
                         {
                             ParseTypeStatement(t, true);
+                            return;
+                        }
+
+                        if (IsName(Peek(1), "type") && IsTypeFunctionAhead(1))
+                        {
+                            ParseTypeFunction(t, true);
                             return;
                         }
 
@@ -527,6 +553,85 @@ namespace CoreAI.Infrastructure.Luau
             }
 
             ParseExprStatement();
+        }
+
+        /// <summary>
+        /// Deletes the attributes in front of a function, each <c>@name</c> or a bracketed list such as
+        /// <c>@[deprecated {use = "f"}]</c>; true when there was at least one.
+        /// </summary>
+        private bool SkipAttributes()
+        {
+            LuauToken first = Cur;
+            bool any = false;
+            while (IsPunct(Cur, "@"))
+            {
+                LuauToken at = Cur;
+                if (Peek(1).Kind == LuauTokenKind.Name)
+                {
+                    Advance();
+                    LuauToken name = Cur;
+                    Advance();
+                    DeleteKeepNewlines(at.Start, name.End);
+                }
+                else if (IsPunct(Peek(1), "["))
+                {
+                    Advance();
+                    int end = SkipBalancedPunct("[", "]");
+                    DeleteKeepNewlines(at.Start, end);
+                }
+                else
+                {
+                    break;
+                }
+
+                any = true;
+            }
+
+            if (any)
+            {
+                _ctx.Note("attribute", first);
+            }
+
+            return any;
+        }
+
+        /// <summary>
+        /// Deletes a type function (<c>type function name(...) ... end</c>, optionally <c>export</c>ed): it runs
+        /// only in Luau's type checker, so it has no runtime effect. Edits made while its body was parsed are
+        /// dropped with it; a chunk prelude it asked for stays and is harmless.
+        /// </summary>
+        private void ParseTypeFunction(LuauToken startTok, bool isExport)
+        {
+            if (isExport)
+            {
+                Advance();
+            }
+
+            Advance();
+            Advance();
+            ExpectIdentifier();
+            int editMark = _ctx.Edits.Count;
+            ILuauSyntaxObserver observer = _observer;
+            _observer = null;
+            int end = ParseFuncBody(false);
+            _observer = observer;
+            for (int i = _ctx.Edits.Count - 1; i >= editMark; i--)
+            {
+                if (_ctx.Edits[i].Seq >= 0)
+                {
+                    _ctx.Budget.RollbackEdit(_ctx.Edits[i]);
+                    _ctx.Edits.RemoveAt(i);
+                }
+            }
+
+            DeleteKeepNewlines(startTok.Start, end);
+            _ctx.Note("type function", startTok);
+        }
+
+        private bool IsTypeFunctionAhead(int offset)
+        {
+            return IsName(Peek(offset + 1), "function") && Peek(offset + 2).Kind == LuauTokenKind.Name
+                                                         && !Keywords.Contains(Peek(offset + 2).Text);
         }
 
         private bool IsTypeStatementAhead(int offset)
@@ -653,7 +758,7 @@ namespace CoreAI.Infrastructure.Luau
         private void ParseForStatement()
         {
             Advance();
-            ExpectIdentifier();
+            List<LuauToken> variables = new() { ExpectIdentifier() };
             MaybeStripAnnotation();
             if (AtEquals())
             {
@@ -672,7 +777,7 @@ namespace CoreAI.Infrastructure.Luau
                 while (IsPunct(Cur, ","))
                 {
                     Advance();
-                    ExpectIdentifier();
+                    variables.Add(ExpectIdentifier());
                     MaybeStripAnnotation();
                 }
 
@@ -686,10 +791,27 @@ namespace CoreAI.Infrastructure.Luau
 
             LuauToken doTok = ExpectKeyword("do");
             LoopFrame frame = PushLoop(false);
+            // WHY declared after the expressions: the loop's own variables are not in scope in its bounds.
+            _observer?.OpenScope();
+            DeclareAll(variables);
             ParseBlock();
+            _observer?.CloseScope();
             LuauToken endTok = ExpectKeyword("end");
             PopLoop();
             FinalizeDoLoop(frame, doTok, endTok);
+        }
+
+        private void DeclareAll(List<LuauToken> names)
+        {
+            if (_observer == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < names.Count; i++)
+            {
+                _observer.Declare(names[i]);
+            }
         }
 
         private string EnsureGeneralizedIterator(LuauToken at)
@@ -724,10 +846,12 @@ namespace CoreAI.Infrastructure.Luau
         {
             Advance();
             LoopFrame frame = PushLoop(true);
-            ParseBlock();
+            _observer?.OpenScope();
+            ParseBlock(false);
             LuauToken untilTok = ExpectKeyword("until");
             PopLoop();
             ParseExpr();
+            _observer?.CloseScope();
             FinalizeRepeatLoop(frame, untilTok);
         }
 
@@ -838,26 +962,56 @@ namespace CoreAI.Infrastructure.Luau
             return _ctx.ToStringName;
         }
 
-        private void ParseFuncName()
+        /// <summary>The name of a <c>function</c> statement; true when it declares a method (<c>a.b:c</c>).</summary>
+        private bool ParseFuncName()
         {
-            ExpectIdentifier();
+            LuauToken root = ExpectIdentifier();
+            bool firstMember = true;
+            bool method = false;
             while (IsPunct(Cur, "."))
             {
                 Advance();
-                ExpectIdentifier();
+                LuauToken member = ExpectIdentifier();
+                if (firstMember)
+                {
+                    _observer?.UseName(root);
+                    _observer?.UseMember(root, member, false);
+                    firstMember = false;
+                }
             }
 
             if (IsPunct(Cur, ":"))
             {
                 Advance();
-                ExpectIdentifier();
+                LuauToken member = ExpectIdentifier();
+                if (firstMember)
+                {
+                    _observer?.UseName(root);
+                    _observer?.UseMember(root, member, true);
+                    firstMember = false;
+                }
+
+                method = true;
             }
+
+            if (firstMember)
+            {
+                _observer?.AssignName(root);
+            }
+
+            return method;
         }
 
-        private int ParseFuncBody()
+        /// <param name="method">True for <c>function a:b()</c>, whose body has an implicit <c>self</c>.</param>
+        private int ParseFuncBody(bool method = false)
         {
             _funcDepth++;
             _loops.Add(new LoopFrame { Barrier = true });
+            _observer?.OpenScope();
+            if (method)
+            {
+                _observer?.DeclareImplicit("self");
+            }
             if (IsPunct(Cur, "<"))
             {
                 LuauToken open = Cur;
@@ -878,7 +1032,8 @@ namespace CoreAI.Infrastructure.Luau
                     }
                     else
                     {
-                        ExpectIdentifier();
+                        LuauToken parameter = ExpectIdentifier();
+                        _observer?.Declare(parameter);
                         MaybeStripAnnotation();
                     }
 
@@ -904,6 +1059,7 @@ namespace CoreAI.Infrastructure.Luau
 
             ParseBlock();
             LuauToken endTok = ExpectKeyword("end");
+            _observer?.CloseScope();
             _loops.RemoveAt(_loops.Count - 1);
             _funcDepth--;
             return endTok.End;
@@ -921,14 +1077,17 @@ namespace CoreAI.Infrastructure.Luau
             if (IsName(Cur, "function"))
             {
                 Advance();
-                ExpectIdentifier();
+                LuauToken name = ExpectIdentifier();
+                _observer?.Declare(name);
                 ParseFuncBody();
                 return;
             }
 
+            List<LuauToken> names = _observer == null ? null : new List<LuauToken>();
             while (true)
             {
-                ExpectIdentifier();
+                LuauToken name = ExpectIdentifier();
+                names?.Add(name);
                 MaybeStripAnnotation();
                 if (IsPunct(Cur, ","))
                 {
@@ -943,6 +1102,11 @@ namespace CoreAI.Infrastructure.Luau
             {
                 ConsumeEquals();
                 ParseExprList();
+            }
+
+            if (names != null)
+            {
+                DeclareAll(names);
             }
         }
 
@@ -987,6 +1151,7 @@ namespace CoreAI.Infrastructure.Luau
             if (IsPunct(t, "="))
             {
                 RequireAssignable(info);
+                ReportWholeNameAssignment(info);
                 Advance();
                 ParseExprList();
                 return;
@@ -995,11 +1160,13 @@ namespace CoreAI.Infrastructure.Luau
             if (IsPunct(t, ","))
             {
                 RequireAssignable(info);
+                ReportWholeNameAssignment(info);
                 while (IsPunct(Cur, ","))
                 {
                     Advance();
                     SuffixedInfo more = ParseSuffixedExpr();
                     RequireAssignable(more);
+                    ReportWholeNameAssignment(more);
                 }
 
                 ExpectPunct("=");
@@ -1010,6 +1177,14 @@ namespace CoreAI.Infrastructure.Luau
             if (info.LastKind != SuffixKind.Call)
             {
                 Throw($"unexpected '{t.Text}' — expression is not a statement");
+            }
+        }
+
+        private void ReportWholeNameAssignment(SuffixedInfo info)
+        {
+            if (info.LastKind == SuffixKind.Name && info.Primary != null)
+            {
+                _observer?.AssignName(info.Primary);
             }
         }
 
@@ -1226,6 +1401,7 @@ namespace CoreAI.Infrastructure.Luau
         {
             LuauToken t = Cur;
             int end;
+            bool multipleValues = false;
             if (t.Kind == LuauTokenKind.Number)
             {
                 if (t.NumberRewrite != null)
@@ -1259,10 +1435,16 @@ namespace CoreAI.Infrastructure.Luau
                 MarkVarargUnsupportedIfInsideIfExpression(t);
                 Advance();
                 end = t.End;
+                multipleValues = true;
             }
             else if (IsName(t, "function"))
             {
                 Advance();
+                end = ParseFuncBody();
+            }
+            else if (IsPunct(t, "@") && SkipAttributes())
+            {
+                ExpectKeyword("function");
                 end = ParseFuncBody();
             }
             else if (IsPunct(t, "{"))
@@ -1275,7 +1457,9 @@ namespace CoreAI.Infrastructure.Luau
             }
             else
             {
-                end = ParseSuffixedExpr().End;
+                SuffixedInfo suffixed = ParseSuffixedExpr();
+                end = suffixed.End;
+                multipleValues = suffixed.LastKind == SuffixKind.Call;
             }
 
             while (IsPunct(Cur, "::") && !IsLabelAhead())
@@ -1283,6 +1467,15 @@ namespace CoreAI.Infrastructure.Luau
                 LuauToken castTok = Cur;
                 Advance();
                 int typeEnd = SkipType();
+                if (multipleValues)
+                {
+                    // WHY: a type assertion is a single value in Luau, so `f() :: T` and `... :: T` keep only the
+                    // first value; deleting the assertion alone left every value of the call in place.
+                    Insert(t.Start, "(");
+                    Insert(castTok.Start, ")");
+                    multipleValues = false;
+                }
+
                 DeleteKeepNewlines(castTok.Start, typeEnd);
                 _ctx.Note("type cast", castTok);
                 end = typeEnd;
@@ -1429,6 +1622,12 @@ namespace CoreAI.Infrastructure.Luau
                 Advance();
                 info.LastKind = SuffixKind.Name;
                 info.End = t.End;
+                info.Primary = t;
+                _observer?.UseName(t);
+                if (_observer != null && (IsPunct(Cur, ".") || IsPunct(Cur, ":")) && Peek(1).Kind == LuauTokenKind.Name)
+                {
+                    _observer.UseMember(t, Peek(1), IsPunct(Cur, ":"));
+                }
             }
             else if (IsPunct(t, "("))
             {
@@ -1467,6 +1666,16 @@ namespace CoreAI.Infrastructure.Luau
                 }
                 else if (IsPunct(c, ":") && Peek(1).Kind == LuauTokenKind.Name && IsCallArgsStart(Peek(2)))
                 {
+                    if (_observer != null)
+                    {
+                        LuauToken argument = Peek(2).Kind == LuauTokenKind.String ? Peek(2)
+                            : IsPunct(Peek(2), "(") && Peek(3).Kind == LuauTokenKind.String
+                                                    && (IsPunct(Peek(4), ")") || IsPunct(Peek(4), ","))
+                                ? Peek(3)
+                                : null;
+                        _observer.CallMethod(Peek(1), argument);
+                    }
+
                     Advance();
                     Advance();
                     info.End = ParseCallArgs();
@@ -1552,7 +1761,7 @@ namespace CoreAI.Infrastructure.Luau
                 {
                     AddEdit(part.Start - 1, part.Start, "\" .. " + EnsureToString() + "(");
                     AddEdit(part.End, part.End + 1, ") .. \"");
-                    LuauRewriteParser sub = new(_ctx, part.Tokens);
+                    LuauRewriteParser sub = new(_ctx, part.Tokens, _observer);
                     sub.ParseInterpolationExpression();
                 }
             }

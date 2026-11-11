@@ -15,15 +15,37 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
         NegativeZ = 5
     }
 
-    /// <summary>One visible face of one cell (world cell coordinates).</summary>
+    /// <summary>Which part of a side face a quad covers when a face rule splits it (<see cref="TerrainFaceMaterialRule"/>).</summary>
+    public enum TerrainFaceBand : byte
+    {
+        /// <summary>The whole face.</summary>
+        Whole = 0,
+
+        /// <summary>The band along the face's upper edge.</summary>
+        Fringe = 1,
+
+        /// <summary>The face below the band.</summary>
+        BelowFringe = 2
+    }
+
+    /// <summary>One visible face of one cell (world cell coordinates), or one band of a split side face.</summary>
     public readonly struct TerrainFaceQuad
     {
         public TerrainFaceQuad(int cellX, int cellY, int cellZ, TerrainFace face)
+            : this(cellX, cellY, cellZ, face, TerrainFaceBand.Whole, 0)
+        {
+        }
+
+        /// <summary>A band of a side face split <paramref name="fringeSixteenths"/> sixteenths below its upper edge.</summary>
+        public TerrainFaceQuad(int cellX, int cellY, int cellZ, TerrainFace face, TerrainFaceBand band,
+            byte fringeSixteenths)
         {
             CellX = cellX;
             CellY = cellY;
             CellZ = cellZ;
             Face = face;
+            Band = band;
+            FringeSixteenths = fringeSixteenths;
         }
 
         public int CellX { get; }
@@ -33,6 +55,32 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
         public int CellZ { get; }
 
         public TerrainFace Face { get; }
+
+        /// <summary>The part of the face this quad covers.</summary>
+        public TerrainFaceBand Band { get; }
+
+        /// <summary>Where the face is split, in sixteenths of a cell below its upper edge; 0 for a whole face.</summary>
+        public byte FringeSixteenths { get; }
+
+        /// <summary>
+        /// Height (0..1 of the cell) of a face corner that sits at <paramref name="cornerDy"/> (0 bottom, 1 top)
+        /// once the band is cut: a fringe starts at the split, the face below it ends there.
+        /// </summary>
+        public float CornerHeight(int cornerDy)
+        {
+            float split = 1f - FringeSixteenths / 16f;
+            if (Band == TerrainFaceBand.Fringe && cornerDy == 0)
+            {
+                return split;
+            }
+
+            if (Band == TerrainFaceBand.BelowFringe && cornerDy == 1)
+            {
+                return split;
+            }
+
+            return cornerDy;
+        }
     }
 
     /// <summary>
@@ -84,7 +132,8 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
     }
 
     /// <summary>
-    /// What a mesher produced for one chunk: the visible faces grouped by material slot. Reused
+    /// What a mesher produced for one chunk: the visible faces grouped by the material slot they are drawn
+    /// with (a face rule may draw a cell's face with another material than the cell's own). Reused
     /// across chunks; <see cref="Clear"/> keeps the list capacity, so re-meshing allocates nothing
     /// once the lists have grown.
     /// </summary>
@@ -143,11 +192,14 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
     /// <summary>
     /// Face-culled cubes: every non-Air cell draws as a full cube, and a face is emitted only where
     /// it can be seen. A solid face shows against Air or Water; a Water face shows only against Air,
-    /// so touching water cells and water against a solid draw no face between them.
+    /// so touching water cells and water against a solid draw no face between them. Each face is drawn
+    /// with the material its cell's <see cref="TerrainFaceMaterialRule"/> names for that side; a side face
+    /// whose rule has a fringe, of a cell open above, is split into the fringe and the face below it.
     /// </summary>
     /// <remarks>
-    /// WHY no greedy merging: a 16-cell chunk has at most 12,288 faces (a checkerboard), so a chunk
-    /// always fits a 16-bit index buffer, and merging pays off only once measurement says so.
+    /// WHY no greedy merging: a 16-cell chunk has at most 12,288 faces (a checkerboard), 20,480 quads with
+    /// every side of a grass checkerboard split by its band, and merging pays off only once measurement says
+    /// so; the mesh builder switches to a 32-bit index buffer past 65,535 vertices.
     /// </remarks>
     public sealed class BlockyTerrainChunkMesher : ITerrainChunkMesher
     {
@@ -155,6 +207,17 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
         private const int Last = TerrainChunkCoord.Mask;
         private const int ZStride = Edge;
         private const int YStride = Edge * Edge;
+
+        private readonly TerrainFaceMaterialRules _rules;
+
+        /// <summary>A mesher drawing faces by <paramref name="rules"/>; null uses <see cref="TerrainFaceMaterialRules.Default"/>.</summary>
+        public BlockyTerrainChunkMesher(TerrainFaceMaterialRules rules = null)
+        {
+            _rules = rules ?? TerrainFaceMaterialRules.Default;
+        }
+
+        /// <summary>The face rules this mesher draws with.</summary>
+        public TerrainFaceMaterialRules Rules => _rules;
 
         /// <inheritdoc />
         public void BuildChunk(TerrainChunkStore store, TerrainChunkCoord coord, TerrainChunkMeshBuffers output)
@@ -201,18 +264,24 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
                         int x = originX + lx;
                         int y = originY + ly;
                         int z = originZ + lz;
+                        TerrainFaceMaterialRule rule = _rules.For(material);
+                        byte above = ly < Last ? materials[index + YStride] : Read(positiveY, index - Last * YStride);
+                        // WHY only under open space: a block laid on a grass block hides its top, and its sides
+                        // show earth to the edge.
+                        byte fringe = above == TerrainMaterials.Air || above == TerrainMaterials.Water
+                            ? rule.FringeSixteenths
+                            : (byte)0;
                         byte next = lx < Last ? materials[index + 1] : Read(positiveX, index - Last);
-                        Emit(output, material, next, x, y, z, TerrainFace.PositiveX);
+                        EmitSide(output, material, next, x, y, z, TerrainFace.PositiveX, in rule, fringe);
                         next = lx > 0 ? materials[index - 1] : Read(negativeX, index + Last);
-                        Emit(output, material, next, x, y, z, TerrainFace.NegativeX);
-                        next = ly < Last ? materials[index + YStride] : Read(positiveY, index - Last * YStride);
-                        Emit(output, material, next, x, y, z, TerrainFace.PositiveY);
+                        EmitSide(output, material, next, x, y, z, TerrainFace.NegativeX, in rule, fringe);
+                        Emit(output, material, rule.Top, above, x, y, z, TerrainFace.PositiveY);
                         next = ly > 0 ? materials[index - YStride] : Read(negativeY, index + Last * YStride);
-                        Emit(output, material, next, x, y, z, TerrainFace.NegativeY);
+                        Emit(output, material, rule.Bottom, next, x, y, z, TerrainFace.NegativeY);
                         next = lz < Last ? materials[index + ZStride] : Read(positiveZ, index - Last * ZStride);
-                        Emit(output, material, next, x, y, z, TerrainFace.PositiveZ);
+                        EmitSide(output, material, next, x, y, z, TerrainFace.PositiveZ, in rule, fringe);
                         next = lz > 0 ? materials[index - ZStride] : Read(negativeZ, index + Last * ZStride);
-                        Emit(output, material, next, x, y, z, TerrainFace.NegativeZ);
+                        EmitSide(output, material, next, x, y, z, TerrainFace.NegativeZ, in rule, fringe);
                     }
                 }
             }
@@ -234,13 +303,31 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
             return neighbour == TerrainMaterials.Air || neighbour == TerrainMaterials.Water;
         }
 
-        private static void Emit(TerrainChunkMeshBuffers output, byte material, byte neighbour, int x, int y,
-            int z, TerrainFace face)
+        private static void Emit(TerrainChunkMeshBuffers output, byte material, byte drawn, byte neighbour, int x,
+            int y, int z, TerrainFace face)
         {
             if (IsFaceVisible(material, neighbour))
             {
-                output.Add(material, new TerrainFaceQuad(x, y, z, face));
+                output.Add(drawn, new TerrainFaceQuad(x, y, z, face));
             }
+        }
+
+        private static void EmitSide(TerrainChunkMeshBuffers output, byte material, byte neighbour, int x, int y,
+            int z, TerrainFace face, in TerrainFaceMaterialRule rule, byte fringe)
+        {
+            if (!IsFaceVisible(material, neighbour))
+            {
+                return;
+            }
+
+            if (fringe == 0 || rule.Side == rule.Top)
+            {
+                output.Add(rule.Side, new TerrainFaceQuad(x, y, z, face));
+                return;
+            }
+
+            output.Add(rule.Top, new TerrainFaceQuad(x, y, z, face, TerrainFaceBand.Fringe, fringe));
+            output.Add(rule.Side, new TerrainFaceQuad(x, y, z, face, TerrainFaceBand.BelowFringe, fringe));
         }
 
         private static byte[] NeighbourMaterials(TerrainChunkStore store, TerrainChunkCoord coord)

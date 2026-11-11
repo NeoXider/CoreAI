@@ -278,6 +278,26 @@ namespace CoreAI.Mods.Rbx.Binding
             }
         }
 
+        /// <summary>
+        /// Fills <paramref name="renderers"/> with the renderer of every part the binder built (adopted host
+        /// objects excluded), for a pass that shades parts per renderer, such as the Terrain sky exposure.
+        /// </summary>
+        public void CollectPartRenderers(System.Collections.Generic.List<Renderer> renderers)
+        {
+            if (renderers == null)
+            {
+                return;
+            }
+
+            foreach (System.Collections.Generic.KeyValuePair<InstanceId, BindingEntry> pair in _bindings)
+            {
+                if (pair.Value.IsPart && pair.Value.OwnsGameObject && pair.Value.Renderer != null)
+                {
+                    renderers.Add(pair.Value.Renderer);
+                }
+            }
+        }
+
         private void OnRelayContact(GameObject self, GameObject other, bool began)
         {
             if (ContactObserved == null

@@ -15,11 +15,12 @@ using Debug = UnityEngine.Debug;
 namespace CoreAI.Tests.PlayMode.RbxApi.Terrain
 {
     /// <summary>
-    /// P4, PlayMode (FastNoLlm): the Terrain in a running player loop. A FillBlock is drawn and collides
-    /// in the frame after the call, chunk colliders hold up a falling body and a character, a ray
+    /// P4, PlayMode (FastNoLlm): the Terrain in a running player loop. A FillBlock collides in the frame
+    /// after the call wherever a ray or a falling part meets it, even with the re-mesh budget starved, and is
+    /// drawn within one frame per chunk; chunk colliders hold up a falling body and a character, a ray
     /// straight down hits a chunk collider that resolves to Terrain, Grass and the up normal, and placing
-    /// one cell re-meshes at most the two chunks it touches within one frame. The last test is the MS
-    /// capture of the reference world.
+    /// one cell re-meshes only the two chunks it touches. The last test is the MS capture of the reference
+    /// world.
     /// </summary>
     /// <remarks>
     /// The simulation is stepped from script so every physics assertion advances a known amount of
@@ -93,14 +94,47 @@ namespace CoreAI.Tests.PlayMode.RbxApi.Terrain
             }
         }
 
-        [UnityTest]
-        public IEnumerator P4_FillBlockSlab_IsDrawnAndCollides_InTheFrameAfterTheCall()
+        /// <summary>
+        /// Frames until nothing waits for a re-mesh; fails past <paramref name="limit"/>.
+        /// </summary>
+        private IEnumerator DrainWithin(int limit, Action<int> frames)
         {
+            int count = 0;
+            while (Renderer.PendingChunkCount > 0 && count < limit)
+            {
+                count++;
+                yield return null;
+            }
+
+            Assert.AreEqual(0, Renderer.PendingChunkCount, "every chunk was re-meshed within " + limit + " frames");
+            frames(count);
+        }
+
+        /// <summary>
+        /// What a player needs from a big write: it collides in the frame after the call wherever something
+        /// touches it (a ray, a falling part), and it is drawn within one frame per chunk at most, because the
+        /// presenter re-meshes at least one waiting chunk every frame. The budget is starved to one chunk a frame,
+        /// so the slab cannot be drawn in one frame by luck of machine speed.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator P4_FillBlockSlab_CollidesInTheFrameAfterTheCall_AndIsDrawnWithinOneFramePerChunk()
+        {
+            _presenter.MaxChunksPerFrame = 1;
+            _presenter.MaxMillisecondsPerFrame = 0f;
+            using BodyWorld bodies = new(_host.transform, _presenter);
             FillSlab();
 
             yield return null;
 
-            Assert.AreEqual(0, Renderer.PendingChunkCount, "every chunk of the slab was re-meshed in one frame");
+            Assert.AreEqual(15, Renderer.PendingChunkCount, "the starved budget drew one chunk");
+            Assert.IsTrue(bodies.Port.TryRaycast(new RbxVector3(232f, 60f, 232f), new RbxVector3(0f, -100f, 0f), false,
+                _ => true, out RbxPhysicsRaycastHit hit), "a ray at the last chunk in the queue hits the slab");
+            Assert.AreEqual(_terrain.Id, hit.Instance);
+            Assert.AreEqual(16f, hit.Position.Y, 1e-3f);
+            Assert.AreEqual(14, Renderer.PendingChunkCount, "only the chunk under the ray was built out of turn");
+            int frames = 0;
+            yield return DrainWithin(16, counted => frames = counted);
+            Assert.LessOrEqual(frames, 14);
             Assert.AreEqual(16, Renderer.ChunkObjectCount);
             foreach (MeshRenderer chunkRenderer in Renderer.Root.GetComponentsInChildren<MeshRenderer>())
             {
@@ -114,7 +148,7 @@ namespace CoreAI.Tests.PlayMode.RbxApi.Terrain
         public IEnumerator P4_ChunkCollider_HoldsUpAFallingBody()
         {
             FillSlab();
-            yield return null;
+            yield return DrainWithin(16, _ => { });
             GameObject ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             ball.transform.SetParent(_host.transform, false);
             float top = RbxSpace.LengthToUnity(16f);
@@ -125,6 +159,51 @@ namespace CoreAI.Tests.PlayMode.RbxApi.Terrain
             Simulate(2f);
 
             Assert.AreEqual(top + 0.5f, ball.transform.position.y, 0.05f, "the ball rests on the slab's top face");
+        }
+
+        /// <summary>
+        /// A part falling onto Terrain whose chunk is still queued behind a starved budget lands on it, because the
+        /// physics port builds the colliders around every simulated body before it moves the body. The twin
+        /// without a Terrain on the port shows the same setup lets the part fall through.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator P4_APartOverAChunkStillQueued_LandsOnIt_BecauseThePortBuildsTheColliderFirst()
+        {
+            yield return DropAPartOnTheLastQueuedChunk(true);
+        }
+
+        [UnityTest]
+        public IEnumerator P4_APartOverAChunkStillQueued_FallsThrough_WhenThePortIsNotToldAboutTheTerrain()
+        {
+            yield return DropAPartOnTheLastQueuedChunk(false);
+        }
+
+        private IEnumerator DropAPartOnTheLastQueuedChunk(bool portKnowsTheTerrain)
+        {
+            _presenter.MaxChunksPerFrame = 1;
+            _presenter.MaxMillisecondsPerFrame = 0f;
+            using BodyWorld bodies = new(_host.transform, portKnowsTheTerrain ? _presenter : null);
+            FillSlab();
+            yield return null;
+            Assert.IsTrue(Renderer.IsGeometryPending(new TerrainChunkCoord(3, 0, 3)), "the chunk under the part is queued");
+            RbxInstance part = bodies.CreatePart(new RbxVector3(224f, 24f, 224f), new RbxVector3(4f, 4f, 4f));
+            bodies.Port.ApplyGravity();
+            Assert.AreEqual(portKnowsTheTerrain, !Renderer.IsGeometryPending(new TerrainChunkCoord(3, 0, 3)),
+                "the port builds the chunk under the part before its first step only when it knows the Terrain; part at "
+                + bodies.ReadPosition(part));
+
+            bodies.Simulate(2f);
+
+            float landed = bodies.ReadPosition(part).Y;
+            if (portKnowsTheTerrain)
+            {
+                Assert.AreEqual(18f, landed, 0.1f, "the part rests on the slab's top face");
+                Assert.Greater(Renderer.PendingChunkCount, 0, "the rest of the slab still waits for its frames");
+            }
+            else
+            {
+                Assert.Less(landed, 0f, "without the port's help the part falls through the queued chunk");
+            }
         }
 
         [UnityTest]
@@ -167,24 +246,23 @@ namespace CoreAI.Tests.PlayMode.RbxApi.Terrain
         }
 
         [UnityTest]
-        public IEnumerator P4_PlacingOneCell_RemeshesAtMostTheTwoChunksItTouches_WithinOneFrame()
+        public IEnumerator P4_PlacingOneCell_RemeshesOnlyTheTwoChunksItTouches_WithinTwoFrames()
         {
             FillSlab();
-            yield return null;
+            yield return DrainWithin(16, _ => { });
             long before = Renderer.RemeshCount;
 
             _terrain.FillBlock(RbxCFrame.FromPosition(RbxTerrain.CellCenterToWorld(16, 4, 5)),
                 new RbxVector3(4f, 4f, 4f), Slot("Brick"));
-            yield return null;
+            yield return DrainWithin(2, _ => { });
 
-            Assert.AreEqual(0, Renderer.PendingChunkCount);
             Assert.AreEqual(2, Renderer.RemeshCount - before,
                 "the touched chunk and the -X neighbour that shares the face; nothing else");
 
             before = Renderer.RemeshCount;
             _terrain.FillBlock(RbxCFrame.FromPosition(RbxTerrain.CellCenterToWorld(16, 4, 5)),
                 new RbxVector3(4f, 4f, 4f), TerrainMaterials.Air);
-            yield return null;
+            yield return DrainWithin(2, _ => { });
             Assert.AreEqual(2, Renderer.RemeshCount - before, "breaking it costs the same two chunks");
         }
 
@@ -232,6 +310,59 @@ namespace CoreAI.Tests.PlayMode.RbxApi.Terrain
                       + "; mean frame " + (frameClock.Elapsed.TotalMilliseconds / 120d).ToString("0.00") + " ms");
             Assert.LessOrEqual(drawBound, 6 * Renderer.ChunkObjectCount,
                 "draw calls follow chunks and the few materials in each, never cells");
+        }
+
+        /// <summary>A bound-part world sharing the scene with the Terrain: a binder, its registry and a physics port.</summary>
+        private sealed class BodyWorld : IDisposable
+        {
+            private readonly InstanceGameObjectBinder _binder;
+            private readonly InstanceRegistry _registry;
+
+            public BodyWorld(Transform parent, IRbxTerrainHitResolver terrain)
+            {
+                RbxSpace.Configure(RbxSpace.DefaultMetersPerStud);
+                _binder = new InstanceGameObjectBinder(parent, null);
+                _registry = new InstanceRegistry(null, _binder, worldInstanceAdapter: new WorldInstanceAdapter(_binder));
+                DataModelBootstrap.CreateGame(_registry);
+                Port = new UnityRbxPhysicsPort(_binder) { TerrainHits = terrain };
+            }
+
+            public UnityRbxPhysicsPort Port { get; }
+
+            /// <remarks>
+            /// WHY a block four studs tall: a chunk collider is a surface, and a one-stud plate falling a few metres
+            /// moves further than its own height in one fixed step and passes it (no continuous collision on parts).
+            /// </remarks>
+            public RbxInstance CreatePart(RbxVector3 position, RbxVector3 size)
+            {
+                RbxInstance part = _registry.Create("Part");
+                part.Parent = _registry.WorldRoot;
+                _binder.SetSize(part.Id, size);
+                _binder.SetPosition(part.Id, position);
+                _binder.SetAnchored(part.Id, false);
+                Physics.SyncTransforms();
+                return part;
+            }
+
+            public RbxVector3 ReadPosition(RbxInstance part)
+            {
+                return _binder.GetLivePositionStuds(part.Id);
+            }
+
+            public void Simulate(float seconds)
+            {
+                int steps = Mathf.CeilToInt(seconds / FixedStep);
+                for (int step = 0; step < steps; step++)
+                {
+                    Port.ApplyGravity();
+                    Physics.Simulate(FixedStep);
+                }
+            }
+
+            public void Dispose()
+            {
+                Port.Dispose();
+            }
         }
 
         private static void FillReferenceWorld(TerrainChunkStore store)

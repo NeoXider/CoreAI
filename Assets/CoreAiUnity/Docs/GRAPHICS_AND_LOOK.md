@@ -133,6 +133,19 @@ environment reflection intensity by it and follows every change at once. A world
 it back to 1 when it reverts. Both appliers take an optional `LookAmbientOwnership` in their constructor;
 `Shared` is the default.
 
+### Caves: sky exposure per surface
+
+The ambient and the reflections a world draws come from the sky, so on their own they reach the inside of a
+cave as fully as the hill above it. The Rbx materials scale both by a sky exposure per surface (1 under the
+open sky, 0 deep in rock), so a cave is dark at noon while the hill above it is lit, in the same frame for
+every viewer; the sun (its shadows stop it), point and spot lights and emission are untouched. The Terrain
+computes the exposure per cell and carries it in its vertex colours; parts and characters take the exposure
+of the cell they stand in. What the sky no longer gives is replaced by the Lighting sink's
+`Lighting.Ambient`, the light Roblox gives areas the sky does not reach, so a world chooses how dark its
+caves are with `Ambient` (keep it low for dark caves; the 0.5 grey default reads as dusk). The rule, its
+costs and its limits are in the Terrain README (`Assets/CoreAIMods/Runtime/RbxApi/Instances/Terrain`). The
+term is a material float, not a keyword, so it adds no shader variant.
+
 ## Render pipelines
 
 The URP part (Volume, camera post-processing and anti-aliasing, render scale) lives in the optional
