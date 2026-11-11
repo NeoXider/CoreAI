@@ -697,8 +697,9 @@ old ones, and 4.1 maps them:
   element factory.
 - **Measured speed (P19).** The owner asked for honest optimization: frame-time and allocation
   measurements in built players come before any optimization and before any claim.
-- **Multiplayer stays after the Block world** (owner, 2026-11-11): single-player worlds, mods and the
-  demo are finished and measured first.
+- **Everything before multiplayer comes first** (owner, 2026-11-11): M1 and M2 — single-player worlds,
+  mods, the Block world, whole games from chat and the harness upgrades — are finished and measured
+  before M3 starts.
 - **Decision models joined chat (plan decision D13).** Models that answer typed questions with
   probabilities appeared in September 2026 and one protocol is already spoken by the common runtimes;
   NPC behaviour and a player autopilot need exactly that

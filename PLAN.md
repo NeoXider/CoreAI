@@ -45,8 +45,8 @@ open work is filed in `TODO.md` under "Plan of record 2026-11-11".
    - mods: P20 — folders for mods (a tree instead of one flat list), after P19 can measure it;
    - MVP4 alongside on the mods runtime.
    First wave, started 2026-11-11: P1, P7, P11 stage 1, the P18 interpreter and the P19 harness.
-3. **M2 Whole games from chat**, **M3 Together** and **M4 Platform** as listed in §4.0; the order of M2
-   and M3 is confirmed after M1.
+3. **M2 Whole games from chat** follows M1: the owner set the goal on 2026-11-11 — everything before
+   multiplayer comes first. **M3 Together** and **M4 Platform** come after, as listed in §4.0.
 
 ### Estimates (2026-11-11, in AI working time)
 
