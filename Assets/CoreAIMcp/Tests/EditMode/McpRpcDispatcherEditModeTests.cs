@@ -150,7 +150,7 @@ namespace CoreAI.Mcp.Tests
                     success = false,
                     message = "Unknown level 'chatty'. Valid: print, warn, error, runtime_error."
                 })
-                : JsonConvert.SerializeObject(new { success = true, count = 0, logs = "" });
+                : JsonConvert.SerializeObject(new { success = true, count = 0, next_sequence = 0, logs = "" });
 
             McpDispatchResult dispatched = await DispatchAdapter(tool, throughBroker,
                 new JObject { ["level"] = level }, CancellationToken.None);

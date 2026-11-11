@@ -37,6 +37,47 @@ namespace CoreAI.Mods.WorldPackages
         event Action<string> HistoryChanged;
     }
 
+    /// <summary>
+    /// The optional face of an undo history that keeps a repair with the change it repairs. The runtime self-repair
+    /// loop opens a window before the model's repair turn; while it is open, every AI change of that actor is a repair:
+    /// it joins the history entry of the change that wrote the failing source when that entry is the actor's latest
+    /// and nothing changed the world in between, so one <c>/undo</c> takes back the request and every repair of it and
+    /// <c>/redo</c> puts back the repaired world; otherwise it becomes its own entry, named as a repair.
+    /// </summary>
+    public interface IRbxWorldRepairUndo
+    {
+        /// <summary>
+        /// Opens a repair window for <paramref name="actorId"/>. <paramref name="repairedSequence"/> is the gate
+        /// sequence of the AI change that wrote the failing source (<see cref="RbxWorldMutationInfo.Sequence"/>);
+        /// 0 means none is known or the repair is the player's own request, so the repair is always its own entry.
+        /// Dispose the window when the repair turn ended.
+        /// </summary>
+        IRbxWorldRepairWindow BeginRepair(string actorId, long repairedSequence, string modId);
+    }
+
+    /// <summary>How the changes of one repair window went into the undo history.</summary>
+    public enum RbxWorldRepairRecording
+    {
+        /// <summary>No change of the window was recorded.</summary>
+        None = 0,
+
+        /// <summary>The latest change joined the entry of the change it repairs: one undo takes back both.</summary>
+        JoinedRepairedChange = 1,
+
+        /// <summary>
+        /// The latest change is its own entry, named as a repair: another change sat between it and the change it
+        /// repairs, or the repair has no parent (a repair the player asked for).
+        /// </summary>
+        OwnEntry = 2
+    }
+
+    /// <summary>An open repair window (<see cref="IRbxWorldRepairUndo.BeginRepair"/>).</summary>
+    public interface IRbxWorldRepairWindow : IDisposable
+    {
+        /// <summary>How the window's latest change was recorded.</summary>
+        RbxWorldRepairRecording Recording { get; }
+    }
+
     /// <summary>What the undo service needs from the live world session.</summary>
     public interface IRbxWorldUndoHost
     {
@@ -399,7 +440,8 @@ namespace CoreAI.Mods.WorldPackages
     /// what a world package holds: the world-owned tree, Part state, camera and mod sources; mods restart
     /// from their sources, as after a world load. A finer, operation-level undo is roadmap P5.
     /// </remarks>
-    public sealed class RbxWorldUndoService : IRbxWorldUndoService, IRbxWorldMutationObserver, IDisposable
+    public sealed class RbxWorldUndoService : IRbxWorldUndoService, IRbxWorldRepairUndo, IRbxWorldMutationObserver,
+        IDisposable
     {
         /// <summary>The default history length per actor.</summary>
         public const int DefaultCapacity = 10;
@@ -414,6 +456,7 @@ namespace CoreAI.Mods.WorldPackages
         private readonly IConfirmedWorldMutationGate _mutationGate;
         private readonly Func<IRbxWorldUndoHost> _hostResolver;
         private readonly Dictionary<string, ActorHistory> _histories = new(StringComparer.Ordinal);
+        private readonly List<RepairWindow> _repairWindows = new();
         private IRbxWorldUndoHost _host;
         private RbxWorldStateMark _markAtStart;
         private bool _markAtStartTaken;
@@ -523,6 +566,21 @@ namespace CoreAI.Mods.WorldPackages
         }
 
         /// <inheritdoc />
+        public IRbxWorldRepairWindow BeginRepair(string actorId, long repairedSequence, string modId)
+        {
+            RepairWindow window = new(this, actorId ?? "", Math.Max(0L, repairedSequence), (modId ?? "").Trim());
+            lock (_gate)
+            {
+                if (!_disposed)
+                {
+                    _repairWindows.Add(window);
+                }
+            }
+
+            return window;
+        }
+
+        /// <inheritdoc />
         public void OnMutationStarting(RbxWorldMutationInfo mutation)
         {
             lock (_gate)
@@ -613,10 +671,27 @@ namespace CoreAI.Mods.WorldPackages
                 }
 
                 ActorHistory history = GetOrCreateHistoryLocked(actorId);
-                bool chained = history.Undo.Count > 0
-                               && IsUnchangedSince(history.Undo[history.Undo.Count - 1], start, valueEditsAtStart);
-                history.Undo.Add(new Entry(before, after, chained, mutation.Trigger, mutation.Sequence, _valueEdits));
-                TrimLocked(history.Undo, true);
+                Entry top = history.Undo.Count > 0 ? history.Undo[history.Undo.Count - 1] : null;
+                bool chained = top != null && IsUnchangedSince(top, start, valueEditsAtStart);
+                RepairWindow window = FindRepairWindowLocked(actorId);
+                if (window != null && chained && window.CanJoin(top))
+                {
+                    top.JoinRepair(after, _valueEdits, mutation.Sequence);
+                    window.Recorded(top, RbxWorldRepairRecording.JoinedRepairedChange);
+                }
+                else
+                {
+                    Entry entry = new(before, after, chained, mutation.Trigger, mutation.Sequence, _valueEdits);
+                    if (window != null)
+                    {
+                        entry.RepairOf = window.ModId.Length > 0 ? window.ModId : "?";
+                        window.Recorded(entry, RbxWorldRepairRecording.OwnEntry);
+                    }
+
+                    history.Undo.Add(entry);
+                    TrimLocked(history.Undo, true);
+                }
+
                 history.Redo.Clear();
             }
 
@@ -634,6 +709,7 @@ namespace CoreAI.Mods.WorldPackages
 
                 _disposed = true;
                 _histories.Clear();
+                _repairWindows.Clear();
             }
 
             if (_mutationGate is IObservableWorldMutationGate observable)
@@ -797,12 +873,35 @@ namespace CoreAI.Mods.WorldPackages
             return new RbxWorldUndoResult(
                 true,
                 undo ? RbxWorldUndoResult.UndoneStatus : RbxWorldUndoResult.RedoneStatus,
-                undo
-                    ? "The last AI change ('" + top.Trigger + "') was undone."
-                    : "The undone AI change ('" + top.Trigger + "') was put back.",
+                DescribeMove(top, undo),
                 actorId,
                 0,
                 0);
+        }
+
+        /// <summary>The player's line for a move of <paramref name="entry"/>; a repair is named as one.</summary>
+        private static string DescribeMove(Entry entry, bool undo)
+        {
+            if (entry.RepairOf.Length > 0)
+            {
+                return undo
+                    ? "The AI's repair of mod '" + entry.RepairOf + "' was undone."
+                    : "The AI's repair of mod '" + entry.RepairOf + "' was put back.";
+            }
+
+            string repairs = entry.Repairs == 1
+                ? "its repair"
+                : "its " + entry.Repairs.ToString(System.Globalization.CultureInfo.InvariantCulture) + " repairs";
+            if (entry.Repairs > 0)
+            {
+                return undo
+                    ? "The last AI change ('" + entry.Trigger + "') was undone, together with " + repairs + "."
+                    : "The undone AI change ('" + entry.Trigger + "') was put back, together with " + repairs + ".";
+            }
+
+            return undo
+                ? "The last AI change ('" + entry.Trigger + "') was undone."
+                : "The undone AI change ('" + entry.Trigger + "') was put back.";
         }
 
         /// <summary>
@@ -826,13 +925,15 @@ namespace CoreAI.Mods.WorldPackages
                 {
                     ActorHistory history = GetOrCreateHistoryLocked(move.ActorId);
                     List<Entry> to = move.Undo ? history.Redo : history.Undo;
-                    to.Add(new Entry(
+                    Entry moved = new(
                         before,
                         move.RestoredMark,
                         move.Entry.ChainedToPrevious,
                         move.Entry.Trigger,
                         move.Entry.Sequence,
-                        move.ValueEdits));
+                        move.ValueEdits);
+                    moved.CopyRepairsFrom(move.Entry);
+                    to.Add(moved);
                     TrimLocked(to, !move.Undo);
                 }
             }
@@ -980,6 +1081,28 @@ namespace CoreAI.Mods.WorldPackages
             return host;
         }
 
+        /// <summary>The newest open repair window of <paramref name="actorId"/>; null when none is open.</summary>
+        private RepairWindow FindRepairWindowLocked(string actorId)
+        {
+            for (int index = _repairWindows.Count - 1; index >= 0; index--)
+            {
+                if (string.Equals(_repairWindows[index].ActorId, actorId, StringComparison.Ordinal))
+                {
+                    return _repairWindows[index];
+                }
+            }
+
+            return null;
+        }
+
+        private void CloseRepairWindow(RepairWindow window)
+        {
+            lock (_gate)
+            {
+                _repairWindows.Remove(window);
+            }
+        }
+
         private ActorHistory GetOrCreateHistoryLocked(string actorId)
         {
             if (!_histories.TryGetValue(actorId, out ActorHistory history))
@@ -1109,6 +1232,51 @@ namespace CoreAI.Mods.WorldPackages
                 Trigger = trigger ?? "";
                 Sequence = sequence;
                 AfterValueEdits = afterValueEdits;
+                _sequences.Add(sequence);
+            }
+
+            private readonly List<long> _sequences = new(1);
+
+            /// <summary>Repairs that joined this entry (<see cref="IRbxWorldRepairUndo"/>).</summary>
+            public int Repairs { get; private set; }
+
+            /// <summary>The mod this entry repairs when it is a repair of its own; empty otherwise.</summary>
+            public string RepairOf { get; set; } = "";
+
+            /// <summary>True when the change of gate sequence <paramref name="sequence"/> is part of this entry.</summary>
+            public bool Covers(long sequence)
+            {
+                return sequence > 0L && _sequences.Contains(sequence);
+            }
+
+            /// <summary>
+            /// A repair joins this entry: the entry now leaves the world as the repair left it, and still restores
+            /// the world before its first change.
+            /// </summary>
+            public void JoinRepair(RbxWorldStateMark after, long valueEdits, long sequence)
+            {
+                MarkAfter(after, valueEdits);
+                Sequence = Math.Max(Sequence, sequence);
+                if (!_sequences.Contains(sequence))
+                {
+                    _sequences.Add(sequence);
+                }
+
+                Repairs++;
+            }
+
+            /// <summary>Carries the repairs of <paramref name="other"/> over to this copy of it (an undo or redo move).</summary>
+            public void CopyRepairsFrom(Entry other)
+            {
+                Repairs = other.Repairs;
+                RepairOf = other.RepairOf;
+                foreach (long sequence in other._sequences)
+                {
+                    if (!_sequences.Contains(sequence))
+                    {
+                        _sequences.Add(sequence);
+                    }
+                }
             }
 
             /// <summary>The world before the change; restoring it takes the change back.</summary>
@@ -1131,7 +1299,57 @@ namespace CoreAI.Mods.WorldPackages
 
             public string Trigger { get; }
 
-            public long Sequence { get; }
+            public long Sequence { get; private set; }
+        }
+
+        /// <summary>One open repair window; disposing it closes it.</summary>
+        private sealed class RepairWindow : IRbxWorldRepairWindow
+        {
+            private readonly RbxWorldUndoService _owner;
+            private Entry _target;
+            private int _recording;
+
+            public RepairWindow(RbxWorldUndoService owner, string actorId, long repairedSequence, string modId)
+            {
+                _owner = owner;
+                ActorId = actorId;
+                RepairedSequence = repairedSequence;
+                ModId = modId;
+            }
+
+            public string ActorId { get; }
+
+            public long RepairedSequence { get; }
+
+            public string ModId { get; }
+
+            public RbxWorldRepairRecording Recording => (RbxWorldRepairRecording)Volatile.Read(ref _recording);
+
+            /// <summary>
+            /// True when a change of this window may join <paramref name="top"/>: the entry its earlier change went
+            /// to, or, before any, the entry that wrote the repaired source. The caller holds the service's lock.
+            /// </summary>
+            public bool CanJoin(Entry top)
+            {
+                if (top == null)
+                {
+                    return false;
+                }
+
+                return _target != null ? ReferenceEquals(top, _target) : top.Covers(RepairedSequence);
+            }
+
+            /// <summary>Records where a change of this window went. The caller holds the service's lock.</summary>
+            public void Recorded(Entry entry, RbxWorldRepairRecording recording)
+            {
+                _target = entry;
+                Volatile.Write(ref _recording, (int)recording);
+            }
+
+            public void Dispose()
+            {
+                _owner.CloseRepairWindow(this);
+            }
         }
 
         private sealed class PendingMove

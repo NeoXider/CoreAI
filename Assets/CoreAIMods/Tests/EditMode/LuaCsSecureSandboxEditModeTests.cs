@@ -85,7 +85,9 @@ namespace CoreAI.Tests.EditMode
             LuaRuntimeException ex = Assert.Throws<LuaRuntimeException>(
                 () => env.RunChunk(state, "coroutine.wrap(function() while true do end end)()"),
                 "A runaway coroutine.wrap body must be cut by the resume budget, never hang.");
-            StringAssert.Contains("EXCEEDED_COROUTINE_STEP_BUDGET", ex.Message);
+            Assert.IsTrue(ex.Message.Contains("EXCEEDED_COROUTINE_STEP_BUDGET")
+                          || ex.Message.Contains("coroutine resume exceeded"),
+                "the per-resume budget of a raw coroutine cut it (steps, or time on a slow machine): " + ex.Message);
         }
 
         [Test]

@@ -168,6 +168,7 @@
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/AiLuaPayloadParserEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/AiLuaPayloadParserEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/LuauDownlevelSeamHonestyEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuauDownlevelSeamHonestyEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/LuauDownlevelerEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuauDownlevelerEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/LuauExportLintEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuauExportLintEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/ModFolders/FakeModFolderStore.cs" Link="Assets/CoreAIMods/Tests/EditMode/ModFolders/FakeModFolderStore.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/ModFolders/ModFolderArchitectureFitnessEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/ModFolders/ModFolderArchitectureFitnessEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/ModFolders/ModFolderHeaderEditorEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/ModFolders/ModFolderHeaderEditorEditModeTests.cs" />

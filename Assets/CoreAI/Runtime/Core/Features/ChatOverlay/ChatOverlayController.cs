@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using CoreAI.Ai;
 using CoreAI.Logging;
 using CoreAI.Messaging;
@@ -277,7 +278,8 @@ namespace CoreAI.ChatOverlay
                 Text = request.Text,
                 RoleId = roleId,
                 TraceId = traceId,
-                StreamingOverride = _options.EnableStreaming ? (bool?)null : false
+                StreamingOverride = _options.EnableStreaming ? (bool?)null : false,
+                HistoryMode = request.HistoryMode
             };
 
             try
@@ -754,6 +756,8 @@ namespace CoreAI.ChatOverlay
             private readonly ChatOverlayController _owner;
             private readonly TurnState _turn;
             private readonly ChatOverlayHostTurnRequest _request;
+            private readonly ThinkBlockStreamFilter _think = new();
+            private readonly StringBuilder _answer = new();
             private bool _ended;
 
             public HostTurnObserver(ChatOverlayController owner, TurnState turn, ChatOverlayHostTurnRequest request)
@@ -778,7 +782,23 @@ namespace CoreAI.ChatOverlay
                     return;
                 }
 
+                if (!string.IsNullOrEmpty(chunk.Text))
+                {
+                    KeepAnswer(_think.ProcessChunk(chunk.Text));
+                }
+
                 _turn.OnChunk(_request.ShowAnswer || string.IsNullOrEmpty(chunk.Text) ? chunk : ProgressOnly);
+            }
+
+            private void KeepAnswer(string visible)
+            {
+                int room = ChatOverlayHostTurnResult.MaximumAnswerCharacters - _answer.Length;
+                if (string.IsNullOrEmpty(visible) || room <= 0)
+                {
+                    return;
+                }
+
+                _answer.Append(visible.Length <= room ? visible : visible.Substring(0, room));
             }
 
             public void OnCompleted()
@@ -831,7 +851,9 @@ namespace CoreAI.ChatOverlay
                 }
                 else
                 {
-                    result = new ChatOverlayHostTurnResult(ChatOverlayHostTurnEnd.Completed);
+                    KeepAnswer(_think.Flush());
+                    result = new ChatOverlayHostTurnResult(ChatOverlayHostTurnEnd.Completed, "", LlmErrorCode.None,
+                        _answer.ToString());
                 }
 
                 _owner.EndHostTurn(_turn);

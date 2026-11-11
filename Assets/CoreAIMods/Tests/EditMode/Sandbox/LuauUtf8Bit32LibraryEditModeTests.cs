@@ -8,7 +8,7 @@ namespace CoreAI.Tests.EditMode.Sandbox
 {
     /// <summary>
     /// The Luau <c>utf8</c> and <c>bit32</c> libraries and the rest of the Luau <c>math</c> members (MVP13, RT5).
-    /// <c>utf8</c> reads this VM's strings by the rules of DEV-97: typed text is UTF-16, text built from bytes is
+    /// <c>utf8</c> reads this VM's strings by the rules of DEV-109: typed text is UTF-16, text built from bytes is
     /// UTF-8, and both give the same code points; <c>bit32</c> converts its arguments as Luau's
     /// <c>(unsigned)(long long)</c> cast does. Each behaviour has its negative twin.
     /// </summary>
@@ -67,7 +67,7 @@ namespace CoreAI.Tests.EditMode.Sandbox
             Assert.AreEqual("4|1|1|2", Text("utf8.len('Hé日😀'), utf8.len('\\195\\169'), utf8.len('\\240\\159\\152\\128'), "
                                             + "utf8.len('abc', 2)"));
             Assert.AreEqual("0|3", Text("utf8.len(''), utf8.len('abc', -3)"));
-            Assert.AreEqual("1", Text("utf8.len('\\233')"), "a lone 0xE9 is Latin-1 é, not an invalid byte (DEV-97)");
+            Assert.AreEqual("1", Text("utf8.len('\\233')"), "a lone 0xE9 is Latin-1 é, not an invalid byte (DEV-109)");
             Assert.AreEqual("nil|2", Text("utf8.len('a' .. ('😀'):sub(1, 1))"),
                 "an unpaired surrogate is the one invalid code: nil and its position");
             StringAssert.Contains("(initial position out of string)", Error("utf8.len('abc', 5)"));

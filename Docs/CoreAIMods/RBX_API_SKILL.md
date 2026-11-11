@@ -108,8 +108,11 @@ returns):
   `warn` into the mod log at `Warn`, the clocks (`os.time(t)` reads the table as UTC with `hour`
   defaulting to 12, a non-number field counts as missing and a date before 1970 is `nil`;
   `GetServerTimeNow` follows the server once a client has joined, never goes backwards from then on
-  and stands still while the server's clock does; there is no `os.date` and `DateTime` is not
-  implemented), that a read-only script's `Instance.new` raises the capability error, and that a
+  and stands still while the server's clock does; `os.date`/`os.difftime` are UTC and `DateTime` is not
+  implemented), the Luau standard library (the `table`, `string.split`/`format`, `utf8`, `bit32`, `math`,
+  `coroutine.wrap` and `debug` members, UTF-16 strings for `#` and `utf8` positions, what `table.freeze`
+  does not stop, the per-call caps, the `buffer`/`vector`/`string.pack` stubs, `loadstring`'s answer, and
+  that `goto`, labels and `_ENV` do not exist in Roblox), that a read-only script's `Instance.new` raises the capability error, and that a
   player's mods are unloaded when that player leaves. Its budget rules say that a budget cut cannot
   be caught by `pcall`/`xpcall` (only the resumer of a cut `coroutine.create` coroutine sees it),
   that such a coroutine (and a thread `task.spawn` runs at once) gets at most what its resumer has

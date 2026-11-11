@@ -223,13 +223,18 @@ namespace CoreAI.Tests.EditMode.Npc
         [Test]
         public void Surface_KeepsAGamesOwnPanelSettingsAsTheyAre_NegativeTwin()
         {
+            // WHY a theme of the game's own: the Editor fills a theme-less panel with the project's first runtime
+            // theme when a document uses it, so "still null" would test the Editor, not the surface.
+            ThemeStyleSheet gameTheme = ScriptableObject.CreateInstance<ThemeStyleSheet>();
             PanelSettings own = ScriptableObject.CreateInstance<PanelSettings>();
+            own.themeStyleSheet = gameTheme;
             _created.Add(own);
+            _created.Add(gameTheme);
             NpcSpeechBubbleSurface surface = NpcSpeechBubbleSurface.Create(new CoreAiNpcSettings { PanelSettings = own });
             _created.Add(GameObject.Find(NpcSpeechBubbleSurface.GameObjectName));
 
             Assert.AreSame(own, surface.Panel, "the game's panel is used");
-            Assert.IsNull(own.themeStyleSheet, "and the surface does not restyle it");
+            Assert.AreSame(gameTheme, own.themeStyleSheet, "and the surface does not restyle it");
             surface.Dispose();
         }
 

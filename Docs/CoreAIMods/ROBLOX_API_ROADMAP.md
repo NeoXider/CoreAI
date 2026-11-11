@@ -437,6 +437,16 @@ Conscious deviations (running list — additions require an entry here):
 | DEV-102 | a string stored in a data store must be valid UTF-8, or the write fails | a string with a lone UTF-16 surrogate (the one kind of text with no UTF-8 form) is refused with `104: Can't store a string that is not valid UTF-8 text in DataStore.`; any other string is stored as the characters Lua holds (DEV-13), so a Lua byte string that is not valid UTF-8 is stored and read back unchanged | the VM boundary maps bytes, not codepoints; refusing byte strings would refuse values that round-trip exactly, while a lone surrogate cannot be written to a file the same way on every runtime |
 | DEV-103 | `GetOrderedDataStore`, `ListKeysAsync`, the version calls, `ListDataStoresAsync`, the options objects (`DataStoreSetOptions`, `DataStoreIncrementOptions`, `DataStoreGetOptions`, `DataStoreOptions`), `SetRateLimitForRequestType` and the deprecated `OnUpdate` exist | the stores' extra calls, the options objects and any options argument are loud stubs planned for the rest of MVP16; `SetRateLimitForRequestType` and `OnUpdate` are unsupported (the host sets the budgets; `OnUpdate` is deprecated); `GetRequestBudgetForRequestType` answers 0 for ordered-store and deprecated request types | a single-player leaderboard has one row; tutorial code for coins needs none of them |
 | DEV-104 | the player list always shows (names alone without stats), is clickable, toggles with Tab, orders columns by `IsPrimary`/`Priority` and abbreviates large numbers | it is drawn only while a listed player has a stat, at the top right 56 px down and 14 px in, under every mod screen (sort order -100), ignores the pointer, shows at most 4 columns and 12 rows (then `+N more`), sorts rows by the first stat highest first then by name, ignores `IsPrimary`/`Priority`, and prints numbers in full (invariant culture); `RbxPlayerListOptions` changes the style and the caps | the mirror has no leaderboards page (03_SERVICES_AND_DATA S2.5 is the source); in a solo game a list of one name is noise, and the list must never cover a mod's HUD or the chat |
+| DEV-105 | Terrain is drawn smooth, and a Grass voxel shows grass on every surface | Blocky cells draw a Grass cell as a grass block: grass on top, Ground on the sides under a 3/16-cell grass band, Ground underneath (`TerrainFaceMaterialRules.BlockWorld`, the default; `TerrainFaceMaterialRules.None` restores grass on every face) | A block world must read as earth under turf. A drawing rule only: `ReadVoxels`, raycasts and saved worlds still report Grass; Parts with `Material.Grass` are unchanged |
+| DEV-106 | `table.freeze` makes the table read-only: every write raises "attempt to modify a readonly table" | `table.insert`, `table.remove`, `table.sort`, `table.clear`, `table.move` into it, `rawset` and `setmetatable` raise it; a plain assignment `t.k = v` still writes (`Freeze_DoesNotRefuseAPlainAssignment_Dev106`) | the Lua 5.2 VM has no read-only tables: `__newindex` does not run for an existing key, and a proxy that moved the contents out would hide them from every raw reader (`next`, `#`, the marshaller); checking every assignment would slow every table write |
+| DEV-107 | `gcinfo()` and `collectgarbage("count")` report the Luau heap of the script's VM | they report the managed heap of the whole process, in whole kilobytes | Lua-CSharp allocates on the .NET heap and keeps no heap of its own |
+| DEV-108 | `getfenv(f)` returns the environment of `f` or of a stack level, which `setfenv` can change per function | every function of a script shares one environment, and `getfenv` returns it for no argument, a level that exists or a function; `setfenv` raises `NOT_IMPLEMENTED` (unsupported) | Lua 5.2 binds a function's environment to its `_ENV` upvalue, which a library cannot rebind |
+| DEV-109 | a string is a byte string and `utf8` works on bytes (DEV-13); `utf8.charpattern` is `"[%z\x01-\x7F\xC2-\xF4][\x80-\xBF]*"` | typed text is UTF-16 and text built from bytes is UTF-8: `utf8` reads a code point from either (a valid UTF-8 run of chars 0x80-0xFF, a Latin-1 char, a surrogate pair or a single char; only an unpaired surrogate is invalid), its positions are char positions, `utf8.char` builds UTF-16 text, `charpattern` also admits chars above 0xFF and low surrogates, and `graphemes` uses a short rule set (combining marks, variation selectors, emoji modifiers, ZWJ sequences, flags) without Hangul jamo | the strings the engine and the Hub display are UTF-16; positions must be the ones `string.sub` takes |
+| DEV-110 | `os.date` without `"!"` formats the local time of the machine | it formats UTC, as `os.time` reads a date table as UTC; `%Z` is `UTC`, `%z` is `+0000`, `%c` is the glibc C-locale form | every machine computes the same date, and `os.time(os.date("*t", t))` is `t` |
+| DEV-111 | `debug.info(f, "n")` names a Lua function, and a level counts every call because Luau makes no tail calls | `n` is nil for every Lua function (this VM keeps no function names) and a tail call replaces its caller's level | Lua-CSharp compiles Lua 5.2, which has tail calls and no function names in its prototypes |
+| DEV-112 | a bad argument reads "invalid argument #n to 'f' (...)" | every library function of the sandbox reads "bad argument #n to 'f' (...)", as Lua-CSharp's own do | one wording for the whole library; scripts rarely match on it |
+| DEV-113 | `table.create`, `table.move` and `string.split` build what memory allows | one call builds at most 1,048,576 elements and is refused past it with a `sandbox:` line; `table.create` without a value is never refused (it only reserves room); a library loop is charged the instructions of the Lua loop it replaces | the allocation budget is sampled between instructions, and one call that fills 10^9 slots is one instruction |
+| DEV-114 | `coroutine.wrap`'s function prepends its caller's position to a string error, and `coroutine.close` of a coroutine that died with an error returns `false` and the error | the error value passes unchanged, and `close` returns `true` for every suspended or dead coroutine | the sandbox's guarded resume returns the body's error as it was; Lua-CSharp keeps no error on a dead thread |
 
 ---
 
@@ -1527,14 +1537,27 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   members; `Scripting/LuaCs/LuaCsValueMarshaller.cs`). Script instances and contexts come from MVP4.
   2026-11-11: the Luau math slice of RT5 (`math.noise`, `math.clamp`, `math.round`, `math.sign`,
   `RbxPerlinNoise`), written with P9 and green in Unity EditMode (`LuauMathLibraryEditModeTests`).
+  2026-11-11, the rest of RT5: Luau's `table` (`find`, `clear`, `create`, `clone`, `freeze`/`isfrozen`, `move`,
+  `maxn`, deprecated `getn`/`foreach`/`foreachi`), `unpack`, `string.split`, `string.format` with `%*` and C's
+  numeric output, `utf8` (with Roblox's `graphemes`/`nfcnormalize`/`nfdnormalize`), `bit32` by Luau's rules with
+  `countlz`/`countrz`/`byteswap`, `math.log10/lerp/map/isnan/isinf/isfinite` and constants, `os.date`/`os.difftime`,
+  `coroutine.wrap` over the guarded resume, `isyieldable`, `close`, Luau's `debug`, `newproxy`, `gcinfo`, Roblox's
+  `collectgarbage`/`loadstring`/`getfenv` rules (`Scripting/LuaCs/LuaCsSecureEnvironment.Luau*.cs`, RBX_API.md
+  "The Luau standard library", DEV-106-DEV-114); library loops are charged like the Lua loop they replace and
+  capped per call. `buffer`, `vector` and `string.pack`/`packsize`/`unpack` are loud stubs for MVP14. The
+  downlevel keeps one value for a type assertion on a call or `...` (it kept all, a wrong program) and accepts
+  attribute lists, attributes on function expressions and type functions. The export lint of RT6 and RT7
+  (`LuauDownlevel/LuauExportLint.cs`): codes LX001-LX401, its CoreAI side checked against the real mod environment,
+  service catalog, elevated gates and header keys, its Roblox side generated from the mirror; it flags the whole
+  seeded list (`LuauExportLintEditModeTests`, `LuauExportLintSurfaceEditModeTests`).
 - **To do**:
   - A `.model` package: a subtree of the world codec, with id remapping on insert and scripts carried as
     instances.
   - An InsertService analog and a template store (local first, then shareable).
   - Place templates: Baseplate, Obby, Tycoon-lite, Arena.
   - AI tools `list_templates`/`insert_template`/`new_place_from_template`; a Studio "Toolbox" panel.
-  - **Parity prerequisites**: the Luau standard-library extensions (RT5); a "Luau-only" export lint that
-    refuses `goto`, `_ENV` and CoreAI-only APIs (RT6, RT7); a round-trip decision per DEV item (map
+  - **Parity prerequisites**: `buffer`, `vector` and `string.pack` (the rest of RT5, loud stubs today); the
+    exporter that runs the export lint (RT6, RT7, MVP14); a round-trip decision per DEV item (map
     DEV-16 back to `math.huge` on export; DEV-7 reads as last-known values or stays documented; RT8); a
     Roblox-save mode that drops non-archivable instances (RT10); `Weld`/`WeldConstraint`/`Attachment`/
     `SpawnLocation`, the minimum the templates need (RT9); the coercion residue after RT4 (the `tostring`
@@ -1593,9 +1616,9 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   | RT2 | No `require`/`ModuleScript` (the sandbox removes `require`) | import | MVP4 |
   | RT3 | No `RunContext` or declared client/server split | both | MVP4 |
   | RT4 | Coercion differed from Roblox (numbers for strings, numeric strings for numbers, Enum Name/Value); one shared rule now, see the open items in `TODO.md` and DEV-17 | import | MVP13 (done: RBX-COERCE, `c0f6fdbc`) |
-  | RT5 | Missing Luau stdlib extensions (`string.split`, `table.find`, `table.clear`, `table.freeze`, `table.create`, `math.clamp`, `math.round`, `math.sign`, `math.noise`, `utf8`, `buffer`) | import | MVP13 |
-  | RT6 | Lua 5.2-only syntax (`goto`, labels, `_ENV`) is accepted and would fail in Roblox | export | MVP13 (lint), MVP14 (export) |
-  | RT7 | CoreAI-only surface (`hooks_*`, `report`, `coreai_world_*`, `unity_*`, `AIService`, PluginSecurity members reachable under DEV-14) | export | MVP13 (lint), MVP14 (export) |
+  | RT5 | Missing Luau stdlib extensions (`string.split`, `table.find`, `table.clear`, `table.freeze`, `table.create`, `math.clamp`, `math.round`, `math.sign`, `math.noise`, `utf8`, `buffer`) | import | MVP13 (done 2026-11-11 but `buffer`, `vector`, `string.pack`/`packsize`/`unpack`: loud stubs for MVP14; `LuauLibraryInventoryEditModeTests` pins every member) |
+  | RT6 | Lua 5.2-only syntax (`goto`, labels, `_ENV`) is accepted and would fail in Roblox | export | MVP13 (lint done 2026-11-11: LX101-LX104, hex float literals too), MVP14 (export) |
+  | RT7 | CoreAI-only surface (`hooks_*`, `report`, `coreai_world_*`, `unity_*`, `AIService`, PluginSecurity members reachable under DEV-14) | export | MVP13 (lint done 2026-11-11: LX201-LX401, derived from the mod environment, the service catalog, the `RequireUnrestricted` gates and the header parser), MVP14 (export) |
   | RT8 | DEV deviations that change observable behaviour (DEV-7, DEV-16, DEV-13, DEV-10/11, DEV-2, DEV-15, DEV-17) | both | MVP13 (a decision per DEV item) |
   | RT9 | Class coverage: welds, constraints, `Attachment`, `MeshPart`, `SpawnLocation`, `Seat`, `Decal`/`Texture`, lights, `Tool`, `Team`, `BindableEvent`, `Terrain` | both | MVP13 (the template minimum), later rungs and backlog |
   | RT10 | Package semantics: the world package keeps `Archivable = false` instances; scripted gravity is not saved; `Lighting` properties are backlog | export | MVP13 (Roblox-save mode) |
@@ -4572,8 +4595,8 @@ Notes:
   points at `os.time()` and `GetServerTimeNow()`; `os.time(t)` reads the date table as UTC (Luau's
   choice), `hour` defaulting to 12, out-of-range fields carrying over, a missing `year`/`month`/`day`
   `BAD_ARGUMENT` (M2-22); as in Luau, a field that is not a number counts as missing and a date
-  before 1970 returns `nil` (A3-06). The sandbox has no `os.date`, so no round trip through it is
-  promised. `typeof` answers Roblox type names and `warn` writes to the mod's log at
+  before 1970 returns `nil` (A3-06). Since MVP13 `os.date` is UTC too, so `os.time(os.date("*t", t))` is `t`
+  (DEV-110). `typeof` answers Roblox type names and `warn` writes to the mod's log at
   `Warn` (M1-06); `BrickColor`, `NumberSequence`, `ColorSequence`, `NumberRange`, `Ray`,
   `Region3`, `Rect`, `PhysicalProperties`, `OverlapParams` and `shared` are loud stubs too.
 - `RunService`: events per §5.2.3; `IsServer()`, `IsClient()`, `IsRunning()` — answered from

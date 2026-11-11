@@ -24,7 +24,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         /// SHA-256 of the Terrain package entry (<c>TerrainVoxelCodec</c>, canonical chunk order) after seed 1337
         /// streamed the 21 columns of view radius 2 around the origin. A change here is a change of the generated world.
         /// </summary>
-        private const string GoldenSeed1337Radius2 = "2201b8714f9dc370b6e6d9a87c526abb74503260416543f81fbfde9213bb91e8";
+        private const string GoldenSeed1337Radius2 = "14cbe894943d06034b10930d5a7ddca9bb7e11255b54d13a2a466d64335b05e0";
 
         private SynchronizationContext _savedContext;
 
@@ -153,6 +153,228 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
             Dictionary<byte, int> floor = CountMaterials(world, -48, 47, -16, -16, -48, 47);
             Assert.AreEqual(RadiusTwoColumns * 256, Count(floor, "Basalt"), "no cave cuts through the bedrock");
             world.AssertHealthy(Mod);
+        }
+
+        /// <summary>The radius-2 world of seed 1337, streamed to the end, and its spawn cell.</summary>
+        private static BlockWorldTestWorld RadiusTwoWorld(out int spawnX, out int spawnZ)
+        {
+            BlockWorldTestWorld world = new();
+            world.SetAttribute("BlockWorldViewRadius", 2d);
+            world.Load(Mod);
+            world.FrameUntil(() => world.Number("BlockWorldColumns") >= RadiusTwoColumns, 4000, "the radius-2 world");
+            RbxVector3 spawn = world.Vector("BlockWorldSpawn");
+            spawnX = (int)Math.Floor(spawn.X / 4f);
+            spawnZ = (int)Math.Floor(spawn.Z / 4f);
+            return world;
+        }
+
+        /// <summary>The highest cell of the pillar that is ground (not air, water, trunk or leaves), or -16.</summary>
+        private static int TopGround(BlockWorldTestWorld world, int x, int z)
+        {
+            byte trunk = BlockWorldTestWorld.Slot("WoodPlanks");
+            byte leaves = BlockWorldTestWorld.Slot("LeafyGrass");
+            for (int y = 15; y > -16; y--)
+            {
+                byte material = world.Material(x, y, z);
+                if (material != TerrainMaterials.Air && material != TerrainMaterials.Water && material != trunk
+                    && material != leaves)
+                {
+                    return y;
+                }
+            }
+
+            return -16;
+        }
+
+        [Test]
+        public void P6_World_HasRelief_ASnowyPeakNearTheSpawn_AndEveryPillarInsideItsRows()
+        {
+            using BlockWorldTestWorld world = RadiusTwoWorld(out int spawnX, out int spawnZ);
+            byte snow = BlockWorldTestWorld.Slot("Snow");
+            int highest = -16;
+            int lowest = 16;
+            int tallestAnything = -16;
+            int snowyPeaks = 0;
+            int nearestPeak = int.MaxValue;
+            for (int x = -32; x <= 47; x++)
+            {
+                for (int z = -32; z <= 47; z++)
+                {
+                    int top = TopGround(world, x, z);
+                    highest = Math.Max(highest, top);
+                    lowest = Math.Min(lowest, top);
+                    tallestAnything = Math.Max(tallestAnything, TopSolid(world, x, z));
+                    if (top >= 12 && world.Material(x, top, z) == snow)
+                    {
+                        snowyPeaks++;
+                        nearestPeak = Math.Min(nearestPeak, Math.Max(Math.Abs(x - spawnX), Math.Abs(z - spawnZ)));
+                    }
+                }
+            }
+
+            int spawnTop = TopGround(world, spawnX, spawnZ);
+            TestContext.WriteLine("seed 1337, radius 2: ground from row " + lowest + " to row " + highest + ", the tallest "
+                                  + "cell (a crown) at row " + tallestAnything + "; " + snowyPeaks + " snowy pillars, the "
+                                  + "nearest " + nearestPeak + " cells from the spawn (spawn ground at row " + spawnTop + ")");
+            Assert.LessOrEqual(highest, 13, "a peak keeps three rows above it inside the column");
+            Assert.LessOrEqual(tallestAnything, 15, "nothing grows out of the column's rows");
+            Assert.GreaterOrEqual(lowest, -12, "the deepest sea floor stays four rows over the bedrock");
+            Assert.Greater(snowyPeaks, 0, "the first view's range has snow on its tops");
+            Assert.LessOrEqual(nearestPeak, 40, "a peak rises within forty cells of the spawn");
+            Assert.GreaterOrEqual(highest - spawnTop, 8, "eight rows or more above the spawn: a mountain, not a terrace");
+            world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_World_TheLowlandIsGrass_TheShoreSand_AndOnlyHighOrSteepGroundIsBare_NegativeTwin()
+        {
+            using BlockWorldTestWorld world = RadiusTwoWorld(out _, out _);
+            byte grass = BlockWorldTestWorld.Slot("Grass");
+            byte sand = BlockWorldTestWorld.Slot("Sand");
+            byte rock = BlockWorldTestWorld.Slot("Rock");
+            byte snow = BlockWorldTestWorld.Slot("Snow");
+            int lowlandGrass = 0;
+            int lowlandBare = 0;
+            int shoreSand = 0;
+            for (int x = -32; x <= 47; x++)
+            {
+                for (int z = -32; z <= 47; z++)
+                {
+                    int top = TopGround(world, x, z);
+                    byte material = world.Material(x, top, z);
+                    if (top >= 1 && top <= 4)
+                    {
+                        lowlandGrass += material == grass ? 1 : 0;
+                        lowlandBare += material == snow ? 1 : 0;
+                    }
+                    else if (top == -1)
+                    {
+                        shoreSand += material == sand ? 1 : 0;
+                    }
+
+                    if (top <= 4 && material == rock)
+                    {
+                        int lowestNeighbour = Math.Min(Math.Min(TopGround(world, x - 1, z), TopGround(world, x + 1, z)),
+                            Math.Min(TopGround(world, x, z - 1), TopGround(world, x, z + 1)));
+                        Assert.GreaterOrEqual(top - lowestNeighbour, 3, "low rock only on a face (" + x + ", " + z + ")");
+                    }
+                }
+            }
+
+            Assert.Greater(lowlandGrass, 500, "the lowland is grass");
+            Assert.AreEqual(0, lowlandBare, "and never snow");
+            Assert.Greater(shoreSand, 0, "the shore is sand");
+            world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_World_GrowsAWoodNearTheSpawn_AndSingleTrees_TrunksApart_NoneAtTheSpawn()
+        {
+            using BlockWorldTestWorld world = RadiusTwoWorld(out int spawnX, out int spawnZ);
+            byte trunk = BlockWorldTestWorld.Slot("WoodPlanks");
+            List<(int X, int Z)> trunks = new();
+            for (int x = -32; x <= 47; x++)
+            {
+                for (int z = -32; z <= 47; z++)
+                {
+                    int ground = TopGround(world, x, z);
+                    if (ground < 15 && world.Material(x, ground + 1, z) == trunk)
+                    {
+                        trunks.Add((x, z));
+                    }
+                }
+            }
+
+            int nearSpawn = 0;
+            int closest = int.MaxValue;
+            for (int index = 0; index < trunks.Count; index++)
+            {
+                (int x, int z) = trunks[index];
+                int fromSpawn = Math.Max(Math.Abs(x - spawnX), Math.Abs(z - spawnZ));
+                nearSpawn += fromSpawn <= 24 ? 1 : 0;
+                Assert.Greater(fromSpawn, 2, "no tree stands on the spawn");
+                for (int other = index + 1; other < trunks.Count; other++)
+                {
+                    closest = Math.Min(closest, Math.Max(Math.Abs(x - trunks[other].X), Math.Abs(z - trunks[other].Z)));
+                }
+            }
+
+            TestContext.WriteLine("seed 1337, radius 2: " + trunks.Count + " trees, " + nearSpawn
+                                  + " within 24 cells of the spawn, trunks at least " + closest + " cells apart");
+            Assert.Greater(trunks.Count, 80, "woods and single trees: far more than the three a column used to grow");
+            Assert.GreaterOrEqual(nearSpawn, 12, "a wood within sight of the spawn");
+            Assert.GreaterOrEqual(closest, 2, "no two trunks side by side");
+            world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_World_ACaveMouthOpensOntoAHillsideNearTheSpawn_NoneInTheSpawnColumn()
+        {
+            using BlockWorldTestWorld world = RadiusTwoWorld(out int spawnX, out int spawnZ);
+            int spawnColumnX = (int)Math.Floor(spawnX / 16d);
+            int spawnColumnZ = (int)Math.Floor(spawnZ / 16d);
+            int mouths = 0;
+            int inSpawnColumn = 0;
+            int nearest = int.MaxValue;
+            for (int x = -31; x <= 46; x++)
+            {
+                for (int z = -31; z <= 46; z++)
+                {
+                    if (!IsHillsideMouth(world, x, z, out int _))
+                    {
+                        continue;
+                    }
+
+                    mouths++;
+                    nearest = Math.Min(nearest, Math.Max(Math.Abs(x - spawnX), Math.Abs(z - spawnZ)));
+                    if ((int)Math.Floor(x / 16d) == spawnColumnX && (int)Math.Floor(z / 16d) == spawnColumnZ)
+                    {
+                        inSpawnColumn++;
+                    }
+                }
+            }
+
+            TestContext.WriteLine("seed 1337, radius 2: " + mouths + " hillside mouth cells, the nearest " + nearest
+                                  + " cells from the spawn");
+            Assert.Greater(mouths, 0, "a cave opens onto a hillside, so a player sees a way in");
+            Assert.LessOrEqual(nearest, 48, "near the spawn");
+            Assert.AreEqual(0, inSpawnColumn, "the spawn's column keeps whole ground");
+            world.AssertHealthy(Mod);
+        }
+
+        /// <summary>
+        /// A cell two high and open to one side under a roof of rock: air at rows y and y + 1, ground at y - 1 and
+        /// at y + 2 with the hill rising at least one row more above it, and the cell beside it open to the sky.
+        /// </summary>
+        private static bool IsHillsideMouth(BlockWorldTestWorld world, int x, int z, out int floor)
+        {
+            floor = 0;
+            int top = TopGround(world, x, z);
+            for (int y = top - 2; y >= top - 6 && y > -15; y--)
+            {
+                if (!Open(world, x, y, z) || !Open(world, x, y + 1, z) || Open(world, x, y + 2, z) || Open(world, x, y - 1, z)
+                    || top < y + 3)
+                {
+                    continue;
+                }
+
+                foreach ((int dx, int dz) in new[] { (1, 0), (-1, 0), (0, 1), (0, -1) })
+                {
+                    if (Open(world, x + dx, y, z + dz) && Open(world, x + dx, y + 1, z + dz)
+                        && TopGround(world, x + dx, z + dz) < y)
+                    {
+                        floor = y;
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static bool Open(BlockWorldTestWorld world, int x, int y, int z)
+        {
+            return world.Material(x, y, z) == TerrainMaterials.Air;
         }
 
         /// <summary>The highest solid, non-water cell of the pillar, or -16.</summary>

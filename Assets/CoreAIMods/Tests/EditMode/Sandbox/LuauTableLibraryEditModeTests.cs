@@ -226,7 +226,7 @@ namespace CoreAI.Tests.EditMode.Sandbox
         }
 
         [Test]
-        public void Freeze_DoesNotRefuseAPlainAssignment_Dev94()
+        public void Freeze_DoesNotRefuseAPlainAssignment_Dev106()
         {
             Assert.AreEqual("2|true", Text("(function() local t = table.freeze({a = 1}) t.a = 2 "
                                            + "return t.a, table.isfrozen(t) end)()"),

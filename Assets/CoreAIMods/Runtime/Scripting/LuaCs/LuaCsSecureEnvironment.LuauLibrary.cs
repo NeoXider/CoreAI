@@ -415,7 +415,7 @@ namespace CoreAI.Sandbox.LuaCs
         /// <summary>
         /// Luau <c>table.freeze(t)</c>: marks the table read-only and returns it. Writes through <c>table.insert</c>,
         /// <c>table.remove</c>, <c>table.sort</c>, <c>table.clear</c>, <c>table.move</c>, <c>rawset</c> and
-        /// <c>setmetatable</c> then raise <see cref="ReadonlyTableMessage"/>; a plain assignment does not (DEV-94).
+        /// <c>setmetatable</c> then raise <see cref="ReadonlyTableMessage"/>; a plain assignment does not (DEV-106).
         /// </summary>
         private static ValueTask<int> LuauTableFreeze(LuaFunctionExecutionContext ctx, CancellationToken ct)
         {
@@ -677,7 +677,7 @@ namespace CoreAI.Sandbox.LuaCs
 
         /// <summary>
         /// The managed heap in whole kilobytes: <c>gcinfo()</c> and <c>collectgarbage("count")</c>. The process
-        /// heap, not one VM's: Lua-CSharp keeps no heap of its own (DEV-95).
+        /// heap, not one VM's: Lua-CSharp keeps no heap of its own (DEV-107).
         /// </summary>
         private static double HeapKilobytes()
         {
@@ -697,7 +697,7 @@ namespace CoreAI.Sandbox.LuaCs
 
         /// <summary>
         /// <c>getfenv(f)</c>: the script's environment for no argument, a stack level that exists, or a function;
-        /// every function of a script shares it here (DEV-96).
+        /// every function of a script shares it here (DEV-108).
         /// </summary>
         private static ValueTask<int> LuauGetFEnv(LuaFunctionExecutionContext ctx, CancellationToken ct)
         {

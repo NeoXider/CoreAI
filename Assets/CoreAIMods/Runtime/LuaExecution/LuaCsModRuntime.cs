@@ -3832,15 +3832,47 @@ namespace CoreAI.Ai.LuaCs
                 return;
             }
 
+            EnterQuarantine(mod, budgetTrips, null);
+        }
+
+        /// <summary>
+        /// Pauses mod <paramref name="id"/> exactly as its error streak does (§5a quarantine): its handlers, timers,
+        /// queued events and threads stop and its logic-slot overrides revert, while the mod stays loaded with its
+        /// source and its instances, and a successful reload clears it. Its stored package is left as it is, so the
+        /// next start runs it again. The host's self-repair loop calls it for a failing mod it leaves alone. False when
+        /// the mod is not loaded or already quarantined. Call it from the frame pump, not from inside a mod's handler.
+        /// </summary>
+        /// <param name="caller">A trusted host actor with unrestricted authority.</param>
+        /// <param name="id">The mod.</param>
+        /// <param name="reason">Why, in a few words, for the mod log.</param>
+        public bool TryQuarantine(ActorContext caller, string id, string reason)
+        {
+            DemandHostAdmin(caller, "quarantine");
+            string modId = Normalize(id);
+            Mod mod;
+            lock (_gate)
+            {
+                if (!_mods.TryGetValue(modId, out mod) || mod.Quarantined || mod.Removed)
+                {
+                    return false;
+                }
+            }
+
+            return EnterQuarantine(mod, false, string.IsNullOrWhiteSpace(reason) ? "paused by the host" : reason.Trim());
+        }
+
+        /// <param name="hostReason">Null for the streak's own quarantine; the host's reason for <see cref="TryQuarantine"/>.</param>
+        private bool EnterQuarantine(Mod mod, bool budgetTrips, string hostReason)
+        {
             lock (_gate)
             {
                 // WHY: `mod` comes from the tick snapshot and may be STALE: a repair's ReloadMod can land
                 // mid-tick (e.g. from a ModHandlerErrored subscriber) and swap the registry entry. Only
                 // the still-live instance may be quarantined — quarantining by id from the old object's
                 // error streak would suspend the freshly repaired mod.
-                if (!_mods.TryGetValue(mod.Id, out Mod live) || !ReferenceEquals(live, mod))
+                if (!_mods.TryGetValue(mod.Id, out Mod live) || !ReferenceEquals(live, mod) || mod.Quarantined)
                 {
-                    return;
+                    return false;
                 }
 
                 mod.Quarantined = true;
@@ -3852,7 +3884,15 @@ namespace CoreAI.Ai.LuaCs
                 PublishSubscriptionSnapshotLocked();
             }
 
-            if (budgetTrips)
+            if (hostReason != null)
+            {
+                _log?.Info(
+                    $"[LuaCsModRuntime] Mod '{mod.Id}' paused by the host ({hostReason}): dispatch suspended, mod " +
+                    "kept loaded with its instances; reload it to clear the quarantine.");
+                AppendLog(mod.Id, LuaLogLevel.Warn,
+                    $"mod paused by the host ({hostReason}); dispatch suspended until reload.");
+            }
+            else if (budgetTrips)
             {
                 _log?.Warn(
                     $"[LuaCsModRuntime] Mod '{mod.Id}' quarantined after {mod.BudgetTripStreak} budget trips in a row " +
@@ -3898,6 +3938,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             RaiseModQuarantined(mod.Id, mod.ErrorCount);
+            return true;
         }
 
         /// <summary>

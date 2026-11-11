@@ -11,7 +11,7 @@ namespace CoreAI.Sandbox.LuaCs
     /// <c>os.date</c> and <c>os.difftime</c> for the sandbox's <c>os</c> table, which the Rbx bindings build
     /// (<c>os.time</c>, <c>os.clock</c>). Dates are UTC with or without <c>"!"</c>, as the sandbox's
     /// <c>os.time</c> reads a date table as UTC, so <c>os.time(os.date("*t", t)) == t</c> on every machine
-    /// (DEV-98); names and <c>%c</c>, <c>%x</c>, <c>%X</c> follow the C locale of a Linux server.
+    /// (DEV-110); names and <c>%c</c>, <c>%x</c>, <c>%X</c> follow the C locale of a Linux server.
     /// </summary>
     public sealed partial class LuaCsSecureEnvironment
     {

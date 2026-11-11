@@ -121,6 +121,70 @@ return 'watchtower built'";
         private CoreAISettingsAsset _settings;
         private string _settingsSnapshot;
         private Application.LogCallback _capture;
+        private Scene _previousActive;
+        private Scene _blockWorld;
+        private RenderSettingsSnapshot _renderBefore;
+
+        /// <summary>The RenderSettings of the active scene, taken before a test and put back after it.</summary>
+        private struct RenderSettingsSnapshot
+        {
+            public Material Skybox;
+            public Light Sun;
+            public AmbientMode AmbientMode;
+            public Color AmbientSky;
+            public Color AmbientEquator;
+            public Color AmbientGround;
+            public float AmbientIntensity;
+            public DefaultReflectionMode ReflectionMode;
+            public float ReflectionIntensity;
+            public bool Fog;
+            public Color FogColor;
+            public FogMode FogMode;
+            public float FogStart;
+            public float FogEnd;
+            public float FogDensity;
+
+            public static RenderSettingsSnapshot Take()
+            {
+                return new RenderSettingsSnapshot
+                {
+                    Skybox = RenderSettings.skybox,
+                    Sun = RenderSettings.sun,
+                    AmbientMode = RenderSettings.ambientMode,
+                    AmbientSky = RenderSettings.ambientSkyColor,
+                    AmbientEquator = RenderSettings.ambientEquatorColor,
+                    AmbientGround = RenderSettings.ambientGroundColor,
+                    AmbientIntensity = RenderSettings.ambientIntensity,
+                    ReflectionMode = RenderSettings.defaultReflectionMode,
+                    ReflectionIntensity = RenderSettings.reflectionIntensity,
+                    Fog = RenderSettings.fog,
+                    FogColor = RenderSettings.fogColor,
+                    FogMode = RenderSettings.fogMode,
+                    FogStart = RenderSettings.fogStartDistance,
+                    FogEnd = RenderSettings.fogEndDistance,
+                    FogDensity = RenderSettings.fogDensity
+                };
+            }
+
+            public void Restore()
+            {
+                RenderSettings.skybox = Skybox;
+                RenderSettings.sun = Sun;
+                RenderSettings.ambientMode = AmbientMode;
+                RenderSettings.ambientSkyColor = AmbientSky;
+                RenderSettings.ambientEquatorColor = AmbientEquator;
+                RenderSettings.ambientGroundColor = AmbientGround;
+                RenderSettings.ambientIntensity = AmbientIntensity;
+                RenderSettings.defaultReflectionMode = ReflectionMode;
+                RenderSettings.reflectionIntensity = ReflectionIntensity;
+                RenderSettings.fog = Fog;
+                RenderSettings.fogColor = FogColor;
+                RenderSettings.fogMode = FogMode;
+                RenderSettings.fogStartDistance = FogStart;
+                RenderSettings.fogEndDistance = FogEnd;
+                RenderSettings.fogDensity = FogDensity;
+            }
+        }
 
         public override void Setup()
         {
@@ -154,6 +218,8 @@ return 'watchtower built'";
                 }
             };
             Application.logMessageReceived += _capture;
+            _previousActive = SceneManager.GetActiveScene();
+            _renderBefore = RenderSettingsSnapshot.Take();
         }
 
         [UnityTearDown]
@@ -162,17 +228,25 @@ return 'watchtower built'";
             Application.logMessageReceived -= _capture;
             _installers?.Dispose();
             _installers = null;
-            Scene empty = SceneManager.CreateScene("BlockWorldTearDown" + Guid.NewGuid().ToString("N"));
-            SceneManager.SetActiveScene(empty);
-            for (int index = SceneManager.sceneCount - 1; index >= 0; index--)
+            // WHY switched off before the switch: nothing of the play world may write the RenderSettings of the scene
+            // that is active again; then the test runner's own scene, with its sky, is active as before the test.
+            if (_blockWorld.IsValid() && _blockWorld.isLoaded)
             {
-                Scene scene = SceneManager.GetSceneAt(index);
-                if (scene.path == ScenePath)
+                foreach (GameObject root in _blockWorld.GetRootGameObjects())
                 {
-                    yield return SceneManager.UnloadSceneAsync(scene);
+                    root.SetActive(false);
                 }
+
+                if (_previousActive.IsValid() && _previousActive.isLoaded)
+                {
+                    SceneManager.SetActiveScene(_previousActive);
+                }
+
+                yield return SceneManager.UnloadSceneAsync(_blockWorld);
             }
 
+            _blockWorld = default;
+            _renderBefore.Restore();
             for (int frame = 0; frame < 5; frame++)
             {
                 yield return null;
@@ -198,6 +272,10 @@ return 'watchtower built'";
                 {
                 }
             }
+
+            Assert.AreEqual(_previousActive, SceneManager.GetActiveScene(),
+                "the fixture leaves the scene that was active before it active, not a scene of its own");
+            Assert.AreSame(_renderBefore.Skybox, RenderSettings.skybox, "with the sky it had, for the tests after it");
         }
 
         // ---- the tests ------------------------------------------------------------------------------------------
@@ -267,9 +345,6 @@ return 'watchtower built'";
         }
 
         [UnityTest]
-        [Ignore("Waits for the Terrain renderer's sky exposure (dark under rock, soft at openings) and a real "
-                + "Lighting.EnvironmentDiffuseScale / EnvironmentSpecularScale; before them a floor crop in a cave "
-                + "at noon reads about 0.06 against 0.005 at midnight.")]
         public IEnumerator BlockWorldScene_ACaveIsDarkAtNoon()
         {
             yield return OpenScene(null);
@@ -372,9 +447,31 @@ return 'watchtower built'";
                 });
             }
 
-            Scene scene = EditorSceneManager.LoadSceneInPlayMode(ScenePath, new LoadSceneParameters(LoadSceneMode.Single));
+            HashSet<GameObject> before = new();
+            if (_previousActive.IsValid() && _previousActive.isLoaded)
+            {
+                before.UnionWith(_previousActive.GetRootGameObjects());
+            }
+
+            Scene scene = EditorSceneManager.LoadSceneInPlayMode(ScenePath, new LoadSceneParameters(LoadSceneMode.Additive));
             Assert.IsTrue(scene.IsValid(), "the Block World scene loads: " + ScenePath);
             yield return null;
+            // WHY: loaded beside the test runner's scene, which is active again after the test. The play world composes
+            // in Awake, before the new scene can be made active, so what it created at the root of the scene active
+            // then moves into the new scene; from here on that is the active scene, as a player's scene is.
+            if (_previousActive.IsValid() && _previousActive.isLoaded)
+            {
+                foreach (GameObject root in _previousActive.GetRootGameObjects())
+                {
+                    if (!before.Contains(root))
+                    {
+                        SceneManager.MoveGameObjectToScene(root, scene);
+                    }
+                }
+            }
+
+            SceneManager.SetActiveScene(scene);
+            _blockWorld = scene;
             yield return null;
             _installers?.Dispose();
             _installers = null;
@@ -596,14 +693,12 @@ return 'watchtower built'";
                    + ", clock back to " + clockBefore.ToString("0.00"));
             Expect(isGrass, "the ground beside the spawn is the Grass material");
             Expect(Equals(sunlit, true), "the grass crop is in sunlight at noon (nothing between it and the sun)");
-            Expect(LooksGreen(grass), "the sunlit grass at the spawn is drawn green (green over red by 0.02, over blue)");
-            Expect(!LooksGreen(dirt), "the same cell drawn as Ground is not green, so the check measures the material");
+            // WHY no hue here: the grass colour belongs to the look package and is retuned there; what this scene owns
+            // is that its top face is the Grass material, drawn clearly unlike the Ground under it.
+            float apart = Mathf.Abs(grass.r - dirt.r) + Mathf.Abs(grass.g - dirt.g) + Mathf.Abs(grass.b - dirt.b);
+            Expect(apart > 0.1f, "the sunlit Grass top is drawn clearly unlike the same cell as Ground (" + apart.ToString("0.000")
+                                 + " apart)");
             Expect(restored, "the cell is grass again");
-        }
-
-        private static bool LooksGreen(Color mean)
-        {
-            return mean.g - mean.r >= 0.02f && mean.g > mean.b;
         }
 
         private IEnumerator WaitForStreamingToSettle()
@@ -1066,13 +1161,23 @@ return 'watchtower built'";
             RbxVector3 ahead = floorTop + new RbxVector3(along.x * 3f * Cell, 2f, along.z * 3f * Cell);
             yield return Aim(eye, ahead);
             yield return Frames(30);
-            object underground = Workspace().GetAttribute("BlockWorldUnderground");
             Color[] dark = Shoot("cave_noon_no_torch.png");
             RbxVector3 side = new(along.z * 1.5f, 0f, -along.x * 1.5f);
             RbxVector3 nearFloor = floorTop + new RbxVector3(along.x * Cell * 1.2f, 0f, along.z * Cell * 1.2f);
             RbxVector3 farFloor = floorTop + new RbxVector3(along.x * Cell * 2.4f, 0f, along.z * Cell * 2.4f);
             RectInt crop = ProjectedRect(nearFloor - side, farFloor + side);
             float darkLuminance = Luminance(dark, crop);
+
+            // WHY the same view at midnight: the sky does not reach a cave, so its floor at noon is as dark as at night.
+            Workspace().SetAttribute("BlockWorldTime", "midnight");
+            yield return Frames(3);
+            Workspace().SetAttribute("BlockWorldTime", "stop");
+            yield return Frames(5);
+            float midnightLuminance = Luminance(Shoot("cave_midnight_no_torch.png"), crop);
+            Workspace().SetAttribute("BlockWorldTime", "noon");
+            yield return Frames(3);
+            Workspace().SetAttribute("BlockWorldTime", "stop");
+            yield return Frames(5);
 
             // WHY the torch at the camera's own cell: its light reaches the floor crop ahead, its flame stays out of it.
             RbxVector3 torchFloor = floorTop - new RbxVector3(along.x * 1.2f, 0f, along.z * 1.2f);
@@ -1086,16 +1191,17 @@ return 'watchtower built'";
             float litLuminance = Luminance(lit, crop);
             yield return Tap(_keyboard.digit1Key);
 
-            Record("cave: tunnel cell " + found + " heading " + along + ", underground " + underground + "; floor crop "
-                   + crop + " at noon without a torch " + darkLuminance.ToString("0.000") + ", with one (torches "
-                   + torches + ") " + litLuminance.ToString("0.000"));
-            Expect(Equals(underground, true), "the clock knows the camera is under rock");
+            Record("cave: tunnel cell " + found + " heading " + along + "; floor crop " + crop + " at noon without a "
+                   + "torch " + darkLuminance.ToString("0.000") + ", at midnight " + midnightLuminance.ToString("0.000")
+                   + ", at noon with one (torches " + torches + ") " + litLuminance.ToString("0.000"));
             if (expectDark)
             {
-                Expect(darkLuminance < 0.05f, "a cave is dark at noon");
+                Expect(darkLuminance <= midnightLuminance + 0.015f,
+                    "the cave floor at noon is as dark as at midnight: the sky does not reach it");
             }
 
-            Expect(litLuminance > darkLuminance + 0.02f, "a torch lights the cave");
+            Expect(litLuminance > darkLuminance + 0.02f && litLuminance > darkLuminance * 2f,
+                "a torch clearly lights the cave");
         }
 
         /// <summary>

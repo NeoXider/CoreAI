@@ -9,8 +9,8 @@ requires no edits retains the original string instance; generic-for loops are no
 
 - **Domain (this assembly)** — `CoreAI.LuauDownlevel.asmdef`, `noEngineReferences: true`,
   `autoReferenced: false`, references: none. A pure text transform: no `UnityEngine`, no `Lua`
-  VM. `LuauDownleveler.Process` is the only public entry point; it never throws (malformed input is
-  returned verbatim with an Error diagnostic).
+  VM. `LuauDownleveler.Process` and `LuauExportLint.Check` are the public entry points; neither throws
+  (malformed input is returned verbatim with an Error diagnostic, or reported as `LX001`).
 - **Consumers** — `CoreAI.Mods` references this assembly. It is wired into every runtime Lua compile
   path through `LuauSourceGate.ToLua52(source, chunkName)`, which runs `Process` before the Lua 5.2
   VM compiles the chunk: mod load/reload (`LuaCsModRuntime.BuildMod`), the one-shot `execute_lua`
@@ -101,3 +101,29 @@ replace the captured function. This Domain assembly never depends on a VM implem
   that wrap an oversized accumulator do not define this module's accepted overflow behavior.
 - Raw multiline backtick text remains unsupported; escaped newline/whitespace handling does not
   claim full Luau string or language coverage.
+- **Type assertions keep one value** (MVP13): `f() :: T` and `... :: T` are one value in Luau, so the
+  assertion is replaced by parentheses around the call or the varargs; an assertion on any other
+  expression is only deleted.
+- **Attributes and type functions** (MVP13): `@name` and bracketed lists such as `@[deprecated {...}]` are
+  deleted in front of a function statement and of a function expression; `type function` and
+  `export type function` declarations run only in Luau's type checker and are deleted whole, newlines
+  kept.
+
+## The export lint
+
+`LuauExportLint.Check(source[, surface])` (MVP13, RT6 and RT7) reads a script as written and lists, with
+line and column, every construct Roblox does not accept or does not have, each under a stable code
+(`LX001` parse error; `LX101`-`LX104` Lua 5.2 syntax: `goto`, labels, `_ENV`, hexadecimal float literals;
+`LX201`/`LX202` CoreAI globals and globals neither Roblox nor the script defines; `LX203` members a Luau
+library does not have; `LX301`-`LX303` CoreAI services, unknown services and DEV-14 elevated members; `LX401`
+the `@coreai` mod header). It parses with this assembly's parser through `ILuauSyntaxObserver` (the parser
+reports scopes, declarations, names, members, method calls, `goto` and labels; with no observer it reports
+nothing), so it reads exactly the Luau CoreAI runs and resolves locals and script-defined globals by scope.
+
+`LuauExportLintSurface` holds the two sides. The Roblox side, `LuauRobloxSurfaceData`, is generated from the
+offline mirror (globals, library members, datatypes, the API dump's services); the CoreAI side is the default
+families and names, or what a host enumerates from the environment it builds (`FromEnvironment`).
+`LuauExportLintSurfaceEditModeTests` fails when the real mod environment, the DataModel's service catalog,
+the `RequireUnrestricted` gates or the mod header parser gain something the default side does not flag, and
+compares the Roblox side with the mirror when it sits next to the checkout. The MVP14 exporter will run the
+lint before it writes a place or model; nothing calls it at runtime yet.

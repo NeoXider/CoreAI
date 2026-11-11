@@ -20,6 +20,9 @@ namespace CoreAI.ChatOverlay
 
         /// <summary>Routing profile for this turn only; empty uses the role's assignment.</summary>
         public string RoutingProfileId { get; set; } = "";
+
+        /// <summary>Whether the turn reads and extends the role's chat history (<see cref="AiTaskRequest.HistoryMode"/>).</summary>
+        public AiTaskHistoryMode HistoryMode { get; set; }
     }
 
     /// <summary>

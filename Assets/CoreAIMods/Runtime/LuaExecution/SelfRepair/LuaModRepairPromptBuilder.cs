@@ -35,6 +35,18 @@ namespace CoreAI.Ai.SelfRepair
 
         /// <summary>The player's request that produced the mod; empty when unknown.</summary>
         public string PlayerRequest { get; set; } = "";
+
+        /// <summary>From the second attempt on: whether the previous attempt reloaded the mod.</summary>
+        public bool PreviousReloaded { get; set; }
+
+        /// <summary>From the second attempt on: the model's own summary of the previous attempt; empty when it gave none.</summary>
+        public string PreviousSummary { get; set; } = "";
+
+        /// <summary>From the second attempt on: the error the previous attempt was asked to fix.</summary>
+        public string PreviousError { get; set; } = "";
+
+        /// <summary>From the second attempt on: where that error came from.</summary>
+        public LuaModErrorSite PreviousSite { get; set; }
     }
 
     /// <summary>
@@ -80,10 +92,12 @@ namespace CoreAI.Ai.SelfRepair
                 .Append("1. Find the cause in fix_this_lua below; call manage_mods get_source mod_id='").Append(id)
                 .Append("' if you need the whole file.\n")
                 .Append("2. Re-apply the corrected Lua under the same id with manage_mods reload mod_id='").Append(id)
-                .Append("'. Keep its intent, id and header; do not create a new mod.\n")
+                .Append("'. Keep its intent, id and header and every feature the player asked for; do not delete a ")
+                .Append("handler to silence the error; do not create a new mod.\n")
                 .Append("3. Check it with get_mod_logs mod_id='").Append(id)
                 .Append("' since_reload=true wait_seconds=5 level='warn'; if it still fails, fix and reload again.\n")
-                .Append("Then reply in one short sentence.\n");
+                .Append("Then reply with one line that starts with '").Append(LuaModRepairChangeReport.SummaryMarker)
+                .Append("' and tells the player in plain words, in one or two short sentences, what you changed.\n");
 
             text.Append("lua_error=").Append(Clip(SingleLine(context.Error), 400));
             if (where.Length > 0)
@@ -92,6 +106,10 @@ namespace CoreAI.Ai.SelfRepair
             }
 
             text.Append('\n');
+            if (context.Attempt > 1)
+            {
+                text.Append(PreviousAttempt(context, id)).Append('\n');
+            }
             string request = SingleLine(context.PlayerRequest);
             if (request.Length > 0)
             {
@@ -140,6 +158,44 @@ namespace CoreAI.Ai.SelfRepair
             return "fix_this_lua (lines " + first.ToString(CultureInfo.InvariantCulture) + "-" +
                    shownLast.ToString(CultureInfo.InvariantCulture) + " of " +
                    lines.Length.ToString(CultureInfo.InvariantCulture) + "):\n" + body;
+        }
+
+        /// <summary>
+        /// What the previous attempt did and what came of it, so a further attempt is a new question: whether it
+        /// reloaded the mod and its own summary of the change, and whether the mod now fails the same way.
+        /// </summary>
+        public static string PreviousAttempt(LuaModRepairContext context, string modId)
+        {
+            if (context == null)
+            {
+                throw new ArgumentNullException(nameof(context));
+            }
+
+            StringBuilder text = new("previous_attempt: ");
+            if (!context.PreviousReloaded)
+            {
+                text.Append("you did not reload the mod, so it still runs the failing code; call manage_mods reload this time.");
+                return text.ToString();
+            }
+
+            text.Append("you reloaded it");
+            string summary = SingleLine(context.PreviousSummary);
+            if (summary.Length > 0)
+            {
+                text.Append(" (you said: \"").Append(Clip(summary, LuaModRepairChangeReport.MaximumSummaryCharacters))
+                    .Append("\")");
+            }
+
+            bool sameError = string.Equals(SingleLine(context.PreviousError), SingleLine(context.Error),
+                StringComparison.Ordinal);
+            bool sameSite = string.Equals(context.PreviousSite.Describe(modId), context.Site.Describe(modId),
+                StringComparison.Ordinal);
+            text.Append(sameError && sameSite
+                ? ", but it fails with the same error at the same line: that change did not reach the cause."
+                : ", and it now fails with the error above instead of \"" +
+                  Clip(SingleLine(context.PreviousError), 160) + "\".");
+            text.Append(" The source below is your last version; try a different fix.");
+            return text.ToString();
         }
 
         /// <summary>The trigger in a few words, for the model and the player.</summary>

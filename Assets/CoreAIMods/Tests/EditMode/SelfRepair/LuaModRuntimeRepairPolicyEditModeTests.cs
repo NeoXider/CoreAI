@@ -35,7 +35,8 @@ namespace CoreAI.Tests.EditMode.SelfRepair
             Assert.AreEqual(2, options.MaxIncidentsPerMod);
             Assert.AreEqual(3, options.MaxQueuedMods);
             Assert.AreEqual(6, options.MaxTurnsPerWindow);
-            Assert.AreEqual(LuaModRuntimeRepairMode.Automatic, options.Mode);
+            Assert.AreEqual(LuaModRuntimeRepairMode.ByBackend, options.Mode,
+                "automatic with a local model, ask first with a paid one");
             Assert.AreEqual(LuaModRuntimeRepairScope.AiWrittenOnly, options.Scope);
         }
 

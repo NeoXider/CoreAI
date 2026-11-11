@@ -96,6 +96,13 @@ When the limiter is saturated, `execute_lua` returns `Lua rate limit exceeded (.
 - `table.concat` is capped the same way (`MaxTableConcatLength`, same `1_000_000` value): the
   replacement mirrors the real `table.concat` algorithm but aborts as soon as the
   in-progress result exceeds the cap, instead of finishing a potentially huge build first.
+- The Luau library functions that build (`table.create` with a value, `table.move`, `string.split`) stop at
+  `MaxTableBuildLength` (1,048,576) elements per call, `unpack` at Luau's 8,000 values, `utf8.codepoint` at
+  8,000 code points. Those that loop (`table.find`, `clear`, `clone`, `create`, `move`, `maxn`, `unpack`,
+  `string.split`) are charged the instructions of the Lua loop they replace to the run executing them
+  (`LuaCsGuardedRun.ChargeLibrarySteps`): a charge that exhausts the run's step budget ends it the moment the
+  call returns, with the same uncatchable trip, so a library call is never a way around the step budget.
+  `coroutine.wrap` resumes through the guarded `coroutine.resume`, so its body has the same per-resume budget.
 - **Per-execution allocation budget (default 256 MB).** `string.rep`, `string.format`, and
   `table.concat` are capped at their library call site, but plain string concatenation (`s = s .. s`)
   is ordinary VM opcodes with no call site to intercept — a ~1 MB allowed string can be doubled
@@ -323,9 +330,16 @@ The sandbox must not expose APIs that allow file, process, reflection, or runtim
 escape by default:
 
 - `io`, `os`, `debug`, `package`, `require`, `load`, `loadstring`, `loadfile`, `dofile`,
-  `collectgarbage`, and `string.dump`.
+  `collectgarbage`, and `string.dump` of the stock libraries. In their place a script gets Luau's own
+  forms (MVP13, `RBX_API.md` "The Luau standard library"): a `debug` table holding exactly `traceback`,
+  `info`, `profilebegin`, `profileend`, the three memory-category functions and a `dumpcodesize` stub, and
+  showing only the script's own frames (a C# function or host-authored Lua below it reads as `[C]` and
+  `debug.info(level, "f")` gives nil for it), pinned by `LUAU007_DebugIsLuausRestrictedLibrary_*`; no
+  `sethook`, `getlocal`, `setupvalue`, `getregistry` or `getinfo`, so nothing reaches the count hook or a
+  captured local; `collectgarbage("count")` only; a `loadstring` that returns `nil, "loadstring() is not
+  available"`; a `getfenv` that returns the script's own environment; `setfenv` refused.
 - The stock `os` library stays removed. With the Rbx API attached (the default Unity composition), `os`
-  is a CoreAI table that holds only `os.time` and `os.clock`.
+  is a CoreAI table that holds only Luau's `os.time`, `os.clock`, `os.date` and `os.difftime`.
 - Arbitrary CLR/Unity reflection entry points.
 - Direct filesystem, networking, shell, or environment access.
 - Host object references that expose broad mutable state without a narrow wrapper.

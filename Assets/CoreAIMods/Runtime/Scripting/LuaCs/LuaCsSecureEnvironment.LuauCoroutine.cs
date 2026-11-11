@@ -179,13 +179,31 @@ namespace CoreAI.Sandbox.LuaCs
             ReadOnlySpan<CallStackFrame> frames = thread.GetCallStackFrames();
             for (int i = frames.Length - 1 - level; i >= 0; i--)
             {
-                if (frames[i].Function is LuaClosure closure)
+                if (IsScriptClosure(frames[i].Function, out LuaClosure closure))
                 {
                     text.Append(closure.Proto.ChunkName).Append(':').Append(FrameLine(frames, i, closure)).Append('\n');
                 }
             }
 
             return new ValueTask<int>(ctx.Return(text.ToString()));
+        }
+
+        /// <summary>The chunk name every script chunk is loaded under (mods, <c>execute_lua</c>, the AI envelope).</summary>
+        private const string ScriptChunkName = "sandbox_chunk";
+
+        /// <summary>
+        /// True when <paramref name="function"/> is a Lua function of a script's own chunk, not host-authored Lua (the
+        /// signal runner's <c>signal_runner</c> chunk) and not a C# function.
+        /// </summary>
+        /// <remarks>
+        /// WHY <c>debug</c> shows a script only its own frames: a C# function or host-authored Lua below the script
+        /// on the stack (a scheduler bridge, the signal runner, the trusted iterator resolver) is not otherwise
+        /// reachable, and <c>debug.info(level, "f")</c> would hand it out to be called with crafted arguments.
+        /// </remarks>
+        private static bool IsScriptClosure(LuaFunction function, out LuaClosure closure)
+        {
+            closure = function as LuaClosure;
+            return closure != null && string.Equals(closure.Proto.ChunkName, ScriptChunkName, StringComparison.Ordinal);
         }
 
         /// <summary>The line frame <paramref name="index"/> is at: the call its callee was made from, or its start.</summary>
@@ -230,11 +248,15 @@ namespace CoreAI.Sandbox.LuaCs
             }
 
             LuaFunction function;
+            LuaClosure lua;
             int line;
+            bool reachable;
             if (target.TryRead(out LuaFunction direct))
             {
                 function = direct;
-                line = direct is LuaClosure closure ? closure.Proto.LineDefined : -1;
+                lua = direct as LuaClosure;
+                line = lua != null ? lua.Proto.LineDefined : -1;
+                reachable = true;
             }
             else
             {
@@ -252,34 +274,34 @@ namespace CoreAI.Sandbox.LuaCs
                 }
 
                 function = frames[index].Function;
-                line = function is LuaClosure closure ? FrameLine(frames, index, closure) : -1;
+                reachable = IsScriptClosure(function, out lua);
+                line = reachable ? FrameLine(frames, index, lua) : -1;
             }
 
             LuaValue[] results = new LuaValue[options.Length + 1];
             int count = 0;
-            LuaClosure lua = function as LuaClosure;
             for (int i = 0; i < options.Length; i++)
             {
                 switch (options[i])
                 {
                     case 's':
-                        results[count++] = lua != null ? lua.Proto.ChunkName : "[C]";
+                        results[count++] = reachable && lua != null ? lua.Proto.ChunkName : "[C]";
                         break;
                     case 'l':
                         results[count++] = line;
                         break;
                     case 'n':
-                        // WHY nil for every Lua function: this VM keeps no function names, only the chunk's (DEV-99).
+                        // WHY nil for every Lua function: this VM keeps no function names, only the chunk's (DEV-111).
                         results[count++] = lua != null || string.IsNullOrEmpty(function.Name)
                             ? LuaValue.Nil
                             : (LuaValue)function.Name;
                         break;
                     case 'a':
-                        results[count++] = lua != null ? lua.Proto.ParameterCount : 0;
-                        results[count++] = lua == null || lua.Proto.HasVariableArguments;
+                        results[count++] = reachable && lua != null ? lua.Proto.ParameterCount : 0;
+                        results[count++] = !reachable || lua == null || lua.Proto.HasVariableArguments;
                         break;
                     default:
-                        results[count++] = function;
+                        results[count++] = reachable ? function : LuaValue.Nil;
                         break;
                 }
             }

@@ -12,7 +12,15 @@ namespace CoreAI.Ai.SelfRepair
         AskFirst = 1,
 
         /// <summary>A failing mod that qualifies is repaired without asking.</summary>
-        Automatic = 2
+        Automatic = 2,
+
+        /// <summary>
+        /// The default: <see cref="Automatic"/> with a local model, which costs nothing per request (LLMUnity, or an
+        /// LM Studio or llama.cpp server on this machine or the local network); <see cref="AskFirst"/> with a paid or
+        /// unknown backend, so no token is spent until the player types <c>/fixmod</c>
+        /// (<see cref="LuaModRepairBackendCostRules"/>).
+        /// </summary>
+        ByBackend = 3
     }
 
     /// <summary>Which failing mods the loop may rewrite without being asked.</summary>
@@ -49,7 +57,11 @@ namespace CoreAI.Ai.SelfRepair
         /// <summary>The runtime's quarantine streak (<c>LuaCsModRuntime.DefaultMaxErrorsBeforeQuarantine</c>).</summary>
         public const int DefaultQuarantineStreak = 8;
 
-        /// <summary>Repair attempts per incident.</summary>
+        /// <summary>
+        /// Repair attempts per incident. WHY three and not one: every further attempt is sent what the one before did
+        /// not have (the fix that failed, the model's own summary of it, and the error that fix produced), so it is a
+        /// new question rather than the same request again.
+        /// </summary>
         public const int DefaultMaxAttemptsPerIncident = 3;
 
         /// <summary>Wait before the second attempt; each later wait is <see cref="DefaultBackoffMultiplier"/> times longer.</summary>
@@ -80,7 +92,7 @@ namespace CoreAI.Ai.SelfRepair
         public const double DefaultTurnTimeoutSeconds = 120d;
 
         /// <summary>Whether and how the loop acts.</summary>
-        public LuaModRuntimeRepairMode Mode { get; set; } = LuaModRuntimeRepairMode.Automatic;
+        public LuaModRuntimeRepairMode Mode { get; set; } = LuaModRuntimeRepairMode.ByBackend;
 
         /// <summary>Which mods the loop may rewrite without being asked.</summary>
         public LuaModRuntimeRepairScope Scope { get; set; } = LuaModRuntimeRepairScope.AiWrittenOnly;

@@ -86,17 +86,29 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         }
 
         [Test]
-        public void P6_DayNight_Midnight_IsDarkerThanNoon()
+        public void P6_DayNight_Midnight_IsDarkerThanNoon_UnderTheOpenSky()
         {
             SetTime("noon");
             float noonOutdoor = Luminance(Lighting.OutdoorAmbient);
-            float noonAmbient = Luminance(Lighting.Ambient);
 
             SetTime("midnight");
 
             Assert.AreEqual(0d, Lighting.ClockTime, 0.01d);
-            Assert.Less(Luminance(Lighting.OutdoorAmbient), noonOutdoor * 0.4f, "the outdoor light falls at night");
-            Assert.Less(Luminance(Lighting.Ambient), noonAmbient * 0.4f);
+            Assert.Less(Luminance(Lighting.OutdoorAmbient), noonOutdoor * 0.4f, "the sky's light falls at night");
+        }
+
+        [Test]
+        public void P6_DayNight_WhereTheSkyDoesNotReach_ItIsAsDarkAtNoonAsAtMidnight()
+        {
+            SetTime("noon");
+            float noonAmbient = Luminance(Lighting.Ambient);
+            float noonOutdoor = Luminance(Lighting.OutdoorAmbient);
+            SetTime("midnight");
+
+            Assert.AreEqual(noonAmbient, Luminance(Lighting.Ambient), 1e-4f,
+                "Lighting.Ambient, the light of a cave, does not follow the sun");
+            Assert.Less(noonAmbient, 0.2f, "and is low: a torch matters there");
+            Assert.Greater(noonOutdoor, noonAmbient * 4f, "while the sky's light by day is several times brighter");
         }
 
         [TestCase("dawn", 6d)]

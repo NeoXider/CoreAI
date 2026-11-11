@@ -9,7 +9,7 @@ using Lua;
 namespace CoreAI.Sandbox.LuaCs
 {
     /// <summary>
-    /// The Luau <c>utf8</c> library over this VM's strings (DEV-97). A string here is a sequence of UTF-16 code
+    /// The Luau <c>utf8</c> library over this VM's strings (DEV-109). A string here is a sequence of UTF-16 code
     /// units: text typed in a script or read from the engine holds one char per code unit, while text built from
     /// byte escapes or <c>string.char</c> holds one char per UTF-8 byte. So a code point is read as: an ASCII char;
     /// a run of chars in 0x80-0xFF that forms a valid UTF-8 sequence (Luau's own decoder rules); any other char
@@ -362,7 +362,7 @@ namespace CoreAI.Sandbox.LuaCs
         /// <summary>
         /// Roblox <c>utf8.graphemes(s, i, j)</c>: an iterator of the first and last char position of each grapheme
         /// cluster, a base code point with the combining marks, variation selectors, emoji modifiers, zero-width
-        /// joiner sequences and regional-indicator pairs that follow it, and CR LF as one (DEV-97).
+        /// joiner sequences and regional-indicator pairs that follow it, and CR LF as one (DEV-109).
         /// </summary>
         private static ValueTask<int> Utf8Graphemes(LuaFunctionExecutionContext ctx, CancellationToken ct)
         {

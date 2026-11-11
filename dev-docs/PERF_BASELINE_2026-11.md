@@ -528,6 +528,28 @@ timeout semantics, which is not a cheap change):
 Not measured in this pass: `SmartToolCallingChatClient` per roundtrip (its fixtures need an `ICoreAISettings`
 fake the benchmark does not have yet) and usage accounting beyond the one usage chunk per turn above.
 
+## 12. The Luau standard library against the Lua it replaces (2026-11-11)
+
+Group `luau stdlib` (`tools/perfbench/LuauStdlibCases.cs`): each pair does the same work once as the sandbox's
+library call and once as the Lua loop a script would otherwise write, inside one guarded execution with the
+production hook, 20,000 operations per trial, median of 7. Same machine as section 2, still contended (other
+agents building), so absolute times are pessimistic; the ratios inside one run are the result. Library loops are
+also charged the steps of the Lua loop they replace (`RBX_API.md`, "Budgets"), so the speed-up is time only.
+
+| Case | CoreCLR library | CoreCLR Lua loop | Mono Boehm library | Mono Boehm Lua loop |
+|---|---:|---:|---:|---:|
+| `table.find`, 64 elements, needle last | 3.7 us | 17.0 us | 4.8 us | 90.6 us |
+| `string.split`, 16 fields | 2.7 us (1,784 B) | 35.3 us (1,256 B) | 11.4 us | 143.3 us |
+| `table.create(256, 0)` | 4.0 us (6,264 B) | 44.5 us (12,336 B) | 90.6 us | 283.5 us |
+| `table.clone`, 64 entries | 2.1 us (1,656 B) | 31.7 us (3,072 B) | 16.2 us | 103.9 us |
+| `string.format('%.2f')` (exact C rounding) | 4.1 us | - | 11.4 us | - |
+| `string.format('%s')` (the capped native path alone) | 1.8 us | - | 7.0 us | - |
+
+Every library call is 3-19 times faster than its loop on both runtimes. A call into any C# function costs about
+0.8-1.6 us here (`rawlen`, `math.max`), so a `table.find` over four elements is still 3.7 times faster than the
+Lua function. `string.format`'s numeric conversions now print from the exact binary value (BigInteger) to match
+C; that adds about 2.3 us on CoreCLR and 4.4 us on Mono to a `%.2f` over the native path.
+
 ## 10. Files
 
 - `tools/perfbench/` — `CoreAI.PerfBench.csproj`, `Program.cs`, `BenchEnvironment.cs`, `MicroBench.cs`,

@@ -48,6 +48,55 @@ namespace CoreAI.Tests.EditMode.ChatOverlay
         }
 
         [Test]
+        public void HostTurn_ReportsTheVisibleAnswer_WithoutReasoning_EvenWhenTheFeedStaysQuiet()
+        {
+            using ChatOverlayHarness harness = new();
+            List<ChatOverlayHostTurnResult> ended = new();
+            harness.Controller.TryStartHostTurn(Request(ended));
+
+            harness.Sender.Stream("<think>the part is nil</think>Changed: the handler ");
+            harness.Sender.Stream("now checks that the part exists.");
+            harness.Sender.Complete();
+
+            Assert.AreEqual(1, harness.Controller.Feed.Lines.Count, "the answer is not shown");
+            Assert.AreEqual("Changed: the handler now checks that the part exists.", ended[0].Answer);
+        }
+
+        [Test]
+        public void HostTurn_ThatFails_ReportsNoAnswer_AndALongAnswerIsBounded()
+        {
+            using ChatOverlayHarness harness = new();
+            List<ChatOverlayHostTurnResult> ended = new();
+            harness.Controller.TryStartHostTurn(Request(ended));
+            harness.Sender.Stream("Changed: half of it");
+            harness.Sender.Fail(ChatOverlayTurnFailureKind.Error);
+            harness.Controller.TryStartHostTurn(Request(ended));
+            harness.Sender.Stream(new string('x', ChatOverlayHostTurnResult.MaximumAnswerCharacters + 50));
+            harness.Sender.Complete();
+
+            Assert.AreEqual(ChatOverlayHostTurnEnd.Failed, ended[0].End);
+            Assert.AreEqual("", ended[0].Answer, "a failed turn has no answer to report");
+            Assert.AreEqual(ChatOverlayHostTurnResult.MaximumAnswerCharacters, ended[1].Answer.Length);
+        }
+
+        [Test]
+        public void HostTurn_PassesItsHistoryMode_ToTheSender_AndATypedTurnKeepsTheRoleDefault()
+        {
+            using ChatOverlayHarness harness = new();
+            List<ChatOverlayHostTurnResult> ended = new();
+            ChatOverlayHostTurnRequest request = Request(ended);
+            request.HistoryMode = AiTaskHistoryMode.None;
+
+            harness.Controller.TryStartHostTurn(request);
+            harness.Sender.Complete();
+            harness.Controller.Submit("build a tower");
+
+            Assert.AreEqual(AiTaskHistoryMode.None, harness.Sender.Requests[0].HistoryMode,
+                "a repair report the player never typed stays out of the role's history");
+            Assert.AreEqual(AiTaskHistoryMode.RoleDefault, harness.Sender.Requests[1].HistoryMode);
+        }
+
+        [Test]
         public void HostTurn_FollowsTheStatusLine_ByItsTraceId()
         {
             using ChatOverlayHarness harness = new();

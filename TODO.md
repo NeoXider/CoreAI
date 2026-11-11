@@ -542,8 +542,29 @@ Mods (P20):
 The campaign that wrote most of M1 on 2026-11-11 left these. Each is open; where code exists, the item says
 how far it was checked.
 
+Owner's questions and decisions on the Block World (2026-11-11):
+
+- [ ] **Replace the character models.** The owner on the default R6 figure in the shoulder view: "the
+      character model is very bad"; a ready model from the Asset Store is an option he named. Left open at
+      his request: the Block World opens in first person, so the local body is not seen, but villagers wear
+      the same body. Needs a decision on the asset (licence: an Asset Store model cannot ship in the public
+      package, only in a local or private game project) or an own model with real joints (`Motor6D`) and
+      animation tracks.
+- [ ] **Multiplayer for the Block World** stays milestone M3, after the single-player demo (owner: do not
+      merge it into the demo now). Missing for it: Terrain voxels on the wire, replicated character poses,
+      the client composition (MVP4 C5), and a Mirror run under `MIRROR` on 96.11.4.
+- [ ] **WebGL build of the Block World with a launcher and fps numbers** (owner request), after the visual
+      fixes and after the Lua VM update to 0.5.8 is in.
+
 Lua runtime and performance (P19):
 
+- [ ] **Luau library residue (MVP13).** A plain assignment into a frozen table still writes (DEV-106); a
+      `\u{...}` escape downlevels to UTF-8 bytes and does not compare equal to the same text typed in
+      source; Lua-CSharp's own `table.insert`, `remove`, `sort` and `concat` are not step-charged;
+      `#{1,2,nil,4}` is 2 here and 4 in Luau; message differences remain (concat, sort compare,
+      `math.random(0)`, Latin-1 letters as `%a`); `buffer`, `vector` and `string.pack` are stubs until MVP14;
+      the export lint cannot see members of UiScreen and agent values without type inference.
+      `tools/perfbench/UnityCompileCheck` lacks references to `CoreAI.Mods.Folders` and the UI assemblies.
 - [ ] **A multi-operand `CONCAT` multiplies a string in one instruction.** 150 operands compile to 150
       `MOVE`s and one `CONCAT` (the parser refuses 200), so a single instruction can join about 199 strings
       of 1,000,000 characters (398 MB) under any budget and any hook batch; the guard trips only afterwards.

@@ -42,7 +42,8 @@ namespace CoreAI.Tests.EditMode
                 ModSourceStore = _store,
                 RbxApi = _roblox
             });
-            ActorContext actor = new LocalActorIdentityProvider("hub-script-tests")
+            // WHY the host identity: the Hub service observes mod reports, which needs unrestricted host authority.
+            ActorContext actor = CoreAI.Composition.CoreServicesInstaller.DefaultLocalHostIdentityProvider
                 .GetActorContext(BuiltInAgentRoleIds.Programmer);
             _hub = new LuaCsModRuntimeHubService(stack.Runtime, actor, _store, LuaCapabilities.All, false, true);
         }
@@ -50,8 +51,8 @@ namespace CoreAI.Tests.EditMode
         [TearDown]
         public void TearDown()
         {
-            _hub.Dispose();
-            _roblox.Dispose();
+            _hub?.Dispose();
+            _roblox?.Dispose();
             SynchronizationContext.SetSynchronizationContext(_savedContext);
         }
 

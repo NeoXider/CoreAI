@@ -435,11 +435,43 @@ namespace CoreAI.Tests.EditMode
                 __coreai_luau_iter = function() error('forged resolver') end
                 local sum = 0
                 for key, value in values do sum = sum + value end
-                return sum, calls, getmetatable(values), debug");
-            CollectionAssert.AreEqual(new object[] { 17d, 1d, "locked", null }, result);
+                return sum, calls, getmetatable(values), debug.getlocal, debug.setupvalue, debug.sethook");
+            // WHY the members and not debug itself: a mod has Luau's restricted debug library since MVP13 (RT5);
+            // what this contract needs is that nothing in it can read or rewrite the local the chunk prelude
+            // captured the resolver in, nor touch the count hook. LUAU007_DebugIsLuausRestrictedLibrary pins the rest.
+            CollectionAssert.AreEqual(new object[] { 17d, 1d, "locked", null, null, null }, result);
             engine.RunChunk(state, "next=function() error('forged next') end; __coreai_luau_iter=nil");
             object[] raw = RunLuau(engine, state, "local sum=0; for _, value in {3,4} do sum=sum+value end; return sum");
             Assert.AreEqual(7d, raw[0]);
+        }
+
+        [Test]
+        public void LUAU007_DebugIsLuausRestrictedLibrary_NoHookFrameOrUpvalueAccess()
+        {
+            // WHY an allow-list: Luau's debug library is safe by design (traceback, info and the profiler and
+            // memory-category no-ops); Lua 5.2's is not - sethook would remove the execution guard's count hook,
+            // getlocal/setlocal/getupvalue/setupvalue would read or rewrite the captured resolver, getregistry and
+            // getinfo with function access would hand out host functions, debug.debug would read a console. A member
+            // outside the list fails here by name.
+            LuaCsScriptEngine engine = new();
+            object[] members = RunLuau(engine, engine.CreateState(), @"
+                local names = {}
+                for name in pairs(debug) do names[#names + 1] = name end
+                table.sort(names)
+                return table.concat(names, ',')");
+            Assert.AreEqual("dumpcodesize,getmemorycategory,info,profilebegin,profileend,resetmemorycategory,"
+                            + "setmemorycategory,traceback", members[0]);
+
+            object[] frames = RunLuau(engine, engine.CreateState(), @"
+                local seen = {}
+                table.sort({2, 1}, function(a, b)
+                    for level = 1, 8 do seen[#seen + 1] = tostring(debug.info(level, 'f') ~= nil) .. (debug.info(level, 's') or 'none') end
+                    return a < b
+                end)
+                return table.concat(seen, ' ')");
+            StringAssert.DoesNotContain("true[C]", (string)frames[0],
+                "debug.info never hands out a host function or host-authored Lua from below the script");
+            StringAssert.Contains("truesandbox_chunk", (string)frames[0], "the script's own frames stay visible");
         }
 
         [Test]

@@ -482,7 +482,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 assert(os.time(os.date('*t', 1000000000)) == 1000000000)
                 assert(os.time(os.date('!*t', 1234567)) == 1234567)
                 assert(os.date('!%Y-%m-%d %H:%M:%S') == '2023-11-14 22:13:20', 'the default is the clock os.time reads')
-                assert(os.date('%H') == os.date('!%H'), 'the local form is UTC too (DEV-98)')");
+                assert(os.date('%H') == os.date('!%H'), 'the local form is UTC too (DEV-110)')");
             Assert.IsTrue(stack.Runtime.IsLoaded("m"));
         }
 

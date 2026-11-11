@@ -69,7 +69,10 @@ namespace CoreAI.Ai.SelfRepair
         NotAllowed = 5,
 
         /// <summary>Too many mods were waiting for a repair already.</summary>
-        TooManyFailing = 6
+        TooManyFailing = 6,
+
+        /// <summary>The player's <c>/undo</c> or <c>/redo</c> put back another version of the mod.</summary>
+        TakenBackByPlayer = 7
     }
 
     /// <summary>What one recorded error changed.</summary>
@@ -457,6 +460,79 @@ namespace CoreAI.Ai.SelfRepair
                 GiveUp(incident, reason);
             }
         }
+
+        /// <summary>
+        /// The player's <c>/undo</c> or <c>/redo</c> put back another version of the mod: the incident closes whatever
+        /// phase it was in, a running attempt included, and the errors of the old code are dropped. Returns the phase
+        /// it had. The session's incident count is kept.
+        /// </summary>
+        public LuaModRepairPhase CloseTakenBack(string modId)
+        {
+            LuaModRepairIncident incident = Get(modId);
+            if (incident == null)
+            {
+                return LuaModRepairPhase.Healthy;
+            }
+
+            LuaModRepairPhase was = incident.Phase;
+            incident.Phase = LuaModRepairPhase.Healthy;
+            incident.Trigger = LuaModRepairTrigger.None;
+            incident.GiveUpReason = LuaModRepairGiveUpReason.None;
+            incident.Attempt = 0;
+            incident.FixLanded = false;
+            incident.ErrorsSinceFix = 0;
+            ClearErrors(incident);
+            return was;
+        }
+
+        /// <summary>
+        /// True when the mod fails all the time rather than now and then: the incident opened on a streak, on budget
+        /// trips or on the runtime's quarantine, or the mod's recent errors (at least
+        /// <see cref="ContinuousErrorCount"/> within <see cref="ContinuousErrorWindowSeconds"/>) came on average at least
+        /// once per <see cref="ContinuousErrorGapSeconds"/>. A mod that fails at one site now and then while the rest of
+        /// it works is not.
+        /// </summary>
+        public bool IsFailingContinuously(string modId, double now)
+        {
+            LuaModRepairIncident incident = Get(modId);
+            if (incident == null)
+            {
+                return false;
+            }
+
+            if (incident.Trigger == LuaModRepairTrigger.Streak || incident.Trigger == LuaModRepairTrigger.BudgetTrips ||
+                incident.Trigger == LuaModRepairTrigger.Quarantined)
+            {
+                return true;
+            }
+
+            int count = 0;
+            double oldest = double.PositiveInfinity;
+            double newest = double.NegativeInfinity;
+            for (int index = 0; index < incident.ErrorCount; index++)
+            {
+                double at = incident.ErrorTimes[index];
+                if (now - at > ContinuousErrorWindowSeconds)
+                {
+                    continue;
+                }
+
+                count++;
+                oldest = Math.Min(oldest, at);
+                newest = Math.Max(newest, at);
+            }
+
+            return count >= ContinuousErrorCount && newest - oldest <= (count - 1) * ContinuousErrorGapSeconds;
+        }
+
+        /// <summary>Errors that must be seen before their rate says anything (<see cref="IsFailingContinuously"/>).</summary>
+        public const int ContinuousErrorCount = 3;
+
+        /// <summary>How far back <see cref="IsFailingContinuously"/> looks.</summary>
+        public const double ContinuousErrorWindowSeconds = 30d;
+
+        /// <summary>The average gap between errors at or below which a mod fails all the time.</summary>
+        public const double ContinuousErrorGapSeconds = 1d;
 
         /// <summary>Drops every record of a mod (it was unloaded).</summary>
         public void Forget(string modId)

@@ -22,14 +22,24 @@ namespace CoreAI.ChatOverlay
     /// <summary>The end of one host turn, with the failure sentence when it did not complete.</summary>
     public readonly struct ChatOverlayHostTurnResult
     {
+        /// <summary>Characters of the model's answer a result keeps (<see cref="Answer"/>).</summary>
+        public const int MaximumAnswerCharacters = 4000;
+
         /// <summary>Creates a result.</summary>
         public ChatOverlayHostTurnResult(ChatOverlayHostTurnEnd end, string message = "",
-            LlmErrorCode errorCode = LlmErrorCode.None)
+            LlmErrorCode errorCode = LlmErrorCode.None, string answer = "")
         {
             End = end;
             Message = message ?? "";
             ErrorCode = errorCode;
+            Answer = answer ?? "";
         }
+
+        /// <summary>
+        /// The visible text of the model's answer (reasoning blocks removed), at most
+        /// <see cref="MaximumAnswerCharacters"/>; also kept when the feed did not show it.
+        /// </summary>
+        public string Answer { get; }
 
         /// <summary>How the turn ended.</summary>
         public ChatOverlayHostTurnEnd End { get; }
@@ -63,6 +73,12 @@ namespace CoreAI.ChatOverlay
 
         /// <summary>True streams the model's answer into the feed like a typed turn; false keeps the feed quiet.</summary>
         public bool ShowAnswer { get; set; }
+
+        /// <summary>
+        /// Whether the turn reads and extends the role's chat history; <see cref="AiTaskHistoryMode.None"/> keeps a
+        /// host request the player never typed (a repair report) out of it.
+        /// </summary>
+        public AiTaskHistoryMode HistoryMode { get; set; }
 
         /// <summary>Called once on the chat's thread when the turn ended, however it ended.</summary>
         public Action<ChatOverlayHostTurnResult> Ended { get; set; }

@@ -39,7 +39,7 @@ sees "attempt to call a nil value".
 | `task` | `task.wait`, `task.spawn`, `task.defer`, `task.delay`, `task.cancel` (`spawn`/`defer`/`delay` also take a task handle back — see "Tasks and coroutines"); `task.synchronize`/`task.desynchronize` are no-ops |
 | `wait`, `spawn`, `delay` | Roblox's legacy scheduler globals |
 | `time`, `tick` | `time()` is scaled game time; `tick()` is deprecated (logs once per mod) |
-| `os` | Only `os.time([dateTable])` and `os.clock()` — the stock `os` library stays removed by the sandbox |
+| `os` | Luau's `os.time([dateTable])`, `os.clock()`, `os.date([format[, time]])` and `os.difftime(t2[, t1])` — the stock `os` library stays removed by the sandbox |
 | `Ray` | `Ray.new(origin, direction)` with `Origin`, `Direction`, `Unit`, `ClosestPoint(point)` and `Distance(point)` (both expect a unit ray, as in the mirror) |
 | `typeof` | Roblox type names: `"Instance"`, `"Vector3"`, `"CFrame"`, `"Ray"`, `"EnumItem"`, `"RBXScriptSignal"`, … |
 | `warn` | Like `print`, into the mod's log at `Warn` level (`get_mod_logs`) |
@@ -135,8 +135,12 @@ which the argument conversion above accepts.
 ...})` reads the table as UTC (`hour` defaults to 12, `min` and `sec` to 0, out-of-range fields carry
 over, `isdst` is ignored), so every machine computes the same timestamp. As in Luau, a date before
 1970-01-01 00:00:00 UTC returns `nil`, and a field that is not a number (nor a numeric string) counts
-as missing — `{hour = true}` is noon, a non-number `year`, `month` or `day` is `BAD_ARGUMENT`. The
-sandbox has no `os.date`, so there is no round trip through it. `os.clock()` is monotonic
+as missing — `{hour = true}` is noon, a non-number `year`, `month` or `day` is `BAD_ARGUMENT`.
+`os.date` is UTC too, with or without the `"!"` prefix (DEV-110), so `os.time(os.date("*t", t))` is `t`
+on every machine; it takes Luau's conversions (`%a %A %b %B %c %d %H %I %j %m %M %p %S %U %w %W %x %X %y
+%Y %z %Z %%` in the C locale, `%c` as `Thu Nov 11 14:30:05 2026`) and `"*t"`, refuses any other
+conversion ("invalid conversion specifier"), and returns `nil` for a moment before the epoch unless the
+format starts with `"!"`. `os.difftime(t2, t1)` is `t2 - t1` in whole seconds. `os.clock()` is monotonic
 elapsed time. `workspace:GetServerTimeNow()` is Unix seconds that the server and every client agree
 on: where this process is the server clock (solo, host, dedicated server) it is the local clock, held
 at its last reading if that clock steps back; on a client it is the local clock until the join
@@ -623,6 +627,62 @@ bound, is the bad-argument error "max must be greater than or equal to min"), `m
 zero, the sign of zero kept) and `math.sign(x)` (-1, 0 or 1; NaN gives 0). Numeric strings convert like
 `tonumber`; anything else raises the sandbox's `bad argument #n to 'name' (number expected, got type)`. The
 same noise is `RbxPerlinNoise.Noise` for C# generators.
+
+### The Luau standard library
+
+Every mod and `execute_lua` chunk gets Luau's libraries as the mirror lists them (`reference/engine/libraries`),
+pinned member by member by `LuauLibraryInventoryEditModeTests`. Arguments convert by Luau's `luaL_check*` rules
+(a numeric string is a number, an integer argument is truncated); errors keep the sandbox's `bad argument #n to
+'name' (...)` wording (Luau says "invalid argument", DEV-112) and every other library error is one clean line on
+`pcall`, `xpcall`, `coroutine.resume` and C# alike.
+
+| Library | What a script has |
+|---|---|
+| `table` | `concat`, `insert`, `pack`, `remove`, `sort`, `unpack`, and Luau's `find` (raw reads from `init`, stops at the first nil, compares as `==` does, so `table.find(list, part.Material)` finds the `EnumItem`), `clear` (keeps the metatable), `create(n, value)`, `clone` (shallow, keeps the metatable, never frozen; a `__metatable`-protected table is refused), `freeze`/`isfrozen`, `move` (raw, overlap-safe), `maxn`, and the deprecated `getn`, `foreach`, `foreachi` |
+| globals | `unpack` (= `table.unpack`, at most 8,000 values: "too many results to unpack"), `newproxy`, `gcinfo` and `collectgarbage("count")` (the process heap in KB, DEV-107; any other option: "collectgarbage must be called with 'count'; use gcinfo() instead"), `ypcall` (= `pcall`), `getfenv` (the script's environment for no argument, a level or a function, DEV-108) |
+| `string` | the Lua 5.2 functions, `split(s, separator = ",")` (plain separator, the empty one splits into characters, the mirror's corner cases), and `format` with Luau's `%*` (any value, as `tostring`) and C's numeric output: `%d`/`%i` truncate a fraction, `%x %X %o %u` print a negative number as its 64-bit two's complement, `%e %f %g` are rounded from the exact binary value as glibc rounds them (`%.2f` of 2.675 is `2.67`), `inf`/`nan` are lower-case; a malformed conversion is Luau's "invalid conversion '%y' to 'format'" |
+| `utf8` | `char`, `charpattern`, `codes`, `codepoint`, `len`, `offset`, and Roblox's `graphemes`, `nfcnormalize`, `nfdnormalize`, over this VM's strings (DEV-109, below) |
+| `bit32` | every Luau member, `countlz`, `countrz` and `byteswap` included; an argument converts by Luau's `(unsigned)(long long)` cast, so `bit32.band(5.7)` is 5 and `-1` is `0xFFFFFFFF` |
+| `math` | the Lua 5.2 functions, the members above, `log10`, `lerp` (exact at both ends), `map`, `isnan`, `isinf`, `isfinite`, and the constants `e`, `nan`, `phi`, `sqrt2`, `tau` |
+| `os` | `time`, `clock`, `date`, `difftime` (see Clocks) |
+| `coroutine` | `create`, `resume`, `running`, `status`, `yield`, `isyieldable`, `close` (a suspended or dead coroutine; a task thread is refused), and `wrap`, which resumes through the guarded `coroutine.resume`, so its body runs under the same per-resume budget (its error passes unchanged, DEV-114) |
+| `debug` | `traceback`, `info` (`s`, `l`, `a`, `f`; `n` is nil for a Lua function, DEV-111), `profilebegin`/`profileend` (no profiler to feed), `getmemorycategory`/`setmemorycategory`/`resetmemorycategory`; `dumpcodesize` is NOT_IMPLEMENTED (Studio's command bar only) |
+| `task` | see "Tasks and coroutines" |
+
+Loud stubs, planned for MVP14 (the round trip needs them): `buffer`, `vector` and `string.pack`/`packsize`/
+`unpack` raise `NOT_IMPLEMENTED` on any use. `loadstring` answers as Roblox does while `LoadStringEnabled` is
+off: `nil, "loadstring() is not available"`. `setfenv` is `NOT_IMPLEMENTED` (unsupported: this VM cannot give
+a function another environment). Absent: `require` (MVP4's `ModuleScript`), `plugin` (nil in a Roblox game too),
+and the Studio and host globals `settings`, `UserSettings`, `stats`, `version`, `printidentity`, `elapsedTime`.
+
+**Strings and `utf8` (DEV-109).** A string here is UTF-16 text: what a script types, or reads from the engine,
+holds one char per UTF-16 code unit, so `#"日本"` is 2 where Luau counts 6 bytes (DEV-13). Text built from
+bytes (`"\195\169"`, `string.char`) holds one char per byte. `utf8` reads both: a char below 0x80, a run of
+chars 0x80-0xFF that is valid UTF-8 (Luau's decoder rules), any other char 0x80-0xFF as Latin-1, a surrogate pair
+or a single char is one code point, and only an unpaired surrogate is invalid. Its positions are char positions,
+the ones `string.sub` takes, and `utf8.char` builds the text a literal is, so `utf8.char(233) == "é"`.
+`utf8.charpattern` is the mirror's pattern extended to UTF-16 chars, so `s:gmatch(utf8.charpattern)` yields
+every character of typed text. `graphemes` keeps combining marks, variation selectors, emoji modifiers,
+zero-width-joiner sequences and flag pairs with their base; Hangul jamo sequences are not joined.
+
+**`table.freeze` (DEV-106).** A frozen table refuses `table.insert`, `table.remove`, `table.sort`,
+`table.clear`, `table.move` into it, `rawset` and `setmetatable` with Luau's "attempt to modify a readonly
+table"; a plain assignment `t.k = v` still writes, because the Lua 5.2 VM has no read-only tables.
+
+**Budgets.** A library function that loops is charged the instructions of the Lua loop it replaces
+(`table.find` 4 per element, `table.create` 2 per slot, `clone`/`clear` 3 per entry, `move` 5 per element,
+`maxn` 8 per entry, `string.split` 20 per piece, `unpack` 1 per value), so a handler cannot do a loop's work
+for one instruction: once a charge exhausts the run's step budget the run ends as soon as the call returns,
+with the same uncatchable trip a loop would get. One call builds at most 1,048,576 elements
+(`table.create` with a value, `table.move`, `string.split`; DEV-113): "sandbox: table.create would fill N slots, ...".
+`table.create` without a value only reserves room and is never refused. The calls stay 4-19 times faster than
+the Lua loops they replace (`dev-docs/PERF_BASELINE_2026-11.md`, "Luau standard library").
+
+**Export to Roblox.** `LuauExportLint.Check(source)` (`Assets/CoreAIMods/Runtime/LuauDownlevel`) lists, with
+line and column, every construct Roblox does not accept or does not have: `goto`, labels, `_ENV`, hex float
+literals, CoreAI globals (`hooks_*`, `report`, `coreai_world_*`, `unity_*`, `mods_*`, `UserInputService`, ...),
+CoreAI library members, `AIService`/`UxmlService`, elevated members (DEV-14) and the `@coreai` header. The
+MVP14 exporter will run it before writing a place.
 
 ### Physics: gravity, raycasts, contacts
 

@@ -46,7 +46,18 @@
   year/month/day is BAD_ARGUMENT — and a date before 1970 returns nil), `os.clock()`, `time()`
   (scaled game time), and `workspace:GetServerTimeNow()` (Unix seconds every player agrees on: a
   client reads the server's clock once joined, from then on it never goes backwards, and it stands
-  still while the server's clock does). There is no `os.date`; `DateTime` is not implemented.
+  still while the server's clock does). `os.date(fmt[, t])` (strftime conversions, `"*t"`) and
+  `os.difftime` exist and are UTC with or without `"!"`; `DateTime` is not implemented.
+- Standard library = Luau's: `table.find/clear/create/clone/freeze/isfrozen/move/maxn`, `unpack`,
+  `string.split`, `string.format` (`%*`, C output: `%d` truncates, `%x` of -1), `utf8.*`, `bit32.*`,
+  `math.lerp/map/log10/isnan/isinf/isfinite`, `coroutine.wrap/isyieldable/close`,
+  `debug.traceback/info/profilebegin`, `newproxy`, `gcinfo`. Strings hold UTF-16 chars: `#s` counts
+  chars, `utf8.len` code points, and utf8 positions are the ones `string.sub` takes. `table.freeze`
+  stops library writes (insert, remove, sort, rawset, ...) but not `t.k = v`. One call builds at
+  most 1,048,576 elements; `unpack` returns at most 8,000. `buffer`, `vector` and
+  `string.pack/unpack` are NOT_IMPLEMENTED (use `string.char`/`string.byte`, `Vector3`);
+  `loadstring` returns nil, "loadstring() is not available"; `setfenv` is refused. `goto`,
+  `::labels::` and `_ENV` run here but not in Roblox: do not write them.
 - Reloading: `manage_mods reload` (and the Hub's Save & run) first removes the previous run's
   startup objects — what its main chunk built before its first yield and the mod still owns — so a
   mod that builds its scene at startup never duplicates it; objects made later by handlers, tasks or

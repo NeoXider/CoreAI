@@ -511,7 +511,7 @@ namespace CoreAI.Sandbox.LuaCs
                 }
 
                 // WHY 5^k: m * 2^-k = m * 5^k / 10^k, so the fraction has exactly k decimal digits.
-                return new ExactDecimal(new BigInteger(mantissa) * BigInteger.Pow(5, -exponent), -exponent);
+                return new ExactDecimal(new BigInteger(mantissa) * PowerOf(5, -exponent), -exponent);
             }
 
             /// <summary><c>%.{p}f</c> without the sign.</summary>
@@ -622,11 +622,11 @@ namespace CoreAI.Sandbox.LuaCs
                 int drop = all.Length - count;
                 if (drop <= 0)
                 {
-                    rounded = _digits * BigInteger.Pow(10, -drop);
+                    rounded = _digits * PowerOf(10, -drop);
                 }
                 else
                 {
-                    rounded = RoundHalfEven(_digits, BigInteger.Pow(10, drop));
+                    rounded = RoundHalfEven(_digits, PowerOf(10, drop));
                 }
 
                 string text = rounded.ToString(CultureInfo.InvariantCulture);
@@ -644,10 +644,35 @@ namespace CoreAI.Sandbox.LuaCs
             {
                 if (scale >= _scale)
                 {
-                    return _digits * BigInteger.Pow(10, scale - _scale);
+                    return _digits * PowerOf(10, scale - _scale);
                 }
 
-                return RoundHalfEven(_digits, BigInteger.Pow(10, _scale - scale));
+                return RoundHalfEven(_digits, PowerOf(10, _scale - scale));
+            }
+
+            // WHY boxed in object arrays: a BigInteger is two fields, and a racing reader of a struct array could see
+            // half of a write; a reference is written whole. A race only computes the same power twice.
+            private static readonly object[] PowersOfFive = new object[1100];
+            private static readonly object[] PowersOfTen = new object[1200];
+
+            /// <summary><paramref name="radix"/> (5 or 10) to the power <paramref name="exponent"/>, cached.</summary>
+            private static BigInteger PowerOf(int radix, int exponent)
+            {
+                object[] cache = radix == 5 ? PowersOfFive : PowersOfTen;
+                if (exponent < 0 || exponent >= cache.Length)
+                {
+                    return BigInteger.Pow(radix, exponent);
+                }
+
+                object cached = cache[exponent];
+                if (cached != null)
+                {
+                    return (BigInteger)cached;
+                }
+
+                BigInteger power = BigInteger.Pow(radix, exponent);
+                cache[exponent] = power;
+                return power;
             }
 
             private static BigInteger RoundHalfEven(BigInteger value, BigInteger divisor)

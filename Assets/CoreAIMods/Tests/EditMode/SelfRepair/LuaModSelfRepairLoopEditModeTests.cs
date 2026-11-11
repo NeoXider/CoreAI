@@ -49,7 +49,8 @@ namespace CoreAI.Tests.EditMode.SelfRepair
             harness.Coordinator.Tick();
 
             Assert.AreEqual(LuaModRepairPhase.Fixed, harness.Coordinator.Policy.PhaseOf("tower"));
-            Assert.AreEqual("'tower' is fixed: no errors for 5 s.", harness.Lines[harness.Lines.Count - 1]);
+            Assert.AreEqual("'tower' is fixed; the AI says: The handler now builds the part before it reads its size. " +
+                            "/undo takes back the AI's change.", harness.Lines[harness.Lines.Count - 1]);
             Assert.IsTrue(harness.Runtime.TryGetModSource(harness.Actor, "tower", out string source));
             Assert.AreEqual(Fixed, source);
             CollectionAssert.Contains(harness.Gate.Triggers, LuaModsLlmTool.ReloadBackupTrigger,
@@ -146,7 +147,7 @@ namespace CoreAI.Tests.EditMode.SelfRepair
 
             Assert.IsEmpty(harness.Model.Requests, "the AI does not rewrite the player's mod behind their back");
             Assert.AreEqual(1, harness.Lines.Count, "reported once");
-            StringAssert.Contains("The AI did not write it, so the AI leaves it alone; /fixmod mine asks the AI to fix it.",
+            StringAssert.Contains("The AI did not write it, so the AI leaves it alone. /fixmod mine asks the AI to fix it.",
                 harness.Lines[0]);
             Assert.AreEqual(LuaModAuthor.Other, harness.Coordinator.Authorship.AuthorOf("mine"));
         }
@@ -232,9 +233,12 @@ namespace CoreAI.Tests.EditMode.SelfRepair
             }
 
             Assert.IsEmpty(harness.Model.Requests);
-            Assert.AreEqual(2, harness.Lines.Count, "one line per failing mod, then silence");
+            Assert.AreEqual(1, harness.Lines.Count, "one sentence for the session, then silence");
             StringAssert.Contains("The AI is offline", harness.Lines[0]);
-            StringAssert.DoesNotContain("offline", harness.Lines[1]);
+            Assert.IsTrue(harness.Logs.Query(new LuaLogQuery { ModId = "b" }).FindAllAsList(entry =>
+                    entry.ScriptName == LuaModSelfRepairCoordinator.RepairScriptName &&
+                    entry.Message.StartsWith("Mod 'b' is failing", StringComparison.Ordinal)).Count == 1,
+                "the second failing mod is in the mod log for the console, not in the chat");
         }
 
         [Test]
@@ -330,7 +334,7 @@ namespace CoreAI.Tests.EditMode.SelfRepair
         /// <summary>The real mod stack, the real tool, a recording gate and a scripted model.</summary>
         private sealed class Harness : IDisposable
         {
-            public Harness(LuaModRuntimeRepairOptions options = null)
+            public Harness(LuaModRuntimeRepairOptions options = null, LuaModSelfRepairPorts ports = null)
             {
                 Logs = new LuaLogService();
                 Stack = LuaCsModRuntimeFactory.Create(new LuaCsModStackOptions
@@ -351,8 +355,9 @@ namespace CoreAI.Tests.EditMode.SelfRepair
                 Requests = new LuaModPlayerRequestRecorder();
                 LuaModAuthorshipTracker authorship = new();
                 Gate.AddObserver(authorship);
+                Ports = ports ?? new LuaModSelfRepairPorts { BackendCost = () => Cost };
                 Coordinator = new LuaModSelfRepairCoordinator(Runtime, Actor, options, authorship, Model, Logs, Chat,
-                    null, () => Clock, () => Requests.CurrentRequest);
+                    null, () => Clock, () => Requests.CurrentRequest, null, Ports);
                 Coordinator.PlayerLinePosted += (_, line) =>
                 {
                     if (!line.StartsWith("AI is fixing", StringComparison.Ordinal))
@@ -385,6 +390,11 @@ namespace CoreAI.Tests.EditMode.SelfRepair
             public List<string> Lines { get; } = new();
 
             public double Clock { get; set; } = 1000d;
+
+            /// <summary>The backend's cost the default ports report; local, so the default mode repairs by itself.</summary>
+            public LuaModRepairBackendCost Cost { get; set; } = LuaModRepairBackendCost.Local;
+
+            public LuaModSelfRepairPorts Ports { get; }
 
             public async Task LoadThroughToolAsync(string modId, string code)
             {
@@ -421,17 +431,21 @@ namespace CoreAI.Tests.EditMode.SelfRepair
 
         /// <summary>
         /// A model that answers a repair turn by calling the real <c>manage_mods reload</c> with the code
-        /// <see cref="Fix"/> returns (none: it changes nothing), then ends the turn as <see cref="EndWith"/> says.
+        /// <see cref="Fix"/> returns (none: it changes nothing), then ends the turn as <see cref="EndWith"/> says, with the
+        /// reply <see cref="Answer"/> gives.
         /// </summary>
-        private sealed class ScriptedRepairModel : ILuaModRepairTurnRunner
+        internal sealed class ScriptedRepairModel : ILuaModRepairTurnRunner
         {
             private readonly LuaModsLlmTool _tool;
-            private readonly List<(Action<LuaModRepairTurnEnd, string> Ended, Handle Handle)> _held = new();
+            private readonly List<(Action<LuaModRepairTurnOutcome> Ended, Handle Handle)> _held = new();
 
             public ScriptedRepairModel(LuaModsLlmTool tool)
             {
                 _tool = tool;
             }
+
+            public Func<LuaModRepairTurnRequest, string> Answer { get; set; } =
+                _ => "Changed: the handler now builds the part before it reads its size.";
 
             public List<LuaModRepairTurnRequest> Requests { get; } = new();
 
@@ -449,7 +463,7 @@ namespace CoreAI.Tests.EditMode.SelfRepair
 
             public int Cancels { get; private set; }
 
-            public ILuaModRepairTurnHandle TryStart(LuaModRepairTurnRequest request, Action<LuaModRepairTurnEnd, string> ended)
+            public ILuaModRepairTurnHandle TryStart(LuaModRepairTurnRequest request, Action<LuaModRepairTurnOutcome> ended)
             {
                 Requests.Add(request);
                 Handle handle = new(this);
@@ -465,16 +479,16 @@ namespace CoreAI.Tests.EditMode.SelfRepair
 
             public void ReleaseHeld(LuaModRepairTurnEnd end = LuaModRepairTurnEnd.Completed)
             {
-                foreach ((Action<LuaModRepairTurnEnd, string> ended, Handle handle) in _held.ToArray())
+                foreach ((Action<LuaModRepairTurnOutcome> ended, Handle handle) in _held.ToArray())
                 {
                     handle.Running = false;
-                    ended(end, "");
+                    ended(new LuaModRepairTurnOutcome(end));
                 }
 
                 _held.Clear();
             }
 
-            private async Task RunAsync(LuaModRepairTurnRequest request, Action<LuaModRepairTurnEnd, string> ended,
+            private async Task RunAsync(LuaModRepairTurnRequest request, Action<LuaModRepairTurnOutcome> ended,
                 Handle handle)
             {
                 string code = Fix(request);
@@ -484,7 +498,8 @@ namespace CoreAI.Tests.EditMode.SelfRepair
                 }
 
                 handle.Running = false;
-                ended(EndWith, "");
+                ended(new LuaModRepairTurnOutcome(EndWith, "",
+                    EndWith == LuaModRepairTurnEnd.Completed ? Answer(request) ?? "" : ""));
             }
 
             private sealed class Handle : ILuaModRepairTurnHandle

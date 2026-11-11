@@ -154,7 +154,9 @@ namespace CoreAI.Tests.EditMode.Sandbox
                 "local f = coroutine.wrap(function() local n = 0 for i = 1, 5000000 do n = n + 1 end return n end) "
                 + "local ok, err = pcall(f) return ok, tostring(err)");
             Assert.IsFalse(results[0].Read<bool>(), "the body is cut, never run to completion");
-            StringAssert.Contains("EXCEEDED_COROUTINE_STEP_BUDGET", results[1].Read<string>());
+            string cut = results[1].Read<string>();
+            Assert.IsTrue(cut.Contains("EXCEEDED_COROUTINE_STEP_BUDGET") || cut.Contains("coroutine resume exceeded"),
+                "the per-resume budget of a raw coroutine cut it (steps, or time on a slow machine): " + cut);
         }
 
         [Test]

@@ -5,26 +5,66 @@ using CoreAI.Ai.Logging;
 using CoreAI.Authority;
 using CoreAI.ChatOverlay;
 using CoreAI.Logging;
+using CoreAI.Mods.WorldPackages;
 
 namespace CoreAI.Ai.SelfRepair
 {
+    /// <summary>The optional services the repair loop works with; every one may be null.</summary>
+    public sealed class LuaModSelfRepairPorts
+    {
+        /// <summary>
+        /// What a repair turn costs on the backend the repairing role uses; read whenever an incident opens. Null is
+        /// <see cref="LuaModRepairBackendCost.Unknown"/>, so <see cref="LuaModRuntimeRepairMode.ByBackend"/> asks first.
+        /// </summary>
+        public Func<LuaModRepairBackendCost> BackendCost { get; set; }
+
+        /// <summary>
+        /// The undo history's repair face: a repair joins the change it repairs, so one <c>/undo</c> takes back both.
+        /// Null records a repair as an ordinary AI change.
+        /// </summary>
+        public IRbxWorldRepairUndo Undo { get; set; }
+
+        /// <summary>
+        /// Pauses a mod the way the runtime's quarantine does (mod id, reason); true when it paused it. Called from
+        /// <see cref="LuaModSelfRepairCoordinator.Tick"/>. Null never pauses a mod.
+        /// </summary>
+        public Func<string, string, bool> Pause { get; set; }
+
+        /// <summary>
+        /// Appends one system-event note to the repairing role's chat history (stored out of the player's sight);
+        /// null keeps no note.
+        /// </summary>
+        public Action<string> HistoryNote { get; set; }
+    }
+
     /// <summary>
     /// Drives the runtime repair loop: listens to the mod runtime's handler errors and source loads, opens incidents
     /// through <see cref="LuaModRuntimeRepairPolicy"/>, decides which failing mods it may rewrite (AI-written only by
-    /// default, <see cref="LuaModAuthorshipTracker"/>), asks the model that maintains mods for one repair turn at a time
-    /// through an <see cref="ILuaModRepairTurnRunner"/>, verifies the fix by watching the mod's errors, and tells the
-    /// player one short line per step. The model applies the fix itself with <c>manage_mods reload</c>, which runs
-    /// through the shared world-mutation gate exactly like a chat request, so the fix is backed up, recorded as one AI
-    /// change and taken back by <c>/undo</c>; the coordinator never writes a mod. Engine-free: the host calls
-    /// <see cref="Tick"/> once per frame. Events may arrive on any thread; turns start only from <see cref="Tick"/>.
+    /// default, <see cref="LuaModAuthorshipTracker"/>) and whether it may spend a model's tokens without asking
+    /// (<see cref="LuaModRuntimeRepairMode.ByBackend"/>), asks the model that maintains mods for one repair turn at a
+    /// time through an <see cref="ILuaModRepairTurnRunner"/>, verifies the fix by watching the mod's errors, and tells
+    /// the player one short line per step. The model applies the fix itself with <c>manage_mods reload</c>, which runs
+    /// through the shared world-mutation gate like a chat request; with an <see cref="IRbxWorldRepairUndo"/> the fix
+    /// joins the change it repairs in the undo history. A mod it leaves alone while it fails all the time is paused,
+    /// never unloaded. An <c>/undo</c> or <c>/redo</c> that puts back another version closes the incident, and the
+    /// loop never repairs that version on its own. Engine-free: the host calls <see cref="Tick"/> once per frame.
+    /// Events may arrive on any thread; turns start and mods are paused only from <see cref="Tick"/>.
     /// </summary>
     public sealed class LuaModSelfRepairCoordinator : IDisposable
     {
         /// <summary><c>ScriptName</c> of the repair lines this loop appends to the mod log.</summary>
         public const string RepairScriptName = LuaModConsoleModel.RepairScriptName;
 
+        /// <summary>Characters of the system-event note a finished incident leaves in the role's history.</summary>
+        public const int MaximumHistoryNoteCharacters = 480;
+
+        /// <summary>The words that open that note.</summary>
+        public const string HistoryNotePrefix = "system_event runtime_repair:";
+
         private const double MissingEndGraceSeconds = 5d;
         private const int MaximumErrorCharacters = 140;
+        private const string PausedSentence =
+            " Its code is paused and its objects stay; saving it in the Hub (Mods) runs it again.";
 
         private readonly object _gate = new();
         private readonly ILuaModRuntime _runtime;
@@ -38,15 +78,19 @@ namespace CoreAI.Ai.SelfRepair
         private readonly Func<double> _clock;
         private readonly Func<string> _playerRequest;
         private readonly ILog _log;
+        private readonly LuaModSelfRepairPorts _ports;
         private readonly List<string> _queue = new();
         private readonly HashSet<string> _consented = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, ModState> _states = new(StringComparer.Ordinal);
         private readonly Queue<double> _turnStarts = new();
         private readonly List<PendingEnd> _pendingEnds = new();
         private readonly List<LuaModRepairIncident> _fixedScratch = new();
         private readonly List<Post> _posts = new();
+        private readonly List<string> _pendingPauses = new();
         private readonly Action<string, string, int> _onErrored;
         private readonly Action<string, string, LuaCapabilities> _onLoaded;
         private readonly Action<string, string, LuaCapabilities> _onUnloaded;
+        private readonly Action<string> _onWorldReplaced;
         private RunningTurn _running;
         private bool _offlineSaid;
         private double _stormNoticeUntil = double.NegativeInfinity;
@@ -63,6 +107,7 @@ namespace CoreAI.Ai.SelfRepair
         /// <param name="clock">Monotonic seconds; null uses <see cref="Environment.TickCount"/>.</param>
         /// <param name="playerRequest">The player's current chat request, recorded with an AI-written mod; optional.</param>
         /// <param name="log">Diagnostics; optional.</param>
+        /// <param name="ports">The backend cost, the undo history, the pause and the history note; optional.</param>
         public LuaModSelfRepairCoordinator(
             ILuaModRuntime runtime,
             ActorContext actor,
@@ -74,7 +119,8 @@ namespace CoreAI.Ai.SelfRepair
             ILuaModSourceStore store = null,
             Func<double> clock = null,
             Func<string> playerRequest = null,
-            ILog log = null)
+            ILog log = null,
+            LuaModSelfRepairPorts ports = null)
         {
             _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
             _actor = actor;
@@ -87,12 +133,15 @@ namespace CoreAI.Ai.SelfRepair
             _clock = clock ?? (() => Environment.TickCount / 1000d);
             _playerRequest = playerRequest;
             _log = log ?? NullLog.Instance;
+            _ports = ports ?? new LuaModSelfRepairPorts();
             _onErrored = OnHandlerErrored;
             _onLoaded = OnSourceLoaded;
             _onUnloaded = OnSourceUnloaded;
+            _onWorldReplaced = OnWholeWorldReplaced;
             _runtime.AddModHandlerErroredListener(_actor, _onErrored);
             _runtime.AddModSourceLoadedListener(_actor, _onLoaded);
             _runtime.AddModSourceUnloadedListener(_actor, _onUnloaded);
+            _authorship.WholeWorldReplaced += _onWorldReplaced;
         }
 
         /// <summary>The decision core, for a HUD or a test.</summary>
@@ -103,6 +152,13 @@ namespace CoreAI.Ai.SelfRepair
 
         /// <summary>The numbers in use.</summary>
         public LuaModRuntimeRepairOptions Options => _policy.Options;
+
+        /// <summary>
+        /// The mode the loop acts in now: <see cref="LuaModRuntimeRepairOptions.Mode"/>, with
+        /// <see cref="LuaModRuntimeRepairMode.ByBackend"/> resolved by the backend's cost.
+        /// </summary>
+        public LuaModRuntimeRepairMode EffectiveMode =>
+            LuaModRepairBackendCostRules.EffectiveMode(Options.Mode, BackendCost());
 
         /// <summary>The mod a repair turn runs for; empty when none runs.</summary>
         public string RepairingModId
@@ -132,8 +188,9 @@ namespace CoreAI.Ai.SelfRepair
         public event Action<string, string> PlayerLinePosted;
 
         /// <summary>
-        /// Advances the loop: applies ended turns, accepts verified fixes, stops a turn past its timeout and starts the
-        /// next due repair when the runner is free. Call once per frame from the main thread.
+        /// Advances the loop: applies ended turns, accepts verified fixes, stops a turn past its timeout, starts the
+        /// next due repair when the runner is free, and pauses the mods it decided to pause. Call once per frame from
+        /// the main thread.
         /// </summary>
         public void Tick()
         {
@@ -143,6 +200,7 @@ namespace CoreAI.Ai.SelfRepair
             }
 
             double now = _clock();
+            string[] pauses = null;
             lock (_gate)
             {
                 ApplyEndedTurnsLocked(now);
@@ -150,21 +208,25 @@ namespace CoreAI.Ai.SelfRepair
                 _policy.Tick(now, _fixedScratch);
                 foreach (LuaModRepairIncident incident in _fixedScratch)
                 {
-                    _consented.Remove(incident.ModId);
-                    Say(incident.ModId, LuaLogLevel.Print, "'" + incident.ModId + "' is fixed: no errors for " +
-                        Seconds(Options.VerifySeconds) + ".");
+                    OnFixedLocked(incident);
                 }
 
                 WatchRunningTurnLocked(now);
                 StartNextLocked(now);
+                if (_pendingPauses.Count > 0)
+                {
+                    pauses = _pendingPauses.ToArray();
+                    _pendingPauses.Clear();
+                }
             }
 
+            ApplyPauses(pauses);
             FlushPosts();
         }
 
         /// <summary>
         /// The player asked for a repair of <paramref name="modId"/> (<c>/fixmod</c>): a failing mod is queued whatever
-        /// the mode and scope say. Returns the reply for the chat.
+        /// the mode, the scope and the backend say. Returns the reply for the chat.
         /// </summary>
         public string RequestRepair(string modId)
         {
@@ -200,6 +262,7 @@ namespace CoreAI.Ai.SelfRepair
                 }
 
                 _consented.Add(id);
+                StateOf(id).Watch = false;
                 if (!_queue.Contains(id))
                 {
                     _queue.Add(id);
@@ -221,6 +284,7 @@ namespace CoreAI.Ai.SelfRepair
             _runtime.RemoveModHandlerErroredListener(_actor, _onErrored);
             _runtime.RemoveModSourceLoadedListener(_actor, _onLoaded);
             _runtime.RemoveModSourceUnloadedListener(_actor, _onUnloaded);
+            _authorship.WholeWorldReplaced -= _onWorldReplaced;
             RunningTurn running;
             lock (_gate)
             {
@@ -229,6 +293,7 @@ namespace CoreAI.Ai.SelfRepair
                 _queue.Clear();
             }
 
+            running?.CloseWindow();
             running?.Handle?.Cancel();
         }
 
@@ -248,7 +313,7 @@ namespace CoreAI.Ai.SelfRepair
                 switch (outcome)
                 {
                     case LuaModRepairErrorOutcome.IncidentOpened:
-                        OnIncidentOpenedLocked(incident, false);
+                        OnIncidentOpenedLocked(incident, false, now);
                         break;
                     case LuaModRepairErrorOutcome.Relapsed:
                         Say(id, LuaLogLevel.Warn, "'" + id + "' fails again: " + Describe(incident) + ".");
@@ -260,7 +325,10 @@ namespace CoreAI.Ai.SelfRepair
                         Enqueue(id);
                         break;
                     case LuaModRepairErrorOutcome.GaveUp:
-                        OnGaveUpLocked(incident);
+                        OnGaveUpLocked(incident, now);
+                        break;
+                    case LuaModRepairErrorOutcome.Counted:
+                        WatchBleedingLocked(incident, now);
                         break;
                 }
             }
@@ -279,7 +347,8 @@ namespace CoreAI.Ai.SelfRepair
             lock (_gate)
             {
                 bool repairingThis = _running != null && string.Equals(_running.ModId, id, StringComparison.Ordinal);
-                string request = repairingThis ? "" : SafePlayerRequest();
+                bool playerMove = _authorship.IsPlayerMoveRunning;
+                string request = repairingThis || playerMove ? "" : SafePlayerRequest();
                 _authorship.NoteSourceLoaded(id, source, request, out bool writtenByAiNow);
                 if (repairingThis && writtenByAiNow)
                 {
@@ -287,10 +356,19 @@ namespace CoreAI.Ai.SelfRepair
                     return;
                 }
 
+                if (playerMove && _authorship.IsPutBackByPlayer(id))
+                {
+                    TakeBackLocked(id, true);
+                    return;
+                }
+
                 _policy.NoteReplaced(id);
                 _consented.Remove(id);
                 _queue.Remove(id);
+                StateOf(id).Watch = false;
             }
+
+            FlushPosts();
         }
 
         private void OnSourceUnloaded(string modId, string source, LuaCapabilities capabilities)
@@ -308,13 +386,162 @@ namespace CoreAI.Ai.SelfRepair
                 if (_running == null || !string.Equals(_running.ModId, id, StringComparison.Ordinal))
                 {
                     _policy.Forget(id);
+                    _states.Remove(id);
                 }
             }
         }
 
-        private void OnIncidentOpenedLocked(LuaModRepairIncident incident, bool consented)
+        /// <summary>
+        /// An <c>/undo</c>, a <c>/redo</c> or a world load replaced the whole world. The restored mods start in a new
+        /// runtime before it is published, so no load or unload of theirs was reported: every mod the loop knows is
+        /// compared with what runs now. A mod that is gone is forgotten; a mod whose source the player's move changed
+        /// is taken back (its incident closes and the loop leaves that version alone); one a world load changed is
+        /// treated as replaced.
+        /// </summary>
+        private void OnWholeWorldReplaced(string trigger)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            bool byPlayer = LuaModAuthorshipTracker.IsPlayerMove(trigger);
+            lock (_gate)
+            {
+                HashSet<string> ids = new(StringComparer.Ordinal);
+                foreach (LuaModRepairIncident incident in _policy.Incidents)
+                {
+                    ids.Add(incident.ModId);
+                }
+
+                foreach (string id in _authorship.TrackedModIds)
+                {
+                    ids.Add(id);
+                }
+
+                if (_running != null)
+                {
+                    ids.Add(_running.ModId);
+                }
+
+                foreach (LuaModInfo info in SafeListMods())
+                {
+                    if (info != null && !string.IsNullOrEmpty(info.Id))
+                    {
+                        ids.Add(info.Id);
+                    }
+                }
+
+                foreach (string id in ids)
+                {
+                    ReconcileLocked(id, byPlayer);
+                }
+            }
+
+            FlushPosts();
+        }
+
+        private void ReconcileLocked(string id, bool byPlayer)
+        {
+            bool loaded;
+            string source = "";
+            try
+            {
+                loaded = _runtime.IsLoaded(_actor, id) && _runtime.TryGetModSource(_actor, id, out source);
+            }
+            catch (Exception ex)
+            {
+                _log.Warn("[LuaModSelfRepair] Reading '" + id + "' after a world replacement failed: " + ex.Message, LogTag.Lua);
+                return;
+            }
+
+            bool repairingThis = _running != null && string.Equals(_running.ModId, id, StringComparison.Ordinal);
+            if (!loaded)
+            {
+                if (repairingThis || IsActiveLocked(id))
+                {
+                    TakeBackLocked(id, byPlayer);
+                }
+
+                _policy.Forget(id);
+                _states.Remove(id);
+                _authorship.NoteSourceGone(id);
+                return;
+            }
+
+            if (!_authorship.NoteSourcePutBack(id, source, byPlayer))
+            {
+                return;
+            }
+
+            if (byPlayer)
+            {
+                TakeBackLocked(id, true);
+                return;
+            }
+
+            if (repairingThis)
+            {
+                StopRunningLocked();
+            }
+
+            _policy.CloseTakenBack(id);
+            _consented.Remove(id);
+            _queue.Remove(id);
+            StateOf(id).Watch = false;
+        }
+
+        /// <summary>
+        /// Closes the incident of a mod the player's move changed or removed: a running repair is stopped, a queued or
+        /// scheduled one dropped, and the player is told only when a repair was under way.
+        /// </summary>
+        private void TakeBackLocked(string id, bool byPlayer)
+        {
+            bool repairingThis = _running != null && string.Equals(_running.ModId, id, StringComparison.Ordinal);
+            bool wasActive = repairingThis || IsActiveLocked(id);
+            if (repairingThis)
+            {
+                StopRunningLocked();
+            }
+
+            _policy.CloseTakenBack(id);
+            _consented.Remove(id);
+            _queue.Remove(id);
+            ModState state = StateOf(id);
+            state.Watch = false;
+            if (wasActive)
+            {
+                Say(id, LuaLogLevel.Print, "Stopped repairing '" + id + "': " + (byPlayer ? "your /undo or /redo" : "a world load") +
+                                           " took that change back, and the AI leaves the version it put back alone. /fixmod " +
+                                           id + " asks the AI to fix it.");
+            }
+        }
+
+        private bool IsActiveLocked(string id)
+        {
+            LuaModRepairPhase phase = _policy.PhaseOf(id);
+            return _queue.Contains(id) || phase == LuaModRepairPhase.Repairing || phase == LuaModRepairPhase.Backoff;
+        }
+
+        /// <summary>Stops the running turn because its mod was taken back: no attempt is counted, no line follows.</summary>
+        private void StopRunningLocked()
+        {
+            RunningTurn running = _running;
+            if (running == null)
+            {
+                return;
+            }
+
+            running.TakenBack = true;
+            running.CancelRequested = true;
+            running.CloseWindow();
+        }
+
+        private void OnIncidentOpenedLocked(LuaModRepairIncident incident, bool consented, double now)
         {
             string id = incident.ModId;
+            ModState state = StateOf(id);
+            state.ResetForIncident();
             string failing = "Mod '" + id + "' is failing: " + Describe(incident) + ".";
             if (Options.Mode == LuaModRuntimeRepairMode.Off && !consented)
             {
@@ -325,33 +552,47 @@ namespace CoreAI.Ai.SelfRepair
 
             if (_runner == null || !_runner.IsModelAvailable)
             {
-                Say(id, LuaLogLevel.Warn, _offlineSaid
-                    ? failing
-                    : failing + " The AI is offline, so nothing repairs it; fix it in the Hub (Mods).");
-                _offlineSaid = true;
+                ReportOfflineLocked(incident, failing, now);
                 _policy.ParkDetected(id, LuaModRepairGiveUpReason.Offline);
+                return;
+            }
+
+            if (!consented && _authorship.IsPutBackByPlayer(id))
+            {
+                ReportOnlyLocked(incident, failing, "It is the version your /undo or /redo put back, so the AI leaves it alone.",
+                    "/fixmod " + id + " asks the AI to fix it.", now);
+                _policy.ParkDetected(id, LuaModRepairGiveUpReason.NotAllowed);
                 return;
             }
 
             if (!consented && Options.Scope == LuaModRuntimeRepairScope.AiWrittenOnly &&
                 _authorship.AuthorOf(id) != LuaModAuthor.Ai)
             {
-                Say(id, LuaLogLevel.Warn, failing + " " + (IsBundled(id) ? "It is a bundled sample" : "The AI did not write it") +
-                                          ", so the AI leaves it alone; /fixmod " + id + " asks the AI to fix it.");
+                ReportOnlyLocked(incident, failing, (IsBundled(id) ? "It is a bundled sample" : "The AI did not write it") +
+                                                    ", so the AI leaves it alone.",
+                    "/fixmod " + id + " asks the AI to fix it.", now);
                 _policy.ParkDetected(id, LuaModRepairGiveUpReason.NotAllowed);
                 return;
             }
 
-            if (!consented && Options.Mode == LuaModRuntimeRepairMode.AskFirst)
+            if (!consented && EffectiveMode == LuaModRuntimeRepairMode.AskFirst)
             {
-                Say(id, LuaLogLevel.Warn, failing + " /fixmod " + id + " asks the AI to fix it.");
+                bool byBackend = Options.Mode == LuaModRuntimeRepairMode.ByBackend;
+                string reason = !byBackend
+                    ? "The AI repairs it when you ask."
+                    : BackendCost() == LuaModRepairBackendCost.Paid
+                        ? "Your AI backend is paid, so nothing is sent to it until you ask."
+                        : "Your AI backend may be paid, so nothing is sent to it until you ask.";
+                ReportOnlyLocked(incident, failing, reason,
+                    "/fixmod " + id + (byBackend ? " repairs it." : " asks the AI to fix it."), now);
                 _policy.ParkDetected(id, LuaModRepairGiveUpReason.NotAllowed);
                 return;
             }
 
             if (!_queue.Contains(id) && _queue.Count >= Options.MaxQueuedMods)
             {
-                Say(id, LuaLogLevel.Warn, failing + " The AI is busy with other failing mods; /fixmod " + id + " queues it.");
+                ReportOnlyLocked(incident, failing, "The AI is busy with other failing mods.", "/fixmod " + id + " queues it.",
+                    now);
                 _policy.ParkDetected(id, LuaModRepairGiveUpReason.TooManyFailing);
                 return;
             }
@@ -360,31 +601,228 @@ namespace CoreAI.Ai.SelfRepair
             Enqueue(id);
         }
 
-        private void OnGaveUpLocked(LuaModRepairIncident incident)
+        /// <summary>
+        /// One line for a failing mod the loop does not repair now, and the mod is paused when it fails all the time;
+        /// a mod that fails now and then keeps running and is watched, so it is paused once it fails all the time.
+        /// </summary>
+        private void ReportOnlyLocked(LuaModRepairIncident incident, string failing, string reason, string hint, double now)
+        {
+            bool paused = PauseIfBleedingLocked(incident, now);
+            Say(incident.ModId, LuaLogLevel.Warn, failing + " " + reason + (paused ? PausedSentence : "") + " " + hint);
+            StateOf(incident.ModId).Watch = !paused;
+        }
+
+        /// <summary>
+        /// The Offline backend: one sentence per session, every later failing mod only in the mod log; a mod that fails
+        /// all the time is paused all the same.
+        /// </summary>
+        private void ReportOfflineLocked(LuaModRepairIncident incident, string failing, double now)
         {
             string id = incident.ModId;
+            bool paused = PauseIfBleedingLocked(incident, now);
+            StateOf(id).Watch = !paused;
+            if (_offlineSaid)
+            {
+                AppendLogLocked(id, LuaLogLevel.Warn, failing + (paused ? PausedSentence : ""));
+                return;
+            }
+
+            _offlineSaid = true;
+            Say(id, LuaLogLevel.Warn, failing + " The AI is offline, so nothing repairs failing mods" +
+                                      (_ports.Pause != null ? "; one that keeps failing is paused and its objects stay" : "") +
+                                      ". The mod console (/console) lists them; fix them in the Hub (Mods).");
+        }
+
+        private void OnGaveUpLocked(LuaModRepairIncident incident, double now)
+        {
+            string id = incident.ModId;
+            ModState state = StateOf(id);
             _queue.Remove(id);
             _consented.Remove(id);
+            string outcome = "gave up after " + incident.Attempt.ToString(CultureInfo.InvariantCulture) + " tries";
             switch (incident.GiveUpReason)
             {
                 case LuaModRepairGiveUpReason.IncidentsExhausted:
+                {
+                    bool paused = PauseIfBleedingLocked(incident, now);
+                    state.Watch = !paused;
                     Say(id, LuaLogLevel.Warn, "'" + id + "' keeps failing (" + Describe(incident) +
-                                              "); the AI stops repairing it for this session. /fixmod " + id +
-                                              " tries again.");
+                                              "); the AI stops repairing it for this session." +
+                                              (paused ? PausedSentence : "") + " /fixmod " + id + " tries again.");
                     break;
+                }
                 case LuaModRepairGiveUpReason.StoppedByPlayer:
+                    outcome = "stopped by the player";
                     Say(id, LuaLogLevel.Print, "Stopped repairing '" + id + "'. /fixmod " + id + " starts again.");
                     break;
                 case LuaModRepairGiveUpReason.Offline:
-                    Say(id, LuaLogLevel.Warn, "Could not reach the AI to fix '" + id + "'; fix it in the Hub (Mods).");
+                {
+                    outcome = "the AI could not be reached";
+                    bool paused = PauseIfBleedingLocked(incident, now);
+                    state.Watch = !paused;
+                    string line = "Could not reach the AI to fix '" + id + "'." + (paused ? PausedSentence : "") +
+                                  " Fix it in the Hub (Mods).";
+                    if (_offlineSaid)
+                    {
+                        AppendLogLocked(id, LuaLogLevel.Warn, line);
+                    }
+                    else
+                    {
+                        Say(id, LuaLogLevel.Warn, line);
+                    }
+
                     _offlineSaid = true;
                     break;
+                }
                 default:
+                {
+                    bool paused = PauseIfBleedingLocked(incident, now);
+                    state.Watch = !paused;
                     Say(id, LuaLogLevel.Warn, "Could not fix '" + id + "' after " +
-                                              incident.Attempt.ToString(CultureInfo.InvariantCulture) + " tries" +
-                                              (IsQuarantined(id) ? "; its handlers stay paused" : "") +
-                                              ". /undo takes back the AI's change; /fixmod " + id + " tries again.");
+                                              incident.Attempt.ToString(CultureInfo.InvariantCulture) + " tries." +
+                                              (paused ? PausedSentence : " It keeps running: only part of it fails.") +
+                                              " /fixmod " + id + " tries again; " + GaveUpUndoWay(state.UndoRecording));
                     break;
+                }
+            }
+
+            NoteHistoryLocked(id, state, outcome);
+        }
+
+        private void OnFixedLocked(LuaModRepairIncident incident)
+        {
+            string id = incident.ModId;
+            ModState state = StateOf(id);
+            _consented.Remove(id);
+            string repaired = "";
+            try
+            {
+                if (!_runtime.TryGetModSource(_actor, id, out repaired))
+                {
+                    repaired = "";
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Warn("[LuaModSelfRepair] Reading the repaired source of '" + id + "' failed: " + ex.Message, LogTag.Lua);
+            }
+
+            LuaModRepairSourceComparison comparison = LuaModRepairChangeReport.Compare(state.FailingSource, repaired);
+            Say(id, LuaLogLevel.Print, LuaModRepairChangeReport.BuildFixedLine(id, state.LastSummary, comparison,
+                LuaModRepairChangeReport.UndoWay(state.UndoRecording)));
+            NoteHistoryLocked(id, state, comparison.IsSuspicious ? "errors stopped, but the fix removed code" : "fixed");
+        }
+
+        /// <summary>
+        /// A paused-or-not decision for a mod the loop leaves alone: true when the mod is paused now (by the runtime's
+        /// own quarantine, or by the pause this call schedules for the next <see cref="Tick"/>).
+        /// </summary>
+        private bool PauseIfBleedingLocked(LuaModRepairIncident incident, double now)
+        {
+            if (incident == null)
+            {
+                return false;
+            }
+
+            if (IsQuarantined(incident.ModId))
+            {
+                return true;
+            }
+
+            if (_ports.Pause == null || !_policy.IsFailingContinuously(incident.ModId, now))
+            {
+                return false;
+            }
+
+            if (!_pendingPauses.Contains(incident.ModId))
+            {
+                _pendingPauses.Add(incident.ModId);
+            }
+
+            return true;
+        }
+
+        /// <summary>A left-alone mod that keeps failing: once it fails all the time, it is paused with one line.</summary>
+        private void WatchBleedingLocked(LuaModRepairIncident incident, double now)
+        {
+            if (incident == null || incident.Phase != LuaModRepairPhase.GaveUp)
+            {
+                return;
+            }
+
+            ModState state = StateOf(incident.ModId);
+            if (!state.Watch || _ports.Pause == null || !_policy.IsFailingContinuously(incident.ModId, now))
+            {
+                return;
+            }
+
+            state.Watch = false;
+            if (IsQuarantined(incident.ModId))
+            {
+                return;
+            }
+
+            _pendingPauses.Add(incident.ModId);
+            string line = "'" + incident.ModId + "' fails all the time now (" + Describe(incident) + ")." + PausedSentence +
+                          " /fixmod " + incident.ModId + " asks the AI to fix it.";
+            if (incident.GiveUpReason == LuaModRepairGiveUpReason.Offline && _offlineSaid)
+            {
+                AppendLogLocked(incident.ModId, LuaLogLevel.Warn, line);
+            }
+            else
+            {
+                Say(incident.ModId, LuaLogLevel.Warn, line);
+            }
+        }
+
+        private void ApplyPauses(string[] pauses)
+        {
+            if (pauses == null || _ports.Pause == null)
+            {
+                return;
+            }
+
+            foreach (string id in pauses)
+            {
+                try
+                {
+                    _ports.Pause(id, "the AI's self-repair left it alone while it kept failing");
+                }
+                catch (Exception ex)
+                {
+                    _log.Warn("[LuaModSelfRepair] Pausing '" + id + "' failed: " + ex.Message, LogTag.Lua);
+                }
+            }
+        }
+
+        /// <summary>
+        /// One system-event note in the repairing role's history for an incident in which the model changed the mod, so
+        /// a later chat turn knows what it changed; the repair requests themselves never enter the history.
+        /// </summary>
+        private void NoteHistoryLocked(string id, ModState state, string outcome)
+        {
+            if (_ports.HistoryNote == null || !state.FixLanded)
+            {
+                return;
+            }
+
+            state.FixLanded = false;
+            string summary = state.LastSummary.Length > 0 ? state.LastSummary : "not described";
+            string note = HistoryNotePrefix + " mod '" + id + "' failed while the game ran (" +
+                          Clip(SingleLine(state.FirstError), MaximumErrorCharacters) + "); the AI repaired it with " +
+                          "manage_mods reload, outcome: " + outcome + ". Its last change: " + summary;
+            if (note.Length > MaximumHistoryNoteCharacters)
+            {
+                note = note.Substring(0, MaximumHistoryNoteCharacters - 3) + "...";
+            }
+
+            try
+            {
+                _ports.HistoryNote(note);
+            }
+            catch (Exception ex)
+            {
+                _log.Warn("[LuaModSelfRepair] Writing the repair note to the history failed: " + ex.Message, LogTag.Lua);
             }
         }
 
@@ -412,26 +850,49 @@ namespace CoreAI.Ai.SelfRepair
                     continue;
                 }
 
-                FinishRunningLocked(pending.End, pending.Message, now);
+                FinishRunningLocked(pending.Outcome, now);
             }
         }
 
-        private void FinishRunningLocked(LuaModRepairTurnEnd end, string message, double now)
+        private void FinishRunningLocked(LuaModRepairTurnOutcome result, double now)
         {
             RunningTurn running = _running;
             _running = null;
+            running.CloseWindow();
+            string id = running.ModId;
+            if (running.TakenBack)
+            {
+                return;
+            }
+
+            LuaModRepairTurnEnd end = result.End;
             if (running.TimedOut && end == LuaModRepairTurnEnd.Cancelled)
             {
                 end = LuaModRepairTurnEnd.TimedOut;
             }
 
-            string id = running.ModId;
+            ModState state = StateOf(id);
             LuaModRepairIncident incident = _policy.Get(id);
             bool changed = incident != null && incident.FixLanded;
+            state.LastReloaded = changed;
+            state.LastSummary = changed ? LuaModRepairChangeReport.ExtractSummary(result.Answer) : "";
+            state.LastAskedError = running.AskedError;
+            state.LastAskedSite = running.AskedSite;
+            if (changed)
+            {
+                state.FixLanded = true;
+                RbxWorldRepairRecording recording = running.Window?.Recording ?? RbxWorldRepairRecording.None;
+                if (recording != RbxWorldRepairRecording.None)
+                {
+                    state.UndoRecording = recording;
+                }
+            }
+
             LuaModRepairAttemptOutcome outcome = _policy.EndAttempt(id, end, now);
             switch (outcome)
             {
                 case LuaModRepairAttemptOutcome.RetryScheduled:
+                    string message = result.Message ?? "";
                     string why = end == LuaModRepairTurnEnd.TimedOut
                         ? "The repair of '" + id + "' took too long"
                         : end == LuaModRepairTurnEnd.Failed && !changed
@@ -443,7 +904,7 @@ namespace CoreAI.Ai.SelfRepair
                     Enqueue(id);
                     break;
                 case LuaModRepairAttemptOutcome.GaveUp:
-                    OnGaveUpLocked(incident);
+                    OnGaveUpLocked(incident, now);
                     break;
             }
         }
@@ -454,6 +915,12 @@ namespace CoreAI.Ai.SelfRepair
             if (running == null)
             {
                 return;
+            }
+
+            if (running.CancelRequested && !running.CancelSent)
+            {
+                running.CancelSent = true;
+                running.Handle?.Cancel();
             }
 
             if (!running.TimedOut && now - running.StartedAt > Options.TurnTimeoutSeconds)
@@ -470,7 +937,8 @@ namespace CoreAI.Ai.SelfRepair
                 }
                 else if (now - running.NotRunningSince > MissingEndGraceSeconds)
                 {
-                    FinishRunningLocked(running.TimedOut ? LuaModRepairTurnEnd.TimedOut : LuaModRepairTurnEnd.Cancelled, "", now);
+                    FinishRunningLocked(new LuaModRepairTurnOutcome(
+                        running.TimedOut ? LuaModRepairTurnEnd.TimedOut : LuaModRepairTurnEnd.Cancelled), now);
                 }
             }
         }
@@ -505,11 +973,9 @@ namespace CoreAI.Ai.SelfRepair
                 if (!_runner.IsModelAvailable)
                 {
                     _queue.RemoveAt(index);
+                    LuaModRepairIncident parked = _policy.Get(id);
                     _policy.ParkDetected(id, LuaModRepairGiveUpReason.Offline);
-                    Say(id, LuaLogLevel.Warn, _offlineSaid
-                        ? "The AI is offline; '" + id + "' is not repaired."
-                        : "The AI is offline, so nothing repairs '" + id + "'; fix it in the Hub (Mods).");
-                    _offlineSaid = true;
+                    ReportOfflineLocked(parked, "Mod '" + id + "' is failing: " + Describe(parked) + ".", now);
                     return;
                 }
 
@@ -532,8 +998,22 @@ namespace CoreAI.Ai.SelfRepair
                 }
 
                 LuaModRepairIncident incident = _policy.Get(id);
-                LuaModRepairTurnRequest request = BuildRequestLocked(incident, incident.Attempt + 1);
-                RunningTurn turn = new() { ModId = id, StartedAt = now };
+                ModState state = StateOf(id);
+                LuaModRepairTurnRequest request = BuildRequestLocked(incident, incident.Attempt + 1, state, out string source);
+                if (incident.Attempt == 0)
+                {
+                    state.FailingSource = source;
+                    state.FirstError = incident.LastError ?? "";
+                }
+
+                RunningTurn turn = new()
+                {
+                    ModId = id,
+                    StartedAt = now,
+                    AskedError = incident.LastError ?? "",
+                    AskedSite = incident.LastSite,
+                    Window = OpenRepairWindowLocked(id)
+                };
 
                 // WHY: the attempt begins before the runner is called: a runner may run the whole turn, the model's
                 // reload included, inside TryStart, and that reload must find the mod in its running attempt.
@@ -542,7 +1022,7 @@ namespace CoreAI.Ai.SelfRepair
                 ILuaModRepairTurnHandle handle;
                 try
                 {
-                    handle = _runner.TryStart(request, (end, message) => OnTurnEnded(turn, end, message));
+                    handle = _runner.TryStart(request, outcome => OnTurnEnded(turn, outcome));
                 }
                 catch (Exception ex)
                 {
@@ -553,6 +1033,7 @@ namespace CoreAI.Ai.SelfRepair
                 if (handle == null)
                 {
                     _running = null;
+                    turn.CloseWindow();
                     _pendingEnds.RemoveAll(pending => ReferenceEquals(pending.Turn, turn));
                     _policy.AbortAttempt(id);
                     return;
@@ -569,10 +1050,37 @@ namespace CoreAI.Ai.SelfRepair
             }
         }
 
-        private LuaModRepairTurnRequest BuildRequestLocked(LuaModRepairIncident incident, int attempt)
+        /// <summary>
+        /// Opens the undo history's repair window for a turn. An automatic repair of a source the AI wrote names the
+        /// change that wrote it, so the repair can join it; a mod the player wrote or put back, and every repair the
+        /// player asked for on such a mod, names none and stays its own entry.
+        /// </summary>
+        private IRbxWorldRepairWindow OpenRepairWindowLocked(string id)
+        {
+            if (_ports.Undo == null)
+            {
+                return null;
+            }
+
+            long repaired = _authorship.AuthorOf(id) == LuaModAuthor.Ai && !_authorship.IsPutBackByPlayer(id)
+                ? _authorship.AiSequenceFor(id)
+                : 0L;
+            try
+            {
+                return _ports.Undo.BeginRepair(_actor.ActorId ?? "", repaired, id);
+            }
+            catch (Exception ex)
+            {
+                _log.Warn("[LuaModSelfRepair] Opening the undo history's repair window failed: " + ex.Message, LogTag.Lua);
+                return null;
+            }
+        }
+
+        private LuaModRepairTurnRequest BuildRequestLocked(LuaModRepairIncident incident, int attempt, ModState state,
+            out string source)
         {
             string id = incident.ModId;
-            string source = "";
+            source = "";
             try
             {
                 if (!_runtime.TryGetModSource(_actor, id, out source))
@@ -595,6 +1103,7 @@ namespace CoreAI.Ai.SelfRepair
                 _log.Warn("[LuaModSelfRepair] Reading the log of '" + id + "' failed: " + ex.Message, LogTag.Lua);
             }
 
+            bool hasPrevious = attempt > 1;
             LuaModRepairContext context = new()
             {
                 ModId = id,
@@ -605,7 +1114,11 @@ namespace CoreAI.Ai.SelfRepair
                 Site = incident.LastSite,
                 Source = source ?? "",
                 RecentLogs = recent,
-                PlayerRequest = _authorship.RequestFor(id)
+                PlayerRequest = _authorship.RequestFor(id),
+                PreviousReloaded = hasPrevious && state.LastReloaded,
+                PreviousSummary = hasPrevious ? state.LastSummary : "",
+                PreviousError = hasPrevious ? state.LastAskedError : "",
+                PreviousSite = hasPrevious ? state.LastAskedSite : default
             };
 
             return new LuaModRepairTurnRequest
@@ -617,33 +1130,59 @@ namespace CoreAI.Ai.SelfRepair
                 Text = LuaModRepairPromptBuilder.Build(context),
                 Announcement = "AI is fixing '" + id + "' (try " + attempt.ToString(CultureInfo.InvariantCulture) + " of " +
                                Options.MaxAttemptsPerIncident.ToString(CultureInfo.InvariantCulture) + "). /stop cancels.",
-                TraceId = Guid.NewGuid().ToString("N")
+                TraceId = Guid.NewGuid().ToString("N"),
+                HistoryMode = AiTaskHistoryMode.None
             };
         }
 
-        private void OnTurnEnded(RunningTurn turn, LuaModRepairTurnEnd end, string message)
+        private void OnTurnEnded(RunningTurn turn, LuaModRepairTurnOutcome outcome)
         {
             lock (_gate)
             {
-                _pendingEnds.Add(new PendingEnd(turn, end, message ?? ""));
+                _pendingEnds.Add(new PendingEnd(turn, outcome));
+            }
+        }
+
+        private LuaModRepairBackendCost BackendCost()
+        {
+            Func<LuaModRepairBackendCost> probe = _ports.BackendCost;
+            if (probe == null)
+            {
+                return LuaModRepairBackendCost.Unknown;
+            }
+
+            try
+            {
+                return probe();
+            }
+            catch (Exception ex)
+            {
+                _log.Warn("[LuaModSelfRepair] Reading the backend's cost failed: " + ex.Message, LogTag.Lua);
+                return LuaModRepairBackendCost.Unknown;
+            }
+        }
+
+        private IReadOnlyList<LuaModInfo> SafeListMods()
+        {
+            try
+            {
+                return _runtime.ListMods(_actor) ?? (IReadOnlyList<LuaModInfo>)Array.Empty<LuaModInfo>();
+            }
+            catch (Exception ex)
+            {
+                _log.Warn("[LuaModSelfRepair] Listing mods failed: " + ex.Message, LogTag.Lua);
+                return Array.Empty<LuaModInfo>();
             }
         }
 
         private bool IsQuarantined(string id)
         {
-            try
+            foreach (LuaModInfo info in SafeListMods())
             {
-                foreach (LuaModInfo info in _runtime.ListMods(_actor))
+                if (info != null && string.Equals(info.Id, id, StringComparison.Ordinal))
                 {
-                    if (info != null && string.Equals(info.Id, id, StringComparison.Ordinal))
-                    {
-                        return info.Quarantined;
-                    }
+                    return info.Quarantined;
                 }
-            }
-            catch (Exception ex)
-            {
-                _log.Warn("[LuaModSelfRepair] Listing mods failed: " + ex.Message, LogTag.Lua);
             }
 
             return false;
@@ -685,6 +1224,17 @@ namespace CoreAI.Ai.SelfRepair
                 _log.Warn("[LuaModSelfRepair] Reading the player's request failed: " + ex.Message, LogTag.Lua);
                 return "";
             }
+        }
+
+        private ModState StateOf(string id)
+        {
+            if (!_states.TryGetValue(id, out ModState state))
+            {
+                state = new ModState();
+                _states[id] = state;
+            }
+
+            return state;
         }
 
         private void Say(string modId, LuaLogLevel level, string line)
@@ -748,6 +1298,19 @@ namespace CoreAI.Ai.SelfRepair
             }
         }
 
+        private static string GaveUpUndoWay(RbxWorldRepairRecording recording)
+        {
+            switch (recording)
+            {
+                case RbxWorldRepairRecording.JoinedRepairedChange:
+                    return "/undo takes back your request together with the AI's tries.";
+                case RbxWorldRepairRecording.OwnEntry:
+                    return "/undo takes back the AI's last try.";
+                default:
+                    return "/undo takes back the AI's change.";
+            }
+        }
+
         /// <summary>
         /// A line for the player. A turn's announcement is not posted to the chat by a chat runner's turn, which shows
         /// it as the host turn's own line.
@@ -775,19 +1338,51 @@ namespace CoreAI.Ai.SelfRepair
                 return "an error";
             }
 
-            string error = incident.LastError ?? "";
-            if (error.Length > MaximumErrorCharacters)
-            {
-                error = error.Substring(0, MaximumErrorCharacters) + "...";
-            }
-
             string where = incident.LastSite.Describe(incident.ModId);
+            string error = Clip(incident.LastError ?? "", MaximumErrorCharacters);
             return where.Length > 0 ? error + " (" + where + ")" : error;
+        }
+
+        private static string Clip(string text, int length)
+        {
+            return text.Length <= length ? text : text.Substring(0, length) + "...";
+        }
+
+        private static string SingleLine(string text)
+        {
+            return (text ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
         }
 
         private static string Seconds(double seconds)
         {
             return Math.Max(0d, Math.Ceiling(seconds)).ToString("0", CultureInfo.InvariantCulture) + " s";
+        }
+
+        /// <summary>What the loop remembers of one mod between the attempts of an incident.</summary>
+        private sealed class ModState
+        {
+            public string FailingSource = "";
+            public string FirstError = "";
+            public string LastSummary = "";
+            public bool LastReloaded;
+            public string LastAskedError = "";
+            public LuaModErrorSite LastAskedSite;
+            public RbxWorldRepairRecording UndoRecording;
+            public bool FixLanded;
+            public bool Watch;
+
+            public void ResetForIncident()
+            {
+                FailingSource = "";
+                FirstError = "";
+                LastSummary = "";
+                LastReloaded = false;
+                LastAskedError = "";
+                LastAskedSite = default;
+                UndoRecording = RbxWorldRepairRecording.None;
+                FixLanded = false;
+                Watch = false;
+            }
         }
 
         private sealed class RunningTurn
@@ -796,23 +1391,45 @@ namespace CoreAI.Ai.SelfRepair
             public double StartedAt;
             public double NotRunningSince = -1d;
             public bool TimedOut;
+            public bool TakenBack;
+            public bool CancelRequested;
+            public bool CancelSent;
+            public string AskedError = "";
+            public LuaModErrorSite AskedSite;
             public ILuaModRepairTurnHandle Handle;
+            public IRbxWorldRepairWindow Window;
+
+            public void CloseWindow()
+            {
+                IRbxWorldRepairWindow window = Window;
+                if (window == null)
+                {
+                    return;
+                }
+
+                try
+                {
+                    window.Dispose();
+                }
+                catch (Exception)
+                {
+                    // WHY: closing a window only removes it from the history's list; a host's own history may throw,
+                    // and the repair must still end.
+                }
+            }
         }
 
         private readonly struct PendingEnd
         {
-            public PendingEnd(RunningTurn turn, LuaModRepairTurnEnd end, string message)
+            public PendingEnd(RunningTurn turn, LuaModRepairTurnOutcome outcome)
             {
                 Turn = turn;
-                End = end;
-                Message = message;
+                Outcome = outcome;
             }
 
             public RunningTurn Turn { get; }
 
-            public LuaModRepairTurnEnd End { get; }
-
-            public string Message { get; }
+            public LuaModRepairTurnOutcome Outcome { get; }
         }
     }
 }

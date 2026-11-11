@@ -1,7 +1,7 @@
 # Block World
 
 A small Minecraft-style game whose logic and interface are entirely Lua mods on CoreAI's Roblox-shaped API:
-a seeded voxel world in `workspace.Terrain` with caves, building and breaking at the crosshair, a hotbar, day and
+a seeded voxel world in `workspace.Terrain` with coasts, hills, snowy peaks, woods and caves, building and breaking at the crosshair, a hotbar, day and
 night, torches, survival with health and falls, villagers who talk, and an autopilot. It is also the template for "a game like this": every part is a
 short mod you can read in one sitting, change while the game runs, or ask the AI to change.
 
@@ -92,10 +92,12 @@ Not built: mobs, hunger and crafting. The game has none of them today and does n
 
 ## Caves
 
-Under the hills run winding tunnels with a few larger chambers, five to twelve blocks down; now and then a
-tunnel reaches the surface, so you find a way in by walking around. A cave at the shore or under the sea is
+Under the hills run winding tunnels with a few larger chambers, five to twelve blocks down. Where the ground
+climbs a hillside, a cave mouth opens into it: two blocks high, running into the hill and ending in a small chamber,
+so a player sees a way in from outside. A cave at the shore or under the sea is
 flooded up to the sea level, inland caves are dry, no cave cuts through the bedrock, and the ground around the
-spawn stays whole. Under rock the clock gives the night's ambient light, so a torch is what lights a cave.
+spawn stays whole. A cave is dark at any hour: the sky's light does not reach it, and the light it gets
+(`Lighting.Ambient`) stays low all day, so a torch is what lights it.
 
 ## When /undo works
 
@@ -127,10 +129,10 @@ reloads on its own.
 
 | Mod | Owns | Talks to the others through |
 |---|---|---|
-| `blockworld_world` | the seeded world: hills, sea, shore, stone, caves, bedrock, trees, streamed around you in budgeted steps (your own column first, then the one whose edge is nearest you, what is in front of the camera before what is behind); the spawn and the heading you first face; a new player held until the first view is built | `BlockWorldSeed`, `BlockWorldSpawn`, `BlockWorldSpawnLook`, `BlockWorldReady`, `BlockWorldOpened`, `BlockWorldOpeningColumns`, `BlockWorldColumns` |
+| `blockworld_world` | the seeded world: sea and lakes, sandy beaches, grass lowlands with woods and single trees (round oaks, tall narrow trees, big oaks), hills whose steps show earth, rocky ridges and snowy peaks, caves with hillside mouths, bedrock; streamed around you in budgeted steps (your own column first, then the one whose edge is nearest you, what is in front of the camera before what is behind); the spawn and the heading you first face; a new player held until the first view is built | `BlockWorldSeed`, `BlockWorldSpawn`, `BlockWorldSpawnLook`, `BlockWorldReady`, `BlockWorldOpened`, `BlockWorldOpeningColumns`, `BlockWorldColumns` |
 | `blockworld_build` | the crosshair target and its outline, breaking and placing, reach, creative or survival, the view | `CrosshairCell`, `CrosshairPlaceCell`, `CrosshairNormal`, `CrosshairPartName`, `CrosshairModelName`, `BlockWorldCreative`, `BlockWorldPlaced`, `BlockWorldBroken`, `BlockWorldCount_<Material>` |
 | `blockworld_hud` | the whole interface (UXML and USS text through `UxmlService`), the key legend, health in survival, the hotbar choice and the "Building the world" screen | `BlockWorldSelected`, `BlockWorldSlot` |
-| `blockworld_daynight` | the clock (`Lighting.ClockTime`, a fresh world starts at 10:00), the night ambient and the dark under rock, `/time` (a `TextChatCommand`) and the L key | `BlockWorldTime` (set it to "noon", "18:30", "stop", "go"), `BlockWorldUnderground` |
+| `blockworld_daynight` | the clock (`Lighting.ClockTime`, a fresh world starts at 10:00), the sky's light (`OutdoorAmbient`, low at night) and the light where the sky does not reach (`Ambient`, low all day, so caves are dark), `/time` (a `TextChatCommand`) and the L key | `BlockWorldTime` (set it to "noon", "18:30", "stop", "go") |
 | `blockworld_torches` | torches with a PointLight and a flame, the light budget | `BlockWorldTorches` |
 | `blockworld_villagers` | Mira, Tobin and Elda: character Models under `workspace` with Roblox's R6 body (`Head`, `Torso`, `Left Arm` ...), which the platform's character rig animates as it does the player's, in their own clothes, with hair and two eyes that follow the head, placed around the spawn in the frame of the first view (Mira in it), held until the ground under them exists, their `AIService` agents and brains | on each Model `NpcAgent`, `NpcBrain`, `NpcState` (the host writes `NpcAction`); `BlockWorldVillagerReply` |
 | `blockworld_survival` | health from the Humanoid, fall damage (a fall is read from `Humanoid.StateChanged`), death and the respawn at the spawn; off in creative | `BlockWorldHealth`, `BlockWorldMaxHealth`, `BlockWorldDeaths` |
@@ -151,10 +153,11 @@ Not done on purpose today: the mods still share state through workspace attribut
 ## Budgets
 
 - World generation spends a fixed amount of work per frame, counted in cells before a pillar is filled (a pillar
-  costs its cells, eight more, and up to 24 for its caves; 250 a frame). The fullest frame stays near 4,000
+  costs its cells, twelve more, and up to 24 for its caves; 220 a frame). Trees grow until about 3,000
+  instructions a frame are spent, after a frame that plans them. The fullest frame stays near 4,000
   instructions, under half the per-resume budget every Heartbeat handler gets (10,000). Nothing is generated
   while the mod loads (a reload must fit an AI tool call); the spawn column, which has no caves, comes first, in
-  under forty frames, and a column with caves takes about fifty.
+  under forty frames (it has no caves and no wood), and a column with caves and a wood takes about seventy.
 - The torch mod keeps at most 48 lit torches and says so when it is full. The host adds its own light budget:
   desktop (Forward+) keeps 64 lights, the WebGL tier keeps the 8 nearest on and reports it.
 - The HUD rewrites a label only when its text changes, so an idle frame writes nothing to the UI.
@@ -165,7 +168,7 @@ Not done on purpose today: the mods still share state through workspace attribut
   night, torches, villagers, autopilot, survival, all eight together, caves).
 - The mods in a running world: `Assets/CoreAIMods/Tests/PlayMode/RbxApi/BlockWorld/BlockWorldPlayModeTests.cs`.
 - This scene as a player opens it: `BlockWorldScenePlayModeTests.cs` next to it (one player on generated ground
-  whose sunlit grass reads green and a Ground twin does not, the HUD from the runtime UI host, place and break with the outline and the reach, noon against midnight and a torch
+  whose sunlit Grass top is drawn unlike its Ground twin, the HUD from the runtime UI host, place and break with the outline and the reach, noon against midnight and a torch
   on masked crops, a scripted model's watchtower and `/undo`, a villager answering by name, the no-model answers,
   a survival fall that hurts and a lethal one that respawns you, a cave at noon with and without a torch).
   It writes its frames to `artifacts/blockworld/`.

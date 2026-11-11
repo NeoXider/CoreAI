@@ -73,6 +73,7 @@
     <Compile Include="ScenarioFrames.cs" />
     <Compile Include="AllocationTrace.cs" />
     <Compile Include="StreamingCases.cs" />
+    <Compile Include="LuauStdlibCases.cs" />
     <Compile Include="TerrainCases.cs" />
   </ItemGroup>
 </Project>

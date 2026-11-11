@@ -1,4 +1,5 @@
 using System;
+using System.Text;
 using System.Threading;
 using CoreAI.Authority;
 using CoreAI.ChatOverlay;
@@ -29,6 +30,34 @@ namespace CoreAI.Ai.SelfRepair
 
         /// <summary>Correlation id of the turn.</summary>
         public string TraceId { get; set; } = "";
+
+        /// <summary>
+        /// Whether the turn reads and extends the role's chat history. <see cref="AiTaskHistoryMode.None"/> (the
+        /// default) keeps a repair report the player never typed out of it; the loop adds one system-event note of
+        /// the outcome instead.
+        /// </summary>
+        public AiTaskHistoryMode HistoryMode { get; set; } = AiTaskHistoryMode.None;
+    }
+
+    /// <summary>How one repair turn ended, as a runner reports it.</summary>
+    public readonly struct LuaModRepairTurnOutcome
+    {
+        /// <summary>Creates an outcome.</summary>
+        public LuaModRepairTurnOutcome(LuaModRepairTurnEnd end, string message = "", string answer = "")
+        {
+            End = end;
+            Message = message ?? "";
+            Answer = answer ?? "";
+        }
+
+        /// <summary>How the turn ended.</summary>
+        public LuaModRepairTurnEnd End { get; }
+
+        /// <summary>The failure sentence when it did not complete; empty otherwise.</summary>
+        public string Message { get; }
+
+        /// <summary>The visible text of the model's answer (bounded); the loop reads the model's summary from it.</summary>
+        public string Answer { get; }
     }
 
     /// <summary>A running repair turn.</summary>
@@ -56,9 +85,9 @@ namespace CoreAI.Ai.SelfRepair
 
         /// <summary>
         /// Starts a turn and reports its end exactly once through <paramref name="ended"/>, on any thread, with the
-        /// failure sentence when it did not complete; null when it cannot start now.
+        /// failure sentence when it did not complete and the model's answer when it did; null when it cannot start now.
         /// </summary>
-        ILuaModRepairTurnHandle TryStart(LuaModRepairTurnRequest request, Action<LuaModRepairTurnEnd, string> ended);
+        ILuaModRepairTurnHandle TryStart(LuaModRepairTurnRequest request, Action<LuaModRepairTurnOutcome> ended);
     }
 
     /// <summary>Maps chat and pipeline failures onto the loop's turn ends.</summary>
@@ -70,6 +99,12 @@ namespace CoreAI.Ai.SelfRepair
             return code == LlmErrorCode.RoutingError || code == LlmErrorCode.BackendUnavailable ||
                    code == LlmErrorCode.AuthExpired || code == LlmErrorCode.PaymentRequired ||
                    code == LlmErrorCode.QuotaExceeded;
+        }
+
+        /// <summary>The loop's outcome for a host turn of the chat.</summary>
+        public static LuaModRepairTurnOutcome OutcomeOf(ChatOverlayHostTurnResult result)
+        {
+            return new LuaModRepairTurnOutcome(From(result), result.Message, result.Answer);
         }
 
         /// <summary>The loop's end for a host turn of the chat.</summary>
@@ -115,7 +150,7 @@ namespace CoreAI.Ai.SelfRepair
         public bool IsBusy => _chat.IsTurnActive;
 
         /// <inheritdoc />
-        public ILuaModRepairTurnHandle TryStart(LuaModRepairTurnRequest request, Action<LuaModRepairTurnEnd, string> ended)
+        public ILuaModRepairTurnHandle TryStart(LuaModRepairTurnRequest request, Action<LuaModRepairTurnOutcome> ended)
         {
             if (request == null)
             {
@@ -130,7 +165,8 @@ namespace CoreAI.Ai.SelfRepair
                 TraceId = traceId,
                 Announcement = request.Announcement,
                 ShowAnswer = false,
-                Ended = result => ended?.Invoke(LuaModRepairTurnEnds.From(result), result.Message)
+                HistoryMode = request.HistoryMode,
+                Ended = result => ended?.Invoke(LuaModRepairTurnEnds.OutcomeOf(result))
             };
 
             return _chat.TryStartHostTurn(hostTurn) ? new Handle(_chat, traceId) : null;
@@ -191,7 +227,7 @@ namespace CoreAI.Ai.SelfRepair
         public bool IsBusy => Volatile.Read(ref _running) != 0;
 
         /// <inheritdoc />
-        public ILuaModRepairTurnHandle TryStart(LuaModRepairTurnRequest request, Action<LuaModRepairTurnEnd, string> ended)
+        public ILuaModRepairTurnHandle TryStart(LuaModRepairTurnRequest request, Action<LuaModRepairTurnOutcome> ended)
         {
             if (request == null)
             {
@@ -211,17 +247,20 @@ namespace CoreAI.Ai.SelfRepair
                 SourceTag = SourceTag,
                 ActorContext = actor,
                 CancellationScope = actor.SessionId,
-                TraceId = string.IsNullOrWhiteSpace(request.TraceId) ? Guid.NewGuid().ToString("N") : request.TraceId
+                TraceId = string.IsNullOrWhiteSpace(request.TraceId) ? Guid.NewGuid().ToString("N") : request.TraceId,
+                HistoryMode = request.HistoryMode
             };
             Handle handle = new();
             RunAsync(task, handle, ended).Forget();
             return handle;
         }
 
-        private async UniTaskVoid RunAsync(AiTaskRequest task, Handle handle, Action<LuaModRepairTurnEnd, string> ended)
+        private async UniTaskVoid RunAsync(AiTaskRequest task, Handle handle, Action<LuaModRepairTurnOutcome> ended)
         {
             LuaModRepairTurnEnd end = LuaModRepairTurnEnd.Completed;
             string message = "";
+            ThinkBlockStreamFilter think = new();
+            StringBuilder answer = new();
             try
             {
                 await foreach (LlmStreamChunk chunk in _orchestrator.RunStreamingAsync(task, handle.Token))
@@ -235,7 +274,14 @@ namespace CoreAI.Ai.SelfRepair
                         message = LlmErrorPresentation.ForErrorCode(code);
                         break;
                     }
+
+                    if (chunk != null && !string.IsNullOrEmpty(chunk.Text))
+                    {
+                        KeepAnswer(answer, think.ProcessChunk(chunk.Text));
+                    }
                 }
+
+                KeepAnswer(answer, think.Flush());
             }
             catch (OperationCanceledException)
             {
@@ -252,7 +298,19 @@ namespace CoreAI.Ai.SelfRepair
                 Volatile.Write(ref _running, 0);
             }
 
-            ended?.Invoke(end, message);
+            ended?.Invoke(new LuaModRepairTurnOutcome(end, message,
+                end == LuaModRepairTurnEnd.Completed ? answer.ToString() : ""));
+        }
+
+        private static void KeepAnswer(StringBuilder answer, string visible)
+        {
+            int room = ChatOverlayHostTurnResult.MaximumAnswerCharacters - answer.Length;
+            if (string.IsNullOrEmpty(visible) || room <= 0)
+            {
+                return;
+            }
+
+            answer.Append(visible.Length <= room ? visible : visible.Substring(0, room));
         }
 
         private sealed class Handle : ILuaModRepairTurnHandle
