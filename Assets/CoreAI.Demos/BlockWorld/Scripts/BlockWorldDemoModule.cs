@@ -108,9 +108,8 @@ namespace CoreAI.Demos.BlockWorld
             try
             {
                 SwitchFolderOn(container.Resolve<ILuaModSourceStore>());
-                IActorIdentityProvider identity = container.ResolveOrDefault<IActorIdentityProvider>()
-                                                  ?? CoreServicesInstaller.DefaultLocalHostIdentityProvider;
-                ActorContext player = identity.GetActorContext(BuiltInAgentRoleIds.Programmer);
+                ActorContext player = container.Resolve<IActorIdentityProvider>()
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
                 LoadedByThisModule = session.CurrentConcreteRuntime.RehydrateFromStore(player, LuaCapabilities.All);
             }
             catch (Exception ex)

@@ -135,7 +135,15 @@ IDisposable hook = controller.AddPreSendHook(myHook); // dispose to remove
   nothing changes.
 
 The NPC block uses this to keep a line addressed to a villager away from the player's agent:
-`npcChatHearing.AttachTo(controller)` ([NPC_AGENTS.md](../../CoreAI/Docs/NPC_AGENTS.md)).
+`npcChatHearing.AttachTo(controller)` ([NPC_AGENTS.md](../../CoreAI/Docs/NPC_AGENTS.md)). Two rules keep the AI
+reachable while villagers listen:
+
+- A line that starts with `ai`, `@ai` or the AI's chat name (the overlay's assistant speaker, `AI` by default),
+  followed by a space or punctuation, always goes to the AI, even right after talking to a villager:
+  `@ai build a tower`. The aliases are `CoreAiNpcSettings.AiAddressAliases`; the chat name yields to a villager who
+  answers to the same name.
+- A villager keeps the player's unnamed lines for its follow-up window only while the player stays within its
+  hearing radius (when positions are known); walk away and the next line goes to the AI.
 
 ## Lines from other code
 

@@ -127,6 +127,30 @@ namespace CoreAI.Ai.LuaCs
             public LuaCsRbxModContext DisplacedBy { get; set; }
         }
 
+        /// <summary>
+        /// One <c>BindableFunction:Invoke</c> whose caller is suspended: the copied arguments, the responder that
+        /// resumes it, and the wait generation that tells a live caller from one that was stopped meanwhile.
+        /// </summary>
+        private sealed class PendingBindableInvoke
+        {
+            public PendingBindableInvoke(IRbxScriptThread caller, long generation, byte[] payload,
+                RbxNetworkRequestResponder responder)
+            {
+                Caller = caller;
+                Generation = generation;
+                Payload = payload;
+                Responder = responder;
+            }
+
+            public IRbxScriptThread Caller { get; }
+
+            public long Generation { get; }
+
+            public byte[] Payload { get; }
+
+            public RbxNetworkRequestResponder Responder { get; }
+        }
+
         internal sealed class ModLoadCandidate
         {
             public ModLoadCandidate(string ownerModId, bool hadPreviousGeneration,
@@ -399,6 +423,9 @@ namespace CoreAI.Ai.LuaCs
             _clientRemoteCallbacks = new();
         private readonly Dictionary<IRbxScriptThread, long>
             _remoteFunctionWaitGenerations = new();
+        private readonly Dictionary<InstanceId, List<PendingBindableInvoke>> _pendingBindableInvokes = new();
+        private RbxScriptSignal _bindableInvokeSignal;
+        private RbxScriptConnection _bindableInvokeConnection;
         private readonly HashSet<string> _legacySchedulerDeprecationOwners =
             new(StringComparer.Ordinal);
         private readonly HashSet<string> _remoteRefusalLoggedSenders = new(StringComparer.Ordinal);
@@ -1807,6 +1834,8 @@ namespace CoreAI.Ai.LuaCs
             _tweenService?.DetachHost();
             _scheduler.PhaseReached -= PumpSchedulerPhase;
             _networkRequestConnection.Disconnect();
+            _bindableInvokeConnection?.Disconnect();
+            _pendingBindableInvokes.Clear();
 
             // WHY the actor ledger is kept: a disposed world's mods are not unloaded by this, and
             // an entry only ever makes their resolution stricter; it is collected with the bindings.
@@ -2409,6 +2438,232 @@ namespace CoreAI.Ai.LuaCs
             clientCallbacks[context.ActorContext.ActorId] = registration;
         }
 
+        /// <summary>
+        /// Mirror <c>BindableEvent:Fire(...)</c>: copies the arguments and queues <c>Event</c>; never yields.
+        /// </summary>
+        /// <remarks>
+        /// WHY the remote codec copies them: Roblox's bindable guide gives bindables the remote copy rules
+        /// (tables copied and without their metatable, non-string keys turned into strings), and the codec is
+        /// that rule in CoreAI, so a table crosses a BindableEvent exactly as it crosses a RemoteEvent, with the
+        /// same refusals (mixed tables, cycles, 64 KiB).
+        /// </remarks>
+        internal void FireBindableEvent(RbxBindableEvent bindable, LuaFunctionExecutionContext ctx)
+        {
+            object[] copied = _networkCodec.DecodeArguments(
+                _networkCodec.EncodeArguments(ReadRemoteArguments(ctx, 1)));
+            bindable.Fire(copied);
+        }
+
+        /// <summary>
+        /// Mirror <c>BindableFunction.OnInvoke = fn</c>: the callback runs on the assigning mod's thread and
+        /// budget for every invocation; nil clears it. Invocations that were waiting for a callback start now.
+        /// </summary>
+        /// <remarks>
+        /// WHY the server-callback table of RemoteFunction: a registration there already goes away with its
+        /// mod's unload, is put back by a failed reload and is dropped with its instance, which is the
+        /// lifetime an OnInvoke callback needs; a network request can never reach it, because the request
+        /// path accepts only a RemoteFunction.
+        /// </remarks>
+        internal void WriteBindableFunctionCallback(LuaCsRbxModContext context, RbxBindableFunction bindable,
+            LuaState state, LuaValue value)
+        {
+            if (value.Type == LuaValueType.Nil)
+            {
+                if (_serverRemoteCallbacks.TryGetValue(bindable.Id, out RemoteFunctionCallbackRegistration cleared))
+                {
+                    cleared.DisplacedBy = context;
+                    _serverRemoteCallbacks.Remove(bindable.Id);
+                }
+
+                return;
+            }
+
+            if (value.Type != LuaValueType.Function)
+            {
+                throw RbxError.BadArgument(
+                    "BindableFunction.OnInvoke expects a function or nil, got " + Describe(value),
+                    "assign a callback function or nil");
+            }
+
+            LuaState ownerState = ResolveSchedulerOwnerState(state);
+            object captured = CaptureSignalCallable(ownerState, value);
+            if (!(captured is LuaCsRbxSchedulerCallable schedulerCallable)
+                || !(schedulerCallable.Callable is LuaValue callback))
+            {
+                throw RbxError.BadArgument(
+                    "BindableFunction.OnInvoke could not be captured for the scheduler",
+                    "assign the callback from a live persistent mod");
+            }
+
+            RemoteFunctionCallbackRegistration registration = new(context, schedulerCallable.OwnerState, callback);
+            if (_serverRemoteCallbacks.TryGetValue(bindable.Id, out RemoteFunctionCallbackRegistration replaced))
+            {
+                replaced.DisplacedBy = context;
+            }
+
+            _serverRemoteCallbacks[bindable.Id] = registration;
+            if (_pendingBindableInvokes.Remove(bindable.Id, out List<PendingBindableInvoke> waiting))
+            {
+                for (int index = 0; index < waiting.Count; index++)
+                {
+                    QueueBindableInvoke(bindable, waiting[index]);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Mirror <c>BindableFunction:Invoke(...)</c>: copies the arguments, suspends the caller and resumes it
+        /// with the callback's copied results, or raises the callback's error in it. Without a callback the
+        /// caller waits until one is assigned, as in Roblox; there is no timeout.
+        /// </summary>
+        private LuaValue ScheduleBindableInvoke(LuaCsRbxModContext context, LuaFunctionExecutionContext ctx,
+            RbxBindableFunction bindable)
+        {
+            const string member = "BindableFunction:Invoke";
+            string ownerModId = RequireTaskOwner(context);
+            IRbxScriptThread caller = _schedulerThreadFactory.CurrentThread;
+            if (!(caller is LuaCsRbxScriptThread luaThread)
+                || !string.Equals(luaThread.OwnerModId, ownerModId, StringComparison.Ordinal))
+            {
+                throw RbxError.BadArgument(
+                    member + " caller is not owned by mod " + ownerModId,
+                    "invoke only from a live scheduler thread owned by the current mod");
+            }
+
+            // WHY copied before the caller is suspended: arguments the copy rules refuse raise in the caller,
+            // and the callback later sees the values as they were at the call.
+            byte[] payload = _networkCodec.EncodeArguments(ReadRemoteArguments(ctx, 1));
+            if (!CanSuspendCaller(ctx, luaThread, member))
+            {
+                return LuaValue.Nil;
+            }
+
+            long generation = luaThread.AdvanceRemoteFunctionWaitGeneration();
+            _remoteFunctionWaitGenerations[caller] = generation;
+            RbxScriptSignal responseSignal = new("BindableFunction.Response[" + bindable.Id.Value + "]");
+            responseSignal.BindScheduler(_scheduler);
+            RbxScriptConnection responseConnection = responseSignal.Wait(arguments =>
+            {
+                if (!_remoteFunctionWaitGenerations.TryGetValue(caller, out long activeGeneration)
+                    || activeGeneration != generation)
+                {
+                    return;
+                }
+
+                _remoteFunctionWaitGenerations.Remove(caller);
+                RbxNetworkResponse response = arguments != null && arguments.Length > 0
+                    ? arguments[0] as RbxNetworkResponse
+                    : null;
+                LuaTable values = BuildRemoteFunctionResumeValues(context, NameBindableFailure(response), null);
+                _scheduler.ResumeSignalWait(caller, new object[] { new LuaValue(values) });
+            });
+            context.TrackConnection(responseConnection);
+            try
+            {
+                RbxNetworkRequestResponder responder = new(response => responseSignal.Fire(response));
+                _scheduler.ScheduleSignalWait(caller);
+                luaThread.PendingWaitConnection = responseConnection;
+                luaThread.NoteScheduledYield();
+                QueueBindableInvoke(bindable, new PendingBindableInvoke(caller, generation, payload, responder));
+            }
+            catch
+            {
+                if (_remoteFunctionWaitGenerations.TryGetValue(caller, out long activeGeneration)
+                    && activeGeneration == generation)
+                {
+                    _remoteFunctionWaitGenerations.Remove(caller);
+                }
+
+                responseConnection.Disconnect();
+                throw;
+            }
+
+            return LuaValue.Nil;
+        }
+
+        /// <summary>
+        /// Starts one invocation at the next resumption point, after its caller has yielded, so the callback
+        /// never runs nested inside the caller's resume.
+        /// </summary>
+        private void QueueBindableInvoke(RbxBindableFunction bindable, PendingBindableInvoke invoke)
+        {
+            if (_bindableInvokeSignal == null)
+            {
+                _bindableInvokeSignal = new RbxScriptSignal("BindableFunction.InvokeQueued");
+                _bindableInvokeSignal.BindScheduler(_scheduler);
+                _bindableInvokeConnection = _bindableInvokeSignal.Connect((Action<object[]>)DeliverBindableInvoke);
+            }
+
+            _bindableInvokeSignal.Fire(bindable, invoke);
+        }
+
+        private void DeliverBindableInvoke(object[] arguments)
+        {
+            RbxBindableFunction bindable = arguments != null && arguments.Length > 0
+                ? arguments[0] as RbxBindableFunction
+                : null;
+            PendingBindableInvoke invoke = arguments != null && arguments.Length > 1
+                ? arguments[1] as PendingBindableInvoke
+                : null;
+            if (bindable == null || invoke == null || bindable.IsDestroyed || invoke.Responder.IsCompleted
+                || !IsBindableCallerWaiting(invoke))
+            {
+                return;
+            }
+
+            if (!_serverRemoteCallbacks.TryGetValue(bindable.Id, out RemoteFunctionCallbackRegistration registration))
+            {
+                if (!_pendingBindableInvokes.TryGetValue(bindable.Id, out List<PendingBindableInvoke> waiting))
+                {
+                    waiting = new List<PendingBindableInvoke>();
+                    _pendingBindableInvokes.Add(bindable.Id, waiting);
+                }
+
+                waiting.RemoveAll(entry => !IsBindableCallerWaiting(entry));
+                waiting.Add(invoke);
+                return;
+            }
+
+            try
+            {
+                object[] decoded = _networkCodec.DecodeArguments(invoke.Payload);
+                object[] callbackArguments = new object[decoded.Length];
+                for (int index = 0; index < decoded.Length; index++)
+                {
+                    callbackArguments[index] = _networkCodec.ToLuaValue(registration.Context, decoded[index]);
+                }
+
+                SpawnRemoteFunctionCallback(registration, callbackArguments, invoke.Responder, null);
+            }
+            catch (Exception ex)
+            {
+                if (!invoke.Responder.IsCompleted)
+                {
+                    invoke.Responder.Fail(RemoteFailureLine(ex));
+                }
+            }
+        }
+
+        private bool IsBindableCallerWaiting(PendingBindableInvoke invoke)
+        {
+            return _remoteFunctionWaitGenerations.TryGetValue(invoke.Caller, out long activeGeneration)
+                   && activeGeneration == invoke.Generation;
+        }
+
+        /// <summary>The callback runner is RemoteFunction's; its fixed failure lines are renamed for a bindable.</summary>
+        private static RbxNetworkResponse NameBindableFailure(RbxNetworkResponse response)
+        {
+            const string remotePrefix = "the RemoteFunction ";
+            if (response == null || response.Succeeded || response.Error == null
+                || !response.Error.StartsWith(remotePrefix, StringComparison.Ordinal))
+            {
+                return response;
+            }
+
+            return RbxNetworkResponse.Failure("the BindableFunction OnInvoke "
+                                              + response.Error.Substring(remotePrefix.Length));
+        }
+
         private RbxPlayer EnsureNetworkActor(string actorId)
         {
             bool hadPlayer = _players.TryGetByActorId(actorId, out RbxPlayer player);
@@ -2712,6 +2967,9 @@ namespace CoreAI.Ai.LuaCs
 
             _serverRemoteCallbacks.Remove(record.Id);
             _clientRemoteCallbacks.Remove(record.Id);
+            // WHY the waiting callers stay suspended: a destroyed BindableFunction can never get a callback,
+            // and Roblox leaves such an invoker parked; it goes with its mod like any parked thread.
+            _pendingBindableInvokes.Remove(record.Id);
             // WHY here as well as in a registry-aware sink: a sink built without the registry (a host
             // sink, or the one a fresh restore builds) hears about destruction only through this call;
             // for one that already heard it the call is an idempotent no-op.
@@ -4875,6 +5133,12 @@ namespace CoreAI.Ai.LuaCs
         {
             try
             {
+                if (invokeServer && TryGetInstance(Arg(ctx, 0), out LuaCsRbxInstanceProxy bindableProxy)
+                                 && bindableProxy.Instance is RbxBindableFunction bindable)
+                {
+                    return ScheduleBindableInvoke(context, ctx, bindable);
+                }
+
                 string ownerModId = RequireTaskOwner(context);
                 context.RequireNetworkSide(
                     invokeServer

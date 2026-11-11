@@ -582,6 +582,10 @@ namespace CoreAI.Mods.Rbx.Instances
                 false, true, false, descriptor => new RbxUnreliableRemoteEvent(descriptor)));
             catalog.Register(new ClassDescriptor("RemoteFunction", "Instance", false, true, false,
                 descriptor => new RbxRemoteFunction(descriptor)));
+            catalog.Register(new ClassDescriptor("BindableEvent", "Instance", false, true, false,
+                descriptor => new RbxBindableEvent(descriptor)));
+            catalog.Register(new ClassDescriptor("BindableFunction", "Instance", false, true, false,
+                descriptor => new RbxBindableFunction(descriptor)));
             catalog.Register(new ClassDescriptor("Player", "Instance", false, false, false,
                 descriptor => new RbxPlayer(descriptor)));
             // WHY: MVP8 slice 8.3 — the empty per-player containers Roblox creates on join. The
@@ -1300,8 +1304,6 @@ namespace CoreAI.Mods.Rbx.Instances
                 + "always has the default look";
             const string legacyMoverWorkaround =
                 "deprecated in Roblox; keep the part Anchored and animate CFrame with TweenService";
-            const string eventWorkaround =
-                "call the function directly, or share it across mods with mods_export/mods_call";
 
             catalog.RegisterKnownUnimplementedClasses(
                 RbxKnownUnimplementedClassDescriptor.Backlog("WedgePart", partShapeWorkaround),
@@ -1350,8 +1352,6 @@ namespace CoreAI.Mods.Rbx.Instances
                     legacyMoverWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Unsupported("BodyAngularVelocity",
                     legacyMoverWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("BindableEvent", eventWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Backlog("BindableFunction", eventWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("Configuration",
                     "use a Folder of value objects or attributes"),
                 RbxKnownUnimplementedClassDescriptor.Backlog("BrickColorValue",

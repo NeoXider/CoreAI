@@ -168,7 +168,8 @@ alias).
 ## 4. Instances
 
 - `Instance.new(""Class""[, parent])` — creatable classes are ""Part"", ""Folder"", ""Model"",
-  ""ClickDetector"", ""RemoteEvent"", ""UnreliableRemoteEvent"", ""RemoteFunction"",
+  ""ClickDetector"", ""RemoteEvent"", ""UnreliableRemoteEvent"", ""RemoteFunction"", ""BindableEvent"",
+  ""BindableFunction"",
   ""MaterialVariant"", ""Humanoid"" (section 8), ""PointLight"" (section 14), ""TextGenerator""
   (section 16), ""Backpack"" (a plain container), the value objects of section 10, and the GUI classes
   of section 12 (ScreenGui, Frame, TextLabel, TextButton, TextBox, ...).
@@ -184,6 +185,13 @@ alias).
   yields for a reply and is bounded to 30 scheduler seconds: a missing or stalled receiver raises
   an error instead of yielding forever (a deliberate deviation from Roblox). Wrap a fallible
   invoke in `pcall`.
+- `BindableEvent` (`:Fire(...)`, `.Event`) and `BindableFunction` (`:Invoke(...)`, `.OnInvoke = fn`) work as in
+  Roblox between scripts and mods: use them, not workspace attributes, to talk between mods. `Fire` never
+  yields; `Invoke` yields until the callback returns, runs it as the mod that assigned it, raises the
+  callback's error in the invoker, and waits (no timeout) while no `OnInvoke` is set. `OnInvoke` is write-only.
+  Arguments and results are copied by the RemoteEvent rules: tables copied without metatable, non-string keys
+  become strings, functions arrive as nil; a mixed array/dictionary table or a cycle raises BAD_ARGUMENT, more
+  than 64 KiB PAYLOAD_TOO_LARGE.
 - `ClickDetector` — parent one under a Part to make that 3D part clickable:
   `local cd = Instance.new(""ClickDetector""); cd.Parent = part; cd.MouseClick:Connect(function() ... end)`.
   MouseClick fires `(playerWhoClicked)` when the user clicks THAT part with the mouse and the

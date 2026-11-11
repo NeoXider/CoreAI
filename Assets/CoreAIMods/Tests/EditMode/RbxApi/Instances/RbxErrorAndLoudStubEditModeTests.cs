@@ -281,7 +281,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             string[] known =
             {
                 "WedgePart", "SpawnLocation", "MeshPart", "Weld", "WeldConstraint", "Attachment",
-                "BindableEvent", "Sound", "ParticleEmitter", "BillboardGui", "BodyVelocity", "Tool"
+                "Configuration", "Sound", "ParticleEmitter", "BillboardGui", "BodyVelocity", "Tool"
             };
             foreach (string className in known)
             {

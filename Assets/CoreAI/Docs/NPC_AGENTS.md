@@ -59,7 +59,9 @@ The default arbiter (`NpcAddressArbiter`, replaceable through `INpcAddressArbite
    **first** in the line; on a tie, the nearer one. A named NPC out of `HearingRadius`, or out of sight when
    `RequireLineOfSight` is on (`INpcLineOfSight`), does not answer.
 3. A line that names nobody goes to the NPC the speaker was talking with, while `FollowUpSeconds` have not passed
-   since its last answer - a conversation does not need the name in every line.
+   since its last answer - a conversation does not need the name in every line. When both positions are known the
+   speaker must also still be within that NPC's `HearingRadius`: walking away ends the conversation, and the next
+   unnamed line goes to the player's own agent. Without positions only the time counts.
 4. Otherwise the nearest NPC with `AnswerUnaddressedWithin > 0` takes it; by default nobody does.
 
 Distances use the game's own units and apply only when both positions are known: a chat-only game with no
@@ -79,6 +81,20 @@ character in studs, the unit a mod's agents are placed in.
 The two are exclusive: attaching one way detaches the other, so a line is never heard twice. With the hook, the
 player's line is shown before the NPCs hear it, so an NPC that answers at once (a fallback line) answers after it, and
 a line to an NPC goes through even while the player's agent is still answering.
+
+A line addressed to the player's own AI is never offered to an NPC, even one second after talking to a villager
+(`NpcAiAddress`): it starts, after spaces and an optional `@`, with an address alias or with the AI's chat name, in
+any case, followed by the end of the line, a space or one of `, : ; . ! ? -`. So `ai, build a tower`,
+`@ai build a tower` and `AI: build` reach the AI, while `aim higher` is an ordinary line. The line is sent to the AI
+as typed.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `NpcChatHearing.AiAddressAliases` (`CoreAiNpcSettings.AiAddressAliases`) | `ai` | Words that always address the AI. Empty turns them off. |
+| `NpcChatHearing.AiDisplayName` (`CoreAiNpcSettings.AddressAiByName`) | the overlay's assistant speaker (`AI`) | The AI's chat name addresses it too, unless an NPC answers to the same name. |
+
+A game that wants a villager called "Ai" clears the aliases: the chat name then yields to the villager, and
+`Ai, how are you?` goes to her.
 
 ## Budgets and turns
 

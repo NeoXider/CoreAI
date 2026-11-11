@@ -147,7 +147,8 @@ backward step, a client's holds too: the server sends the value its own scripts 
 ## Classes
 
 `Instance.new` accepts: **`Part`**, **`Folder`**, **`Model`**, **`ClickDetector`**, **`MaterialVariant`**,
-**`RemoteEvent`**, **`UnreliableRemoteEvent`**, **`RemoteFunction`**, **`Humanoid`**, **`Backpack`**, the
+**`RemoteEvent`**, **`UnreliableRemoteEvent`**, **`RemoteFunction`**, **`BindableEvent`**,
+**`BindableFunction`**, **`Humanoid`**, **`Backpack`**, the
 GUI classes of [Roblox GUI](#roblox-gui), and the value objects **`IntValue`**, **`NumberValue`**, **`StringValue`**, **`BoolValue`**,
 **`ObjectValue`**, **`Vector3Value`**, **`CFrameValue`** and **`Color3Value`** (each with one
 type-checked `Value`). `Camera` is not creatable — the world's one camera is
@@ -452,6 +453,24 @@ sink off with **Drive Scene Lighting** on `RbxWorldHost`. The rest of P9 (fog, `
 and exposure, shadows, the moon, `Sky`, `Atmosphere`, the post effects, `SpotLight`, `SurfaceLight`) are loud
 stubs planned for P9; `LightingStyle`, `PrioritizeLightingQuality` and `Technology` are
 `RobloxScriptSecurity` and unsupported.
+
+### `BindableEvent` and `BindableFunction`
+
+They work as in Roblox and are how mods talk to each other on one side (instead of workspace attributes):
+`BindableEvent:Fire(...)` never yields and queues `Event` for every handler (deferred, like every signal);
+`BindableFunction:Invoke(...)` yields until the `OnInvoke` callback returns and resumes with its results. The
+callback runs on the thread and budget of the mod that assigned it, its error is raised in the invoker, and an
+`Invoke` made while no callback is set waits until one is assigned (no timeout, as in Roblox; the waiting call
+goes with its mod). `OnInvoke` is write-only (reading it raises), and a callback goes away with its mod's
+unload and is put back by a failed reload, like `OnServerInvoke`.
+
+Arguments and results are copied as a `RemoteEvent` copies them: tables are new tables without their
+metatable, non-string dictionary keys become strings (an Instance key its `Name`), Instances, datatypes and
+EnumItems arrive as themselves, and functions arrive as nil. Deviations (DEV candidates): a table that mixes
+array and dictionary keys, or a cyclic one, raises `BAD_ARGUMENT` at the call (Roblox drops elements
+silently), a copy over 64 KiB raises `PAYLOAD_TOO_LARGE`, and a function is always nil, also at the top level
+(the mirror's bindable guide does not say what Roblox hands over; a mod's closure would otherwise run on
+another mod's budget, even after its own unload).
 
 ### Roblox GUI
 

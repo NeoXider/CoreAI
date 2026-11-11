@@ -96,6 +96,25 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         }
 
         [Test]
+        public void P6_Hud_EveryClassTheModToggles_HasAStyleRule_AndHiddenHides()
+        {
+            string lua = BlockWorldTestWorld.Source(Mod);
+            MatchCollection toggled = Regex.Matches(lua, @":(?:AddClass|RemoveClass)\(""([a-z-]+)""\)");
+
+            Assert.Greater(toggled.Count, 0, "the HUD shows and hides its parts with classes");
+            foreach (Match match in toggled)
+            {
+                string selector = "." + match.Groups[1].Value;
+                Assert.IsTrue(Regex.IsMatch(Screen.UssText, Regex.Escape(selector) + @"\s*[{.:]"),
+                    "the class " + selector + " the mod toggles has a rule in its USS; without one the toggle does "
+                    + "nothing on screen");
+            }
+
+            Assert.IsTrue(Regex.IsMatch(Screen.UssText, @"\.is-hidden\s*\{[^}]*display:\s*none"),
+                "is-hidden takes the element off screen (display: none)");
+        }
+
+        [Test]
         public void P6_Hud_ARuleTheInterpreterRefuses_IsReported_SoTheCheckAboveCanFail()
         {
             UssStyleSheet sheet = UssStyleSheet.Parse(Screen.UssText.Replace("padding: 0;", "gap: 4px;"));

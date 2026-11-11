@@ -358,6 +358,10 @@ namespace CoreAI.Tests.EditMode
 
             controller.Submit("Bob, any bread?");
             Assert.AreEqual(1, sender.Requests.Count, "the villager answers; the building agent never sees the line");
+
+            controller.Submit("@ai build a tower");
+            Assert.AreEqual(2, sender.Requests.Count, "a line addressed to the AI skips Bob's follow-up window");
+            Assert.AreEqual("AI", CoreAI.Ai.Npc.CoreAiNpcEntryPoint.AssistantName(controller));
         }
 
         // ==================== Orchestrator mode ====================

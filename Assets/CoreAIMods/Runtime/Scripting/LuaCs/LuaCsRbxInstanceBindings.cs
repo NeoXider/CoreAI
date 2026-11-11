@@ -1220,6 +1220,34 @@ namespace CoreAI.Ai.LuaCs
                 }
             }
 
+            if (instance is RbxBindableEvent bindableEvent)
+            {
+                switch (member)
+                {
+                    case "Event":
+                        value = LuaCsRbxDatatypeBindings.Wrap(bindableEvent.Event, context);
+                        return true;
+                }
+            }
+
+            if (instance is RbxBindableFunction)
+            {
+                switch (member)
+                {
+                    // WHY the InvokeServer bridge: it suspends the caller and resumes it with the copied
+                    // answer or raises the callback's error; the scheduling half it calls recognises a
+                    // BindableFunction and answers it on this side instead of over the network.
+                    case "Invoke":
+                        value = ReadRemoteFunctionInvokeBridge(ctx, true);
+                        return true;
+                    case "OnInvoke":
+                        throw RbxError.BadArgument(
+                            "OnInvoke is a callback member of BindableFunction; you can only set the callback "
+                            + "value, get is not available",
+                            "keep your own reference to the function you assign to OnInvoke");
+                }
+            }
+
             value = LuaValue.Nil;
             return false;
         }
@@ -1354,6 +1382,20 @@ namespace CoreAI.Ai.LuaCs
                         context.RequireWorldEditForWrite(player, member);
                         player.CameraMinZoomDistance = ReadAssignedNumber(value, player.ClassName, member);
                         context.RecordMutation(player);
+                        return true;
+                    default:
+                        return false;
+                }
+            }
+
+            if (instance is RbxBindableFunction bindableFunction)
+            {
+                switch (member)
+                {
+                    case "OnInvoke":
+                        context.RequireMetadataMutation(instance, "set the invoke callback");
+                        context.Bindings.WriteBindableFunctionCallback(context, bindableFunction, state, value);
+                        context.RecordMutation(instance);
                         return true;
                     default:
                         return false;
@@ -2119,6 +2161,11 @@ namespace CoreAI.Ai.LuaCs
                 context.Bindings.FireRemoteAllClients((RbxRemoteEvent)self, ctx);
                 return LuaValue.Nil;
             }, "BaseRemoteEvent");
+            Method("Fire", (ctx, self) =>
+            {
+                context.Bindings.FireBindableEvent((RbxBindableEvent)self, ctx);
+                return LuaValue.Nil;
+            }, "BindableEvent");
 
             return methods;
         }
@@ -2271,7 +2318,7 @@ namespace CoreAI.Ai.LuaCs
             "InputBegan", "InputEnded", "InputChanged", "TextBoxFocused", "TextBoxFocusReleased",
             "IsKeyDown", "GetKeysPressed", "GetMouseLocation", "GetMouseDelta", "Heartbeat", "Stepped", "RenderStepped", "PreAnimation",
             "PreSimulation", "PostSimulation", "PreRender", "MouseClick", "MouseHoverEnter",
-            "MouseHoverLeave", "Completed", "LightingChanged");
+            "MouseHoverLeave", "Completed", "LightingChanged", "Event", "Invoke", "OnInvoke");
 
         /// <summary>
         /// The names in <see cref="BoundNonProperties"/>; the drift guard in the acceptance tests

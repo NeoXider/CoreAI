@@ -25,7 +25,7 @@ namespace CoreAI.Tests.PlayMode.RbxApi
     /// bloom only with the look on, measured against the same wall a little further from the bar so that
     /// tonemapping, which changes both bands alike, cancels out. The look's fog must stay faint at this
     /// distance: the brick wall keeps at least half of its texture contrast (luminance spread) with the
-    /// look on. Before the Rbx shaders measured fog from the view depth, the default fog washed every lit
+    /// look on. Before the Rbx shaders took their fog factor from the vertex stage, the default fog washed every lit
     /// part into one flat grey and this crop's spread fell to nearly zero.
     /// </summary>
     public sealed class DefaultLookNoonCapturePlayModeTests

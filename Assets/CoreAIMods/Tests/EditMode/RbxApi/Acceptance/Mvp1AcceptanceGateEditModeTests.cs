@@ -1056,7 +1056,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             "InputBegan", "InputEnded", "InputChanged", "TextBoxFocused", "TextBoxFocusReleased",
             "IsKeyDown", "GetKeysPressed", "GetMouseLocation", "GetMouseDelta", "Heartbeat", "Stepped",
             "RenderStepped", "PreAnimation", "PreSimulation", "PostSimulation", "PreRender", "MouseClick",
-            "MouseHoverEnter", "MouseHoverLeave", "Completed", "LightingChanged"
+            "MouseHoverEnter", "MouseHoverLeave", "Completed", "LightingChanged", "Event", "Invoke",
+            "OnInvoke"
         };
 
         /// <summary>One instance of every class that declares a row of the BoundProperties table.</summary>
