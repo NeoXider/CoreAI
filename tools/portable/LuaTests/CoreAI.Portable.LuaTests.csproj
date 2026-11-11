@@ -199,6 +199,7 @@
     <Compile Include="$(TestsRoot)/RbxApi/Ai/P12TextGeneratorAndAiServiceEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Ai/P12TextGeneratorAndAiServiceEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Ai/RbxJsonSchemaCheckEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Ai/RbxJsonSchemaCheckEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/DataStoresLua/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/DataStoresLua/%(Filename)%(Extension)" />
+    <Compile Include="$(TestsRoot)/SelfRepair/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/SelfRepair/%(Filename)%(Extension)" />
   </ItemGroup>
   <!--
     P19 allocation budgets and the engine-free harness contract (dev-docs/PERF_BASELINE_2026-11.md).

@@ -243,6 +243,57 @@ namespace CoreAI.ChatOverlay
             return true;
         }
 
+        /// <summary>
+        /// Starts a turn the host asks for instead of the player (<see cref="ChatOverlayHostTurnRequest"/>): it takes the
+        /// chat's turn slot, so the status line follows it and <c>/stop</c> stops it. False, with no callback, when a turn
+        /// already runs, no AI service is connected, the request has no text or the chat is disposed; the host tries
+        /// again later.
+        /// </summary>
+        public bool TryStartHostTurn(ChatOverlayHostTurnRequest request)
+        {
+            if (_disposed || request == null || string.IsNullOrWhiteSpace(request.Text) || _turn != null ||
+                !_sender.IsAvailable)
+            {
+                return false;
+            }
+
+            double now = _clock.NowSeconds;
+            if (!string.IsNullOrWhiteSpace(request.Announcement))
+            {
+                Feed.Add(ChatFeedLineKind.System, "", request.Announcement.Trim(), now);
+            }
+
+            string roleId = string.IsNullOrWhiteSpace(request.RoleId) ? _agents.ActiveRoleId : request.RoleId.Trim();
+            string traceId = string.IsNullOrWhiteSpace(request.TraceId)
+                ? Guid.NewGuid().ToString("N")
+                : request.TraceId.Trim();
+            TurnState turn = new(this, roleId, traceId);
+            _turn = turn;
+            Status.BeginTurn(now);
+            PushStatus(now);
+            HostTurnObserver observer = new(this, turn, request);
+            ChatOverlayTurnRequest send = new()
+            {
+                Text = request.Text,
+                RoleId = roleId,
+                TraceId = traceId,
+                StreamingOverride = _options.EnableStreaming ? (bool?)null : false
+            };
+
+            try
+            {
+                turn.AttachHandle(_sender.Send(send, observer));
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"[ChatOverlay] The turn sender threw on a host turn: {ex}", LogTag.Llm);
+                observer.OnFailed(new ChatOverlayTurnFailure(ChatOverlayTurnFailureKind.Error,
+                    LlmErrorPresentation.ToUserMessage(ex), LlmErrorCode.ProviderError, ex));
+            }
+
+            return true;
+        }
+
         /// <inheritdoc />
         public void PostSystemMessage(string text)
         {
@@ -678,6 +729,121 @@ namespace CoreAI.ChatOverlay
             public string Text { get; }
 
             public ChatFeedLineKind Kind { get; }
+        }
+
+        /// <summary>Ends a host turn without a feed line; the host reports the outcome itself.</summary>
+        private void EndHostTurn(TurnState turn)
+        {
+            if (!ReferenceEquals(_turn, turn))
+            {
+                return;
+            }
+
+            turn.Abandon();
+            EndTurn(turn, null);
+        }
+
+        /// <summary>
+        /// Feeds a host turn's progress into its turn state. Unless the host asked for the answer, text becomes a
+        /// progress hint, so the status line moves and the feed stays quiet. Reports the end exactly once.
+        /// </summary>
+        private sealed class HostTurnObserver : IChatOverlayTurnObserver
+        {
+            private static readonly LlmStreamChunk ProgressOnly = new() { GenerationInProgress = true };
+
+            private readonly ChatOverlayController _owner;
+            private readonly TurnState _turn;
+            private readonly ChatOverlayHostTurnRequest _request;
+            private bool _ended;
+
+            public HostTurnObserver(ChatOverlayController owner, TurnState turn, ChatOverlayHostTurnRequest request)
+            {
+                _owner = owner;
+                _turn = turn;
+                _request = request;
+            }
+
+            public void OnChunk(LlmStreamChunk chunk)
+            {
+                if (_ended || chunk == null)
+                {
+                    return;
+                }
+
+                if (IsFailureChunk(chunk))
+                {
+                    Finish(ChatOverlayTurnFailure.FromErrorCode(
+                        chunk.ErrorCode == LlmErrorCode.None ? LlmErrorCode.ProviderError : chunk.ErrorCode,
+                        chunk.RetryAfterSeconds));
+                    return;
+                }
+
+                _turn.OnChunk(_request.ShowAnswer || string.IsNullOrEmpty(chunk.Text) ? chunk : ProgressOnly);
+            }
+
+            public void OnCompleted()
+            {
+                if (_ended)
+                {
+                    return;
+                }
+
+                bool answered = false;
+                if (_request.ShowAnswer && ReferenceEquals(_owner._turn, _turn))
+                {
+                    _turn.OnCompleted();
+                    answered = true;
+                }
+
+                Finish(null, answered);
+            }
+
+            public void OnFailed(ChatOverlayTurnFailure failure)
+            {
+                Finish(failure);
+            }
+
+            private void Finish(ChatOverlayTurnFailure? failure, bool answered = false)
+            {
+                if (_ended)
+                {
+                    return;
+                }
+
+                _ended = true;
+                bool stillCurrent = ReferenceEquals(_owner._turn, _turn);
+                ChatOverlayHostTurnResult result;
+                if (!stillCurrent && !answered)
+                {
+                    result = new ChatOverlayHostTurnResult(ChatOverlayHostTurnEnd.Cancelled,
+                        _owner._options.StoppedText, LlmErrorCode.Cancelled);
+                }
+                else if (failure.HasValue)
+                {
+                    ChatOverlayTurnFailure value = failure.Value;
+                    ChatOverlayHostTurnEnd end = value.Kind switch
+                    {
+                        ChatOverlayTurnFailureKind.Cancelled => ChatOverlayHostTurnEnd.Cancelled,
+                        ChatOverlayTurnFailureKind.Timeout => ChatOverlayHostTurnEnd.TimedOut,
+                        _ => ChatOverlayHostTurnEnd.Failed
+                    };
+                    result = new ChatOverlayHostTurnResult(end, value.Message, value.ErrorCode);
+                }
+                else
+                {
+                    result = new ChatOverlayHostTurnResult(ChatOverlayHostTurnEnd.Completed);
+                }
+
+                _owner.EndHostTurn(_turn);
+                try
+                {
+                    _request.Ended?.Invoke(result);
+                }
+                catch (Exception ex)
+                {
+                    _owner._log.Error($"[ChatOverlay] A host turn's end callback threw: {ex}", LogTag.Core);
+                }
+            }
         }
 
         /// <summary>One turn's observer; callbacks for a turn that is no longer current are ignored.</summary>

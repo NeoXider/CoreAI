@@ -10,7 +10,7 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
 {
     /// <summary>
-    /// P6, the whole Block World: the seven mods of the <c>Samples/Block World</c> folder load together with the
+    /// P6, the whole Block World: the eight mods of the <c>Samples/Block World</c> folder load together with the
     /// headers the seeder needs, run side by side without an error or a budget trip, and work through each other's
     /// attributes (the hotbar chooses, the crosshair targets, the build mod places); and the "build here" recipe the
     /// skill text teaches writes cells only inside its box at the crosshair.
@@ -22,7 +22,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         public static readonly string[] Mods =
         {
             "blockworld_world", "blockworld_build", "blockworld_hud", "blockworld_daynight", "blockworld_torches",
-            "blockworld_villagers", "blockworld_autopilot"
+            "blockworld_villagers", "blockworld_autopilot", "blockworld_survival"
         };
 
         /// <summary>
@@ -79,7 +79,7 @@ end";
         }
 
         [Test]
-        public void P6_Demo_TheSevenMods_RunTogether_WithoutAnErrorOrABudgetTrip()
+        public void P6_Demo_TheEightMods_RunTogether_WithoutAnErrorOrABudgetTrip()
         {
             using BlockWorldTestWorld world = new(new BlockWorldTestOptions
             {
@@ -93,11 +93,13 @@ end";
             }
 
             load.Stop();
+            // WHY 1800 frames: with its caves the radius-2 world takes about 1100 frames to stream in at the
+            // per-frame budget, and the mods must then run together on the finished world too.
             Stopwatch frames = Stopwatch.StartNew();
-            world.Frame(600);
+            world.Frame(1800);
             frames.Stop();
-            TestContext.WriteLine("load " + load.Elapsed.TotalMilliseconds.ToString("0") + " ms, 600 frames "
-                                  + (frames.Elapsed.TotalMilliseconds / 600d).ToString("0.00") + " ms each, "
+            TestContext.WriteLine("load " + load.Elapsed.TotalMilliseconds.ToString("0") + " ms, 1800 frames "
+                                  + (frames.Elapsed.TotalMilliseconds / 1800d).ToString("0.00") + " ms each, "
                                   + world.Number("BlockWorldColumns") + " columns");
 
             world.AssertHealthy(Mods);

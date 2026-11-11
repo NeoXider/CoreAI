@@ -10,7 +10,7 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode.RbxApi.DataStoresLua
 {
     /// <summary>
-    /// The game's DataStore files: a restart reads exactly what was written (any UTF-16 text included), the namespace
+    /// The game's DataStore files: a restart reads exactly what was written (non-ASCII text and Lua byte strings included), the namespace
     /// folder follows the one storage naming rule, an unreadable file is set aside and reported without taking the
     /// game down, a page that did not arm WebGL persistence is a failed write, and every path fits a storage root of
     /// 121 characters.
@@ -44,7 +44,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.DataStoresLua
         }
 
         [Test]
-        public void ARestart_ReadsBackEveryEntryExactly_TextOutsideAsciiIncluded()
+        public void ARestart_ReadsBackEveryEntryExactly_NonAsciiTextAndByteStringsIncluded()
         {
             string root = NewRoot();
             FileRbxDataStorePersistence storage = new(root);
@@ -52,7 +52,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.DataStoresLua
             file.Entries.Add(new RbxDataStoreEntry
             {
                 Key = "Player_1",
-                ValueJson = "{\"name\":\"é中😀\",\"lone\":\"\ud800\"}",
+                ValueJson = "{\"name\":\"\u00e9\u4e2d\ud83d\ude00\",\"bytes\":\"\u00c3\u00a9\u00ff\"}",
                 CreatedMilliseconds = 1L,
                 UpdatedMilliseconds = 2L,
                 Version = 3L,
@@ -62,6 +62,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.DataStoresLua
 
             storage.Save("block-world-demo", file);
             IReadOnlyList<RbxDataStoreLoadResult> loaded = new FileRbxDataStorePersistence(root).LoadNamespace("block-world-demo");
+            byte[] onDisk = File.ReadAllBytes(storage.PathFor("block-world-demo", "PlayerData", "global"));
+            foreach (byte value in onDisk)
+            {
+                Assert.Less(value, (byte)128, "every character above ASCII is escaped, so the bytes do not depend on the runtime");
+            }
 
             Assert.AreEqual(1, loaded.Count);
             Assert.AreEqual(RbxDataStoreLoadStatus.Loaded, loaded[0].Status);

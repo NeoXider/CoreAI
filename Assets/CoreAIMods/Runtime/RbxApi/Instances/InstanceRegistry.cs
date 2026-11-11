@@ -1736,7 +1736,7 @@ namespace CoreAI.Mods.Rbx.Instances
         /// </summary>
         internal event Action<RbxInstance> ParentChanged;
 
-        /// <summary>The GUI layout of this world (its presenter), or null when nothing draws GUI.</summary>
+        /// <summary>The GUI layout of this world (its presenter), or null when no GUI is drawn.</summary>
         internal IRbxGuiLayoutSource GuiLayout { get; set; }
 
         internal void OnParentChanged(RbxInstance instance, bool wasInScene)

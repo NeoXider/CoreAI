@@ -1,12 +1,12 @@
 --[[@coreai
 id: blockworld_hud
 name: Block World 3 - HUD and hotbar
-version: 1.0.0
+version: 1.1.0
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo. The whole interface, made in this mod from UXML and USS text through UxmlService - a crosshair, a nine-slot hotbar (keys 1-9, the mouse wheel or a click on a slot), the clock, creative or survival, a placed and broken counter, the block counts in survival, the autopilot banner and short notices from the other Block World mods. Choosing a slot publishes the workspace attribute BlockWorldSelected, which the build and torch mods read. Hot-reload it to restyle the HUD live.
+description: Part of the Block World demo. The whole interface, made in this mod from UXML and USS text through UxmlService - a crosshair, a nine-slot hotbar (keys 1-9, the mouse wheel or a click on a slot), a key legend, the clock, creative or survival, your health in survival, a placed and broken counter, the block counts in survival, the autopilot banner and short notices from the other Block World mods. Choosing a slot publishes the workspace attribute BlockWorldSelected, which the build and torch mods read. Hot-reload it to restyle the HUD live.
 ]]
 
 -- The hotbar is the single owner of "what is in your hand": a slot is chosen by number key, wheel or click,
@@ -68,6 +68,7 @@ local UXML = [[
   <ui:VisualElement name="status" class="status" picking-mode="Ignore">
     <ui:Label name="clock" class="chip" text="--:--" picking-mode="Ignore" />
     <ui:Label name="mode" class="chip" text="Creative" picking-mode="Ignore" />
+    <ui:Label name="health" class="chip health is-hidden" text="" picking-mode="Ignore" />
     <ui:Label name="counter" class="chip" text="Placed 0  Broken 0" picking-mode="Ignore" />
   </ui:VisualElement>
   <ui:Label name="autopilot" class="banner is-hidden" text="" picking-mode="Ignore" />
@@ -109,6 +110,8 @@ local USS = [[
 .legend-row { flex-direction: row; }
 .legend-key { width: 110px; font-size: 16px; color: rgb(255, 214, 120); -unity-font-style: bold; }
 .legend-text { font-size: 16px; color: rgb(240, 240, 240); }
+.health { color: rgb(255, 150, 150); }
+.health.is-low { background-color: rgba(150, 24, 24, 0.85); color: rgb(255, 255, 255); }
 .is-hidden { display: none; }
 ]]
 
@@ -124,6 +127,7 @@ for index = 1, #ITEMS do
 end
 local clockLabel = hud:GetElement("clock")
 local modeLabel = hud:GetElement("mode")
+local healthLabel = hud:GetElement("health")
 local counterLabel = hud:GetElement("counter")
 local noticeLabel = hud:GetElement("notice")
 local autopilotLabel = hud:GetElement("autopilot")
@@ -198,6 +202,19 @@ end
 local function refreshStatus()
     local creative = workspace:GetAttribute("BlockWorldCreative") ~= false
     setText(modeLabel, "mode", creative and "Creative" or "Survival")
+    local health = workspace:GetAttribute("BlockWorldHealth")
+    local maxHealth = workspace:GetAttribute("BlockWorldMaxHealth")
+    if creative or type(health) ~= "number" or type(maxHealth) ~= "number" then
+        healthLabel:AddClass("is-hidden")
+    else
+        healthLabel:RemoveClass("is-hidden")
+        setText(healthLabel, "health", "Health " .. health .. " / " .. maxHealth)
+        if health < maxHealth * 0.3 then
+            healthLabel:AddClass("is-low")
+        else
+            healthLabel:RemoveClass("is-low")
+        end
+    end
     setText(counterLabel, "counter", "Placed " .. (workspace:GetAttribute("BlockWorldPlaced") or 0)
         .. "  Broken " .. (workspace:GetAttribute("BlockWorldBroken") or 0))
     for index, item in ipairs(ITEMS) do
@@ -231,7 +248,8 @@ local function refreshAutopilot()
     end
 end
 
-for _, name in ipairs({ "BlockWorldCreative", "BlockWorldPlaced", "BlockWorldBroken" }) do
+for _, name in ipairs({ "BlockWorldCreative", "BlockWorldPlaced", "BlockWorldBroken", "BlockWorldHealth",
+    "BlockWorldMaxHealth" }) do
     workspace:GetAttributeChangedSignal(name):Connect(refreshStatus)
 end
 for _, item in ipairs(ITEMS) do

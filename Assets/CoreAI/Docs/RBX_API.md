@@ -162,8 +162,9 @@ so `IsA` works the way it does in Roblox.
 Services `game:GetService` returns as working instances: `Workspace`, `RunService`,
 `UserInputService`, `Players`, `CollectionService`, `TweenService`, `Lighting`, `Debris`,
 `HttpService`, `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`, `StarterGui`,
-`MaterialService`, `TextChatService` (its commands, see below) and `ScriptContext`. `DataStoreService` (MVP16), `ContextActionService` (MVP7) and
-`SoundService` (MVP17) are planned; `PathfindingService` and `MarketplaceService` are not planned. They and twenty-seven more real Roblox services (`Teams`, `PhysicsService`,
+`MaterialService`, `TextChatService` (its commands, see below), `ScriptContext` and `DataStoreService`
+([below](#datastoreservice-and-leaderstats); a DataModel the composition did not attach it to names the missing
+attachment). `ContextActionService` (MVP7) and `SoundService` (MVP17) are planned; `PathfindingService` and `MarketplaceService` are not planned. They and twenty-seven more real Roblox services (`Teams`, `PhysicsService`,
 `ReplicatedFirst`, `TeleportService`, `BadgeService`, …) resolve to loud placeholders whose first
 member access raises `NOT_IMPLEMENTED` with a workaround, instead of the false `X is not a valid
 Service name`; `GetService("")` is `UNKNOWN_SERVICE`.
@@ -306,6 +307,25 @@ later; local actors, solo and client worlds are unaffected. The Mirror provider 
 `BasePart`'s network-ownership family (`SetNetworkOwner`, `GetNetworkOwner`,
 `SetNetworkOwnershipAuto`, `GetNetworkOwnershipAuto`, `CanSetNetworkOwnership`) is a loud stub too:
 the server simulates every part, and network ownership is not modelled.
+
+### `DataStoreService` and `leaderstats`
+
+`game:GetService("DataStoreService")` keeps data between sessions: `GetDataStore(name, scope = "global")`,
+`GetGlobalDataStore()` and `GetRequestBudgetForRequestType(Enum.DataStoreRequestType.X)`, and on a store the
+yielding `GetAsync`, `SetAsync(key, value, userIds?)`, `UpdateAsync(key, fn)` (a nil return cancels the write;
+the function may not yield), `IncrementAsync(key, delta = 1)` and `RemoveAsync`, with a `DataStoreKeyInfo`
+(`Version`, `CreatedTime`, `UpdatedTime`, `GetUserIds()`, `GetMetadata()`) as the second value. Every call
+yields its thread and resumes it on a later scheduler step, works inside `pcall`, and fails with Roblox's code
+inside the message (`102: Key name exceeds the 50 character limit.`, `104: Can't store function in DataStore.`,
+`105: Serialized value exceeds 4MB limit.`, `302: SetAsync request dropped. Request was throttled but queue was
+full.`). Stores are shared by every mod of the world, need the `Data` capability (part of `All`), and pace
+requests like a Roblox server (60 + 40 per player a minute per request type, a queue of 30). The data lives in
+`CoreAI/DataStores` under the storage root, one namespace per game (the mods store id) and per world id; it is
+not part of a world package and `/undo` does not change it. A `leaderstats` folder under a Player shows the
+player list at the top right (`StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, false)` hides it).
+Ordered stores, versions, listing and the option objects raise `NOT_IMPLEMENTED` (MVP16). Limits, the
+namespace rule, what a host configures and the deviations:
+[DataStores/README.md](../../CoreAIMods/Runtime/RbxApi/Instances/DataStores/README.md).
 
 ### `Humanoid`
 
@@ -552,7 +572,8 @@ Deviations (each a DEV candidate):
   copies (a ScreenGui a script parented into `PlayerGui` stays); a child added after the spawn is copied on the
   next frame; destroying an original removes its copies (a hot reload leaves one copy, not two). Scripts are
   not copied (a CoreAI script is a mod). `SetCoreGuiEnabled`/`GetCoreGuiEnabled` are recorded per
-  `Enum.CoreGuiType`: CoreAI draws no Roblox core GUI and no top bar, so the GUI inset is always zero.
+  `Enum.CoreGuiType`; of the core GUI only `PlayerList` is drawn (the leaderstats list,
+  [below](#datastoreservice-and-leaderstats)), and there is no top bar, so the GUI inset is always zero.
 - **Text.** Every font family draws in the host font, bold or italic by the font's name. `TextScaled` estimates
   the size from the box and the character count, and `AutomaticSize` fits children, not text: text is not
   measured, so `TextBounds` and `TextFits` raise `NOT_IMPLEMENTED`. `RichText` draws the host's tags

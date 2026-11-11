@@ -422,6 +422,29 @@ namespace CoreAI.Sandbox.LuaCs
         }
 
         /// <summary>
+        /// Charges <paramref name="steps"/> that a library function spent inside one call (the instructions of
+        /// the Lua loop it replaces) to this run: they come off what it may still spend, so its hook trips at
+        /// its next fire once they exhaust it, as the loop would have, and they reach the runs this one is nested
+        /// in and its record like a raw coroutine's steps.
+        /// </summary>
+        /// <remarks>
+        /// WHY here and not a per-call allowance like the pattern matcher's: a table loop is bounded by its
+        /// table, so the call itself always ends; what it must not do is let a script do a loop's work for the
+        /// price of one instruction under a per-resume budget the host sized for that work.
+        /// </remarks>
+        internal void ChargeLibrarySteps(long steps)
+        {
+            if (steps <= 0)
+            {
+                return;
+            }
+
+            _nestedSteps += steps;
+            _nestedUnreportedSteps += steps;
+            ChargeNestedSteps(steps);
+        }
+
+        /// <summary>
         /// Takes <paramref name="steps"/> a nested run spent (its own and its nested runs') off what this run may
         /// still spend.
         /// </summary>

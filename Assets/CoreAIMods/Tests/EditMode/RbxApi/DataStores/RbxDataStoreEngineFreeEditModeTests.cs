@@ -88,6 +88,30 @@ namespace CoreAI.Tests.EditMode.RbxApi.DataStores
             Assert.IsNull(service.Database.Read("Big", "global", "k"));
         }
 
+        /// <summary>
+        /// The mirror: a stored string "must be valid UTF-8" or the write fails. A lone UTF-16 surrogate has no UTF-8
+        /// form (and no runtime writes it to a file the same way), so it is refused with 104 on every runtime; the
+        /// twin, a complete surrogate pair, is stored and read back unchanged.
+        /// </summary>
+        [Test]
+        public void S1_14_AStringThatIsNotValidUtf8Text_IsRefusedWith104_AndACompletePairIsStored()
+        {
+            RbxDataStoreService service = Service(Backend());
+            RbxGlobalDataStore store = service.GetDataStore("Text");
+
+            RbxDataStoreRequest lone = service.Submit(Set(store, "lone", "\"a\ud800b\""));
+            RbxDataStoreRequest pair = service.Submit(Set(store, "pair", "\"a\ud83d\ude00b\""));
+            RbxError refused = Assert.Throws<RbxError>(() => RbxDataStoreService.RequireStorableText("x\udc00", "$.name"));
+
+            Assert.AreEqual(RbxDataStoreRequestState.Failed, lone.State);
+            StringAssert.StartsWith("104: Can't store a string that is not valid UTF-8 text in DataStore.",
+                lone.Error.RawMessage);
+            Assert.IsNull(service.Database.Read("Text", "global", "lone"));
+            Assert.AreEqual(RbxDataStoreRequestState.Done, pair.State);
+            Assert.AreEqual("\"a\ud83d\ude00b\"", service.Database.Read("Text", "global", "pair").ValueJson);
+            StringAssert.Contains("(at $.name)", refused.RawMessage);
+        }
+
         [Test]
         public void S1_24_AWriteRefusedByPacing_IsAcceptedAfterTheBudgetRefills()
         {

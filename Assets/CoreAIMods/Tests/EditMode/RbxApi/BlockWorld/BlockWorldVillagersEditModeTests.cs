@@ -78,25 +78,65 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
                 Assert.AreEqual("Model", body.ClassName);
                 Assert.IsNotNull(body.FindFirstChild("HumanoidRootPart"), name);
                 Assert.IsNotNull(body.FindFirstChildOfClass("Humanoid"), name + " can be walked by a brain");
-                Assert.AreEqual(5, body.GetChildren().Count, "root, Humanoid, legs, head and hair");
+                Assert.AreEqual(9, body.GetChildren().Count, "root, Humanoid, the six R6 parts and hair");
+                foreach (string part in new[] { "Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg" })
+                {
+                    Assert.IsNotNull(body.FindFirstChild(part), name + " has the R6 part " + part);
+                }
             }
 
             _world.AssertHealthy(Mod);
         }
 
         [Test]
-        public void P6_Villagers_TheirBodiesFollowTheRoot_AsTheBrainWalksIt()
+        public void P6_Villagers_LeaveTheSixR6PartsToTheRig_AndTheRootIsTheOnlyCollider()
         {
             Start(allowAgents: false);
 
-            _world.LoadSource("test_walk", "workspace.Mira.HumanoidRootPart.CFrame = CFrame.new(50, 20, 50)");
-            _world.Frame(2);
+            _world.LoadSource("test_body", @"
+local body = workspace.Mira
+local loose = 0
+for _, name in ipairs({ 'Torso', 'Head', 'Left Arm', 'Right Arm', 'Left Leg', 'Right Leg' }) do
+    local part = body[name]
+    if not part.Anchored and not part.CanCollide then
+        loose = loose + 1
+    end
+end
+local root = body.HumanoidRootPart
+workspace:SetAttribute('TestLooseParts', loose)
+workspace:SetAttribute('TestRootSize', root.Size)
+workspace:SetAttribute('TestRootHidden', root.Transparency == 1)
+workspace:SetAttribute('TestHairHeld', body.Hair.Anchored and not body.Hair.CanCollide)");
 
-            RbxInstance head = Body("Mira").FindFirstChild("Head");
-            Assert.IsTrue(_world.Roblox.PartSink.TryGetPartProperties(head.Id, out CoreAI.Mods.Rbx.Binding.PartProperties part));
-            Assert.AreEqual(50f, part.Position.X, 0.01f);
-            Assert.AreEqual(21.8f, part.Position.Y, 0.01f, "the head sits on the moved root");
-            Assert.AreEqual(50f, part.Position.Z, 0.01f);
+            Assert.AreEqual(6d, _world.Number("TestLooseParts"),
+                "the rig poses the six R6 parts: unanchored, and none of them collides");
+            Assert.AreEqual(new RbxVector3(2, 2, 1), _world.Vector("TestRootSize"), "the root is the standard 2x2x1 box");
+            Assert.AreEqual(true, _world.Attribute("TestRootHidden"), "and invisible");
+            Assert.AreEqual(true, _world.Attribute("TestHairHeld"), "the hair is the mod's own, held and never colliding");
+            _world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_Villagers_TheHairFollowsTheHead_WhereverTheHeadIsPosed()
+        {
+            Start(allowAgents: false);
+
+            _world.LoadSource("test_move_head", "workspace.Mira.Head.CFrame = CFrame.new(50, 20, 50)");
+            double moved = HairGap("test_gap_moved");
+            _world.Frame(2);
+            double after = HairGap("test_gap_after");
+
+            Assert.Greater(moved, 1d, "a head moved after this frame's render step has left its hair behind");
+            Assert.AreEqual(0d, after, 0.01d, "the next render step puts the hair back on the head");
+            _world.AssertHealthy(Mod);
+        }
+
+        private double HairGap(string probeId)
+        {
+            _world.LoadSource(probeId, "local body = workspace.Mira "
+                                       + "workspace:SetAttribute('TestHairGap', (body.Hair.Position - "
+                                       + "(body.Head.CFrame * CFrame.new(0, 0.7, 0)).Position).Magnitude)");
+            return _world.Number("TestHairGap");
         }
 
         [Test]

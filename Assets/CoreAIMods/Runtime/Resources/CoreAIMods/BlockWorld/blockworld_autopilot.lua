@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_autopilot
 name: Block World 7 - Autopilot
-version: 1.0.0
+version: 1.1.0
 active: false
 capabilities: All
 category: Samples/Block World

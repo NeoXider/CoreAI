@@ -350,7 +350,7 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
         internal static string BuildUxml(int rows, int columns, bool more)
         {
             StringBuilder uxml = new(256 + rows * (96 + columns * 96));
-            uxml.Append("<ui:UXML xmlns:ui=\"UnityEngine.UIElements\">\n")
+            uxml.Append("<ui:UXML>\n")
                 .Append("  <ui:VisualElement name=\"playerlist\" class=\"cai-playerlist\" picking-mode=\"Ignore\">\n")
                 .Append("    <ui:VisualElement name=\"header\" class=\"cai-playerlist__row cai-playerlist__header\" ")
                 .Append("picking-mode=\"Ignore\">\n")

@@ -50,7 +50,8 @@ print(tostring(m:HasTag("Enemy")))  -- true
   `StringValue.Value` is capped at 200,000 characters; longer raises "String too long".
   `ObjectValue.Value` accepts an Instance or nil.
 - `leaderstats` is CONVENTION, not an API: a `Folder` named exactly `"leaderstats"` parented
-  under a `Player`, holding named Value children — the standard way to show per-player stats.
+  under a `Player`, holding named Value children — the standard way to show per-player stats; its
+  IntValue/NumberValue/StringValue children show in the player list (section data, with saving).
     local coins = Instance.new("IntValue")
     coins.Name = "Coins"; coins.Value = 0
     local stats = Instance.new("Folder")

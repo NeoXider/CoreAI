@@ -52,7 +52,7 @@ namespace CoreAI.Demos.BlockWorld
         private const string PlayWorldObjectName = "CoreAI Play World";
         private const int PreviewRadius = 1;
         private const float FirstViewEyeHeightStuds = 1.5f;
-        private const float FirstViewPitchDegrees = 5f;
+        private const float FirstViewPitchDegrees = 12f;
         private const int MaxBakeFrames = 4000;
         private const double FrameSeconds = 1d / 60d;
 

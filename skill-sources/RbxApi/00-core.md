@@ -56,7 +56,7 @@ end
 ```
 
 ## Services, UI and AI
-- `game:GetService("Name")`. Roblox services CoreAI has not built yet (DataStoreService, SoundService,
+- `game:GetService("Name")`. Roblox services CoreAI has not built yet (SoundService,
   ContextActionService, PathfindingService, Teams, ...) are placeholders: GetService returns them (do not
   guard it) and their first member use raises NOT_IMPLEMENTED with a workaround. An unknown name raises
   UNKNOWN_SERVICE. Which services are real: section instances.

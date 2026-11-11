@@ -322,6 +322,7 @@ namespace CoreAI.Mods.Rbx.Instances.DataStores
                 }
 
                 RequireValueSize(valueJson);
+                RequireStorableText(metadataJson, "$ (metadata)");
                 RbxDataStoreEntry written = _database.Write(request.Store.StoreName, request.Store.Scope, request.Key,
                     valueJson, userIds, metadataJson, _backend.WallClock());
                 request.State = RbxDataStoreRequestState.Done;
@@ -380,13 +381,27 @@ namespace CoreAI.Mods.Rbx.Instances.DataStores
             }
         }
 
-        /// <summary>The mirror check of a value size, the characters of its JSON encoding.</summary>
+        /// <summary>
+        /// The mirror checks of a value: the characters of its JSON encoding (105), and text a store can keep (104:
+        /// the mirror says a stored string "must be valid UTF-8", and a lone UTF-16 surrogate has no UTF-8 form).
+        /// </summary>
         public void RequireValueSize(string valueJson)
         {
             int limit = Math.Min(_backend.Options.MaxValueCharacters, RbxDataStoreOptions.MirrorValueLimit);
             if (valueJson == null || valueJson.Length > limit)
             {
                 throw RbxDataStoreErrors.ValueTooLarge(limit);
+            }
+
+            RequireStorableText(valueJson, "$");
+        }
+
+        /// <summary>Refuses text with a lone UTF-16 surrogate (104), the one kind of string that is not valid UTF-8 text.</summary>
+        public static void RequireStorableText(string text, string path)
+        {
+            if (text != null && !IsValidText(text))
+            {
+                throw RbxDataStoreErrors.CantStore("a string that is not valid UTF-8 text", path);
             }
         }
 
@@ -403,7 +418,7 @@ namespace CoreAI.Mods.Rbx.Instances.DataStores
             }
         }
 
-        private static bool IsValidText(string value)
+        internal static bool IsValidText(string value)
         {
             for (int index = 0; index < value.Length; index++)
             {

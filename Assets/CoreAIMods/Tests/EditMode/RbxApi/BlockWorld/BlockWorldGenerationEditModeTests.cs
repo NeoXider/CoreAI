@@ -24,7 +24,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         /// SHA-256 of the Terrain package entry (<c>TerrainVoxelCodec</c>, canonical chunk order) after seed 1337
         /// streamed the 21 columns of view radius 2 around the origin. A change here is a change of the generated world.
         /// </summary>
-        private const string GoldenSeed1337Radius2 = "6c3402c59a81053e66611dd0166d6dc2495107eeb81a3f60da505768bfe9674f";
+        private const string GoldenSeed1337Radius2 = "2201b8714f9dc370b6e6d9a87c526abb74503260416543f81fbfde9213bb91e8";
 
         private SynchronizationContext _savedContext;
 
@@ -107,6 +107,67 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
 
             Assert.AreEqual(RadiusTwoColumns * 256, Count(counts, "Basalt"), "a complete bedrock floor");
             world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_World_HasCaves_UnderTheSurface_WithEntrances_FloodedBelowTheSeaLevel_AboveAWholeBedrock()
+        {
+            using BlockWorldTestWorld world = new();
+            world.SetAttribute("BlockWorldViewRadius", 2d);
+            world.Load(Mod);
+            world.FrameUntil(() => world.Number("BlockWorldColumns") >= RadiusTwoColumns, 3000, "the radius-2 world");
+
+            int caveAir = 0;
+            int floodedCave = 0;
+            Dictionary<long, int> tops = new();
+            for (int x = -48; x <= 47; x++)
+            {
+                for (int z = -48; z <= 47; z++)
+                {
+                    int surface = TopSolid(world, x, z);
+                    tops[x * 1000L + z] = surface;
+                    for (int y = surface - 1; y > -16; y--)
+                    {
+                        byte material = world.Material(x, y, z);
+                        caveAir += material == TerrainMaterials.Air ? 1 : 0;
+                        floodedCave += material == TerrainMaterials.Water ? 1 : 0;
+                    }
+                }
+            }
+
+            int entrances = 0;
+            for (int x = -47; x <= 46; x++)
+            {
+                for (int z = -47; z <= 46; z++)
+                {
+                    int lowest = Math.Min(Math.Min(tops[(x - 1) * 1000L + z], tops[(x + 1) * 1000L + z]),
+                        Math.Min(tops[x * 1000L + z - 1], tops[x * 1000L + z + 1]));
+                    entrances += tops[x * 1000L + z] <= lowest - 3 ? 1 : 0;
+                }
+            }
+
+            TestContext.WriteLine("seed 1337, radius 2: " + caveAir + " cave cells, " + floodedCave
+                                  + " flooded cave cells, " + entrances + " shafts (a pillar three or more rows below all four neighbours)");
+            Assert.Greater(caveAir, 500, "tunnels and chambers under the surface");
+            Assert.Greater(entrances, 0, "a cave reaches the surface somewhere, so a player can find one");
+            Dictionary<byte, int> floor = CountMaterials(world, -48, 47, -16, -16, -48, 47);
+            Assert.AreEqual(RadiusTwoColumns * 256, Count(floor, "Basalt"), "no cave cuts through the bedrock");
+            world.AssertHealthy(Mod);
+        }
+
+        /// <summary>The highest solid, non-water cell of the pillar, or -16.</summary>
+        private static int TopSolid(BlockWorldTestWorld world, int x, int z)
+        {
+            for (int y = 15; y > -16; y--)
+            {
+                byte material = world.Material(x, y, z);
+                if (material != TerrainMaterials.Air && material != TerrainMaterials.Water)
+                {
+                    return y;
+                }
+            }
+
+            return -16;
         }
 
         [Test]

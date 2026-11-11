@@ -443,6 +443,7 @@ namespace CoreAI.Ai.LuaCs
             new(StringComparer.Ordinal);
         private readonly Dictionary<string, ExecutingScriptBacking> _executingScriptsByMod =
             new(StringComparer.Ordinal);
+        private readonly ScriptInstanceHost _scriptInstances;
         private readonly Dictionary<string, ActorContext> _actorContextsByOwnerModId =
             new(StringComparer.Ordinal);
         private readonly ModActorLedger _actorLedger = new();
@@ -717,6 +718,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             _registry.Unregistered += OnInstanceUnregistered;
+            _scriptInstances = new ScriptInstanceHost(_registry, _game, _log);
 
             _scheduler.PhaseReached += PumpSchedulerPhase;
             _scheduler.ThreadRetired += OnSchedulerThreadRetired;
@@ -755,6 +757,12 @@ namespace CoreAI.Ai.LuaCs
 
         /// <summary>The shared DataModel root exposed as the <c>game</c> global.</summary>
         public RbxDataModel Game => _game;
+
+        /// <summary>
+        /// The world-owned script instances bound to mod sources in this world (MVP4 step C1): the mod runtime places a
+        /// declared mod's script here before its main chunk runs, and the <c>script</c> global is that instance.
+        /// </summary>
+        internal IScriptInstanceHost ScriptInstances => _scriptInstances;
 
         /// <summary>The shared enum registry exposed as the <c>Enum</c> global.</summary>
         public RbxEnumRegistry Enums => _enums;
@@ -1823,6 +1831,7 @@ namespace CoreAI.Ai.LuaCs
             _networkBridge.RequestReceived -= QueueNetworkRequest;
             _networkBridge.DetachServerClock(_serverClockReader);
             _registry.Unregistered -= OnInstanceUnregistered;
+            _scriptInstances.Dispose();
             _registry.Registered -= OnInstanceRegisteredForCharacter;
             _registry.SceneMembershipChanged -= OnCharacterSceneMembershipChanged;
             CharacterRigs?.Dispose();
@@ -4278,7 +4287,7 @@ namespace CoreAI.Ai.LuaCs
             if (!string.IsNullOrWhiteSpace(ownerModId))
             {
                 luaRegistry.RegisterValue("script", () =>
-                    context.WrapInstance(GetOrCreateExecutingScript(context)));
+                    context.WrapInstance(ResolveExecutingScript(context)));
             }
 
             luaRegistry.RegisterValue("game", () => context.WrapInstance(_game));
@@ -4634,6 +4643,39 @@ namespace CoreAI.Ai.LuaCs
         private static string DescribeUnimplementedAccess(string name, LuaValue key)
         {
             return key.Type == LuaValueType.String ? name + "." + key.Read<string>() : name;
+        }
+
+        /// <summary>
+        /// The <c>script</c> of a mod's main chunk: the durable instance bound to the mod when it has one (MVP4 rule
+        /// R2, placed by the runtime before the chunk's registry is applied), else the synthetic legacy placement
+        /// (rule R1), exactly as before MVP4.
+        /// </summary>
+        private RbxInstance ResolveExecutingScript(LuaCsRbxModContext context)
+        {
+            return _scriptInstances.TryGetBoundScript(context.OwnerModId, out RbxLuaSourceContainer bound)
+                ? bound
+                : GetOrCreateExecutingScript(context);
+        }
+
+        /// <summary>
+        /// Hands a mod's synthetic legacy placement to its durable script once a reload moved the mod from a header
+        /// without a context to one with one (MVP4 step C1): what the synthetic folder and script hold moves into the
+        /// durable script (with <paramref name="keepOwnObjects"/> false, what the mod itself owns there goes with the
+        /// folder), and both are destroyed. False when the mod has no synthetic placement or no durable script.
+        /// </summary>
+        internal bool RetireExecutingScript(string ownerModId, bool keepOwnObjects)
+        {
+            if (string.IsNullOrWhiteSpace(ownerModId)
+                || !_scriptInstances.TryGetBoundScript(ownerModId, out RbxLuaSourceContainer successor)
+                || !TryGetExecutingScriptBacking(ownerModId, out ExecutingScriptBacking backing))
+            {
+                return false;
+            }
+
+            _executingScriptsByMod.Remove(ownerModId);
+            _scriptInstances.HandOverLegacyPlacement(ownerModId, backing.Container, backing.Script, successor,
+                keepOwnObjects);
+            return true;
         }
 
         private bool TryGetExecutingScriptBacking(string ownerModId,

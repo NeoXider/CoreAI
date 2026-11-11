@@ -203,6 +203,31 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         }
 
         [Test]
+        public void P6_Hud_InSurvival_ShowsHealth_RedWhenLow_AndCreativeHidesIt()
+        {
+            FakeRbxUiBackend.FakeElement health = Screen.Find("health");
+            Assert.IsTrue(health.Classes.Contains("is-hidden"), "creative, the start, shows no health");
+
+            _world.SetAttribute("BlockWorldCreative", false);
+            _world.SetAttribute("BlockWorldMaxHealth", 100d);
+            _world.SetAttribute("BlockWorldHealth", 20d);
+            _world.Frame();
+
+            Assert.IsFalse(health.Classes.Contains("is-hidden"), "survival shows health");
+            Assert.AreEqual("Health 20 / 100", health.Text);
+            Assert.IsTrue(health.Classes.Contains("is-low"), "under a third it turns red");
+
+            _world.SetAttribute("BlockWorldHealth", 90d);
+            _world.Frame();
+            Assert.IsFalse(health.Classes.Contains("is-low"));
+
+            _world.SetAttribute("BlockWorldCreative", true);
+            _world.Frame();
+            Assert.IsTrue(health.Classes.Contains("is-hidden"), "creative hides it again");
+            _world.AssertHealthy(Mod);
+        }
+
+        [Test]
         public void P6_Hud_ANotice_ShowsForFourSeconds()
         {
             FakeRbxUiBackend.FakeElement notice = Screen.Find("notice");

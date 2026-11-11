@@ -38,7 +38,9 @@ namespace CoreAI.Mcp.Tools
             "Read-only. Entries carry a monotonically increasing sequence number and are returned " +
             "oldest-first; pass since_sequence to page only newer entries. When the character budget is exceeded, " +
             "the newest entries are kept and a leading '...(+N more)' marker counts omitted entries. Params: mod_id (optional filter), " +
-            "level (minimum severity: print, warn, error, runtime_error), since_sequence, max_entries (default 50).";
+            "level (minimum severity: print, warn, error, runtime_error), since_sequence, max_entries (default 50), " +
+            "since_reload (with mod_id: only entries since the mod's latest load or reload) and wait_seconds (0-10: " +
+            "wait for a new warning or error and answer as soon as one arrives). Every result carries next_sequence.";
 
         /// <inheritdoc />
         public string InputSchemaJson => _inner.ParametersSchema;
@@ -50,9 +52,11 @@ namespace CoreAI.Mcp.Tools
             string level = McpArguments.String(arguments, "level");
             long since = McpArguments.Long(arguments, "since_sequence", 0);
             int max = McpArguments.Int(arguments, "max_entries", GetModLogsLlmTool.DefaultMaxEntries);
+            bool sinceReload = McpArguments.Bool(arguments, "since_reload");
+            int wait = McpArguments.Int(arguments, "wait_seconds", 0);
 
             string json = await _inner
-                .ExecuteAsync(modId, level, since, max, cancellationToken)
+                .ExecuteAsync(modId, level, since, max, sinceReload, wait, cancellationToken)
                 .ConfigureAwait(false);
 
             JToken success = JObject.Parse(json)["success"];

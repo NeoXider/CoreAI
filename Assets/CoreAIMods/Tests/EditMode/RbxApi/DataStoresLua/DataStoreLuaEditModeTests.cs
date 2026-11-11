@@ -139,11 +139,15 @@ namespace CoreAI.Tests.EditMode.RbxApi.DataStoresLua
         public void S1_15_AValueOneCharacterTooLargeAsJson_IsRefusedWith105_AndOneAtTheLimitIsStored()
         {
             using World world = new();
-            // WHY minus two: a string's JSON adds its two quotes, so 4,194,302 characters encode to exactly the limit.
+            // WHY a table of five strings: the sandbox caps one string.rep at 1,000,000 characters. Four strings of
+            // 1,000,000 and one of r encode to 2 brackets + 4 commas + 10 quotes + 4,000,000 + r characters, so
+            // r = 194,288 is exactly the limit.
             world.Load(@"
                 local store = game:GetService('DataStoreService'):GetDataStore('Big')
-                local okLimit, errLimit = pcall(function() store:SetAsync('fits', string.rep('x', 4194302)) end)
-                local ok, err = pcall(function() store:SetAsync('over', string.rep('x', 4194303)) end)
+                local million = string.rep('x', 1000000)
+                local function value(rest) return { million, million, million, million, string.rep('y', rest) } end
+                local okLimit, errLimit = pcall(function() store:SetAsync('fits', value(194288)) end)
+                local ok, err = pcall(function() store:SetAsync('over', value(194289)) end)
                 workspace:SetAttribute('okLimit', okLimit)
                 workspace:SetAttribute('errLimit', tostring(errLimit))
                 workspace:SetAttribute('ok', ok)
@@ -440,10 +444,14 @@ namespace CoreAI.Tests.EditMode.RbxApi.DataStoresLua
             Assert.IsFalse(ContainsText(package, "DataStoreService"), "the detached service is not in the tree");
             Assert.IsNotNull(read);
             RbxWorldPackageRestoreResult restored = RbxWorldPackageSerializer.RestoreFresh(read);
-            using World next = new(null, world.Storage, restored);
-            next.Load(@"workspace:SetAttribute('value', game:GetService('DataStoreService'):GetDataStore('Coins'):GetAsync('Player_1'))");
-            next.AdvanceUntil(() => next.Attribute("value") != null);
-            Assert.AreEqual("marker-4242", next.Attribute("value"));
+            using World next = new(null, world.Storage, restored, world.Backend);
+            next.Load(@"
+                local store = game:GetService('DataStoreService'):GetDataStore('Coins')
+                local ok, value = pcall(function() return store:GetAsync('Player_1') end)
+                store:SetAsync('Seen', tostring(ok) .. '|' .. tostring(value))");
+            next.AdvanceUntil(() => next.Backend.Database("").Read("Coins", "global", "Seen") != null);
+            Assert.AreEqual("\"true|marker-4242\"", next.Backend.Database("").Read("Coins", "global", "Seen").ValueJson,
+                "the restored world reads the data the world before it wrote");
         }
 
         [Test]
@@ -563,15 +571,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.DataStoresLua
 
         private sealed class World : IDisposable
         {
+            private readonly bool _ownsBackend;
+
             public World(RbxDataStoreOptions options = null, InMemoryRbxDataStorePersistence storage = null,
-                RbxWorldPackageRestoreResult restored = null)
+                RbxWorldPackageRestoreResult restored = null, RbxDataStoreBackend sharedBackend = null)
             {
                 Storage = storage ?? new InMemoryRbxDataStorePersistence();
                 Rbx = restored == null
                     ? new LuaCsRbxApiBindings()
                     : new LuaCsRbxApiBindings(restored.Registry, restored.Game);
                 Rbx.Players.CharacterAutoLoads = false;
-                Backend = new RbxDataStoreBackend(Storage, "", options, () => Now, () => WallNow);
+                _ownsBackend = sharedBackend == null;
+                Backend = sharedBackend ?? new RbxDataStoreBackend(Storage, "", options, () => Now, () => WallNow);
                 Action<LuaCsApiRegistry, LuaCapabilities> hook =
                     CoreAiLuaDataStoreBindings.Attach(Rbx, Backend, null, out LuaCsRbxDataStoreAdapter adapter);
                 Adapter = adapter;
@@ -626,7 +637,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.DataStoresLua
             public void Dispose()
             {
                 Rbx.Dispose();
-                Backend.Dispose();
+                if (_ownsBackend)
+                {
+                    Backend.Dispose();
+                }
             }
         }
     }

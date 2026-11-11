@@ -1,18 +1,20 @@
 --[[@coreai
 id: blockworld_villagers
 name: Block World 6 - Villagers
-version: 1.0.0
+version: 1.1.0
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo. Three villagers live by the spawn - Mira the baker, Tobin the builder and Elda the fisher - each created by this mod as an AIService agent with a name, a persona and a memory of its own, and given a brain (NpcAgent and NpcBrain on its Model) that lets it wander, greet, face you, follow you and go home. Talk to them in the chat by name ("Tobin, what should I build?") or look at one and press E; they answer in the chat and in a bubble over their heads. They need the game to allow AI from Lua (CoreAiLuaAiOptions.AllowAgentsFromLua) and a model: without the setting they stand still and say why, without a model they answer with a line that says one is needed.
+description: Part of the Block World demo. Three villagers live by the spawn - Mira the baker, Tobin the builder and Elda the fisher - each a character with Roblox's R6 body (Head, Torso, arms and legs) that the platform animates, created by this mod as an AIService agent with a name, a persona and a memory of its own, and given a brain (NpcAgent and NpcBrain on its Model) that lets it wander, greet, face you, follow you and go home. Talk to them in the chat by name ("Tobin, what should I build?") or look at one and press E; they answer in the chat and in a bubble over their heads. They need the game to allow AI from Lua (CoreAiLuaAiOptions.AllowAgentsFromLua) and a model: without the setting they stand still and say why, without a model they answer with a line that says one is needed.
 ]]
 
--- A villager is a Roblox character: a Model directly under the Workspace with a HumanoidRootPart and a Humanoid,
--- so the host's NPC brain can walk it (wander, go_home, follow_player) and turn it (face_player, at command time).
--- The legs, head and hair are anchored parts this mod keeps on the root every frame, because joints (Weld,
--- Motor6D) are not built yet. The agent comes from AIService:CreateAgent, which only a game that turned AI from
+-- A villager is a Roblox character: a Model directly under the Workspace with a HumanoidRootPart, a Humanoid and
+-- the six R6 parts, so the host's NPC brain can walk it (wander, go_home, follow_player) and turn it (face_player,
+-- at command time), and the platform's character rig animates it (idle, walk, jump, fall) as it does the player.
+-- The rig owns the six parts: they are unanchored and never collide, and the root (an invisible 2x2x1 box resting
+-- on the floor) is the only collider. The hair is this mod's own and follows the Head after the rig has posed it.
+-- The agent comes from AIService:CreateAgent, which only a game that turned AI from
 -- Lua on allows; a refusal is caught, its reason kept, and every greeting then explains it. Chat lines reach the
 -- agents through the host (a line that names a villager, follows up, or is said within its hearing radius goes to
 -- that villager); E is the in-world way to start a conversation.
@@ -36,23 +38,26 @@ local STATE_SECONDS = 5         -- how often the villagers' facts (NpcState) are
 local BRAIN = "idle, wander, greet, face_player, follow_player, go_home"
 local SKIN = Color3.fromRGB(232, 190, 150)
 
+-- Homes around the spawn in studs, in the frame of the heading a new player first faces (BlockWorldSpawnLook):
+-- `ahead` along it, `right` across it. Mira stands in that first view, a little to the left; Tobin and Elda are
+-- found by turning round.
 local VILLAGERS = {
     {
-        name = "Mira", offset = Vector3.new(12, 0, 8), shirt = Color3.fromRGB(196, 72, 64),
+        name = "Mira", ahead = 14, right = -4, shirt = Color3.fromRGB(196, 72, 64),
         persona = "Mira, the village baker of a little block village by the sea. Warm, busy and proud of her "
             .. "brick oven; she dreams of a bigger bakery made of Brick with a Cobblestone chimney.",
         voice = "Two short sentences at most. Calls the player by name. Mentions bread or the oven now and then.",
         fallback = "Mira smiles but says nothing: no AI model answered. Pick a model in the Hub so the villagers can talk.",
     },
     {
-        name = "Tobin", offset = Vector3.new(-14, 0, 6), shirt = Color3.fromRGB(70, 110, 190),
+        name = "Tobin", ahead = 4, right = 16, shirt = Color3.fromRGB(70, 110, 190),
         persona = "Tobin, the village builder. Loves tall watchtowers, straight walls and WoodPlanks; always "
             .. "suggests something to build next and where to put it.",
         voice = "Short, practical, enthusiastic. Talks in blocks and cells. Calls the player by name.",
         fallback = "Tobin scratches his head: no AI model answered. Pick a model in the Hub so the villagers can talk.",
     },
     {
-        name = "Elda", offset = Vector3.new(4, 0, -16), shirt = Color3.fromRGB(80, 150, 90),
+        name = "Elda", ahead = -14, right = -6, shirt = Color3.fromRGB(80, 150, 90),
         persona = "Elda, an old fisher who knows the shore, the sea and the weather; she warns about the dark and "
             .. "tells players to carry torches at night.",
         voice = "Calm, a little mysterious, two sentences at most. Calls the player by name.",
@@ -80,7 +85,7 @@ local function newPart(model, name, size, color, anchored)
     local part = Instance.new("Part")
     part.Name = name
     part.Anchored = anchored
-    part.CanCollide = not anchored
+    part.CanCollide = false
     part.Size = size
     part.Color = color
     part.Material = Enum.Material.SmoothPlastic
@@ -88,22 +93,35 @@ local function newPart(model, name, size, color, anchored)
     return part
 end
 
--- Offsets of the decorative parts from the root (the torso), kept by followBody.
-local DECOR = {
-    { name = "Legs", size = Vector3.new(2, 2, 1), offset = CFrame.new(0, -2, 0), color = Color3.fromRGB(60, 52, 70) },
-    { name = "Head", size = Vector3.new(1.6, 1.6, 1.6), offset = CFrame.new(0, 1.8, 0), color = SKIN },
-    { name = "Hair", size = Vector3.new(1.7, 0.5, 1.7), offset = CFrame.new(0, 2.65, 0), color = Color3.fromRGB(90, 60, 40) },
+-- Roblox's R6 body with its standard sizes, laid out as the rig rests it: the root's box on the floor, the Torso
+-- 2 studs above it, the Head 3.5. "shirt" takes the villager's own colour.
+local PANTS = Color3.fromRGB(60, 52, 70)
+local BODY = {
+    { name = "Torso", size = Vector3.new(2, 2, 1), offset = Vector3.new(0, 2, 0), color = "shirt" },
+    { name = "Head", size = Vector3.new(2, 1, 1), offset = Vector3.new(0, 3.5, 0), color = SKIN },
+    { name = "Left Arm", size = Vector3.new(1, 2, 1), offset = Vector3.new(-1.5, 2, 0), color = "shirt" },
+    { name = "Right Arm", size = Vector3.new(1, 2, 1), offset = Vector3.new(1.5, 2, 0), color = "shirt" },
+    { name = "Left Leg", size = Vector3.new(1, 2, 1), offset = Vector3.new(-0.5, 0, 0), color = PANTS },
+    { name = "Right Leg", size = Vector3.new(1, 2, 1), offset = Vector3.new(0.5, 0, 0), color = PANTS },
 }
+local HAIR_SIZE = Vector3.new(2.1, 0.4, 1.1)
+local HAIR_ON_HEAD = CFrame.new(0, 0.7, 0)
+local HAIR_COLOR = Color3.fromRGB(90, 60, 40)
 
 local function buildBody(villager)
     local model = Instance.new("Model")
     model.Name = villager.name
+    -- WHY anchored at first: the root is held until the ground under its home exists (see tryPlace), then let go.
     local root = newPart(model, "HumanoidRootPart", Vector3.new(2, 2, 1), villager.shirt, true)
-    villager.decor = {}
-    for _, piece in ipairs(DECOR) do
-        villager.decor[#villager.decor + 1] = { part = newPart(model, piece.name, piece.size, piece.color, true),
-            offset = piece.offset }
+    root.Transparency = 1
+    root.CFrame = CFrame.new()
+    for _, piece in ipairs(BODY) do
+        local color = piece.color == "shirt" and villager.shirt or piece.color
+        newPart(model, piece.name, piece.size, color, false).CFrame = CFrame.new(piece.offset)
     end
+    villager.head = model:FindFirstChild("Head")
+    villager.hair = newPart(model, "Hair", HAIR_SIZE, HAIR_COLOR, true)
+    villager.hair.CFrame = villager.head.CFrame * HAIR_ON_HEAD
     local humanoid = Instance.new("Humanoid")
     humanoid.WalkSpeed = 8
     humanoid.Parent = model
@@ -112,14 +130,13 @@ local function buildBody(villager)
     villager.model, villager.root = model, root
 end
 
-local function followBody(villager)
-    local cframe = villager.root.CFrame
-    if villager.shownAt and (cframe.Position - villager.shownAt).Magnitude < 0.01 then
-        return
-    end
-    villager.shownAt = cframe.Position
-    for _, piece in ipairs(villager.decor) do
-        piece.part.CFrame = cframe * piece.offset
+-- The hair is not an R6 part, so the rig leaves it alone: it follows the Head from RenderStepped, which runs after
+-- the rig has posed the body this frame. A head that has not moved is not written again.
+local function followHead(villager)
+    local cframe = villager.head.CFrame
+    if villager.hairOn ~= cframe then
+        villager.hairOn = cframe
+        villager.hair.CFrame = cframe * HAIR_ON_HEAD
     end
 end
 
@@ -184,17 +201,26 @@ local groundParams = RaycastParams.new()
 groundParams.FilterType = Enum.RaycastFilterType.Include
 groundParams.FilterDescendantsInstances = { terrain }
 
+-- WHY only over a finished column: blockworld_world lays a column's deep stone a few frames before the rest, so
+-- ground found earlier is the floor of a column still being filled, and a villager stood on it ends up inside rock.
+-- The bedrock row is the world's "this column is done" mark.
+local BEDROCK_ROW = -16
 local function groundUnder(spot)
+    local cell = terrain:WorldToCell(Vector3.new(spot.X, BEDROCK_ROW * 4 + 2, spot.Z))
+    local corner = terrain:CellCornerToWorld(cell.X, BEDROCK_ROW, cell.Z)
+    local materials = terrain:ReadVoxels(Region3.new(corner, corner + Vector3.new(4, 4, 4)), 4)
+    if materials[1][1][1] ~= Enum.Material.Basalt then
+        return nil
+    end
     return workspace:Raycast(Vector3.new(spot.X, 200, spot.Z), Vector3.new(0, -400, 0), groundParams)
 end
 
--- Stands the villager on the ground found under its home and lets the motor have it.
+-- Stands the villager on the ground found under its home (the root's box on the floor) and lets the motor have it.
 local function letGo(villager, groundY)
-    villager.home = Vector3.new(villager.home.X, groundY + 3, villager.home.Z)
+    villager.home = Vector3.new(villager.home.X, groundY + 1, villager.home.Z)
     villager.model:PivotTo(CFrame.new(villager.home))
-    followBody(villager)
-    -- WHY CanCollide here: the root was made anchored and so without collision; let go without it, the villager
-    -- falls through the Terrain. The legs, head and hair stay anchored decoration that never collides.
+    -- WHY CanCollide here: the root is the villager's only collider, made without collision while it was held;
+    -- let go without it, the villager falls through the Terrain.
     villager.root.CanCollide = true
     villager.root.Anchored = false
     villager.grounded = true
@@ -207,14 +233,18 @@ local function tryPlace(villager, force)
     if typeof(spawn) ~= "Vector3" then
         return
     end
-    local spot = spawn + villager.offset
+    local look = workspace:GetAttribute("BlockWorldSpawnLook")
+    local ahead = typeof(look) == "Vector3" and Vector3.new(look.X, 0, look.Z) or Vector3.zero
+    ahead = ahead.Magnitude > 0.01 and ahead.Unit or Vector3.new(0, 0, -1)
+    local right = ahead:Cross(Vector3.new(0, 1, 0))
+    local spot = spawn + ahead * villager.ahead + right * villager.right
     local hit = groundUnder(spot)
     if not hit and not force then
         return
     end
-    villager.home = Vector3.new(spot.X, spawn.Y - 1, spot.Z)
+    -- WHY 3 under the spawn: BlockWorldSpawn is 4 studs above the spawn's ground, the root's centre 1.
+    villager.home = Vector3.new(spot.X, spawn.Y - 3, spot.Z)
     villager.model:PivotTo(CFrame.new(villager.home))
-    followBody(villager)
     if hit then
         letGo(villager, hit.Position.Y)
     end
@@ -287,7 +317,13 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
--- ---- every frame: find the ground, keep the bodies together, tell the brains what is going on ------------
+-- ---- every frame: find the ground, keep the hair on, tell the brains what is going on ----------------------
+
+RunService.RenderStepped:Connect(function()
+    for _, villager in ipairs(VILLAGERS) do
+        followHead(villager)
+    end
+end)
 
 local function facts()
     local hours = Lighting.ClockTime
@@ -306,7 +342,6 @@ RunService.Heartbeat:Connect(function(dt)
     for _, villager in ipairs(VILLAGERS) do
         if villager.home then
             keepOnGround(villager)
-            followBody(villager)
         else
             tryPlace(villager, waited > PLACE_TIMEOUT)
         end
@@ -335,9 +370,9 @@ RunService.Heartbeat:Connect(function(dt)
     end
     local target = root.Position
     for _, villager in ipairs(VILLAGERS) do
-        local home = villager.home
-        if home and (target - home).Magnitude < FACE_DISTANCE then
-            villager.model:PivotTo(CFrame.lookAt(home, Vector3.new(target.X, home.Y, target.Z)))
+        local at = villager.home and villager.root.Position
+        if at and (target - at).Magnitude < FACE_DISTANCE then
+            villager.model:PivotTo(CFrame.lookAt(at, Vector3.new(target.X, at.Y, target.Z)))
         end
     end
 end)

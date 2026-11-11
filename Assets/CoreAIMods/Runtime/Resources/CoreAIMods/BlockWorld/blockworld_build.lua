@@ -1,12 +1,12 @@
 --[[@coreai
 id: blockworld_build
 name: Block World 2 - Build
-version: 1.0.0
+version: 1.1.0
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo. Breaking and placing blocks at the crosshair: a thin outline shows the block you look at, left click breaks it, right click places the hotbar block on the face you look at, holding a button repeats, and nothing happens beyond a reach of five blocks. Bedrock cannot be broken and a block is never placed inside you. G switches between creative (endless blocks) and survival (you place what you broke); V switches first and third person. Publishes the crosshair cell as workspace attributes (CrosshairCell, CrosshairPlaceCell, CrosshairNormal) so the AI and other mods build where you look.
+description: Part of the Block World demo. Breaking and placing blocks at the crosshair: a thin outline shows the block you look at, left click breaks it, right click places the hotbar block on the face you look at, holding a button repeats, and nothing happens beyond a reach of five blocks. Bedrock cannot be broken and a block is never placed inside you. G switches between creative (endless blocks) and survival (you place what you broke); you start in first person, as in Minecraft, and V switches to third person behind your character and back. Publishes the crosshair cell as workspace attributes (CrosshairCell, CrosshairPlaceCell, CrosshairNormal) so the AI and other mods build where you look.
 ]]
 
 -- The target is found once per frame: a ray from the camera along its look direction (the crosshair is the
@@ -288,8 +288,9 @@ end
 
 -- ---- modes ------------------------------------------------------------------------------------------
 
--- WHY third person first: a new player sees the character in the world it stands in; V gives first person.
-local firstPerson = false
+-- WHY first person first: building at the crosshair is a first-person game (Minecraft is); V gives the view
+-- over the shoulder.
+local firstPerson = true
 local SHOULDER_DISTANCE = 12    -- studs from the camera to the character in third person
 
 local function applyView()

@@ -1,8 +1,10 @@
 # MVP4 — Script contexts and the client runtime: design note
 
-Status (2026-11-11): **steps A1–A3, B1 and B2 written; C1–C6 not started.** A1–A3 are green in
-Unity 6000.6 EditMode; B1 (the script instance classes and `Enum.RunContext`) and B2 (the package v2 reader) have
-passed their portable tests only. Nothing runs on the declared context yet (C1 adds the load refusal). Written 2026-11-11 for the rung "MVP4 — Script contexts & client
+Status (2026-11-11): **steps A1–A3, B1, B2 and C1-1 to C1-3 written; C1-4 to C1-6 and C2–C6 not started.**
+A1–A3 are green in Unity 6000.6 EditMode; B1 (the script instance classes and `Enum.RunContext`), B2 (the package v2
+reader) and C1-1 to C1-3 (declared mods get durable bound script instances, see the C1 entry) have passed their
+portable tests only. The declared context decides placement and the load refusals; it does not yet decide where or
+whether a script runs (C2, C3). Written 2026-11-11 for the rung "MVP4 — Script contexts & client
 runtime" (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md:929-977`) and the open item "Design note for plan
 decision D1 (c) before any code" (`TODO.md:557-561`). Plan decision D1 (c) — "instances are views over
 the mod source store" — is at `ROBLOX_API_ROADMAP.md:4634`; the owner may still override it.
@@ -848,7 +850,65 @@ entry:
 - Tests read hand-written v2 packages and every v1 golden; the writer still emits v1, because until C1
   binds instances a v2 package would declare every mod detached.
 
-### C1 (M) — Registration and runs, bound instances, legacy placement, v2 writer
+### C1 (M) — Registration and runs, bound instances, legacy placement, v2 writer — C1-1 to C1-3 done 2026-11-11
+
+**Replaced by rules R1–R4 (accepted 2026-11-11).** The original entry below made every mod's `script` a world-owned
+saved instance. That would charge instance quota per mod, leave orphans on unload and forget, make every legacy
+undo refuse, change every saved world and golden, and contradict SC-8. The rules that replace it:
+
+- **R1.** A source without `context:` and without `parent:` (and no bound instance) keeps the synthetic
+  runtime-infrastructure placement, through the same code (`GetOrCreateExecutingScript`).
+- **R2.** A declared or `parent:`-placed source gets a durable, world-owned bound instance, placed before the build,
+  exempt from the instance quota (the source limit bounds them).
+- **R3.** In format version 2 a declared source without a bound instance is detached; a legacy one starts at the
+  synthetic placement, as in version 1.
+- **R4.** The writer picks the lowest format version that can express the world: 1 when the saved tree holds no
+  script instance and no manifest declares a context, so every legacy-only world stays byte-identical.
+
+Steps: C1-1 planner, run-state mapping and version chooser; C1-2 host seam, binding index and quota exemption; C1-3
+declared loads; C1-4 session migration, rehydrate partition and the writer's version choice; C1-5 list fields in the
+runtime, the tool and the Hub; C1-6 the registration/run split (modules registered but not run, detached entries
+listed, SC-4 replacement on a class change).
+
+**Built in C1-1 to C1-3** (portable tests only; `ScriptPlacementEditModeTests`, `ScriptInstanceHostEditModeTests`,
+`ScriptPlacementLuaEditModeTests`):
+
+- Engine-free in `RbxApi/Instances/Scripts/`: `ScriptPlacementPlanner` (`ScriptPlacement.cs`: the SC-5 precedence
+  header → bound instance → fallback context → legacy; R1/R2; SC-6 default path and `parent:` parsing; the refusals),
+  `ScriptRunStates.Describe` (`ScriptRunStates.cs`), `ScriptPackageFormat.RequiresScriptBindings` (R4, not called
+  until C1-4), `IScriptInstanceHost` and `ScriptInstanceHost` (binding index, placement, undo, release, folder move,
+  the legacy hand-over).
+- `LuaCsRbxApiBindings` owns one `ScriptInstanceHost` (`ScriptInstances`); the `script` value is the bound instance
+  when there is one (`ResolveExecutingScript`), else the unchanged synthetic one; `RetireExecutingScript` hands the
+  synthetic placement to the durable script.
+- `LuaCsModRuntime`: `BuildMod` plans before anything else and places right after `BeginModLoadCandidate`, before
+  the registry is applied and before the startup capture; its catch undoes the placement. `Mod.Context` and
+  `Mod.Placement`; reload falls back to the run's context; `ForgetMod` releases; `TryRetitleModSource` moves a
+  default-placed script; the two rehydrate paths pass the stored manifest's `Context`; `IsUnchargedBoundScript` in
+  the seed and the charge.
+
+**Where C1-1 to C1-3 differ from the note and the plan:**
+
+- **The host is a composed engine-free class, not `LuaCsRbxApiBindings` itself**, so it is tested without the VM
+  and the shared binding file grows by a few lines. The candidate bookkeeping stays in `BuildMod`
+  (`ScriptInstancePlacement` and `UndoPlacement`), not in `ModLoadCandidate`.
+- **The quota exemption is a placement scope plus `IsBound`**: at admission a new instance has no `SourceId` yet, so
+  the runtime exempts world-owned script containers created inside its own placement call, and the attach-time seed
+  exempts world-owned bound ones. A forgotten instance left unbound stays uncharged.
+- **The plan's "the synthetic one goes with the teardown" does not hold**: a reload's teardown releases no
+  instances. A successful legacy-to-declared reload retires the synthetic folder and script explicitly
+  (`RetireSyntheticScript`), moving what they hold into the durable script; in a clean reload what the mod owns
+  there goes with the folder (question 5).
+- **A placement adopts the unbound script a version 1 save leaves** (same class, named after the mod, at the
+  placement), so a declared mod saved before C1-4 does not get a second script after a load.
+- **A `parent:` inside a mod-owned subtree, on runtime infrastructure, or (for an actor without host authority) on
+  an instance another actor owns is refused**, besides the note's mod-owned parent.
+- **Gating is not in C1**: a loaded declared script always runs; `ScriptRunStates.Describe` therefore reports a
+  loaded source as running, and the SC-9 predicate decides starts only from C1-6/C2.
+- **Interim until C1-4**: production capture still writes version 1, which keeps a durable instance as a plain
+  script node without its binding; the next load adopts it (above).
+
+The original entry, kept for its file list:
 
 - `LuaCsModRuntime`: a `ScriptEntry` registration record (id, source, compile source, caps, owner,
   context, bound instance id, run state) separate from the `Mod` run record (`:495-560`);

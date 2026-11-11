@@ -130,6 +130,18 @@ namespace CoreAI.Composition
             // Persistent stores so mods survive a restart and export/import works. ResolveOrDefault in the
             // factory means a host that wires its own store wins; otherwise these file-backed defaults apply.
             builder.Register(_ => new FileLuaModStore(storeId: modStoreId), Lifetime.Singleton).As<ILuaModStore>();
+            // WHY one backend per composition: every world of this game shares one DataStore namespace, and
+            // disposing the scope writes whatever is still pending.
+            if (!builder.Exists(typeof(CoreAI.Mods.Rbx.Instances.DataStores.RbxDataStoreBackend)))
+            {
+                builder.Register(
+                    c => CoreAiDataStoreDefaults.CreateBackend(
+                        modStoreId,
+                        c.ResolveOrDefault<Logging.ILog>(),
+                        c.ResolveOrDefault<CoreAI.Mods.Rbx.Instances.DataStores.RbxDataStoreOptions>()),
+                    Lifetime.Singleton);
+            }
+
             if (worldSessionSourceStore != null)
             {
                 if (worldSessionSourceStore is not IRbxWorldModSourceStore)
@@ -842,6 +854,10 @@ namespace CoreAI.Composition
             }
 
             RuntimeUiLuaInstaller.AttachRuntimeUi(c, rbxApi);
+            CoreAiPlayerListBindings.AttachTo(
+                rbxApi,
+                c.ResolveOrDefault<RuntimeUiLuaSurface>()?.Backend,
+                c.ResolveOrDefault<CoreAI.Mods.Rbx.Instances.RuntimeUi.RbxPlayerListOptions>());
             // WHY: without a chat (a headless world) TextChatCommands still register; nothing runs them.
             CoreAI.ChatOverlay.IChatCommandRegistry chatCommands =
                 c.ResolveOrDefault<CoreAI.ChatOverlay.IChatCommandRegistry>();
@@ -867,12 +883,16 @@ namespace CoreAI.Composition
             LuaCsRbxApiBindings rbxApi,
             System.Action<LuaCsApiRegistry, LuaCapabilities> additionalGameplayBindings)
         {
+            System.Action<LuaCsApiRegistry, LuaCapabilities> withData = CoreAiLuaDataStoreBindings.Attach(
+                rbxApi,
+                c.ResolveOrDefault<CoreAI.Mods.Rbx.Instances.DataStores.RbxDataStoreBackend>(),
+                additionalGameplayBindings);
             return CoreAiLuaAiBindings.Attach(
                 rbxApi,
                 c.ResolveOrDefault<CoreAiLuaAiOptions>(),
                 c.ResolveOrDefault<IAiOrchestrationService>(),
                 c.ResolveOrDefault<CoreAI.Ai.Npc.INpcDirector>(),
-                additionalGameplayBindings,
+                withData,
                 RbxBoundObjectAnchors.CreateResolver(rbxApi.PartSink),
                 c.ResolveOrDefault<CoreAI.Ai.Npc.NpcSpeechAnchorRegistry>(),
                 c.ResolveOrDefault<CoreAI.Ai.Npc.ITextModerationFilter>());

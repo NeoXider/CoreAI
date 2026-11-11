@@ -167,7 +167,7 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
         [ThreadStatic] private static List<RbxGuiNode> _sortScratch;
 
         // WHY a pass-wide flag: before the host's first layout a screen is 0 by 0, and clamping CanvasPosition
-        // against that empty window would throw away the offset a script set while building its GUI.
+        // against that empty window would throw away the offset a script set while its GUI was being built.
         [ThreadStatic] private static bool _clampScroll;
 
         /// <summary>Lays out a whole screen against a viewport of the given size.</summary>

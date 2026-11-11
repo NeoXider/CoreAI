@@ -159,6 +159,7 @@
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatCommandRegistryEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatCommandRegistryEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayControllerEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayControllerEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayPreSendHookEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayPreSendHookEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayHostTurnEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayHostTurnEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/AgentStatusEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/AgentStatusEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayBuiltInCommandsEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayBuiltInCommandsEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayArchitectureFitnessEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayArchitectureFitnessEditModeTests.cs" />
@@ -220,6 +221,8 @@
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptRunRulesEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptRunRulesEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptInstancesEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptInstancesEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptSnapshotEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptSnapshotEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptPlacementEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptPlacementEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptInstanceHostEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Scripts/ScriptInstanceHostEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Unity/RbxShaderClusterLightLoopEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Unity/RbxShaderClusterLightLoopEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Terrain/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Terrain/%(Filename)%(Extension)" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/TextChat/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/TextChat/%(Filename)%(Extension)" />

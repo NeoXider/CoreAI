@@ -13,6 +13,13 @@ namespace CoreAI.Ai.Logging
     /// agent can read <c>print</c>/<c>warn</c>/<c>error</c>/runtime-error output from Lua mods during
     /// play — independent of the Unity console — to diagnose and self-repair a misbehaving mod.
     /// <para>
+    /// It is also the watch surface after a change: every result carries <c>next_sequence</c>, the cursor for the next
+    /// call; <c>since_reload</c> starts after the mod's latest load or reload (<see cref="LuaModLifecycleLog"/>); and
+    /// <c>wait_seconds</c> (at most <see cref="MaxWaitSeconds"/>) waits for a new warning or error and answers as soon as
+    /// one arrives. The wait is scheduled by the host's <see cref="ILlmAsyncMarshaler.DelayAsync"/>, which a Unity
+    /// host drives from its frame loop, so it never blocks and runs in a WebGL player.
+    /// </para>
+    /// <para>
     /// Production wiring: <c>CoreAiModsInstaller.RegisterCoreAiMods</c> registers the
     /// <see cref="ILuaLogService"/> singleton, threads it through <c>LuaCsModStackOptions</c> into the
     /// mod runtime's Append calls, and attaches this tool to the built-in Programmer role alongside
@@ -31,11 +38,33 @@ namespace CoreAI.Ai.Logging
         /// <summary>Character budget passed to <see cref="LuaLogFormatter.ToPromptText"/>.</summary>
         public const int MaxPromptChars = 6000;
 
+        /// <summary>Upper bound of <c>wait_seconds</c>.</summary>
+        public const int MaxWaitSeconds = 10;
+
+        /// <summary>How often a wait checks whether a warning or error arrived.</summary>
+        public const int WaitStepMilliseconds = 100;
+
         private readonly ILuaLogService _logService;
+        private readonly ILlmAsyncMarshaler _asyncMarshaler;
+        private readonly LuaModLifecycleLog _lifecycle;
 
         public GetModLogsLlmTool(ILuaLogService logService)
+            : this(logService, null, null)
+        {
+        }
+
+        /// <param name="logService">The mod log.</param>
+        /// <param name="asyncMarshaler">
+        /// Schedules <c>wait_seconds</c>. Null uses the pass-through default, whose delay is <c>Task.Delay</c>: that never
+        /// fires in a WebGL player, so a Unity host passes its frame-driven marshaler (<c>ICoreAISettings.ToolInvocationMarshaler</c>).
+        /// </param>
+        /// <param name="lifecycle">The recorded load of every mod for <c>since_reload</c>; null scans the log for the load line.</param>
+        public GetModLogsLlmTool(ILuaLogService logService, ILlmAsyncMarshaler asyncMarshaler,
+            LuaModLifecycleLog lifecycle = null)
         {
             _logService = logService ?? throw new ArgumentNullException(nameof(logService));
+            _asyncMarshaler = asyncMarshaler ?? PassThroughLlmAsyncMarshaler.Instance;
+            _lifecycle = lifecycle;
         }
 
         /// <inheritdoc />
@@ -48,21 +77,23 @@ namespace CoreAI.Ai.Logging
 
         /// <inheritdoc />
         public string Description =>
-            "Read Lua mod logs (print/error/runtime-error) captured independently of the Unity " +
-            "console, so you can inspect what a mod printed or which error it threw during play and " +
-            "repair it. Read-only. Params: mod_id (optional filter), level (optional minimum severity: " +
-            "print, warn, error, runtime_error), since_sequence (optional, only entries newer than this " +
-            "sequence number), max_entries (default 50).";
+            "Read Lua mod logs (print, warn, error, runtime_error) captured during play: what a mod printed and " +
+            "which error it threw, with script:line, so you can repair it. Read-only. Every result has " +
+            "next_sequence; pass it as since_sequence to get only newer entries. To check a change, call it right " +
+            "after manage_mods reload with mod_id, since_reload=true and wait_seconds=5: it answers as soon as a " +
+            "warning or error arrives, otherwise after the wait.";
 
         /// <inheritdoc />
         public string ParametersSchema =>
             "{" +
             "\"type\":\"object\"," +
             "\"properties\":{" +
-            "\"mod_id\":{\"type\":\"string\",\"description\":\"Only return logs from this mod id.\"}," +
+            "\"mod_id\":{\"type\":\"string\",\"description\":\"Only this mod's logs.\"}," +
             "\"level\":{\"type\":\"string\",\"description\":\"Minimum severity: print, warn, error, runtime_error.\"}," +
-            "\"since_sequence\":{\"type\":\"integer\",\"description\":\"Only return entries with a sequence number greater than this.\"}," +
-            "\"max_entries\":{\"type\":\"integer\",\"description\":\"Maximum number of entries to return (default 50).\"}" +
+            "\"since_sequence\":{\"type\":\"integer\",\"description\":\"Only entries with a higher sequence (next_sequence of an earlier result).\"}," +
+            "\"max_entries\":{\"type\":\"integer\",\"description\":\"Most entries to return (default 50).\"}," +
+            "\"since_reload\":{\"type\":\"boolean\",\"description\":\"With mod_id: only entries since the mod's latest load or reload.\"}," +
+            "\"wait_seconds\":{\"type\":\"integer\",\"description\":\"Wait up to this many seconds (0-10) for a new warning or error.\"}" +
             "}}";
 
         /// <summary>Creates the MEAI function surface for <c>get_mod_logs</c>.</summary>
@@ -70,8 +101,8 @@ namespace CoreAI.Ai.Logging
         {
             // WHY: System.Threading.Tasks.Task is banned by ARCHITECTURE_RULES §3, but this is a
             // framework-boundary exception — MEAI's AIFunctionFactory.Create binds a delegate whose
-            // contract is Task<string>; it does not accept UniTask. The work underneath is synchronous.
-            Func<string, string, long, int, CancellationToken, Task<string>> func = ExecuteAsync;
+            // contract is Task<string>; it does not accept UniTask.
+            Func<string, string, long, int, bool, int, CancellationToken, Task<string>> func = ExecuteAsync;
             AIFunctionFactoryOptions options = new()
             {
                 Name = Name,
@@ -80,20 +111,36 @@ namespace CoreAI.Ai.Logging
             return AIFunctionFactory.Create(func, options);
         }
 
-        /// <summary>Executes a <c>get_mod_logs</c> query and returns a JSON result for the model.</summary>
+        /// <summary>Executes a <c>get_mod_logs</c> query without waiting and returns a JSON result for the model.</summary>
         public Task<string> ExecuteAsync(
-            [Description("Only return logs from this mod id.")]
+            string mod_id,
+            string level,
+            long since_sequence,
+            int max_entries,
+            CancellationToken cancellationToken)
+        {
+            return ExecuteAsync(mod_id, level, since_sequence, max_entries, false, 0, cancellationToken);
+        }
+
+        /// <summary>Executes a <c>get_mod_logs</c> query, optionally waiting for a warning or error.</summary>
+        // WHY: MEAI awaits this task with ConfigureAwait(false) inside its binary. In the WebGL player
+        // the result must be published with the host SynchronizationContext cleared, or the model turn
+        // never resumes after an asynchronously completed body (see MeaiToolTaskBridge).
+        public Task<string> ExecuteAsync(
+            [Description("Only this mod's logs.")]
             string mod_id = null,
             [Description("Minimum severity: print, warn, error, runtime_error.")]
             string level = null,
-            [Description("Only return entries with a sequence number greater than this.")]
+            [Description("Only entries with a higher sequence (next_sequence of an earlier result).")]
             long since_sequence = 0,
-            [Description("Maximum number of entries to return (default 50).")]
+            [Description("Most entries to return (default 50).")]
             int max_entries = DefaultMaxEntries,
+            [Description("With mod_id: only entries since the mod's latest load or reload.")]
+            bool since_reload = false,
+            [Description("Wait up to this many seconds (0-10) for a new warning or error.")]
+            int wait_seconds = 0,
             CancellationToken cancellationToken = default)
         {
-            // WHY: the underlying Query is synchronous so the token cannot be threaded further; observe
-            // it at the one point that is trivially safe — before doing any work — per §3's intent.
             cancellationToken.ThrowIfCancellationRequested();
 
             LuaLogLevel? minLevel = null;
@@ -108,23 +155,113 @@ namespace CoreAI.Ai.Logging
                 minLevel = parsed;
             }
 
+            string modId = string.IsNullOrWhiteSpace(mod_id) ? null : mod_id.Trim();
+            if (since_reload && modId == null)
+            {
+                return Task.FromResult(Fail("since_reload needs mod_id."));
+            }
+
+            long since = since_reload
+                ? Math.Max(since_sequence, LuaModLifecycleLog.SinceLatestLoad(_logService, _lifecycle, modId))
+                : since_sequence;
             LuaLogQuery query = new()
             {
-                ModId = string.IsNullOrWhiteSpace(mod_id) ? null : mod_id.Trim(),
+                ModId = modId,
                 MinLevel = minLevel,
-                SinceSequence = since_sequence,
+                SinceSequence = since,
                 MaxCount = max_entries > 0 ? max_entries : DefaultMaxEntries
             };
 
+            int wait = Math.Max(0, Math.Min(MaxWaitSeconds, wait_seconds));
+            if (wait == 0)
+            {
+                return Task.FromResult(Format(query, -1));
+            }
+
+            return MeaiToolTaskBridge.Publish(WaitAndFormatAsync(query, wait, cancellationToken));
+        }
+
+        private async Task<string> WaitAndFormatAsync(LuaLogQuery query, int waitSeconds, CancellationToken cancellationToken)
+        {
+            LuaLogLevel alert = query.MinLevel.HasValue && query.MinLevel.Value > LuaLogLevel.Warn
+                ? query.MinLevel.Value
+                : LuaLogLevel.Warn;
+            if (HasAlert(_logService.Query(query), alert))
+            {
+                return Format(query, 0);
+            }
+
+            int arrived = 0;
+            string modId = query.ModId;
+            long since = query.SinceSequence;
+            Action<LuaLogEntry> watch = entry =>
+            {
+                if (entry != null && entry.Level >= alert && entry.Sequence > since &&
+                    (modId == null || string.Equals(entry.ModId, modId, StringComparison.Ordinal)))
+                {
+                    Volatile.Write(ref arrived, 1);
+                }
+            };
+
+            // WHY a flag polled in short host-scheduled steps instead of a completion source: the event is raised
+            // inside the mod's own print or error call, and completing the tool from there would run the model
+            // turn's continuation in the middle of that mod's code.
+            int waitedMilliseconds = 0;
+            _logService.EntryAppended += watch;
+            try
+            {
+                int limit = waitSeconds * 1000;
+                while (waitedMilliseconds < limit && Volatile.Read(ref arrived) == 0)
+                {
+                    await _asyncMarshaler.DelayAsync(WaitStepMilliseconds, cancellationToken);
+                    waitedMilliseconds += WaitStepMilliseconds;
+                }
+            }
+            finally
+            {
+                _logService.EntryAppended -= watch;
+            }
+
+            return Format(query, waitedMilliseconds / 1000d);
+        }
+
+        private string Format(LuaLogQuery query, double waitedSeconds)
+        {
             IReadOnlyList<LuaLogEntry> entries = _logService.Query(query);
             string promptText = LuaLogFormatter.ToPromptText(entries, MaxPromptChars);
+            long next = Math.Max(query.SinceSequence, LuaModLifecycleLog.LatestSequence(_logService));
+            if (waitedSeconds < 0)
+            {
+                return JsonConvert.SerializeObject(new
+                {
+                    success = true,
+                    count = entries.Count,
+                    next_sequence = next,
+                    logs = promptText
+                });
+            }
 
-            return Task.FromResult(JsonConvert.SerializeObject(new
+            return JsonConvert.SerializeObject(new
             {
                 success = true,
                 count = entries.Count,
+                next_sequence = next,
+                waited_seconds = Math.Round(waitedSeconds, 1),
                 logs = promptText
-            }));
+            });
+        }
+
+        private static bool HasAlert(IReadOnlyList<LuaLogEntry> entries, LuaLogLevel alert)
+        {
+            for (int index = 0; index < entries.Count; index++)
+            {
+                if (entries[index].Level >= alert)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static string Fail(string message)

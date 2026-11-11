@@ -742,7 +742,9 @@ namespace CoreAI.Ai.LuaCs
                     lowerBound += 1;
                     break;
                 case LuaValueType.String:
-                    lowerBound += value.Read<string>().Length + 2L;
+                    string text = value.Read<string>();
+                    RbxDataStoreService.RequireStorableText(text, path);
+                    lowerBound += text.Length + 2L;
                     break;
                 case LuaValueType.Table:
                     CheckTable(value.Read<LuaTable>(), path, depth, active, fromUpdate, ref lowerBound, limit);
@@ -797,6 +799,7 @@ namespace CoreAI.Ai.LuaCs
                 {
                     hasString = true;
                     string name = pair.Key.Read<string>();
+                    RbxDataStoreService.RequireStorableText(name, path);
                     lowerBound += name.Length + 3L;
                     childPath = path + "." + name;
                 }

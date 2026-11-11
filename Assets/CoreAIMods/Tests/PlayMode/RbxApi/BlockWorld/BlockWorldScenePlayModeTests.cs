@@ -66,7 +66,7 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
         private static readonly string[] BlockWorldMods =
         {
             "blockworld_world", "blockworld_build", "blockworld_hud", "blockworld_daynight", "blockworld_torches",
-            "blockworld_villagers", "blockworld_autopilot"
+            "blockworld_villagers", "blockworld_autopilot", "blockworld_survival"
         };
 
         private const string AimSource = @"
@@ -244,6 +244,38 @@ return 'watchtower built'";
             Report();
         }
 
+        [UnityTest]
+        public IEnumerator BlockWorldScene_InSurvival_ALongFallHurts_AndALethalOneRespawnsThePlayer()
+        {
+            yield return OpenScene(null);
+            yield return WaitUntilStanding();
+            yield return CheckSurvivalFalls();
+            Report();
+        }
+
+        [UnityTest]
+        public IEnumerator BlockWorldScene_ATorchLightsACaveAtNoon()
+        {
+            yield return OpenScene(null);
+            yield return WaitUntilStanding();
+            yield return WaitForStreamingToSettle();
+            yield return CheckCaveAtNoon(false);
+            Report();
+        }
+
+        [UnityTest]
+        [Ignore("Waits for the Terrain renderer's sky exposure (dark under rock, soft at openings) and a real "
+                + "Lighting.EnvironmentDiffuseScale / EnvironmentSpecularScale; before them a floor crop in a cave "
+                + "at noon reads about 0.06 against 0.005 at midnight.")]
+        public IEnumerator BlockWorldScene_ACaveIsDarkAtNoon()
+        {
+            yield return OpenScene(null);
+            yield return WaitUntilStanding();
+            yield return WaitForStreamingToSettle();
+            yield return CheckCaveAtNoon(true);
+            Report();
+        }
+
         // ---- opening the scene ------------------------------------------------------------------------------------
 
         private IEnumerator OpenScene(ILlmClient model)
@@ -397,17 +429,80 @@ return 'watchtower built'";
                 Record("first frame at clock " + ClockTime());
             }
 
-            RbxVector3 groundTop = new(root.X + 6f, (below + 1) * Cell, root.Z + 0.5f);
-            yield return Aim(groundTop + new RbxVector3(0f, 14f, -6f), groundTop);
-            Color[] look = Shoot("_ground_check.png");
-            RectInt crop = ProjectedRect(groundTop + new RbxVector3(-1.5f, 0f, -1.5f), groundTop + new RbxVector3(1.5f, 0f, 1.5f));
-            Color mean = Mean(look, crop);
-            Record("ground colour at the spawn: crop " + crop + " mean " + mean);
-            Expect(mean.g > mean.r && mean.g > mean.b, "the grass at the spawn is drawn green (the Grass material)");
+            yield return CheckGrassIsGreen(root);
             Record("standing: root " + root + ", state " + humanoid.GetState() + ", still " + still
                    + " frames, cell under the feet (" + cellX + ", " + below + ", " + cellZ + ") material slot " + ground);
             Expect(still >= 30, "the character comes to rest");
             Expect(ground != TerrainMaterials.Air, "the character stands on generated ground, not on air");
+        }
+
+        /// <summary>
+        /// The grass cell beside the spawn, at noon and proven sunlit (no ray toward the sun from its corners or
+        /// centre hits anything), reads green by a margin over red; the same cell turned to Ground reads brown, and
+        /// is turned back.
+        /// </summary>
+        /// <remarks>
+        /// WHY noon and the sunlight proof: under the morning sun the cell can lie in a hill's or the character's long
+        /// shadow, where the grass's mean colour reads olive-brown and a plain "green wins" check fails by luck.
+        /// </remarks>
+        private IEnumerator CheckGrassIsGreen(RbxVector3 root)
+        {
+            RbxTerrain terrain = Terrain();
+            int cellX = Mathf.FloorToInt((root.X + 6f) / Cell);
+            int cellZ = Mathf.FloorToInt(root.Z / Cell);
+            int top = 15;
+            while (top > -16 && terrain.Store.GetMaterial(cellX, top, cellZ) == TerrainMaterials.Air)
+            {
+                top--;
+            }
+
+            TerrainMaterials.TryGetSlot("Grass", out byte grassSlot);
+            bool isGrass = terrain.Store.GetMaterial(cellX, top, cellZ) == grassSlot;
+            RbxVector3 centre = new((cellX + 0.5f) * Cell, (top + 1) * Cell, (cellZ + 0.5f) * Cell);
+            // WHY the clock itself and not BlockWorldTime: the attribute makes the clock mod post a notice, which
+            // the HUD would still show when a test looks at it.
+            RbxLighting lighting = (RbxLighting)CurrentWorld().Game.FindFirstChildOfClass("Lighting");
+            double clockBefore = lighting.ClockTime;
+            lighting.SetClockTime(12d);
+            yield return Frames(3);
+            RunAsPlayer("test_grass_sunlit", "local toSun = game:GetService('Lighting'):GetSunDirection() * 300 "
+                                             + "local lit = true "
+                                             + "for _, d in ipairs({ Vector3.new(0, 0, 0), Vector3.new(-1.4, 0, -1.4), "
+                                             + "Vector3.new(1.4, 0, -1.4), Vector3.new(-1.4, 0, 1.4), Vector3.new(1.4, 0, 1.4) }) do "
+                                             + "if workspace:Raycast(Vector3.new(" + Lua(centre.X) + ", " + Lua(centre.Y + 0.2f)
+                                             + ", " + Lua(centre.Z) + ") + d, toSun) then lit = false end end "
+                                             + "workspace:SetAttribute('TestGrassSunlit', lit)");
+            object sunlit = Workspace().GetAttribute("TestGrassSunlit");
+            yield return Aim(centre + new RbxVector3(0f, 14f, -6f), centre);
+            RectInt crop = ProjectedRect(centre + new RbxVector3(-1.5f, 0f, -1.5f), centre + new RbxVector3(1.5f, 0f, 1.5f));
+            Color grass = Mean(Shoot("_ground_check.png"), crop);
+
+            string cell = "Region3.new(Vector3.new(" + Lua(cellX * Cell) + ", " + Lua(top * Cell) + ", " + Lua(cellZ * Cell)
+                          + "), Vector3.new(" + Lua((cellX + 1) * Cell) + ", " + Lua((top + 1) * Cell) + ", "
+                          + Lua((cellZ + 1) * Cell) + "))";
+            RunAsPlayer("test_grass_to_dirt",
+                "workspace.Terrain:ReplaceMaterial(" + cell + ", 4, Enum.Material.Grass, Enum.Material.Ground)");
+            yield return Frames(10);
+            Color dirt = Mean(Shoot("_ground_check_dirt.png"), crop);
+            RunAsPlayer("test_dirt_to_grass",
+                "workspace.Terrain:ReplaceMaterial(" + cell + ", 4, Enum.Material.Ground, Enum.Material.Grass)");
+            bool restored = terrain.Store.GetMaterial(cellX, top, cellZ) == grassSlot;
+            lighting.SetClockTime(clockBefore);
+            yield return Frames(3);
+
+            Record("grass beside the spawn: cell (" + cellX + ", " + top + ", " + cellZ + ") grass " + isGrass + ", sunlit at noon "
+                   + sunlit + "; crop " + crop + " mean " + grass + "; as Ground " + dirt + "; restored " + restored
+                   + ", clock back to " + clockBefore.ToString("0.00"));
+            Expect(isGrass, "the ground beside the spawn is the Grass material");
+            Expect(Equals(sunlit, true), "the grass crop is in sunlight at noon (nothing between it and the sun)");
+            Expect(LooksGreen(grass), "the sunlit grass at the spawn is drawn green (green over red by 0.02, over blue)");
+            Expect(!LooksGreen(dirt), "the same cell drawn as Ground is not green, so the check measures the material");
+            Expect(restored, "the cell is grass again");
+        }
+
+        private static bool LooksGreen(Color mean)
+        {
+            return mean.g - mean.r >= 0.02f && mean.g > mean.b;
         }
 
         private IEnumerator WaitForStreamingToSettle()
@@ -706,12 +801,37 @@ return 'watchtower built'";
             Expect(wallOn > wallOff + 0.02f, "the torch lights the wall crop at night, and removing it darkens it");
         }
 
+        private bool HasGroundUnder(int sx, int sz, int row, Vector2Int[] offsets)
+        {
+            foreach (Vector2Int offset in offsets)
+            {
+                bool ground = false;
+                for (int y = row; y > row - 6 && !ground; y--)
+                {
+                    ground = Terrain().Store.GetMaterial(sx + offset.x, y, sz + offset.y) != TerrainMaterials.Air;
+                }
+
+                if (!ground)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         private IEnumerator NightWithTorches(int sx, int sz, int row)
         {
             RbxVector3 eye = RootPosition(Humanoid()) + new RbxVector3(0f, 1.5f, 0f);
+            Vector2Int[] offsets = { new(2, -3), new(-2, -3), new(3, -1), new(-3, -1) };
+            // WHY wait: these cells lie behind the first view, and the world streams what the camera faces first.
+            for (int frame = 0; frame < 1800 && !HasGroundUnder(sx, sz, row, offsets); frame++)
+            {
+                yield return null;
+            }
+
             int placed = 0;
-            foreach (Vector2Int offset in new[] { new Vector2Int(2, -3), new Vector2Int(-2, -3), new Vector2Int(3, -1),
-                         new Vector2Int(-3, -1) })
+            foreach (Vector2Int offset in offsets)
             {
                 int cx = sx + offset.x;
                 int cz = sz + offset.y;
@@ -735,6 +855,188 @@ return 'watchtower built'";
             Record("night view: " + placed + " torches put on the ground, " + Workspace().GetAttribute("BlockWorldTorches")
                    + " lit");
             Expect(placed == 4, "four right clicks with the torch in hand put four torches on the ground");
+        }
+
+        // ---- survival ----------------------------------------------------------------------------------------------
+
+        private IEnumerator CheckSurvivalFalls()
+        {
+            Workspace().SetAttribute("BlockWorldCreative", false);
+            yield return Frames(5);
+            RbxHumanoid humanoid = Humanoid();
+            RbxVector3 start = RootPosition(humanoid);
+            RunAsPlayer("test_survival_drop", "local c = game:GetService('Players'):GetPlayers()[1].Character "
+                                              + "c:PivotTo(CFrame.new(c.HumanoidRootPart.Position + Vector3.new(0, 40, 0)))");
+            yield return WaitUntilLanded(humanoid);
+            double afterFall = humanoid.Health;
+            object hudHealth = Workspace().GetAttribute("BlockWorldHealth");
+            object notice = Workspace().GetAttribute("BlockWorldNotice");
+            yield return ShootWithUi("survival_after_fall.png");
+
+            RunAsPlayer("test_survival_lethal", "local c = game:GetService('Players'):GetPlayers()[1].Character "
+                                                + "c:PivotTo(CFrame.new(c.HumanoidRootPart.Position + Vector3.new(0, 90, 0)))");
+            yield return WaitUntilLanded(humanoid);
+            double afterLethal = humanoid.Health;
+            object deaths = Workspace().GetAttribute("BlockWorldDeaths");
+            object deathNotice = Workspace().GetAttribute("BlockWorldNotice");
+            RbxHumanoid next = null;
+            for (int frame = 0; frame < 600 && (next == null || next == humanoid); frame++)
+            {
+                yield return null;
+                next = Humanoid();
+            }
+
+            yield return Frames(30);
+            RbxVector3 spawn = (RbxVector3)Workspace().GetAttribute("BlockWorldSpawn");
+            RbxVector3 back = next != null ? RootPosition(next) : default;
+            Record("survival: start " + start + "; a 40-stud drop left health " + afterFall.ToString("0.0") + " (HUD "
+                   + hudHealth + ", notice '" + notice + "'); a 90-stud drop left " + afterLethal.ToString("0.0")
+                   + ", deaths " + deaths + ", notice '" + deathNotice + "'; respawned " + (next != null && next != humanoid)
+                   + " at " + back + " (spawn " + spawn + "), health " + (next != null ? next.Health.ToString("0") : "?"));
+            Expect(afterFall < 100d && afterFall > 0d, "a fall of ten blocks in survival costs health and does not kill");
+            Expect(Equals(hudHealth, afterFall) || System.Math.Abs(System.Convert.ToDouble(hudHealth ?? -1d) - afterFall) < 1d,
+                "the HUD shows the health that is left");
+            Expect(afterLethal <= 0d && Equals(System.Convert.ToDouble(deaths ?? 0d), 1d), "a fall of 22 blocks kills, once");
+            Expect(next != null && next != humanoid && next.Health >= 100d
+                   && (new RbxVector3(back.X, 0f, back.Z) - new RbxVector3(spawn.X, 0f, spawn.Z)).Magnitude < 8f,
+                "the player comes back at the spawn with full health");
+        }
+
+        private static IEnumerator WaitUntilLanded(RbxHumanoid humanoid)
+        {
+            bool airborne = false;
+            for (int frame = 0; frame < 900; frame++)
+            {
+                yield return null;
+                RbxHumanoidState state = humanoid.GetState();
+                airborne |= state == RbxHumanoidState.Freefall;
+                if (airborne && (state == RbxHumanoidState.Running || state == RbxHumanoidState.Landed
+                                 || state == RbxHumanoidState.Dead || humanoid.Health <= 0d))
+                {
+                    break;
+                }
+            }
+
+            yield return Frames(10);
+        }
+
+        // ---- a cave at noon --------------------------------------------------------------------------------------------
+
+        private IEnumerator CheckCaveAtNoon(bool expectDark)
+        {
+            Workspace().SetAttribute("BlockWorldTime", "noon");
+            yield return Frames(2);
+            Workspace().SetAttribute("BlockWorldTime", "stop");
+            RbxVector3 spawn = (RbxVector3)Workspace().GetAttribute("BlockWorldSpawn");
+            int sx = Mathf.FloorToInt(spawn.X / Cell);
+            int sz = Mathf.FloorToInt(spawn.Z / Cell);
+            RbxTerrain terrain = Terrain();
+            Vector3Int found = default;
+            Vector3Int along = default;
+            bool any = false;
+            for (int radius = 6; radius <= 40 && !any; radius++)
+            {
+                for (int dx = -radius; dx <= radius && !any; dx++)
+                {
+                    foreach (int dz in new[] { -radius, radius })
+                    {
+                        if (TryFindTunnel(terrain, sx + dx, sz + dz, out found, out along))
+                        {
+                            any = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            Expect(any, "a tunnel two cells tall under at least three cells of rock lies within 40 cells of the spawn");
+            if (!any)
+            {
+                yield break;
+            }
+
+            RbxVector3 floorTop = new((found.x + 0.5f) * Cell, found.y * Cell, (found.z + 0.5f) * Cell);
+            RunAsPlayer("test_cave_stand", "game:GetService('Players'):GetPlayers()[1].Character:PivotTo(CFrame.new("
+                                           + Lua(floorTop.X) + ", " + Lua(floorTop.Y + 3.2f) + ", " + Lua(floorTop.Z)
+                                           + "))");
+            yield return Frames(30);
+            RbxVector3 eye = floorTop + new RbxVector3(0f, 6f, 0f);
+            RbxVector3 ahead = floorTop + new RbxVector3(along.x * 3f * Cell, 2f, along.z * 3f * Cell);
+            yield return Aim(eye, ahead);
+            yield return Frames(30);
+            object underground = Workspace().GetAttribute("BlockWorldUnderground");
+            Color[] dark = Shoot("cave_noon_no_torch.png");
+            RbxVector3 side = new(along.z * 1.5f, 0f, -along.x * 1.5f);
+            RbxVector3 nearFloor = floorTop + new RbxVector3(along.x * Cell * 1.2f, 0f, along.z * Cell * 1.2f);
+            RbxVector3 farFloor = floorTop + new RbxVector3(along.x * Cell * 2.4f, 0f, along.z * Cell * 2.4f);
+            RectInt crop = ProjectedRect(nearFloor - side, farFloor + side);
+            float darkLuminance = Luminance(dark, crop);
+
+            // WHY the torch at the camera's own cell: its light reaches the floor crop ahead, its flame stays out of it.
+            RbxVector3 torchFloor = floorTop - new RbxVector3(along.x * 1.2f, 0f, along.z * 1.2f);
+            yield return Tap(_keyboard.digit9Key);
+            yield return Aim(eye, torchFloor);
+            yield return Click(_mouse.rightButton);
+            object torches = Workspace().GetAttribute("BlockWorldTorches");
+            yield return Aim(eye, ahead);
+            yield return Frames(10);
+            Color[] lit = Shoot("cave_noon_torch.png");
+            float litLuminance = Luminance(lit, crop);
+            yield return Tap(_keyboard.digit1Key);
+
+            Record("cave: tunnel cell " + found + " heading " + along + ", underground " + underground + "; floor crop "
+                   + crop + " at noon without a torch " + darkLuminance.ToString("0.000") + ", with one (torches "
+                   + torches + ") " + litLuminance.ToString("0.000"));
+            Expect(Equals(underground, true), "the clock knows the camera is under rock");
+            if (expectDark)
+            {
+                Expect(darkLuminance < 0.05f, "a cave is dark at noon");
+            }
+
+            Expect(litLuminance > darkLuminance + 0.02f, "a torch lights the cave");
+        }
+
+        /// <summary>
+        /// A floor cell (x, y, z) whose two cells above are empty, with at least three solid cells of roof above them,
+        /// and a neighbour that continues the tunnel along x or z.
+        /// </summary>
+        private static bool TryFindTunnel(RbxTerrain terrain, int x, int z, out Vector3Int floor, out Vector3Int along)
+        {
+            floor = default;
+            along = default;
+            for (int y = 8; y > -14; y--)
+            {
+                if (!Solid(terrain, x, y, z) || Solid(terrain, x, y + 1, z) || Solid(terrain, x, y + 2, z)
+                    || !Solid(terrain, x, y + 3, z) || !Solid(terrain, x, y + 4, z) || !Solid(terrain, x, y + 5, z))
+                {
+                    continue;
+                }
+
+                foreach (Vector3Int step in new[] { Vector3Int.right, Vector3Int.left, new Vector3Int(0, 0, 1), new Vector3Int(0, 0, -1) })
+                {
+                    if (Solid(terrain, x + step.x, y, z + step.z) && !Solid(terrain, x + step.x, y + 1, z + step.z)
+                        && !Solid(terrain, x + step.x, y + 2, z + step.z))
+                    {
+                        floor = new Vector3Int(x, y + 1, z);
+                        along = step;
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>A number as Lua source, whatever the machine's culture.</summary>
+        private static string Lua(float value)
+        {
+            return value.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        private static bool Solid(RbxTerrain terrain, int x, int y, int z)
+        {
+            byte material = terrain.Store.GetMaterial(x, y, z);
+            return material != TerrainMaterials.Air && material != TerrainMaterials.Water;
         }
 
         // ---- build here with a scripted model, then /undo -------------------------------------------------------------
@@ -927,7 +1229,7 @@ return 'watchtower built'";
         {
             ChatOverlayController overlay = Overlay();
             RbxInstance tobin = Workspace().FindFirstChild("Tobin");
-            object agent = tobin?.GetAttribute("NpcAgent");
+            object agent = null;
             INpcDirector npcs = _bootstrap.Composition.CoreScope.Container.Resolve<INpcDirector>();
             StringBuilder heardBy = new();
             Action<NpcAddressed> addressed = e => heardBy.Append("addressed ").Append(e.NpcName).Append("; ");
@@ -947,9 +1249,14 @@ return 'watchtower built'";
                     }
                 }
 
+                // WHY wait for the brain: the mod gives it once Tobin stands on his finished column, which can come
+                // a few columns after the spawn's; until then his agent sits at the origin.
                 NpcPosition? playerAt = listenerRelay.Current;
-                atSend = "Tobin " + tobinAt + ", listener " + playerAt + " after " + frame + " frames";
-                if (tobinAt.HasValue && playerAt.HasValue && tobinAt.Value.DistanceTo(playerAt.Value) <= 40d)
+                agent = tobin?.GetAttribute("NpcAgent");
+                atSend = "Tobin " + tobinAt + ", listener " + playerAt + ", brain " + (agent != null) + " after " + frame
+                         + " frames";
+                if (agent != null && tobinAt.HasValue && playerAt.HasValue
+                    && tobinAt.Value.DistanceTo(playerAt.Value) <= 40d)
                 {
                     break;
                 }

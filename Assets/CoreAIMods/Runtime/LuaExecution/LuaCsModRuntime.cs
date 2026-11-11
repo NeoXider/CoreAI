@@ -6,6 +6,7 @@ using CoreAI.Authority;
 using CoreAI.Logging;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Scheduling;
+using CoreAI.Mods.Rbx.Instances.Scripts;
 using CoreAI.Sandbox.LuaCs;
 using CoreAI.Scripting;
 using CoreAI.Scripting.LuaCs;
@@ -560,6 +561,38 @@ namespace CoreAI.Ai.LuaCs
             /// into a mod that is gone.
             /// </summary>
             public bool Removed;
+
+            /// <summary>
+            /// The context this run was planned with (MVP4 step C1): the one its header, its bound instance or
+            /// the stored manifest declares, else <see cref="ScriptContext.Legacy"/>. A reload of a header that
+            /// declares none falls back to it.
+            /// </summary>
+            public ScriptContext Context;
+
+            /// <summary>
+            /// Where this run's <c>script</c> lives: the synthetic legacy placement (rule R1) or the durable instance
+            /// bound to the mod (rule R2).
+            /// </summary>
+            public ScriptPlacementKind Placement;
+        }
+
+        /// <summary>
+        /// What a build plans its script placement from besides its own source (MVP4 step C1): the context to fall
+        /// back on when neither the header nor a bound instance declares one, and the source the bound instance was
+        /// last placed for, whose folder tells where its default placement was.
+        /// </summary>
+        private readonly struct ScriptPlanSeed
+        {
+            public ScriptPlanSeed(string fallbackContext, string previousSource)
+            {
+                FallbackContext = fallbackContext ?? "";
+                PreviousSource = previousSource;
+            }
+
+            public string FallbackContext { get; }
+
+            /// <summary>Null when the previous placement's folder is the new source's own.</summary>
+            public string PreviousSource { get; }
         }
 
         private readonly object _gate = new();
@@ -643,6 +676,9 @@ namespace CoreAI.Ai.LuaCs
         private readonly Dictionary<string, int> _registeredInstancesByActor =
             new(StringComparer.Ordinal);
         private readonly InstanceQuotaAdmission _instanceQuotaAdmission;
+
+        /// <summary>Above zero while this runtime places a durable script, whose creation is never charged.</summary>
+        private int _boundScriptAdmissionDepth;
 
         private readonly Queue<LuaModHandlerError> _recentHandlerErrors = new();
         private readonly Queue<LuaModReport> _recentReports = new();
@@ -971,6 +1007,9 @@ namespace CoreAI.Ai.LuaCs
             string modId = Normalize(id);
             string ownerActorId;
             LuaCapabilities caps;
+            string previousSource;
+            ScriptContext context;
+            ScriptPlacementKind placement;
             lock (_gate)
             {
                 if (!_mods.TryGetValue(modId, out Mod mod))
@@ -985,13 +1024,48 @@ namespace CoreAI.Ai.LuaCs
                         nameof(newSource));
                 }
 
+                previousSource = mod.Source;
                 mod.Source = newSource;
                 ownerActorId = mod.OwnerActorId;
                 caps = mod.Caps;
+                context = mod.Context;
+                placement = mod.Placement;
             }
 
             PersistMod(modId, newSource, caps, ownerActorId, false);
+            if (placement == ScriptPlacementKind.Durable)
+            {
+                MoveDefaultPlacedScript(modId, context, previousSource, newSource);
+            }
+
             return true;
+        }
+
+        /// <summary>
+        /// Moves a mod's durable script to its new folder when the mod changed folder and the script still sits at the
+        /// old default placement (the note's <c>RePlaceDefaultScript</c>, SC-6). A script its header places with
+        /// <c>parent:</c>, or one a player or script moved, stays. Best-effort: the folder change itself is kept.
+        /// </summary>
+        private void MoveDefaultPlacedScript(string modId, ScriptContext context, string previousSource,
+            string newSource)
+        {
+            LuaModHeader header = LuaModHeader.Parse(newSource ?? "", modId);
+            if (_rbxApi == null || !string.IsNullOrWhiteSpace(header.Parent))
+            {
+                return;
+            }
+
+            try
+            {
+                _rbxApi.ScriptInstances.MoveFromDefaultPlacement(modId,
+                    ScriptPlacementPlanner.DefaultPath(context,
+                        LuaModHeader.Parse(previousSource ?? "", modId).FolderPath.GetSegments()),
+                    ScriptPlacementPlanner.DefaultPath(context, header.FolderPath.GetSegments()));
+            }
+            catch (Exception ex)
+            {
+                _log?.Warn($"[LuaCsModRuntime] Moving the script of mod '{modId}' to its new folder failed; it stays where it was: {ex.Message}");
+            }
         }
 
         /// <inheritdoc />
@@ -1638,7 +1712,8 @@ namespace CoreAI.Ai.LuaCs
             {
                 if (!registry.TryGetRecord(live[index].Id, out InstanceRecord record)
                     || record.IsRuntimeInfrastructure
-                    || IsUnchargedWorldSkeleton(record))
+                    || IsUnchargedWorldSkeleton(record)
+                    || IsUnchargedBoundScript(record))
                 {
                     continue;
                 }
@@ -1680,6 +1755,36 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
+        /// True for the world-owned script instance a source is bound to (MVP4 rule R2): one a restored world holds, or
+        /// the one this runtime is placing for a load. A script made with <c>Instance.new</c> is charged as before.
+        /// </summary>
+        /// <remarks>
+        /// WHY exempt: the runtime creates the instance, not the actor, and the source limit
+        /// (<c>RbxWorldPackageSerializer.MaximumMods</c>) already bounds how many there are; charging it would let a
+        /// load fail on the instance it needs before its chunk ran, and change every quota a world had before MVP4.
+        /// </remarks>
+        private bool IsUnchargedBoundScript(InstanceRecord record)
+        {
+            return record.Instance is RbxLuaSourceContainer container
+                   && string.IsNullOrEmpty(record.OwnerModId)
+                   && (container.IsBound || Volatile.Read(ref _boundScriptAdmissionDepth) > 0);
+        }
+
+        /// <summary>Runs a durable script placement with its creation exempt from the instance quota.</summary>
+        private T RunBoundScriptAdmission<T>(Func<T> placement)
+        {
+            Interlocked.Increment(ref _boundScriptAdmissionDepth);
+            try
+            {
+                return placement();
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _boundScriptAdmissionDepth);
+            }
+        }
+
+        /// <summary>
         /// The registry admission body (<see cref="InstanceQuotaAdmission"/>): charges
         /// <paramref name="record"/> to its quota actor and returns null, or returns the refusal and
         /// charges nothing when the runtime's emergency ceiling or the actor's quota is full. The
@@ -1690,7 +1795,7 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         private string ChargeRegisteredInstance(InstanceRecord record)
         {
-            if (record.IsRuntimeInfrastructure)
+            if (record.IsRuntimeInfrastructure || IsUnchargedBoundScript(record))
             {
                 return null;
             }
@@ -1862,6 +1967,11 @@ namespace CoreAI.Ai.LuaCs
         /// undoes the load (see <see cref="CommitFirstLoadKeepingSource"/>). Only for an id the store
         /// does not hold yet.
         /// </param>
+        /// <param name="storedContext">
+        /// The <see cref="LuaModManifest.Context"/> of the stored package a restore starts, which decides the
+        /// script's context when neither its header nor a bound instance does (MVP4 SC-5); null for a load whose
+        /// caller holds no manifest.
+        /// </param>
         private void LoadModInternal(
             string id,
             string luaCode,
@@ -1869,7 +1979,8 @@ namespace CoreAI.Ai.LuaCs
             LuaCapabilities capabilities,
             bool persistToStore,
             bool ownerHasHostAuthority,
-            Action<string> demandSourceKept = null)
+            Action<string> demandSourceKept = null,
+            string storedContext = null)
         {
             ThrowIfShutdown();
             string modId = Normalize(id);
@@ -1908,7 +2019,8 @@ namespace CoreAI.Ai.LuaCs
                         ? built => CommitFirstLoadKeepingSource(
                             modId, luaCode, capabilities, ownerActorId, built, demandSourceKept)
                         : built => InstallFirstLoad(modId, ownerActorId, built),
-                    false);
+                    false,
+                    new ScriptPlanSeed(storedContext, PreviousSourceOfBoundScript(modId)));
             }
             finally
             {
@@ -2065,6 +2177,12 @@ namespace CoreAI.Ai.LuaCs
         /// True for the candidate of a reload, whose failure also destroys the objects its chunk built;
         /// a failed first load keeps them.
         /// </param>
+        /// <param name="scriptSeed">
+        /// What the script placement is planned from besides the header (MVP4 step C1). A header that declares a
+        /// context or a <c>parent:</c>, or a mod already bound to a durable instance, gets that instance placed
+        /// before the chunk runs; a failed build undoes the placement (a created instance is destroyed, a kept
+        /// one goes back where it was). A mod that declares nothing keeps the synthetic legacy script.
+        /// </param>
         /// <remarks>
         /// The caller has already entered the build of <paramref name="modId"/>
         /// (<see cref="EnterModBuildLocked"/>, refused while another build of the id is in flight) and
@@ -2078,7 +2196,8 @@ namespace CoreAI.Ai.LuaCs
             string ownerActorId,
             bool ownerHasHostAuthority,
             Action<Mod> commit,
-            bool isReload)
+            bool isReload,
+            ScriptPlanSeed scriptSeed)
         {
             InvocationScope invocation = _invocationScope.Value;
             CancellationToken cancellationToken = invocation?.Token ?? CancellationToken.None;
@@ -2094,11 +2213,16 @@ namespace CoreAI.Ai.LuaCs
                 LoadedAtUtc = DateTime.UtcNow
             };
             LuaCsRbxApiBindings.ModLoadCandidate rbxLoadCandidate = null;
+            ScriptInstancePlacement scriptPlacement = null;
             StartupCapture startupCapture = null;
             LuaCsLogicSlots.OverrideSnapshot slotsBeforeBuild = CaptureLogicSlots(modId);
 
             try
             {
+                ScriptPlacementPlan scriptPlan = PlanScriptPlacement(modId, luaCode, scriptSeed);
+                mod.Context = scriptPlan.Context;
+                mod.Placement = scriptPlan.Kind;
+
                 // WHY: Downlevel Luau -> Lua 5.2 BEFORE the VM compiles the chunk so mods may use Luau syntax
                 // (compound assignment, continue, string interpolation, if-expressions, type annotations);
                 // keyed by mod id so a downlevel error maps to the right source and throws out of the load,
@@ -2108,6 +2232,16 @@ namespace CoreAI.Ai.LuaCs
                     (_engine as IScriptGeneralizedIteratorSupport)?.TrustedIteratorResolverName);
                 BindActorAttribution(modId, ownerActorId, ownerHasHostAuthority);
                 rbxLoadCandidate = _rbxApi?.BeginModLoadCandidate(modId);
+
+                // WHY placed here, before the registry is applied and before the startup capture begins: the
+                // `script` value is built when the registry is applied, so an instance placed later would leave
+                // the chunk with the synthetic legacy script; and it is world-owned, so the capture never takes it
+                // for a startup object that a clean reload destroys.
+                if (scriptPlan.Kind == ScriptPlacementKind.Durable && _rbxApi != null)
+                {
+                    scriptPlacement = RunBoundScriptAdmission(() => _rbxApi.ScriptInstances.Place(
+                        modId, scriptPlan, ownerActorId, ownerHasHostAuthority));
+                }
 
                 IScriptFunctionRegistry registry = _engine.CreateFunctionRegistry();
                 RegisterGameplayBindings(registry, capabilities, modId);
@@ -2197,6 +2331,7 @@ namespace CoreAI.Ai.LuaCs
                     DestroyFailedBuildObjects(modId, startupCapture);
                 }
 
+                UndoScriptPlacement(modId, scriptPlacement);
                 RestoreLogicSlotsAfterFailedBuild(slotsBeforeBuild, modId, mod.State);
                 DropUnusedQuotaAttribution(modId, 1);
 
@@ -2210,6 +2345,81 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 throw failure;
+            }
+        }
+
+        /// <summary>
+        /// Plans where the build's <c>script</c> lives (MVP4 step C1): the header's <c>context:</c> and
+        /// <c>parent:</c>, the instance already bound to the mod, and <paramref name="seed"/> decide, through
+        /// <see cref="ScriptPlacementPlanner"/>. Throws the planner's refusal (an unknown context or a malformed
+        /// <c>parent:</c> is BAD_ARGUMENT; <c>context: shared</c> and a class change are NOT_IMPLEMENTED).
+        /// </summary>
+        private ScriptPlacementPlan PlanScriptPlacement(string modId, string luaCode, ScriptPlanSeed seed)
+        {
+            LuaModHeader header = LuaModHeader.Parse(luaCode ?? "", modId);
+            RbxLuaSourceContainer bound = null;
+            bool hasBound = _rbxApi != null && _rbxApi.ScriptInstances.TryGetBoundScript(modId, out bound);
+            ScriptPlacementRequest request = new()
+            {
+                SourceId = modId,
+                HeaderContext = header.Context,
+                HeaderParent = header.Parent,
+                FallbackContext = seed.FallbackContext,
+                FolderSegments = header.FolderPath.GetSegments(),
+                PreviousFolderSegments = seed.PreviousSource == null
+                    ? null
+                    : LuaModHeader.Parse(seed.PreviousSource, modId).FolderPath.GetSegments(),
+                HasBoundInstance = hasBound,
+                BoundClassName = bound?.ClassName,
+                BoundRunContext = bound is RbxBaseScript script ? script.RunContext : RunContextValues.Legacy
+            };
+            if (!ScriptPlacementPlanner.TryPlan(in request, out ScriptPlacementPlan plan, out RbxError refusal))
+            {
+                throw refusal;
+            }
+
+            return plan;
+        }
+
+        /// <summary>
+        /// The source a mod's bound instance was last placed for, when a first load reuses it: the stored package's.
+        /// Null when no instance is bound (every legacy load), so the store is read only on the declared path.
+        /// </summary>
+        private string PreviousSourceOfBoundScript(string modId)
+        {
+            if (_rbxApi == null || !_rbxApi.ScriptInstances.TryGetBoundScript(modId, out _))
+            {
+                return null;
+            }
+
+            try
+            {
+                return _sourceStore.TryLoad(modId, out string source, out _) && !string.IsNullOrWhiteSpace(source)
+                    ? source
+                    : null;
+            }
+            catch (Exception ex)
+            {
+                _log?.Warn($"[LuaCsModRuntime] Reading the stored source of '{modId}' to find its script's folder failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>Best-effort undo of a failed build's script placement; a failure must not replace the load error.</summary>
+        private void UndoScriptPlacement(string modId, ScriptInstancePlacement placement)
+        {
+            if (placement == null || _rbxApi == null)
+            {
+                return;
+            }
+
+            try
+            {
+                _rbxApi.ScriptInstances.UndoPlacement(placement);
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Undoing the script placement of the failed build of '{modId}' failed: {ex}");
             }
         }
 
@@ -2549,7 +2759,8 @@ namespace CoreAI.Ai.LuaCs
                         : null;
                     replacement = BuildMod(
                         modId, luaCode, caps, ownerActorId, ownerHasHostAuthority,
-                        built => DemandStillLoaded(modId, existing), true);
+                        built => DemandStillLoaded(modId, existing), true,
+                        new ScriptPlanSeed(ScriptContexts.ToDeclaredName(existing.Context), existing.Source));
                 }
                 catch
                 {
@@ -2611,11 +2822,44 @@ namespace CoreAI.Ai.LuaCs
                 report = new ModReloadReport(modId, ModReloadMode.KeepObjects, 0, kept.Count, 0);
             }
 
+            if (existing.Placement == ScriptPlacementKind.Synthetic
+                && replacement.Placement == ScriptPlacementKind.Durable)
+            {
+                RetireSyntheticScript(modId, mode);
+            }
+
             _log?.Info($"[LuaCsModRuntime] Mod '{modId}' reloaded (caps={caps}); {report.Describe()}.");
             RecordRevision(modId, luaCode);
             PersistMod(modId, luaCode, caps, ownerActorId, false);
             RaiseModSourceLoaded(modId, luaCode, caps);
             return report;
+        }
+
+        /// <summary>
+        /// After a successful reload from a header that declared nothing to one that declares a context or a
+        /// <c>parent:</c> (MVP4 step C1): the synthetic legacy folder and script of the replaced run go, and what they
+        /// held moves into the durable script. In <see cref="ModReloadMode.CleanStartupObjects"/> what the mod itself
+        /// owns there goes with them, as its startup objects do. Best-effort: the reload already succeeded.
+        /// </summary>
+        /// <remarks>
+        /// WHY here and not in the teardown: a reload's teardown releases threads and connections but no instances,
+        /// so without this the synthetic script would stay next to the durable one and the mod would have two.
+        /// </remarks>
+        private void RetireSyntheticScript(string modId, ModReloadMode mode)
+        {
+            if (_rbxApi == null)
+            {
+                return;
+            }
+
+            try
+            {
+                _rbxApi.RetireExecutingScript(modId, mode == ModReloadMode.KeepObjects);
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Retiring the legacy script of mod '{modId}' after its reload failed: {ex}");
+            }
         }
 
         /// <summary>Makes <paramref name="replacement"/> the loaded run of its mod in place of <paramref name="existing"/>; call under the gate.</summary>
@@ -5174,6 +5418,7 @@ namespace CoreAI.Ai.LuaCs
         internal bool ForgetMod(string id)
         {
             string modId = Normalize(id);
+            string boundScriptSource = SourceOfBoundScript(modId);
             bool wasLoaded = UnloadMod(modId);
 
             try
@@ -5186,7 +5431,43 @@ namespace CoreAI.Ai.LuaCs
                 return wasLoaded;
             }
 
+            ReleaseBoundScript(modId, boundScriptSource);
             return wasLoaded || modId.Length > 0;
+        }
+
+        /// <summary>
+        /// The source whose folder tells a durable script's default placement: the loaded run's, else the stored
+        /// package's. Null when no instance is bound to the mod, which is every legacy mod.
+        /// </summary>
+        private string SourceOfBoundScript(string modId)
+        {
+            if (_rbxApi == null || !_rbxApi.ScriptInstances.TryGetBoundScript(modId, out _))
+            {
+                return null;
+            }
+
+            return TryGetModSource(modId, out string loaded) ? loaded : PreviousSourceOfBoundScript(modId) ?? "";
+        }
+
+        /// <summary>
+        /// Ends the binding of a forgotten mod (MVP4 step C1, question 3): its instance is destroyed when it still sits
+        /// at its default placement with nothing inside it, and stays in the world unbound otherwise.
+        /// </summary>
+        private void ReleaseBoundScript(string modId, string source)
+        {
+            if (source == null || _rbxApi == null)
+            {
+                return;
+            }
+
+            try
+            {
+                _rbxApi.ScriptInstances.Release(modId, LuaModHeader.Parse(source, modId).FolderPath.GetSegments());
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Releasing the script instance of forgotten mod '{modId}' failed: {ex}");
+            }
         }
 
         /// <summary>
@@ -5289,7 +5570,7 @@ namespace CoreAI.Ai.LuaCs
                     // restore it.
                     LoadModInternal(
                         modId, source, ownerActorId, effectiveCaps, false,
-                        ownerActorId.Length == 0);
+                        ownerActorId.Length == 0, storedContext: stored?.Context ?? manifest.Context);
                     loaded++;
                 }
                 catch (Exception ex)
@@ -5363,7 +5644,8 @@ namespace CoreAI.Ai.LuaCs
                     ownerActorId,
                     effectiveCaps,
                     false,
-                    ownerActorId.Length == 0);
+                    ownerActorId.Length == 0,
+                    storedContext: stored.Context);
                 loaded++;
             }
 

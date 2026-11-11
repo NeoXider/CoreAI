@@ -51,12 +51,42 @@ tags: movement, camera
   (`INVALID_CHARACTER`, `EMPTY_SEGMENT`, `SEGMENT_TOO_LONG`, `TOO_DEEP`, `PATH_TOO_LONG`, `RESERVED_NAME`).
   Moving a mod rewrites only this line (`Assets/CoreAIMods/Runtime/ModFolders/README.md`).
 - `tags` — optional, comma-separated.
-- `context` — optional, the script context the mod declares for MVP4: `server`, `client` or `shared`
-  (any case). It is parsed and stored, and nothing acts on it yet: every mod still runs as a legacy
-  script whatever it declares, and a value that is not a context is not refused yet (MVP4 step C1 adds
-  that refusal; `dev-docs/MVP4_SCRIPT_CONTEXTS_DESIGN.md`, SC-5).
-- `parent` — optional, the `/`-separated instance path from `game` where the mod's script is meant to
-  live (SC-6). It is parsed and kept on the header only; nothing places a script by it yet.
+- `context` — optional, the script context the mod declares: `server`, `client` or `shared` (any case).
+  A mod that declares one gets its own script instance in the world (below). Any other value fails the
+  load with `BAD_ARGUMENT: @coreai context 'clinet' is not server, client or shared`. `shared` (a
+  ModuleScript run by `require`) fails with `NOT_IMPLEMENTED` until `require` exists (MVP4 step C4).
+  Without the key the mod is a legacy script and runs exactly as before. What the context changes when
+  the script runs (its side, the `CONTEXT_VIOLATION` checks) arrives with later MVP4 steps
+  (`dev-docs/MVP4_SCRIPT_CONTEXTS_DESIGN.md`, SC-5, SC-9).
+- `parent` — optional, the `/`-separated instance path from `game` where the mod's script lives, such
+  as `Workspace/Door` (a leading `@game/` is accepted). The path must exist when the mod loads and must not
+  lie inside an instance a mod made; otherwise the load fails with `BAD_ARGUMENT` naming the missing
+  segment or the parent it refuses. It applies at every load and reload.
+
+Where `script` lives:
+- **A mod that declares neither key** keeps the legacy placement: `script` is
+  `ServerScriptService/<id> (Folder)/<id> (Script)`, which the runtime builds for every run, never saves,
+  and removes when the mod unloads.
+- **A mod that declares `context:` or `parent:`** gets one script instance of its own, created before its
+  main chunk runs: a `Script` with `RunContext` Server (`context: server`) or Client (`context: client`),
+  named after the mod, under the `parent:` path or else under `ServerScriptService` (server) or
+  `ReplicatedStorage` (client), inside folders named after the mod's `category` path. The instance belongs
+  to the world, not to the mod: a reload keeps it (a clean reload removes only the previous run's startup
+  objects), an unload keeps it, and it costs no instance quota. A load that fails the first time removes
+  it again, with the folders it created; a reload that fails keeps it where it was. Forgetting the mod
+  removes the instance when it still sits at its default placement with nothing inside it, and otherwise
+  leaves it in the world unbound. When its instance is destroyed, the next load creates a new one.
+- A reload whose header drops `context:` keeps the context of the existing instance. A reload to another
+  context moves an instance that still sits at its default placement and changes its `RunContext`; one a
+  player or script moved stays where it is. A reload that would change the class (to `shared`, or a
+  LocalScript to a server script) fails with `NOT_IMPLEMENTED` and leaves the run as it was. Moving the mod
+  to another folder moves a default-placed instance with it.
+- A legacy mod reloaded with a header that declares a context hands what its legacy folder held to the new
+  instance (a clean reload removes what the mod itself owned there, as its startup objects) and the legacy
+  folder goes.
+- Saving the binding with the world (package format version 2) arrives with MVP4 step C1-4. Until then a
+  saved world keeps the instance as a plain unbound script; the next load of the mod binds it again when
+  it still sits at its placement under the mod's name, instead of making a second one.
 
 Parsing rules:
 - The block form must be the first thing in the file: the source starts with `--[[@coreai` and the
@@ -108,8 +138,8 @@ name, description, version, author, owner, capabilities, `Active` and `Entry`, i
   (a legacy script). Every manifest writer derives it the same way (`LuaModManifest.ResolveContext`), and
   the world package's mod entries carry it. Omitted from JSON when empty, so the manifest of a mod that
   declares nothing is byte-identical to one written before the field existed; a 7.56.0 reader refuses a
-  package whose mod manifest carries it. Stored only: nothing reads it to decide where or whether a mod
-  runs yet (MVP4 steps C1–C6).
+  package whose mod manifest carries it. A restore of a stored mod whose header declares no context and
+  that has no script instance yet starts it with this context (§1, "Where `script` lives").
 - `bool SuspendedAfterBudgetTrips = false;` — set together with `Active = false` when the runtime
   quarantined the mod after repeated budget trips (§5a), so neither a restart nor a world restore starts
   it again; a successful load or reload by hand writes a manifest without it. Omitted from JSON when

@@ -16,8 +16,9 @@ their UDim2, Color3 and number properties. Where CoreAI differs:
 - `StarterGui` is copied into PlayerGui when the character spawns (`ResetOnSpawn = false`: copied once and
   kept). A child added after the spawn is copied on the next frame; a respawn replaces only the copies, so a
   ScreenGui you parented into PlayerGui yourself stays; destroying an original removes its copies; scripts
-  are never copied. The core-GUI switches (`SetCoreGuiEnabled`) are recorded: CoreAI draws no Roblox core
-  GUI and no top bar (`IgnoreGuiInset` changes nothing).
+  are never copied. Of the core-GUI switches (`SetCoreGuiEnabled`) only `PlayerList` draws something (the
+  leaderstats list, section data); the others are recorded, and there is no top bar (`IgnoreGuiInset`
+  changes nothing).
 - Every font draws in the host font, bold or italic by the font's name. `TextScaled` estimates the size and
   `AutomaticSize` fits children, not text (text is not measured; `TextBounds`/`TextFits` raise
   NOT_IMPLEMENTED). `RichText` draws `<b> <i> <u> <s>`, not Roblox's `<font ...>` or `<stroke>`.

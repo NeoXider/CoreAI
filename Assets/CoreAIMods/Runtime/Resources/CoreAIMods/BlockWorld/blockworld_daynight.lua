@@ -1,12 +1,12 @@
 --[[@coreai
 id: blockworld_daynight
 name: Block World 4 - Day and night
-version: 1.0.0
+version: 1.1.0
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo. A day lasts eight minutes - the mod advances Lighting.ClockTime and darkens the ambient light at night, so torches matter after dusk. Set the time with /time noon, /time 18:30, /time stop or /time go where the host offers chat commands, with the L key (noon, dusk, midnight, dawn), or from any script or the AI by setting the workspace attribute BlockWorldTime to the same words. A ClockTime written by someone else is kept: the clock carries on from it.
+description: Part of the Block World demo. A day lasts eight minutes and a fresh world starts at 10:00 - the mod advances Lighting.ClockTime and darkens the ambient light at night and under rock, so torches matter after dusk and in caves. Set the time with /time noon, /time 18:30, /time stop or /time go where the host offers chat commands, with the L key (noon, dusk, midnight, dawn), or from any script or the AI by setting the workspace attribute BlockWorldTime to the same words. A ClockTime written by someone else is kept: the clock carries on from it.
 ]]
 
 -- The clock reads Lighting.ClockTime back before every step, so a time set by the AI, another mod or a saved
@@ -18,7 +18,8 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local DAY_SECONDS = 480          -- one whole day, in real seconds
-local START_HOURS = 8.5          -- where a fresh world's clock starts: a low morning sun
+local START_HOURS = 10           -- where a fresh world's clock starts: a mid-morning sun, high enough to light the
+                                 -- hills and low enough to give them shadows
 local STEP_SECONDS = 0.1         -- how often the clock is written
 local NAMED = {
     dawn = 6, morning = 8, day = 9, noon = 12, afternoon = 15,
@@ -26,9 +27,11 @@ local NAMED = {
 }
 local CYCLE = { "noon", "dusk", "midnight", "dawn" }
 
-local DAY_OUTDOOR = Color3.fromRGB(150, 150, 150)
+-- WHY this bright by day: the sky light is all a face turned from the sun gets, so with less the hillsides in
+-- shadow read nearly black.
+local DAY_OUTDOOR = Color3.fromRGB(185, 185, 190)
 local NIGHT_OUTDOOR = Color3.fromRGB(34, 40, 74)
-local DAY_AMBIENT = Color3.fromRGB(110, 110, 116)
+local DAY_AMBIENT = Color3.fromRGB(135, 130, 125)
 local NIGHT_AMBIENT = Color3.fromRGB(14, 16, 30)
 
 local paused = false
@@ -73,9 +76,37 @@ local function daylight(hours)
     return 1 - smoothstep(17.5, 20, hours)
 end
 
+-- Under rock the ambient light is the night's: the sun does not reach into a cave, so a cave is dark at noon and a
+-- torch is what lights it. "Under rock" is a Terrain cell above the camera (leaves do not count), eased over about
+-- half a second so walking into a tunnel dims the light rather than switching it.
+-- TODO: a stopgap that dims the whole view for one viewer. Remove it once the Terrain renderer darkens cells by
+-- their exposure to the sky (per vertex, soft at cave mouths) and Lighting.EnvironmentDiffuseScale and
+-- EnvironmentSpecularScale are real, so a cave is dark while the hill above it is lit.
+local ROOF_STUDS = 48
+local roofParams = RaycastParams.new()
+roofParams.FilterType = Enum.RaycastFilterType.Include
+roofParams.FilterDescendantsInstances = { workspace.Terrain }
+local underground = 0
+
+local function updateUnderground(dt)
+    local camera = workspace.CurrentCamera
+    local roofed = false
+    if camera then
+        local hit = workspace:Raycast(camera.CFrame.Position, Vector3.new(0, ROOF_STUDS, 0), roofParams)
+        roofed = hit ~= nil and hit.Material ~= Enum.Material.LeafyGrass
+    end
+    local target = roofed and 1 or 0
+    local step = math.min(1, dt * 2)
+    underground = underground + (target - underground) * step
+    if math.abs(target - underground) < 0.01 then
+        underground = target
+    end
+    workspace:SetAttribute("BlockWorldUnderground", underground > 0.5)
+end
+
 local shownDaylight = -1
 local function applyAmbient(hours)
-    local light = daylight(hours)
+    local light = daylight(hours) * (1 - underground)
     if math.abs(light - shownDaylight) < 0.01 then
         return
     end
@@ -115,7 +146,8 @@ local function runTimeCommand(text)
     notify("Time set to " .. describe(hours) .. ".")
 end
 
--- Roblox's chat command, where the host has TextChatService; CoreAI's chat has no Lua commands yet.
+-- /time is a Roblox chat command (a TextChatCommand under TextChatService); a host without Lua chat commands still
+-- has the L key and the BlockWorldTime attribute.
 local commandOk = pcall(function()
     local TextChatService = game:GetService("TextChatService")
     local command = Instance.new("TextChatCommand")
@@ -158,6 +190,7 @@ RunService.Heartbeat:Connect(function(dt)
         hours = (hours + pending * 24 / DAY_SECONDS) % 24
         Lighting.ClockTime = hours
     end
+    updateUnderground(pending)
     pending = 0
     applyAmbient(hours)
 end)
