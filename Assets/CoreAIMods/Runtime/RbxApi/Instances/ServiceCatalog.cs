@@ -214,7 +214,7 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.RegisterTreeBacked("CollectionService");
             catalog.RegisterTreeBacked("ScriptContext");
             catalog.Register(RuntimeUi.RbxUxmlService.ServiceClassName, new RuntimeUi.RbxUxmlService());
-            catalog.RegisterStub("DataStoreService", "MVP16", implementedServiceHint);
+            catalog.RegisterImplementedFallback("DataStoreService");
             catalog.RegisterImplementedFallback("UserInputService");
             catalog.RegisterImplementedFallback("StarterGui");
             catalog.RegisterStub("ContextActionService", "MVP7", implementedServiceHint);

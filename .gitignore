@@ -176,3 +176,6 @@ __pycache__/
 /Assets/Mirror.meta
 /Assets/ScriptTemplates/
 /Assets/ScriptTemplates.meta
+
+# Test result files written by local runs of the portable test projects.
+tools/portable/**/TestResults/

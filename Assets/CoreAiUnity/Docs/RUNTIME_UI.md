@@ -120,7 +120,9 @@ about.
 | `SetImage(Texture2D or Sprite)` | the image of an Image, the background of anything else |
 | `SetZOrder(n)`, `BringToFront`, `SendToBack` | stacking among siblings; equal z keeps document order |
 | `Focus`, `Blur`, `Query`, `CreateChild`, `Remove`, `Parent` | the rest |
+| `ScrollOffset`, `SetScrollOffset(Vector2)` | how far a ScrollView is scrolled; the view clamps a write to its range, and the write raises no `ScrollChanged` (zero and `false` for any other kind) |
 | events `Clicked`, `ValueChanged`, `Submitted`, `PointerEntered`, `PointerExited`, `FocusGained`, `FocusLost` | wired lazily; a throwing handler is logged and does not stop the others |
+| event `ScrollChanged` | a ScrollView's offset moved by anything but `SetScrollOffset`: the wheel, a touch drag, a scroll bar, the keyboard, or the view clamping it after its content shrank |
 
 API styles win over every rule and over the `style` attribute, and survive USS and UXML replaces.
 
@@ -415,6 +417,15 @@ lays out again when `screen.Resized` fires.
 - Focus: a focused `TextBox` and the pointer over a button, a `TextBox`, an `Active` object or an object a
   script listens to `MouseEnter` on are reported like any other element of the host, so `UserInputService`
   marks that input `gameProcessed` and typing never moves the character.
+- Scrolling: a `ScrollingFrame` is a `ScrollView` holding one canvas element (class `rbx-canvas`, not counted
+  against the mod's element budget) sized to `AbsoluteCanvasSize` plus the strips of inset bars, so the
+  view's own range is the Roblox one; the children are drawn on the canvas at their unscrolled places and the
+  view's `scrollOffset` is `CanvasPosition`. A script's `CanvasPosition` is pushed with `SetScrollOffset`; the
+  player's wheel, touch drag or bar comes back as `ScrollChanged` and becomes `CanvasPosition` without a write
+  charge, and an axis `ScrollingEnabled`/`ScrollingDirection` closes is put straight back. `ScrollingDirection`
+  is the view's `mode`; `ScrollBarThickness`, `ScrollBarImageColor3`/`ScrollBarImageTransparency` and the
+  side (`rbx-scroll-left`/`rbx-scroll-right`) reach the bars through the screen USS (`--rbx-scroll-bar-size`,
+  `--rbx-scroll-bar-color`), which draws them flat, over the canvas and without arrow buttons.
 - What differs from Roblox (fonts, text measurement, `rbxassetid` images, scrolling, the stubbed signals) is
   listed in [RBX_API.md](../../CoreAI/Docs/RBX_API.md#roblox-gui).
 

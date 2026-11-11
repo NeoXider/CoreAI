@@ -818,12 +818,13 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }
 
             string parent = NewTemporaryDirectory();
-            // WHY 158: with the short folder names a staged world load needs the root plus 102 characters
-            // without a store id, so 157 is the longest root that fits and 158 gives a 260-character path.
-            int padding = 158 - parent.Length - 1;
+            // WHY 170: this root is the store's own folder, and a staged world load writes at most 90
+            // characters below it (.world-sessions, a 26-character version, m-<26>, manifest.json.tmp, with
+            // their separators), so 169 is the longest folder that fits and 170 gives a 260-character path.
+            int padding = 170 - parent.Length - 1;
             Assert.Greater(padding, 0);
             string root = Path.Combine(parent, new string('x', padding));
-            Assert.AreEqual(158, Path.GetFullPath(root).Length);
+            Assert.AreEqual(170, Path.GetFullPath(root).Length);
             int syncCalls = 0;
             using FileLuaModSourceStore sources = new(root, persistenceSyncAsync: cancellationToken =>
             {

@@ -55,7 +55,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         [Test]
         public void P6_DayNight_AFreshWorld_StartsInTheMorning_AndAReloadKeepsTheTime()
         {
-            Assert.AreEqual(8.5d, Lighting.ClockTime, 0.02d, "a fresh world starts at 08:30, a low morning sun");
+            Assert.AreEqual(10d, Lighting.ClockTime, 0.02d, "a fresh world starts at 10:00, a mid-morning sun");
 
             SetTime("dusk");
             _world.Stack.Runtime.ReloadMod(Mod, BlockWorldTestWorld.Source(Mod));

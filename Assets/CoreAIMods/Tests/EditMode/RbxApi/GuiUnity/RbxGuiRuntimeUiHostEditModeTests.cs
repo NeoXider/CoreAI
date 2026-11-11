@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using System.Threading;
 using CoreAI.Ai.LuaCs;
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
 using CoreAI.Mods.Rbx.Instances.RuntimeUi;
@@ -19,7 +20,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.GuiUnity
     /// a UxmlService screen are two screens of one host, built by one element factory; the typed styles land
     /// as inline styles; after the panel's layout pass the drawn boxes equal AbsolutePosition and AbsoluteSize;
     /// a real button submit reaches its Lua handler; a focused TextBox reaches the shared UI focus, so typing
-    /// is processed input; unloading the mod leaves the host with nothing. Unity only: it needs UI Toolkit.
+    /// is processed input; unloading the mod leaves the host with nothing; a shop list scrolls by its bar while
+    /// CanvasPosition follows, and with scrolling off the bar is hidden and a scroll snaps back. Unity only: it
+    /// needs UI Toolkit.
     /// </summary>
     [TestFixture]
     public sealed class RbxGuiRuntimeUiHostEditModeTests
@@ -287,6 +290,108 @@ game:GetService('UxmlService'):CreateScreen('menu',
             Assert.AreEqual(0, _host.Screens.Count);
             Assert.AreEqual(0, gui.LiveSubscriberCount);
             Assert.AreEqual(0, Presenter.ElementCount);
+        }
+
+        /// <summary>A shop list a player scrolls: 30 rows of 40 pixels in a 240 by 200 window.</summary>
+        public const string ShopSource = @"
+local player = game:GetService('Players'):GetPlayers()[1]
+local gui = Instance.new('ScreenGui')
+gui.Name = 'ShopGui'
+local shop = Instance.new('ScrollingFrame')
+shop.Name = 'Shop'
+shop.Size = UDim2.fromOffset(240, 200)
+shop.Position = UDim2.fromOffset(20, 20)
+shop.BorderSizePixel = 0
+shop.CanvasSize = UDim2.new()
+shop.AutomaticCanvasSize = Enum.AutomaticSize.Y
+shop.ScrollBarThickness = 8
+shop.ScrollBarImageColor3 = Color3.fromRGB(255, 196, 64)
+shop.Parent = gui
+Instance.new('UIListLayout').Parent = shop
+for i = 1, 30 do
+  local item = Instance.new('TextButton')
+  item.Name = 'Item' .. i
+  item.Size = UDim2.new(1, 0, 0, 40)
+  item.BorderSizePixel = 0
+  item.Text = 'Sword ' .. i
+  item.Parent = shop
+end
+gui.Parent = player.PlayerGui
+";
+
+        /// <summary>Loads the shop under the runtime theme production panels use, and lets host and layout settle.</summary>
+        private ScrollView LoadShop()
+        {
+            ThemeStyleSheet theme = Resources.Load<ThemeStyleSheet>(RuntimeUiHostOptions.DefaultThemeResourcePath);
+            if (theme == null)
+            {
+                Assert.Ignore("The runtime theme '" + RuntimeUiHostOptions.DefaultThemeResourcePath + "' is not in Resources.");
+            }
+
+            _panelSettings.themeStyleSheet = theme;
+            _world.Load(Mod, ShopSource);
+            Settle();
+            return (ScrollView)Drawn(Find<RbxGuiObject>("Shop"));
+        }
+
+        private void Settle()
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                _world.Frame();
+                PanelPasses();
+            }
+        }
+
+        [Test]
+        public void MVP15_RealHost_AShopList_ScrollsByItsBar_AndIsDrawnWhereAbsolutePositionSays()
+        {
+            ScrollView view = LoadShop();
+            RbxScrollingFrame shop = Find<RbxScrollingFrame>("Shop");
+
+            Assert.AreEqual(0, CountProblems(GuiScreen()), "the scroll bar rules raise no report: " + Describe(GuiScreen()));
+            Assert.AreEqual(1, view.contentContainer.childCount, "the scroll view holds the canvas");
+            Assert.AreEqual(1200f, view.contentContainer[0].resolvedStyle.height, 0.5f, "30 rows of 40");
+            Assert.AreEqual(1000f, view.verticalScroller.highValue, 1f, "the bar's range is canvas minus window");
+            Assert.AreEqual(DisplayStyle.Flex, view.verticalScroller.resolvedStyle.display, "the bar shows");
+            Assert.AreEqual(DisplayStyle.None, view.horizontalScroller.resolvedStyle.display, "nothing to scroll across");
+            Assert.AreEqual(8f, view.verticalScroller.resolvedStyle.width, 0.5f, "ScrollBarThickness");
+            Assert.AreEqual(Position.Absolute, view.verticalScroller.resolvedStyle.position, "drawn over the canvas");
+            Assert.AreEqual(DisplayStyle.None, view.verticalScroller.lowButton.resolvedStyle.display, "no arrow buttons");
+            Assert.AreEqual(240f, view.contentViewport.layout.width, 0.5f, "the window is the whole frame");
+
+            // WHY the scroller's value: dragging the bar, the wheel and the arrow keys all end in this setter.
+            view.verticalScroller.value = 300f;
+            Assert.AreEqual(new RbxVector2(0f, 300f), shop.CanvasPosition, "CanvasPosition follows at once");
+            _world.Frame();
+            PanelPasses();
+
+            RbxGuiObject eighth = Find<RbxGuiObject>("Item8");
+            Rect root = _document.rootVisualElement.worldBound;
+            Assert.AreEqual(20f + 7 * 40f - 300f, eighth.AbsolutePosition.Y, 0.01f);
+            Assert.AreEqual(eighth.AbsolutePosition.Y, Drawn(eighth).worldBound.y - root.y, 0.5f,
+                "the row is drawn where AbsolutePosition says");
+            Assert.AreEqual(300f, view.scrollOffset.y, 0.01f, "the next frame leaves the player's offset alone");
+        }
+
+        [Test]
+        public void MVP15_RealHost_ScrollingDisabled_TheBarIsHidden_AndAScrollSnapsBack_ButAScriptMovesIt()
+        {
+            ScrollView view = LoadShop();
+            RbxScrollingFrame shop = Find<RbxScrollingFrame>("Shop");
+            shop.SetScrollingEnabled(false);
+            Settle();
+
+            Assert.AreEqual(DisplayStyle.None, view.verticalScroller.resolvedStyle.display, "no bar is drawn");
+            view.verticalScroller.value = 300f;
+            Assert.AreEqual(0f, view.scrollOffset.y, 0.01f, "the player's scroll is undone");
+            Assert.AreEqual(new RbxVector2(0f, 0f), shop.CanvasPosition);
+
+            shop.SetCanvasPosition(new RbxVector2(0f, 120f));
+            Settle();
+            Assert.AreEqual(120f, view.scrollOffset.y, 0.01f, "twin: a script's CanvasPosition still scrolls it");
+            Rect root = _document.rootVisualElement.worldBound;
+            Assert.AreEqual(20f - 120f, Drawn(Find<RbxGuiObject>("Item1")).worldBound.y - root.y, 0.5f);
         }
 
         private static int CountProblems(RuntimeUiScreen screen)

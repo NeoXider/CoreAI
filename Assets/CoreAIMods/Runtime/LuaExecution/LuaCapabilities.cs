@@ -42,14 +42,21 @@ namespace CoreAI.Ai
         Ai = 1 << 6,
 
         /// <summary>
+        /// Persistent data from Lua: <c>game:GetService("DataStoreService")</c> stores (Roblox's script capability
+        /// <c>DataStore</c>). Part of <see cref="All"/>, so a gameplay mod keeps the player's progress without
+        /// configuration; a host masks it (<c>LuaCapabilities.All &amp; ~LuaCapabilities.Data</c>) to keep mods off storage.
+        /// </summary>
+        Data = 1 << 7,
+
+        /// <summary>
         /// Every standard tier: <see cref="Read"/> | <see cref="Gameplay"/> | <see cref="WorldEdit"/> |
-        /// <see cref="LogicOverride"/> | <see cref="Ui"/>. WARNING: despite the name, All EXCLUDES <see cref="Full"/> —
+        /// <see cref="LogicOverride"/> | <see cref="Ui"/> | <see cref="Data"/>. WARNING: despite the name, All EXCLUDES <see cref="Full"/> —
         /// Full-tier reflection is opt-in and must be OR-ed in explicitly
         /// (<c>LuaCapabilities.All | LuaCapabilities.Full</c>). A mod header that declares
         /// <c>capabilities: All, Full</c> still gets Full masked away unless the host granted it.
         /// WHY: no duplicate-value alias — a second member with this exact value would make
         /// ToString()/serialized headers print an unspecified name on IL2CPP/WebGL.
         /// </summary>
-        All = Read | Gameplay | WorldEdit | LogicOverride | Ui
+        All = Read | Gameplay | WorldEdit | LogicOverride | Ui | Data
     }
 }

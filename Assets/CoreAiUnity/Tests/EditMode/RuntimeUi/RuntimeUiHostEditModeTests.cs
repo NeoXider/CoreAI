@@ -293,6 +293,36 @@ namespace CoreAI.Tests.EditMode.RuntimeUi
         }
 
         [Test]
+        public void ScrollView_ThePlayerScrollsAUxmlScrollView_AndItsHandleReportsThat_ButNotItsOwnWrites()
+        {
+            using RuntimeUiTestPanel panel = new(withTheme: true);
+            RuntimeUiScreen screen = panel.Create("log",
+                "<ui:ScrollView name=\"s\" style=\"width: 100px; height: 100px;\">" +
+                "<ui:VisualElement style=\"height: 500px;\"/></ui:ScrollView><ui:Label name=\"l\"/>", null);
+            panel.Update();
+            panel.Update();
+            RuntimeUiElement handle = screen.GetElement("s");
+            ScrollView view = (ScrollView)handle.VisualElement;
+            int reported = 0;
+            handle.ScrollChanged += _ => reported++;
+
+            Assert.Greater(view.verticalScroller.highValue, 0f, "content taller than the view gives the player a range");
+            view.verticalScroller.value = 120f;
+            Assert.AreEqual(120f, handle.ScrollOffset.y, 0.01f, "the player's scroll moves the view");
+            Assert.AreEqual(1, reported, "and is reported");
+
+            Assert.IsTrue(handle.SetScrollOffset(new Vector2(0f, 40f)));
+            Assert.AreEqual(40f, handle.ScrollOffset.y, 0.01f);
+            Assert.AreEqual(1, reported, "twin: the API's own write is not reported");
+            Assert.IsFalse(handle.SetScrollOffset(new Vector2(0f, float.NaN)), "a non-finite offset is refused");
+
+            RuntimeUiElement label = screen.GetElement("l");
+            Assert.IsFalse(label.SetScrollOffset(new Vector2(0f, 10f)), "only a scroll view scrolls");
+            Assert.AreEqual(Vector2.zero, label.ScrollOffset);
+            Assert.Greater(screen.LiveHandleRegistrationCount, 0);
+        }
+
+        [Test]
         public void CreateElement_WithoutMarkup_BuildsAbsoluteAndFlexLayoutsAndZOrder()
         {
             using RuntimeUiTestPanel panel = new();

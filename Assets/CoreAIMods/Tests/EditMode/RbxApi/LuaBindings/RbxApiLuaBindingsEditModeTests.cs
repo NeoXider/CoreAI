@@ -1164,19 +1164,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             LuaCsModStack stack = BuildStack(new LuaCsRbxApiBindings());
             // WHY: top-of-file GetService calls must not block unrelated script initialization;
             // the loud failure belongs to the line that first uses the missing service surface.
-            // TweenService landed in MVP8 slice 8.4, so DataStoreService (MVP16) is the
-            // deferred-stub probe now.
+            // DataStoreService shipped in MVP16, so ContextActionService (MVP7) is the deferred-stub probe now.
             stack.Runtime.LoadMod("resolve-only", @"
-                local DataStoreService = game:GetService('DataStoreService')
-                assert(DataStoreService ~= nil)");
+                local ContextActionService = game:GetService('ContextActionService')
+                assert(ContextActionService ~= nil)");
             Assert.IsTrue(stack.Runtime.IsLoaded("resolve-only"));
 
             Exception ex = LoadFails(stack, "member-access", @"
-                local DataStoreService = game:GetService('DataStoreService')
-                DataStoreService:GetDataStore()");
+                local ContextActionService = game:GetService('ContextActionService')
+                ContextActionService:BindAction()");
             StringAssert.Contains("NOT_IMPLEMENTED", FullText(ex));
-            StringAssert.Contains("DataStoreService:GetDataStore", FullText(ex));
-            StringAssert.Contains("MVP16", FullText(ex));
+            StringAssert.Contains("ContextActionService:BindAction", FullText(ex));
+            StringAssert.Contains("MVP7", FullText(ex));
         }
 
         [Test]

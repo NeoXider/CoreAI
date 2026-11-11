@@ -1813,6 +1813,7 @@ namespace CoreAI.Mods.WorldPackages
                 AddTextLength(ref textCharacters, node.Humanoid?.JumpPower);
                 AddTextLength(ref textCharacters, node.Humanoid?.JumpHeight);
                 AddTextLength(ref textCharacters, node.Humanoid?.DisplayName);
+                AddTextLength(ref textCharacters, node.Script?.SourceId);
                 if (node.Attributes != null)
                 {
                     foreach (AttributeSnapshot attribute in node.Attributes)

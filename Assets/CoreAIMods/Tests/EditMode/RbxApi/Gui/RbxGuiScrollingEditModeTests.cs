@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.RuntimeUi;
+using CoreAI.RuntimeUi;
 using CoreAI.Tests.EditMode.RbxApi.RuntimeUi;
 using NUnit.Framework;
 
@@ -359,6 +360,125 @@ namespace CoreAI.Tests.EditMode.RbxApi.Gui
             Assert.IsFalse(canvas.IsAlive, "the canvas goes with its frame");
             Assert.AreEqual(0, view.SubscriberCount);
             Assert.AreEqual(0, world.World.CountElements(RbxGuiTestWorld.Mod));
+        }
+
+        [Test]
+        public void MVP15_Scroll_TheScreenUss_WithItsScrollBarRules_ParsesWithoutAReport()
+        {
+            UssStyleSheet sheet = UssStyleSheet.Parse(RbxGuiPresenter.ScreenUss);
+            Assert.AreEqual(0, sheet.Diagnostics.Count, sheet.Diagnostics.Count > 0 ? sheet.Diagnostics[0].ToString() : "");
+
+            UssStyleSheet broken = UssStyleSheet.Parse(RbxGuiPresenter.ScreenUss + ".rbx-canvas { gap: 4px; }");
+            Assert.Greater(broken.Diagnostics.Count, 0, "twin: an unsupported property is reported, so the check can fail");
+        }
+
+        [Test]
+        public void MVP15_Scroll_TheScreenUss_SizesAndPlacesTheBars_FromTheFramesCustomProperties()
+        {
+            StyleNode view = new("ScrollView", null, "rbx-gui", "rbx-scroll", "rbx-scroll-right");
+            StyleNode container = view.Add(new StyleNode("VisualElement", null,
+                "unity-scroll-view__content-and-vertical-scroll-container"));
+            StyleNode viewport = container.Add(new StyleNode("VisualElement", null, "unity-scroll-view__content-viewport"));
+            StyleNode canvas = viewport.Add(new StyleNode("VisualElement", null, "unity-scroll-view__content-container"))
+                .Add(new StyleNode("VisualElement", null, "rbx-canvas"));
+            StyleNode vertical = container.Add(new StyleNode("Scroller", null, "unity-scroller", "unity-scroller--vertical"));
+            StyleNode lowButton = vertical.Add(new StyleNode("RepeatButton", null, "unity-scroller__low-button"));
+            StyleNode dragger = vertical.Add(new StyleNode("Slider", null, "unity-scroller__slider"))
+                .Add(new StyleNode("VisualElement", null, "unity-base-slider__dragger"));
+            StyleNode horizontal = view.Add(new StyleNode("Scroller", null, "unity-scroller", "unity-scroller--horizontal"));
+            StyleNode nested = canvas.Add(new StyleNode("TextField", null, "rbx-gui", "rbx-textbox"))
+                .Add(new StyleNode("Scroller", null, "unity-scroller", "unity-scroller--vertical"));
+            RuntimeUiDiagnosticList reports = new();
+            List<UssDeclaration> overrides = new()
+            {
+                UssDeclaration.Create("--rbx-scroll-bar-size", "8px", 0, 0, RuntimeUiSource.Api, reports),
+                UssDeclaration.Create("--rbx-scroll-bar-color", "rgb(255, 0, 0)", 0, 0, RuntimeUiSource.Api, reports)
+            };
+            StyleCascade cascade = new(UssStyleSheet.Parse(RbxGuiPresenter.ScreenUss), view, overrides);
+
+            UssResolvedStyle bar = cascade.Resolve(vertical);
+            Assert.AreEqual("absolute", bar.Get(UssPropertyId.Position).ToUssText(), "the bar lies over the canvas");
+            Assert.AreEqual("8px", bar.Get(UssPropertyId.Width).ToUssText(), "ScrollBarThickness is the bar's width");
+            Assert.AreEqual("0px", bar.Get(UssPropertyId.Right).ToUssText());
+            Assert.IsFalse(bar.IsSet(UssPropertyId.Left), "on the right side only");
+            Assert.AreEqual("8px", cascade.Resolve(horizontal).Get(UssPropertyId.Height).ToUssText());
+            Assert.AreEqual("none", cascade.Resolve(lowButton).Get(UssPropertyId.Display).ToUssText(), "no arrows");
+            Assert.AreEqual("rgba(255, 0, 0, 1)", cascade.Resolve(dragger).Get(UssPropertyId.BackgroundColor).ToUssText(),
+                "ScrollBarImageColor3 colors the bar");
+            Assert.AreEqual("hidden", cascade.Resolve(canvas).Get(UssPropertyId.Overflow).ToUssText());
+            Assert.IsFalse(cascade.Resolve(nested).IsSet(UssPropertyId.Width),
+                "twin: a scroller inside a child field is not a bar of the frame");
+            Assert.AreEqual(0, reports.Items.Count + cascade.Reports.Items.Count);
+
+            view.Classes.Remove("rbx-scroll-right");
+            view.Classes.Add("rbx-scroll-left");
+            bar = cascade.Resolve(vertical);
+            Assert.AreEqual("0px", bar.Get(UssPropertyId.Left).ToUssText(), "VerticalScrollBarPosition Left");
+            Assert.IsFalse(bar.IsSet(UssPropertyId.Right));
+        }
+
+        /// <summary>An engine-free styled element: a type, classes and a parent.</summary>
+        private sealed class StyleNode : IUssElement
+        {
+            public StyleNode(string typeName, string name, params string[] classes)
+            {
+                TypeName = typeName;
+                Name = name;
+                Classes = new HashSet<string>(classes);
+            }
+
+            public string TypeName { get; }
+
+            public string Name { get; }
+
+            public HashSet<string> Classes { get; }
+
+            public StyleNode Parent { get; private set; }
+
+            public IUssElement StyleParent => Parent;
+
+            public UssPseudoState PseudoStates => UssPseudoState.None;
+
+            public bool HasClass(string className)
+            {
+                return Classes.Contains(className);
+            }
+
+            public StyleNode Add(StyleNode child)
+            {
+                child.Parent = this;
+                return child;
+            }
+        }
+
+        /// <summary>Resolves an element after its ancestors, so custom properties inherit as in the host.</summary>
+        private sealed class StyleCascade
+        {
+            private readonly List<UssStyleSheet> _sheets;
+            private readonly StyleNode _owner;
+            private readonly IReadOnlyList<UssDeclaration> _overrides;
+            private readonly UssStyleResolver _resolver;
+
+            public StyleCascade(UssStyleSheet sheet, StyleNode owner, IReadOnlyList<UssDeclaration> overrides)
+            {
+                _sheets = new List<UssStyleSheet> { sheet };
+                _owner = owner;
+                _overrides = overrides;
+                Reports = new RuntimeUiDiagnosticList();
+                _resolver = new UssStyleResolver(Reports);
+            }
+
+            public RuntimeUiDiagnosticList Reports { get; }
+
+            public UssResolvedStyle Resolve(StyleNode node)
+            {
+                UssCustomProperties inherited = node.Parent == null ? UssCustomProperties.Empty
+                    : Resolve(node.Parent).CustomProperties;
+                UssResolvedStyle output = new();
+                _resolver.Resolve(_sheets, 0, node, inherited, null, ReferenceEquals(node, _owner) ? _overrides : null,
+                    output);
+                return output;
+            }
         }
 
         private static int CountPointer(FakeRbxUiBackend.FakeElement element)

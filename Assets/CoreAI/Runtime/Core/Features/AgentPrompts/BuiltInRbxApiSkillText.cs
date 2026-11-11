@@ -866,8 +866,13 @@ their UDim2, Color3 and number properties. Where CoreAI differs:
 - `Image` must be a URL or path the host can load: `rbxassetid://` ids are never downloaded and draw
   nothing. Nine-slice, `UIGradient`, `HoverImage`/`PressedImage` and `ZIndexBehavior.Global` (drawn as
   Sibling) are not drawn as in Roblox.
-- A `ScrollingFrame` clips its canvas and scrolls only when a script sets `CanvasPosition` (no wheel or drag
-  yet; the scroll bar is not drawn).
+- A `ScrollingFrame` scrolls as in Roblox: the wheel, a touch drag and its bar move the canvas within
+  `CanvasSize` (for a list set `CanvasSize = UDim2.new()` and `AutomaticCanvasSize = Enum.AutomaticSize.Y`),
+  and `CanvasPosition` follows (its signal fires; the player's scrolling costs no write budget, a script's
+  write does). `ScrollingEnabled = false` and `ScrollingDirection` stop the player, never a script.
+  `CanvasPosition` stays within 0 and `AbsoluteCanvasSize - AbsoluteWindowSize`. The bar is flat, in
+  `ScrollBarImageColor3`/`ScrollBarImageTransparency` (`ScrollBarThickness`, the two insets and
+  `VerticalScrollBarPosition` work); `ElasticBehavior` and the bar images raise NOT_IMPLEMENTED.
 - `InputBegan/InputChanged/InputEnded`, `MouseButton1Down/Up`, the `MouseButton2*` and Touch signals and
   `TweenPosition/TweenSize` raise NOT_IMPLEMENTED (planned MVP15); `BillboardGui`, `SurfaceGui`,
   `ViewportFrame` and `CanvasGroup` are backlog.

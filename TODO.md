@@ -129,8 +129,10 @@ sections below keep their items under the rung names they were written for.
       Roblox-shaped subsets with their DEV entries (no smoothing, water without swimming, the AI agent
       shown as system messages, no message filtering) rather than as CoreAI-only APIs.
       2026-11-11: the Terrain half is written that way (P4, its DEV entries in `ROBLOX_API_ROADMAP.md` §2.1);
-      the `TextChatService` half is not built. Open until the owner confirms the Terrain half and the
-      `TextChatService` subset exists.
+      of the `TextChatService` half the commands part is written the same way (`TextChatCommand` over the
+      chat's command registry, DEV-84 to DEV-86; `RbxTextChatServiceEditModeTests` and
+      `TextChatCommandLuaEditModeTests` green in Unity EditMode), and the messaging half is not built. Open
+      until the owner confirms the Terrain half and the `TextChatService` subset exists.
 - [ ] **Samples active in the one-click world (P3).** Default: `sample_welcome` only; the block world
       scene activates `sample_block_world`. 2026-11-11, facts for the decision: the one-click world loads a
       transient default-content mod (baseplate and spawn pad, never stored or undone) and the bundled
@@ -259,8 +261,13 @@ Play loop (P1–P4, P6):
 - [ ] **`TextChatService` subset (P2).** *Owner:* Rbx API. *Plan:* `RBXGeneral`/`RBXSystem`,
       `SendAsync`, `DisplaySystemMessage`, `MessageReceived`, `TextChatCommand`, the two configuration
       objects and `DisplayBubble`, with the agent-as-system-message and no-filter DEV candidates written
-      up. 2026-11-11: a first slice over the chat command registry is being written (`RbxTextChat.cs`); not
-      finished and not run.
+      up. 2026-11-11, the commands part: `TextChatService` is a real service and a `TextChatCommand` below it
+      is a command of the in-world chat (`RbxTextChat.cs`, the adapter `ChatCommandRegistrySink`, wired in
+      `CoreAiModsInstaller`); written with engine-free tests, and `RbxTextChatServiceEditModeTests` and
+      `TextChatCommandLuaEditModeTests` are green in Unity EditMode; its deviations are DEV-84 to DEV-86
+      (`Assets/CoreAI/Docs/RBX_API.md`). Open: the messaging half (`RBXGeneral`/`RBXSystem`, `SendAsync`,
+      `DisplaySystemMessage`, `MessageReceived`, the two configuration objects, `DisplayBubble`) with its DEV
+      candidates, and a PlayMode run of a command typed into the chat.
 - [x] **Write-behind mutation gate (P3).** *Owner:* world packages. *Plan:* in-memory snapshot,
       mutate at once, durable autosave written behind it, startup refresh debounced; keep the
       format-limit rules and add fault-injection tests for a crash between mutation and write.
@@ -298,7 +305,17 @@ Play loop (P1–P4, P6):
       scene list and smoke list went from 17 to 18 scenes. A first PlayMode run of the scene on a separate
       Unity copy showed the world, the HUD, break at the crosshair, the day cycle and torches working and
       `/undo` after an autopilot run and one villager address failing. Open: those failures, the remaining
-      scene PlayMode tests, the WebGL run, and a real `SelectionBox` (the outline is 12 Parts).
+      scene PlayMode tests, the WebGL run, and moving the target outline (still 12 Parts) onto `SelectionBox`,
+      which exists now: written with engine-free tests (`RbxSelectionBoxEditModeTests`,
+      `SelectionBoxLuaEditModeTests`), drawn by `UnityRbxSelectionBoxBackend` (its EditMode fixture has not run
+      in Unity), DEV-87.
+- [ ] **`SelectionBox` and `TextChatCommand` in saved worlds (P3, P5).** *Owner:* world packages. *Plan:*
+      optional `selection_box` (adornee by id, `Color3`, `Transparency`, `Visible`, `LineThickness`,
+      `SurfaceColor3`, `SurfaceTransparency`) and `text_chat_command` (`PrimaryAlias`, `SecondaryAlias`,
+      `Enabled`, `AutocompleteVisible`) blocks in the PointLight form; `LocalTransparencyModifier` is never
+      saved. 2026-11-11: written (`RbxWorldPackageAdornments.cs` and the
+      serializer), with `WorldPackageAdornmentsEditModeTests` (8) green in the portable Lua suite. Open: the
+      fixture in Unity EditMode, and a save and load of the block world with an outline and a `/time` command.
 
 Look (P7, P8 stage 1), ordered by visual payoff:
 
@@ -417,8 +434,11 @@ UI from Lua (P18) and performance (P19):
       budgets of 32 screens, 4,096 elements and 8,192 writes per frame (`RbxUiBudgets`), the skill section,
       DEV-69 (`dev-docs/RUNTIME_UI_LUA_SURFACE.md`); `UxmlServiceLuaEditModeTests` and the real-host fixture
       green in Unity EditMode. Not built: `PushScreen`/`PopScreen`, templates, pointer and focus signals,
-      `QueryAll` on an element, the export lint. Open: measure the UI Toolkit cost at the raised ceilings
-      with the P19 harness.
+      `QueryAll` on an element, the export lint, and a scroll offset for Lua: a UXML `ScrollView` scrolls for
+      the player as UI Toolkit draws it, but `UiElement` cannot read or set its offset (`Value` is nil and
+      refused; pinned by `P18_AUxmlScrollView_HasNoScrollOffsetForLua_ButTakesItsScrollAttributes`; the host
+      has `RuntimeUiElement.ScrollOffset`/`SetScrollOffset`/`ScrollChanged` to build it on). Open: measure the
+      UI Toolkit cost at the raised ceilings with the P19 harness.
 - [ ] **Performance harness and the first dated table (P19).** *Owner:* performance. *Plan:* reference
       scenes (idle world, bundled sample mods, 2,048 and 16,384 Parts, later the Block world) recording
       frame-time percentiles, garbage per frame, Lua throughput, batches and memory into JSON and a table
@@ -494,10 +514,16 @@ Block world content the owner asked for (P6, with slices of P9, P12 and MVP13):
       `ScrollingFrame`, `UIPadding`, `UIStroke`, `UIScale`, `UIGridLayout` and the two size constraints), a
       real `StarterGui` and `PlayerGui`, laid out engine-free by `RbxGuiPresenter` with the budgets, ownership
       and focus of `UxmlService`; the engine-free and Lua fixtures are green in Unity EditMode. Open: one
-      real-host layout test failed on a wrong test assumption and its corrected form has not been re-run;
-      scrolling a `ScrollingFrame` with the wheel or by dragging. `UserInputService` reporting a focused GUI
-      `TextBox` was added later and has not run in Unity. Its deviations are DEV-70 to DEV-79, with DEV-23
-      and DEV-24.
+      real-host layout test failed on a wrong test assumption and its corrected form has not been re-run.
+      `UserInputService` reporting a focused GUI `TextBox` was added later and has not run in Unity. Player
+      scrolling of a `ScrollingFrame` was added later too (the wheel, a touch drag and the bars move the
+      canvas, `CanvasPosition` follows without a write charge, `ScrollingEnabled`/`ScrollingDirection` stop
+      only the player, the bar members and the insets are drawn): written with engine-free tests
+      (`RbxGuiScrollingEditModeTests`, the scrolling cases of `RbxGuiLuaEditModeTests`); the two scrolling
+      cases of `RbxGuiRuntimeUiHostEditModeTests` and the host case of `RuntimeUiHostEditModeTests` have not
+      run in Unity, and nobody has scrolled a list with a real wheel yet. `ElasticBehavior` and the bar images
+      are backlog stubs (DEV-88, DEV-89). Its deviations are DEV-70 to DEV-79 (DEV-78 resolved) and DEV-88 to
+      DEV-92, with DEV-23 and DEV-24.
 
 Mods (P20):
 

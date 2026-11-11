@@ -148,7 +148,7 @@ backward step, a client's holds too: the server sends the value its own scripts 
 
 `Instance.new` accepts: **`Part`**, **`Folder`**, **`Model`**, **`ClickDetector`**, **`MaterialVariant`**,
 **`RemoteEvent`**, **`UnreliableRemoteEvent`**, **`RemoteFunction`**, **`BindableEvent`**,
-**`BindableFunction`**, **`Humanoid`**, **`Backpack`**, the
+**`BindableFunction`**, **`Humanoid`**, **`Backpack`**, **`TextChatCommand`**, **`SelectionBox`**, the
 GUI classes of [Roblox GUI](#roblox-gui), and the value objects **`IntValue`**, **`NumberValue`**, **`StringValue`**, **`BoolValue`**,
 **`ObjectValue`**, **`Vector3Value`**, **`CFrameValue`** and **`Color3Value`** (each with one
 type-checked `Value`). `Camera` is not creatable — the world's one camera is
@@ -162,7 +162,7 @@ so `IsA` works the way it does in Roblox.
 Services `game:GetService` returns as working instances: `Workspace`, `RunService`,
 `UserInputService`, `Players`, `CollectionService`, `TweenService`, `Lighting`, `Debris`,
 `HttpService`, `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`, `StarterGui`,
-`MaterialService` and `ScriptContext`. `DataStoreService` (MVP16), `ContextActionService` (MVP7) and
+`MaterialService`, `TextChatService` (its commands, see below) and `ScriptContext`. `DataStoreService` (MVP16), `ContextActionService` (MVP7) and
 `SoundService` (MVP17) are planned; `PathfindingService` and `MarketplaceService` are not planned. They and twenty-seven more real Roblox services (`Teams`, `PhysicsService`,
 `ReplicatedFirst`, `TeleportService`, `BadgeService`, …) resolve to loud placeholders whose first
 member access raises `NOT_IMPLEMENTED` with a workaround, instead of the false `X is not a valid
@@ -375,9 +375,12 @@ in pixels only while the pointer is locked, scaled by `MouseDeltaSensitivity` (0
 the wheel fires `InputChanged` with `UserInputType.MouseWheel` and the direction in `Position.Z`.
 The gamepad thumbsticks fire `InputChanged` with `KeyCode.Thumbstick1`/`Thumbstick2`,
 `UserInputType.Gamepad1` and the stick in `Position` (each axis in [-1, 1], y up) whenever they move.
-`TextBoxFocused` and `TextBoxFocusReleased` fire when CoreAI's own text field (the chat, the Hub) takes
-and returns the keyboard; those fields are not script-visible `TextBox`es, so the argument is `nil` and
-`GetFocusedTextBox()` returns `nil` (a DEV candidate) — branch on `gameProcessedEvent` instead.
+`TextBoxFocused(textBox)` and `TextBoxFocusReleased(textBox)` fire when a GUI `TextBox` (see
+[Roblox GUI](#roblox-gui)) takes and returns the keyboard, with that box as the argument (nil for a box destroyed
+while it had the keyboard), on the next input step; `GetFocusedTextBox()` returns the box while it holds the
+keyboard. CoreAI's own text fields (the chat, the Hub) fire the same two signals with `nil`, and
+`GetFocusedTextBox()` stays `nil` for them, because they are not script-visible `TextBox`es (DEV-24): branch on
+`gameProcessedEvent` to know the player is typing there.
 
 **Passive regeneration is not built in**, exactly as in Roblox: the mirror inserts a regeneration
 *script* into humanoids and documents disabling it with an empty `Script` named `Health`, so
@@ -399,6 +402,19 @@ the camera pulls the camera in front of it (the subject's own character, non-col
 at least 95% transparent never block it) without changing the zoom you chose. While the chat or the Hub
 holds the input the camera neither turns nor zooms and frees the pointer; with the pointer over a panel
 the wheel and the right button belong to the panel.
+
+**First person hides your own character, on this machine only.** `BasePart.LocalTransparencyModifier`
+(default 0) is a local multiplier on `Transparency`: the part is drawn at
+`1 - (1 - Transparency) * (1 - LocalTransparencyModifier)`, and at 1 it is not drawn at all (no shadow either),
+while `Transparency` still reads what scripts set. It is never replicated, saved or undone, and a clone starts at
+0 (BasePart.yaml tags it Hidden and NotReplicated); reads are ungated, a write needs WorldEdit and a non-finite
+value is `BAD_ARGUMENT`. The default camera drives it on the local character as the PlayerModule's
+TransparencyController does: every part of the character outside a `Tool` is hidden within 0.5 studs of the
+camera's focus (first person), fades from 1 to 0.5 out to 1.25 studs and is drawn beyond that; a fade moves at
+most 2.8 per second, while entering and leaving first person happen at once. Other characters are never touched,
+and a character the camera leaves goes back to 0. Deviation: a part added to the character while the value holds
+keeps its own modifier until the value or the character changes; the PlayerModule watches `DescendantAdded`
+(DEV-83).
 
 `CameraType = Enum.CameraType.Scriptable` hands the camera to scripts: the default camera stops and
 `camera.CFrame` stays where a script puts it, exactly as in Roblox. In `Custom`, a `CFrame` written by a
@@ -431,12 +447,16 @@ The day-cycle slice of P9, with Roblox's names and the class defaults of the API
 | `GeographicLatitude` | 41.7332993 | degrees north |
 | `Brightness` | 1 | the sun's intensity |
 | `Ambient` / `OutdoorAmbient` | (0.5, 0.5, 0.5) | the sky-occluded hue and the outdoor hue |
+| `EnvironmentDiffuseScale` | 1 in a new world (DEV-93) | the sky's share of the ambient; clamped to [0, 1] |
+| `EnvironmentSpecularScale` | 1 in a new world (DEV-93) | the sky's share of the reflections on smooth and metal surfaces; clamped to [0, 1] |
 | `GetSunDirection()` | | unit `Vector3` towards the sun, below the horizon at night |
 | `LightingChanged(skyChanged)` | | fires once per real change with `false` |
 
 A real change fires `Changed`, `GetPropertyChangedSignal` (a `ClockTime` change fires `TimeOfDay`'s too) and
 `LightingChanged`; an equal write fires nothing. Writes need WorldEdit; a non-finite value is `BAD_ARGUMENT`.
-`ClockTime` and the colours are tweenable.
+`ClockTime`, the colours and the two environment scales are tweenable, and all of them are saved with the
+world. At 0 both environment scales leave only `Ambient` and no sky reflections, which is how a cave or a
+cellar reads dark: tween them down when the player goes below ground.
 
 The sun model: solar noon at 12:00, 15 degrees an hour, the observer at `GeographicLatitude`, and the sun on
 the celestial equator, so it rises due east (+X) at 06:00 and sets due west at 18:00 at every latitude. The
@@ -446,13 +466,14 @@ Lua never touches an engine type: the state goes to a replaceable `IRbxLightingS
 (`RbxLighting.AttachSink`). `RbxWorldHost` attaches the Unity default, `UnityRbxLightingSink`, which points
 the scene's sun light along `GetSunDirection`, sets its intensity to `Brightness` times daylight (a smooth
 step from -6 to +6 degrees of elevation; the light is switched off below), makes it `RenderSettings.sun` so
-the sky follows, and sets a trilight ambient: sky and equator from `OutdoorAmbient` scaled by daylight down
-to 15% at night, ground from `Ambient` (DEV candidates P9-a and P9-g). Until a script, a tween or a saved
-world sets a Lighting property, nothing is applied and the host scene keeps its authored lighting; switch the
-sink off with **Drive Scene Lighting** on `RbxWorldHost`. The rest of P9 (fog, `ColorShift_*`, environment
-and exposure, shadows, the moon, `Sky`, `Atmosphere`, the post effects, `SpotLight`, `SurfaceLight`) are loud
-stubs planned for P9; `LightingStyle`, `PrioritizeLightingQuality` and `Technology` are
-`RobloxScriptSecurity` and unsupported.
+the sky follows, and sets a trilight ambient: sky and equator blend from `OutdoorAmbient` scaled by daylight
+(down to 15% at night) at `EnvironmentDiffuseScale` 1 towards `Ambient` at 0, ground from `Ambient` (DEV
+candidates P9-a and P9-g); `EnvironmentSpecularScale` multiplies the default look's sky reflections (its sky
+reflection probe and the environment reflection intensity). Until a script, a tween or a saved world sets a
+Lighting property, nothing is applied and the host scene keeps its authored lighting; switch the sink off with
+**Drive Scene Lighting** on `RbxWorldHost`. The rest of P9 (fog, `ColorShift_*`, exposure, shadows, the moon,
+`Sky`, `Atmosphere`, the post effects, `SpotLight`, `SurfaceLight`) are loud stubs planned for P9;
+`LightingStyle`, `PrioritizeLightingQuality` and `Technology` are `RobloxScriptSecurity` and unsupported.
 
 ### `BindableEvent` and `BindableFunction`
 
@@ -471,6 +492,43 @@ array and dictionary keys, or a cyclic one, raises `BAD_ARGUMENT` at the call (R
 silently), a copy over 64 KiB raises `PAYLOAD_TOO_LARGE`, and a function is always nil, also at the top level
 (the mirror's bindable guide does not say what Roblox hands over; a mod's closure would otherwise run on
 another mod's budget, even after its own unload).
+
+### `TextChatService` and `TextChatCommand`: chat commands
+
+`game:GetService("TextChatService")` is a real service, and its commands work as in Roblox. A `TextChatCommand`
+anywhere below it (directly or in a `Folder`) that is `Enabled` (default true) and has a `PrimaryAlias`
+(`"/time"`; the leading slash is optional) is a command of the in-world chat, together with its `SecondaryAlias`.
+When the player sends a line that starts with an alias (`/time night`), `Triggered(textSource, unfilteredText)`
+fires with the sender's `TextSource` (its `UserId`; `Players:GetPlayerByUserId` finds the player) and the whole
+line, and the line never reaches the model. A command lives as long as its instance: it goes away with its mod,
+a reload adds it again, and `Enabled = false` or moving it out of `TextChatService` removes it.
+`AutocompleteVisible` (true) is recorded, `ChatVersion` is always `Enum.ChatVersion.TextChatService`, and a
+world-owned command is saved with the world. A world without the in-world chat (a dedicated server, a headless
+tool) keeps the commands and never triggers them. The chat is reached through the engine-free
+`IRbxChatCommandSink`, which `ChatCommandRegistrySink` implements over the chat's `IChatCommandRegistry`.
+
+Deviations (DEV candidates): an alias the chat already answers, one of the game's own commands (`/undo`,
+`/fly`, ...) or another command's, stays with its first owner: a command whose `PrimaryAlias` is taken is not
+added at all, its secondary alias included, the world log says so once, and it is added once a `TextChatCommand`
+that held the alias goes away; a taken `SecondaryAlias` alone is dropped and the primary still works (DEV-84).
+`CreateDefaultCommands` is recorded and no `TextChatCommands` folder of default commands is made; CoreAI's own
+chat commands take that part (DEV-85). There are no `TextChannel`s, so a `TextSource` has no parent (DEV-86).
+The messaging half (`TextChannels`, `SendAsync`, `DisplaySystemMessage`, `MessageReceived`,
+`OnIncomingMessage`, bubbles) raises `NOT_IMPLEMENTED`, planned for P2; the legacy `Chat` service is
+unsupported.
+
+### `SelectionBox`
+
+`Instance.new("SelectionBox")` (a `GuiBase3d` and an `InstanceAdornment`; drawn in the world, so it needs no
+`Ui` capability) draws the edges of its `Adornee`'s box `LineThickness` studs thick (default 0.15) in `Color3`
+(default RGB 13, 105, 172) at `Transparency`, and fills the faces in `SurfaceColor3` while
+`SurfaceTransparency` (default 1) is below 1. It is drawn while `Visible`, while it sits in the Workspace or in a
+`PlayerGui`, and while its `Adornee`, a `BasePart` or a `Model` (the box around all its parts), is in the
+Workspace; it follows the adornee every frame, is never hit by a ray, never collides and takes no clicks. Its
+number and `Color3` properties are tweenable, and a world-owned box is saved with the world (the adornee by id).
+Drawing goes through the replaceable `IRbxSelectionBoxBackend`: `RbxSelectionBoxReconciler` keeps the boxes, and
+`RbxWorldHost` ticks it in `LateUpdate` with `UnityRbxSelectionBoxBackend` (twelve unlit edge boxes and a face
+box, no colliders). Deviation (DEV candidate): the box around a `Model` is aligned to the world axes (DEV-87).
 
 ### Roblox GUI
 
@@ -502,11 +560,22 @@ Deviations (each a DEV candidate):
 - **Images.** `Image` is a URL or path the host loads; `rbxassetid://` ids are never downloaded and draw
   nothing. Nine-slice (`SliceCenter`) and `UIGradient` are not drawn; `HoverImage`/`PressedImage` are recorded.
 - **Stacking.** `ZIndexBehavior.Global` is recorded and drawn as `Sibling` (elements nest like the instances).
-- **Scrolling.** A `ScrollingFrame` clips its canvas and moves it by `CanvasPosition`; the player's wheel or
-  drag does not scroll it yet and the scroll bar is not drawn.
+- **Scrolling.** A `ScrollingFrame` scrolls with the wheel, a touch drag and its scroll bar within its canvas, and
+  `CanvasPosition` follows the player: its signal fires, and the player's scrolling is never charged to the
+  write budget (a script's write is). `ScrollingEnabled = false` and `ScrollingDirection` stop the player on an
+  axis, never a script; a script's `CanvasPosition` moves the canvas even when no bar is drawn (DEV-92).
+  `CanvasPosition` is kept between 0 and `AbsoluteCanvasSize - AbsoluteWindowSize` at the next layout (DEV-91),
+  and `AbsoluteCanvasSize` is never smaller than the window (DEV-90). `AutomaticCanvasSize` grows the canvas to
+  the children (a layout's `AbsoluteContentSize`) plus `UIPadding`, already on the first frame. The bars are flat
+  bars of `ScrollBarImageColor3` at `1 - ScrollBarImageTransparency`, `ScrollBarThickness` wide (0 draws none),
+  without arrow buttons, drawn over the canvas unless `VerticalScrollBarInset`/`HorizontalScrollBarInset` take
+  their strip from the window (`ScrollBar` while the bar shows, `Always` always), with the vertical bar on the side
+  `VerticalScrollBarPosition` names; `TopImage`/`MidImage`/`BottomImage` and their `*Content` twins raise
+  `NOT_IMPLEMENTED` (DEV-88). `ElasticBehavior` raises `NOT_IMPLEMENTED` too: the canvas always stops at its
+  ends (DEV-89). `GetScrollVelocity`/`ResetScrollVelocity` are backlog stubs.
 - **Input.** A GUI object whose `MouseEnter`/`MouseLeave` a script listens to takes the pointer, so input over
-  it is `gameProcessed` as over an `Active` one. `UserInputService.TextBoxFocused` does not fire for a GUI
-  `TextBox` yet, and `GetFocusedTextBox()` returns nil.
+  it is `gameProcessed` as over an `Active` one. A focused `TextBox` is what `UserInputService.TextBoxFocused`
+  and `TextBoxFocusReleased` pass and `GetFocusedTextBox()` returns (see "Input focus and the pointer").
 - **Not yet.** `InputBegan/InputChanged/InputEnded`, `MouseMoved`, the wheel, `MouseButton1Down/Up`,
   `MouseButton2*`, `SecondaryActivated`, the Touch signals and `TweenPosition`/`TweenSize`/`TweenSizeAndPosition`
   raise `NOT_IMPLEMENTED` (planned MVP15); gamepad selection, `BillboardGui`, `SurfaceGui`, `ViewportFrame`,
@@ -543,9 +612,16 @@ body, so a world that changes it never touches the host scene's own `Physics.gra
 `Position`, `Normal`, `Material`, `Distance`) or `nil`. The direction's **length is the range** and
 may not exceed 15,000 studs — a longer one is refused rather than clamped. `RaycastParams.new()`
 carries `FilterDescendantsInstances`, `FilterType` (`Enum.RaycastFilterType.Exclude`/`Include`),
-`RespectCanCollide`, and `AddToFilter`. `IgnoreWater` and `BruteForceAllSlow` are accepted and inert
-(CoreAI has no Terrain and one broadphase); `CollisionGroup` accepts only `"Default"` and raises
-otherwise, because a group that filtered parts differently would return a confidently wrong hit.
+`RespectCanCollide`, and `AddToFilter`. `BruteForceAllSlow` is accepted and inert (one broadphase), and so is
+`IgnoreWater`: Terrain water has no collider, so rays always pass through it as if it were true (DEV-38).
+`CollisionGroup` accepts only `"Default"` and raises otherwise, because a group that filtered parts differently
+would return a confidently wrong hit.
+
+A ray hits `workspace.Terrain` in every world (`Instance` is the Terrain, with the cell's `Material` and the
+normal of the face it entered): a host with a physics engine answers from the Terrain's chunk colliders, and a
+server or a headless tool without one answers from an engine-free march through the voxel grid. Terrain passes
+`Exclude`/`Include` like any instance and always collides, so `RespectCanCollide` changes nothing for it, and the
+nearer of a part hit and a Terrain hit wins.
 
 `BasePart.Touched(otherPart)` and `BasePart.TouchEnded(otherPart)` fire on **both** parts, and only
 from physical movement: at least one part must be unanchored, and a part moved by assigning

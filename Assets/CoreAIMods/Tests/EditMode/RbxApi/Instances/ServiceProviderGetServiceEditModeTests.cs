@@ -78,24 +78,39 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void GetService_PlannedService_ReturnsCachedStubWithoutThrowing()
         {
-            // WHY: TweenService landed as a live tree-backed service (MVP8 slice 8.4), so
-            // DataStoreService (MVP16) stands in as the planned-service probe now.
+            // WHY: DataStoreService shipped in MVP16 (an implemented fallback until the composition attaches it),
+            // so ContextActionService (MVP7) stands in as the planned-service probe now.
             RbxInstance service = null;
-            Assert.DoesNotThrow(() => service = _game.GetService("DataStoreService"));
+            Assert.DoesNotThrow(() => service = _game.GetService("ContextActionService"));
             RbxStubService stub = service as RbxStubService;
             Assert.IsNotNull(stub);
-            Assert.AreEqual("MVP16", stub.PlannedMvp);
-            Assert.AreSame(stub, _game.GetService("DataStoreService"));
+            Assert.AreEqual("MVP7", stub.PlannedMvp);
+            Assert.AreSame(stub, _game.GetService("ContextActionService"));
+        }
+
+        /// <summary>
+        /// MVP16: DataStoreService is real; a DataModel the composition did not attach it to answers with the
+        /// implemented-fallback text that names the missing attachment, never with a roadmap rung.
+        /// </summary>
+        [Test]
+        public void GetService_DataStoreServiceWithoutItsAdapter_NamesTheMissingAttachment()
+        {
+            RbxStubService fallback = (RbxStubService)_game.GetService("DataStoreService");
+
+            Assert.IsTrue(fallback.IsImplementedFallback);
+            Assert.IsNull(fallback.PlannedMvp);
+            StringAssert.Contains("is implemented but is not attached to this DataModel",
+                fallback.MemberAccessError("GetDataStore").RawMessage);
         }
 
         [Test]
         public void FindService_ReturnsNullForValidAbsentServicesAndThrowsForUnknown()
         {
             Assert.AreSame(_registry.WorldRoot, _game.FindService("Workspace"));
-            // WHY: Debris landed as a live tree-backed service (MVP8 slice 8.0), and
-            // TweenService followed in slice 8.4, so the still-unimplemented
-            // DataStoreService stands in as the valid-but-absent example.
-            Assert.IsNull(_game.FindService("DataStoreService"));
+            // WHY: Debris landed as a live tree-backed service (MVP8 slice 8.0), TweenService followed in slice
+            // 8.4 and DataStoreService in MVP16, so the still-unimplemented ContextActionService stands in as the
+            // valid-but-absent example.
+            Assert.IsNull(_game.FindService("ContextActionService"));
             Assert.IsNotNull(_game.FindService("TweenService"));
 
             // WHY: Players is no longer absent — the loopback networking rung pulled its minimum
@@ -174,10 +189,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [Test]
         public void StubServices_UseTheWordingOfTheirOwnStatus()
         {
-            RbxStubService planned = (RbxStubService)_game.GetService("DataStoreService");
+            RbxStubService planned = (RbxStubService)_game.GetService("ContextActionService");
             Assert.AreEqual(RbxKnownUnimplementedMemberStatus.Planned, planned.Status);
-            Assert.AreEqual("DataStoreService:GetDataStore is planned for MVP16.",
-                planned.MemberAccessError("GetDataStore").RawMessage);
+            Assert.AreEqual("ContextActionService:BindAction is planned for MVP7.",
+                planned.MemberAccessError("BindAction").RawMessage);
 
             RbxStubService unsupported = (RbxStubService)_game.GetService("PathfindingService");
             Assert.AreEqual(RbxKnownUnimplementedMemberStatus.Unsupported, unsupported.Status);

@@ -30,10 +30,28 @@ namespace CoreAI.Ai.LuaCs
         internal const int MaxAggregateEntries = 100_000;
         internal const int MaxArrayIndex = MaxAggregateEntries;
 
+        /// <summary>Raised inside an <see cref="EncodeWithin"/> whose output passed the caller's limit.</summary>
+        private sealed class OutputLimitReached : Exception
+        {
+        }
+
         private sealed class EncodeState
         {
             private readonly StringBuilder _output = new(256);
+            private readonly int _maxEncodedCharacters;
+            private readonly bool _signalLimit;
             private int _aggregateEntries;
+
+            public EncodeState()
+                : this(MaxEncodedCharacters, false)
+            {
+            }
+
+            public EncodeState(int maxEncodedCharacters, bool signalLimit)
+            {
+                _maxEncodedCharacters = maxEncodedCharacters;
+                _signalLimit = signalLimit;
+            }
 
             public string GetResult()
             {
@@ -77,8 +95,13 @@ namespace CoreAI.Ai.LuaCs
             private void EnsureOutputCapacity(int additionalCharacters, string path)
             {
                 if (additionalCharacters < 0
-                    || additionalCharacters > MaxEncodedCharacters - _output.Length)
+                    || additionalCharacters > _maxEncodedCharacters - _output.Length)
                 {
+                    if (_signalLimit)
+                    {
+                        throw new OutputLimitReached();
+                    }
+
                     throw RbxError.BadArgument(
                         "HttpService:JSONEncode output exceeds CoreAI's "
                         + MaxEncodedCharacters + " UTF-16 code-unit limit at " + path,
@@ -126,7 +149,39 @@ namespace CoreAI.Ai.LuaCs
             return state.GetResult();
         }
 
+        /// <summary>
+        /// The same encoding with a caller's output limit instead of <see cref="MaxEncodedCharacters"/> (a data store
+        /// value may be 4,194,304 characters); null when the output would pass <paramref name="maxEncodedCharacters"/>.
+        /// Every other refusal raises exactly as <see cref="Encode"/> does.
+        /// </summary>
+        internal string EncodeWithin(LuaValue input, int maxEncodedCharacters)
+        {
+            EncodeState state = new(Math.Max(0, maxEncodedCharacters), true);
+            HashSet<LuaTable> activeTables = new(new LuaTableReferenceComparer());
+            try
+            {
+                EncodeValue(input, state, activeTables, 0, "$");
+            }
+            catch (OutputLimitReached)
+            {
+                return null;
+            }
+
+            return state.GetResult();
+        }
+
+        /// <summary>The same decoding with a caller's input limit instead of <see cref="MaxInputCharacters"/>.</summary>
+        internal LuaValue DecodeWithin(string input, int maxInputCharacters)
+        {
+            return Decode(input, Math.Max(0, maxInputCharacters));
+        }
+
         public LuaValue Decode(string input)
+        {
+            return Decode(input, MaxInputCharacters);
+        }
+
+        private LuaValue Decode(string input, int maxInputCharacters)
         {
             if (input == null)
             {
@@ -135,10 +190,10 @@ namespace CoreAI.Ai.LuaCs
                     "pass a valid JSON string");
             }
 
-            if (input.Length > MaxInputCharacters)
+            if (input.Length > maxInputCharacters)
             {
                 throw RbxError.BadArgument(
-                    "JSON input exceeds CoreAI's " + MaxInputCharacters + " character limit",
+                    "JSON input exceeds CoreAI's " + maxInputCharacters + " character limit",
                     "decode a smaller JSON document");
             }
 

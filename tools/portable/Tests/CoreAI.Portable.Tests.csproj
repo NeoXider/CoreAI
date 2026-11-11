@@ -232,5 +232,7 @@
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/Performance/AllocationMeter.cs" Link="Assets/CoreAIMods/Tests/EditMode/Performance/AllocationMeter.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Agents/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Agents/%(Filename)%(Extension)" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/CharacterRig/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/CharacterRig/%(Filename)%(Extension)" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/DataStores/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/DataStores/%(Filename)%(Extension)" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/PlayerList/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/PlayerList/%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

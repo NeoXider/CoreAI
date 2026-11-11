@@ -465,7 +465,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
             Assert.AreEqual(2, fake.Updates);
             Assert.AreEqual(3f, world.Rig.GetCFrame().Position.Z, 1e-4f);
-            Assert.AreEqual(world.RootPosition().Y + 1.5f, fake.LastFocus.Y, 1e-3f, "the module gets the head focus");
+            Assert.AreEqual(world.RootPosition().Y + LuaCsRbxApiBindings.RigCameraSubjectOffset.Y, fake.LastFocus.Y, 1e-3f,
+                "the module gets the head focus");
 
             world.Load("m", "workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable");
             world.Frames(1);

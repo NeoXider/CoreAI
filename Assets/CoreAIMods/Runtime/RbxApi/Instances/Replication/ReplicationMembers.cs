@@ -40,10 +40,11 @@ namespace CoreAI.Mods.Rbx.Instances.Replication
 
         /// <summary>
         /// <c>BaseScript.Enabled</c> of a <see cref="Scripts.RbxBaseScript"/>. Recorded in the dirty set only:
-        /// <see cref="EnumerateReplicable"/> does not carry it until the snapshot holds script state (MVP4 step B2).
+        /// <see cref="EnumerateReplicable"/> does not carry it: the snapshot holds script state since MVP4 step B2, the wire codes and the NotReplicated
+        /// deviation are step C5's.
         /// </summary>
         /// <remarks>
-        /// WHY B2 must decide the wire name: BaseScript.yaml tags <c>Enabled</c> NotReplicated and leaves its
+        /// WHY C5 must decide the wire name: BaseScript.yaml tags <c>Enabled</c> NotReplicated and leaves its
         /// deprecated inverse <c>Disabled</c> untagged, so the state reaches clients in Roblox under the other
         /// name; carrying <c>Enabled</c> needs a written deviation in GuardedReplicationFilterEditModeTests.
         /// </remarks>

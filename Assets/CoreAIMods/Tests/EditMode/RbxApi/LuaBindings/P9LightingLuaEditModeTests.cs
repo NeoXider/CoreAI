@@ -474,7 +474,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             StringAssert.Contains("is planned for MVP17", world.Get("m", "sound"));
             StringAssert.Contains("is planned for MVP15", world.Get("m", "gui"));
             StringAssert.Contains("is planned for P10", world.Get("m", "mesh"));
-            StringAssert.Contains("is planned for MVP16", world.Get("m", "store"));
+            StringAssert.Contains("is implemented but is not attached", world.Get("m", "store"),
+                "DataStoreService shipped in MVP16; a world without its adapter names the missing attachment");
             StringAssert.Contains("is planned for MVP7", world.Get("m", "actions"));
             StringAssert.Contains("is planned for MVP16", world.Get("m", "close"));
             foreach (string key in new[] { "sound", "gui", "store", "actions", "close" })
