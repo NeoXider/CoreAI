@@ -503,7 +503,7 @@ flagship, with recorded evidence.
 | Milestone | Outcome | Rungs and packages | Gate | Demos |
 |---|---|---|---|---|
 | **M0 Ready to play** | A new project reaches a working world and an honest model connection in minutes | P3 (one-click world), P11 stage 1, spikes S1 and S2, the open MVP3 player checks, one live-model run with a valid provider key | From a fresh checkout: one menu, one key, the first AI-made object; a missing module fails loudly | the one-click world |
-| **M1 Block world** | The Minecraft-style demo, solo: walk and fly, build with blocks and by chat, talk to NPCs, switch on the autopilot | P1, P2, P3, P4, P6, P7, P8 stage 1, P12 stage 1, P13, P18, P19; MVP4 alongside | The Block world demo — Lua end to end, interface included — passes its recorded script in the editor and in a WebGL player; the P19 budgets hold; the bundled sample mods and published demos run on the defaults | Block world |
+| **M1 Block world** | The Minecraft-style demo, solo: walk and fly, build with blocks and by chat, talk to NPCs, switch on the autopilot | P1, P2, P3, P4, P6, P7, P8 stage 1, P12 stage 1, P13, P18, P19, P20; MVP4 alongside | The Block world demo — Lua end to end, interface included — passes its recorded script in the editor and in a WebGL player; the P19 budgets hold; the bundled sample mods and published demos run on the defaults | Block world |
 | **M2 Whole games from chat** | A complete small game — HUD, sound, saving — made by talking; the harness upgrades | The solo halves of MVP15, MVP16 and MVP17; MVP13; the self-repair and manifest parts of MVP18; P5, P8 stage 2, P9, P10 stage 1, P11 stage 2, P12 stage 2, P14, P15, P16, P17 | A person who writes no code gets a playable game with HUD, sound and saving in 15 minutes; a "whole game" benchmark tier measures it | an obby and a tycoon from templates, an NPC town, an application that is not a game on the same harness |
 | **M3 Together** | Several players create in one room | MVP5, MVP6, the network half of MVP7, MVP11, the network halves of MVP15–MVP17 | Four players in a room, two prompting the AI at once; every edit visible within 1 tick + RTT; the world survives joins and leaves | Block world co-op |
 | **M4 Platform** | Dedicated servers, scale, Roblox import, asset import, hardening | MVP8, MVP9, MVP10, MVP14 (import first), the rest of MVP18, MVP19, P10 stage 2, the flagship's own project | The rungs' own DoDs | the flagship |
@@ -515,7 +515,7 @@ materials v2 · **P9** Lighting API · **P10** new materials and asset import ·
 and the Connect-API doctor · **P12** gameplay LLM API and talking NPCs · **P13** decision models ·
 **P14** orchestrator mode · **P15** roles, tools, skills and prompts as data · **P16** tool review and
 camera v2 · **P17** benchmark touch-ups · **P18** runtime UI from Lua (UXML and USS) ·
-**P19** honest performance: measurement, budgets, optimization.
+**P19** honest performance: measurement, budgets, optimization · **P20** mod folders.
 
 A split rung keeps one section: its **Order** line says which half belongs to which milestone.
 
@@ -1717,9 +1717,9 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   restricted to the solo-eligible subset (multi-client fixtures excluded), plus the client-mode fixture
   set.
 
-### Packages added on 2026-11-11 (P1–P19)
+### Packages added on 2026-11-11 (P1–P20)
 
-Nineteen packages carry what the flagship's play-and-create loop and the agent harness lacked on
+Twenty packages carry what the flagship's play-and-create loop and the agent harness lacked on
 2026-11-11. Their milestones are in §4.0; each section has the shape of a rung. Three repository surveys
 of release 7.56.0 supplied the "Done so far" facts. Path conventions differ by group, because each group
 lives in different packages: P1–P6 follow this document's rule (relative to `Assets/CoreAIMods/Runtime/`
@@ -3511,6 +3511,50 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
   keep the scale and device work.
 - **Package/flagship**: packages: the harness, the budgets and the fixes; the reference scenes are
   repository test content. Flagship: its own content budgets.
+
+### P20 — Mod folders (M) *(new 2026-11-11)*
+
+- **Goal** (M1): mods live in folders — a folder holds mods and other folders — so a world with a
+  thousand mods is a tree a player browses, searches, folds, rearranges and switches on or off by branch,
+  in the Hub and through the AI tools, instead of one endless list.
+- **Done so far**:
+  - One flat level exists: `LuaModManifest.Category` (`LuaExecution/LuaModManifest.cs:37`), the
+    `category:` key of the `@coreai` header (`LuaExecution/LuaModHeader.cs:259`), and the Hub Mods page
+    groups rows by category with a name, category and tags search (`HubIntegration/HubModsPage.cs:13`,
+    `:254`). The list is a plain `ScrollView` (`HubModsPage.cs:174`), not virtualized.
+  - A world carries at most 256 distinct mod sources (`Docs/ROADMAP.md`, Track C).
+  - Related and different: MVP18 plans folder mods (one mod as a folder of scripts), and MVP4 puts
+    scripts into the instance tree, where Roblox itself organizes scripts with `Folder` instances.
+- **To do**:
+  - **A folder path on the mod**: `category` becomes a `/`-separated path (`Games/Arcade`); a one-level
+    category stays valid, so existing mods and packages load unchanged. Path rules (segment characters
+    and length, depth) fail with a named error.
+  - **Folder operations** in the mod service: create, rename, move a mod or a folder, delete an empty
+    folder, enable or disable a whole branch; empty folders persist.
+  - **Hub Mods page**: a collapsible tree with counts, a search that keeps matching branches open, a
+    virtualized list so a thousand mods scroll smoothly, remembered fold state and a "Move to" action.
+  - **AI tools**: `manage_mods` lists by folder, creates a mod in a folder and moves it; the default
+    folder for AI-made mods is configurable; the skill text says so.
+  - **World package and bundles**: the path travels in the manifest as the same field, so no format
+    bump; the bundled samples move under a `Samples` folder.
+  - **The 256-source ceiling**: measure load time and memory at 1,000 sources with the P19 harness and
+    raise the ceiling to what the measurement supports.
+  - **With MVP4**: the folder path maps onto `Folder` instances that hold the script instances, so the
+    tree a player sees is the Roblox-shaped tree.
+- **Test**: PT (path parsing and rules, move and rename semantics); EM (service operations and
+  persistence; an old flat category loads as one level; branch enable and disable with a sibling twin);
+  PL (`manage_mods` folder arguments); PM `FastNoLlm` (the tree with 1,000 mods renders, scrolls and
+  filters inside the P19 frame budget).
+- **DoD**:
+  - With 1,000 mods in nested folders the Mods page opens in 100 ms or less and scrolling keeps the P19
+    frame budget (measured, recorded).
+  - Moving a folder moves its mods and survives a restart; disabling a folder disables exactly its
+    branch (twin: a sibling stays enabled).
+  - A package saved before this change, with flat categories, loads identically (golden).
+  - The AI creates a mod inside a named folder and moves another, through tools only.
+- **Reuses**: the mod store and manifest, the Hub Mods page, P19 (measurement); MVP4 (script instances)
+  and MVP18 (folder mods) build on the same paths.
+- **Package/flagship**: packages; the flagship decides its default folder layout.
 
 ### Dropped: the old MVP7 (editor tooling)
 

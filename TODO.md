@@ -80,8 +80,8 @@
 ## Plan of record 2026-11-11: open work by milestone
 
 The plan was re-ordered on 2026-11-11 (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md` §4.0, plan decisions
-D9–D14): demo-gated milestones M0–M4, the existing rungs under their MVPn ids and nineteen new packages
-P1–P19. This section files the open work of M0 and M1; later milestones are filed when they start. The
+D9–D14): demo-gated milestones M0–M4, the existing rungs under their MVPn ids and twenty new packages
+P1–P20. This section files the open work of M0 and M1; later milestones are filed when they start. The
 sections below keep their items under the rung names they were written for.
 
 ### Owner decisions (each has a default the work proceeds with; the owner may override)
@@ -288,6 +288,13 @@ UI from Lua (P18) and performance (P19):
       the table — expected candidates are the guard batch, marshalling and dispatch allocations, the
       per-part property block that defeats the SRP Batcher and the every-instance pre-simulation pass —
       and record before and after for each on the same harness.
+
+Mods (P20):
+
+- [ ] **Mod folders (P20).** *Owner:* mods + Hub. *Plan:* `category` becomes a `/`-separated folder path
+      (flat categories stay valid), the mod service gains create, rename, move and branch enable or
+      disable, the Hub Mods page becomes a collapsible, virtualized tree with search and remembered fold
+      state, `manage_mods` works by folder, and the 256-source ceiling is re-measured at 1,000 sources.
 
 ### Existing items these packages absorb or make stale
 

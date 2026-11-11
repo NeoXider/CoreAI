@@ -40,6 +40,7 @@ open work is filed in `TODO.md` under "Plan of record 2026-11-11".
      through a `llama-server` sidecar);
    - interface: P18 — the interpreter and host first, the Lua surface after P1's input-focus port;
    - performance: P19 — the harness and the first table, then optimization by measured rank;
+   - mods: P20 — folders for mods (a tree instead of one flat list), after P19 can measure it;
    - MVP4 alongside on the mods runtime.
    First wave, started 2026-11-11: P1, P7, P11 stage 1, the P18 interpreter and the P19 harness.
 3. **M2 Whole games from chat**, **M3 Together** and **M4 Platform** as listed in §4.0; the order of M2
@@ -54,7 +55,7 @@ package and acceptance by demo; with the three audit rounds per rung used throug
 
 | Milestone | Agent-days | Wall-clock at 3–4 agents |
 |---|---|---|
-| M0 + M1: the single-player Block world with UI from Lua and the performance baseline | about 43 | 4–5 weeks; a first playable slice after about 1.5 |
+| M0 + M1: the single-player Block world with UI from Lua, the performance baseline and mod folders | about 45 | 4–5 weeks; a first playable slice after about 1.5 |
 | M2 Whole games from chat | about 37 | 3–4 weeks |
 | M3 Together | about 19 | about 3 weeks (the network rungs are sequential) |
 | M4 Platform | about 30 | 4–5 weeks |
