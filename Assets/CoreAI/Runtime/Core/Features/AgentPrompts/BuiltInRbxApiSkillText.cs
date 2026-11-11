@@ -1129,6 +1129,12 @@ command.Parent = TextChatService
 - `EnvironmentDiffuseScale` and `EnvironmentSpecularScale` (0..1, clamped; 1 in a new world) are the
   sky's share of the ambient and of reflections. 0 leaves only `Ambient` and no sky reflections, which
   is how an underground area reads dark: tween both down when the player goes below ground.
+- Fog: `FogStart` (0) and `FogEnd` (100000) are depths in studs from the camera where the fog begins
+  and where it is fully opaque, `FogColor` its hue (Color3 0.75, 0.75, 0.75). FogEnd 100000 means no
+  fog. Any finite number is kept as set; tween them like any number or Color3. As in Roblox, a fog
+  change fires `Changed` and its property signal but not `LightingChanged`. In CoreAI, until a script
+  (or a saved world) sets fog, the host's look keeps its own haze.
+    L.FogColor = Color3.fromRGB(196, 214, 214); L.FogStart = 150; L.FogEnd = 600
 - A day cycle: `RunService.Heartbeat:Connect(function(dt) L.ClockTime = L.ClockTime + dt * 24 / 600 end)`
   (a ten-minute day), or `TweenService:Create(L, TweenInfo.new(5), {ClockTime = 18}):Play()`.
 - `Instance.new(""PointLight"")` parented to a Part in the Workspace lights around that part:
@@ -1143,10 +1149,10 @@ command.Parent = TextChatService
     local light = Instance.new(""PointLight"")
     light.Range = 16; light.Brightness = 2; light.Color = Color3.fromRGB(255, 180, 90)
     light.Parent = torch
-- Not yet (NOT_IMPLEMENTED, planned for P9): `FogStart`/`FogEnd`/`FogColor`, `ColorShift_Top`/
-  `ColorShift_Bottom`, `ExposureCompensation`,
-  `GlobalShadows`, `ShadowSoftness`, `GetMoonDirection`, `GetMoonPhase`, and the classes `SpotLight`,
-  `SurfaceLight`, `Sky`, `Atmosphere`, `BloomEffect`, `ColorCorrectionEffect`, `ColorGradingEffect`.
+- Not yet (NOT_IMPLEMENTED, planned for P9): `ColorShift_Top`/`ColorShift_Bottom`,
+  `ExposureCompensation`, `GlobalShadows`, `ShadowSoftness`, `GetMoonDirection`, `GetMoonPhase`, and
+  the classes `SpotLight`, `SurfaceLight`, `Sky`, `Atmosphere`, `BloomEffect`, `ColorCorrectionEffect`,
+  `ColorGradingEffect`.
   `LightingStyle`, `PrioritizeLightingQuality` and `Technology` are Roblox-only (unsupported).
 
 <!-- section: ai -->

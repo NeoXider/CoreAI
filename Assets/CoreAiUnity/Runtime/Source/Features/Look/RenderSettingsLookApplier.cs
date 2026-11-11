@@ -15,7 +15,9 @@ namespace CoreAI.Look
     /// restored by <see cref="Revert"/>. While another system claims the ambient
     /// (<see cref="LookAmbientOwnership"/>), the ambient mode, colours and intensity are left to it; the
     /// sky, reflections, fog and shadows still follow the look, and the look's ambient returns when the
-    /// last claim is released.
+    /// last claim is released. With its procedural sky the look follows the sun: the sky below the horizon continues
+    /// the haze above it (<see cref="CoreAiLookProfile.SkyGroundFollowsHaze"/>) and the fog takes the haze colour
+    /// (<see cref="CoreAiLookProfile.FogFollowsHaze"/>), recomputed whenever the sun has moved before a frame renders.
     /// </summary>
     public class RenderSettingsLookApplier : ICoreAiLookApplier
     {
@@ -33,6 +35,9 @@ namespace CoreAI.Look
         private static readonly int GroundColorId = Shader.PropertyToID("_GroundColor");
         private static readonly int ExposureId = Shader.PropertyToID("_Exposure");
 
+        /// <summary>Cosine of the sun turn below which the haze colours are not recomputed (about 0.05 degrees).</summary>
+        private const float HazeSunTolerance = 0.9999996f;
+
         private readonly IGameLogger _logger;
         private readonly LookAmbientOwnership _ambientOwnership;
         private readonly Dictionary<Light, LightShadows> _originalShadows = new();
@@ -46,6 +51,10 @@ namespace CoreAI.Look
         private ResolvedGraphicsOptions _lastOptions;
         private LookMode _lastMode = LookMode.Off;
         private bool _ownershipSubscribed;
+        private bool _hazeSubscribed;
+        private bool _hazeValid;
+        private Vector3 _hazeSun;
+        private bool _ownsFog;
 
         /// <summary>
         /// Creates the applier; <paramref name="logger"/> defaults to the unscoped CoreAI logger and
@@ -90,7 +99,8 @@ namespace CoreAI.Look
                 ApplySky(profile, options);
             }
 
-            if (mode == LookMode.Apply || _snapshot.FogMissing)
+            _ownsFog = mode == LookMode.Apply || _snapshot.FogMissing;
+            if (_ownsFog)
             {
                 ApplyFog(profile, options);
             }
@@ -99,6 +109,32 @@ namespace CoreAI.Look
             {
                 ApplyShadows(options);
             }
+
+            _hazeValid = false;
+            UpdateHaze();
+            if (!_hazeSubscribed)
+            {
+                RenderPipelineManager.beginContextRendering += HandleBeginContextRendering;
+                _hazeSubscribed = true;
+            }
+        }
+
+        /// <summary>
+        /// The ground colour the procedural sky was last given (linear) and the fog colour the haze set; false while the
+        /// look does not draw its procedural sky or the sky does not follow the haze.
+        /// </summary>
+        public bool TryGetHazeColors(out Color groundLinear, out Color fogLinear)
+        {
+            groundLinear = default;
+            fogLinear = default;
+            if (_proceduralSky == null || !_hazeValid)
+            {
+                return false;
+            }
+
+            groundLinear = _proceduralSky.GetColor(GroundColorId).linear;
+            fogLinear = RenderSettings.fogColor.linear;
+            return true;
         }
 
         /// <inheritdoc />
@@ -110,6 +146,15 @@ namespace CoreAI.Look
                 _ambientOwnership.SkyReflectionScaleChanged -= HandleSkyReflectionScaleChanged;
                 _ownershipSubscribed = false;
             }
+
+            if (_hazeSubscribed)
+            {
+                RenderPipelineManager.beginContextRendering -= HandleBeginContextRendering;
+                _hazeSubscribed = false;
+            }
+
+            _hazeValid = false;
+            _ownsFog = false;
 
             _lastProfile = null;
             _lastOptions = null;
@@ -192,6 +237,64 @@ namespace CoreAI.Look
             if (_lastMode == LookMode.Apply || _snapshot.SkyboxMissing)
             {
                 ApplySky(_lastProfile, _lastOptions);
+            }
+        }
+
+        private void HandleBeginContextRendering(ScriptableRenderContext context, List<Camera> cameras)
+        {
+            UpdateHaze();
+        }
+
+        /// <summary>
+        /// Recolours the procedural sky's ground and, while the look owns the fog, the fog from the sun's direction,
+        /// when the sun has turned since the last time.
+        /// </summary>
+        private void UpdateHaze()
+        {
+            CoreAiLookProfile profile = _lastProfile;
+            if (profile == null || _proceduralSky == null || RenderSettings.skybox != _proceduralSky
+                || (!profile.SkyGroundFollowsHaze && !profile.FogFollowsHaze))
+            {
+                return;
+            }
+
+            Light sun = RenderSettings.sun;
+            if (sun == null)
+            {
+                return;
+            }
+
+            Vector3 towardSun = -sun.transform.forward;
+            if (_hazeValid && Vector3.Dot(towardSun, _hazeSun) > HazeSunTolerance)
+            {
+                return;
+            }
+
+            _hazeSun = towardSun;
+            _hazeValid = true;
+            Color tint = profile.SkyTint;
+            float thickness = profile.SkyAtmosphereThickness;
+            if (profile.SkyGroundFollowsHaze)
+            {
+                ProceduralSkyHaze.GroundColorMatchingHaze(towardSun.x, towardSun.y, towardSun.z, tint.r, tint.g, tint.b,
+                    thickness, out float red, out float green, out float blue);
+                // WHY gamma: in a linear project Unity converts a material colour to linear before the shader sees
+                // it, and the sky uses its ground colour as it arrives.
+                _proceduralSky.SetColor(GroundColorId, new Color(red, green, blue, 1f).gamma);
+            }
+            else
+            {
+                _proceduralSky.SetColor(GroundColorId, profile.SkyGroundColor);
+            }
+
+            if (profile.FogFollowsHaze && _ownsFog && RenderSettings.fog)
+            {
+                ProceduralSkyHaze.HorizonHaze(towardSun.x, towardSun.y, towardSun.z, tint.r, tint.g, tint.b, thickness,
+                    out float red, out float green, out float blue);
+                float exposure = profile.SkyExposure;
+                Color haze = new(Mathf.Clamp01(red * exposure), Mathf.Clamp01(green * exposure),
+                    Mathf.Clamp01(blue * exposure), 1f);
+                RenderSettings.fogColor = haze.gamma;
             }
         }
 
@@ -295,6 +398,9 @@ namespace CoreAI.Look
             _proceduralSky.SetColor(SkyTintId, profile.SkyTint);
             _proceduralSky.SetColor(GroundColorId, profile.SkyGroundColor);
             _proceduralSky.SetFloat(ExposureId, profile.SkyExposure);
+            // WHY: the ground colour just written is the profile's; the haze colours are recomputed before the next
+            // frame even when the sun has not moved.
+            _hazeValid = false;
             return _proceduralSky;
         }
 

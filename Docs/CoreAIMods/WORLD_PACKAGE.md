@@ -50,7 +50,13 @@ block in a tree without a `Lighting` service. The block also carries `environmen
 `environment_specular_scale` (`Lighting.EnvironmentDiffuseScale`, `EnvironmentSpecularScale`), each only when it
 differs from its default of 1, so a block whose scales were never changed is written exactly as before they existed
 and a block without them reads 1; the reader refuses a scale outside [0, 1], the range the setters clamp to, and
-the undo mark folds both in. Tests: `WorldPackageLightingEditModeTests`, `WorldPackageEnvironmentScalesEditModeTests`. Known limit:
+the undo mark folds both in. Likewise `fog_start` and `fog_end` (studs) and `fog_color` [r, g, b]
+(`Lighting.FogStart`, `FogEnd`, `FogColor`) are written only when they differ from the class defaults (0, 100000,
+[0.75, 0.75, 0.75]); a block without them reads those defaults, the reader refuses a non-finite value or a
+`fog_color` without three components, and the undo mark folds all three in. No range is enforced (the mirror
+states none) and `fog_start` may exceed `fog_end`. A reader older than these keys refuses a block that carries
+them, as it refuses every unknown key. Tests: `WorldPackageLightingEditModeTests`,
+`WorldPackageEnvironmentScalesEditModeTests`, `WorldPackageFogEditModeTests`. Known limit:
 `RbxLighting.RestoreDurableState` advances the Lighting service's revision, so a world with a `lighting`
 block re-saves with a higher revision on that one node.
 

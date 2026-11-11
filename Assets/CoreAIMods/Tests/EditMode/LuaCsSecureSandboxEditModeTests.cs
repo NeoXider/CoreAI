@@ -2867,7 +2867,15 @@ namespace CoreAI.Tests.EditMode
                 bool overflowLine = rows[0].Contains("stack overflow")
                                     || (channel == "xpcall" && rows[0].EndsWith("|string:error in error handling",
                                         System.StringComparison.Ordinal));
-                if (!rows[0].StartsWith("boolean:false|string:", System.StringComparison.Ordinal) || !overflowLine)
+                // WHY nil is accepted for xpcall: Lua-CSharp 0.5.8's native xpcall hands its handler the error object,
+                // and the engine's own overflow has none. The sandbox restores the line only while fewer than 8
+                // counted calls are open (LuaCsSecureEnvironment.XPCallBodyMaxOpenLevels); this chain is deeper, so
+                // on the editor's Mono, where the engine's stack check stops it first, the chain ends with nil.
+                // TODO: drop this once upstream passes a message for wrapped engine exceptions.
+                bool deepXpcallNil = channel == "xpcall" && rows[0] == "boolean:false|nil:nil";
+                bool caughtWithALine = rows[0].StartsWith("boolean:false|string:", System.StringComparison.Ordinal)
+                                       && overflowLine;
+                if (!caughtWithALine && !deepXpcallNil)
                 {
                     failures.Add(channel + " ended with " + rows[0]);
                 }

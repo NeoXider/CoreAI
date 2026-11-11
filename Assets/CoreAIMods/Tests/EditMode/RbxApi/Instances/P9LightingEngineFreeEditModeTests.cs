@@ -330,6 +330,182 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             Assert.AreEqual(0.3f, RbxLightingMapping.SkyFacingAmbient(half).R, 1e-5f);
         }
 
+        // ---- fog ---------------------------------------------------------------------------------
+
+        [Test]
+        public void P9_Fog_DefaultsEqualTheFullApiDump_AndAFreshStateCarriesThem()
+        {
+            Assert.AreEqual(0f, _lighting.FogStart);
+            Assert.AreEqual(100000f, _lighting.FogEnd);
+            Assert.AreEqual(new RbxColor3(0.75f, 0.75f, 0.75f), _lighting.FogColor);
+            RbxLightingState state = _lighting.CaptureState();
+            Assert.AreEqual(0f, state.FogStart);
+            Assert.AreEqual(100000f, state.FogEnd);
+            Assert.AreEqual(RbxLighting.DefaultFogColor, state.FogColor);
+            Assert.IsTrue(RbxLightingMapping.IsFogAtDefaults(state), "a world that never set fog carries the defaults");
+            Assert.IsFalse(_lighting.IsDriven, "reading fog drives nothing");
+        }
+
+        [Test]
+        public void P9_Fog_ARealChangeFiresChangedAndItsSignalOnce_ButNotLightingChanged()
+        {
+            ModScheduler scheduler = new(new NoThreadFactory(), new RbxAccumulatingTimeSource());
+            List<string> changed = new();
+            int fogEndSignals = 0;
+            int lightingChanged = 0;
+            _lighting.Changed.BindScheduler(scheduler);
+            _lighting.Changed.Connect((Action<object[]>)(arguments => changed.Add((string)arguments[0])));
+            RbxScriptSignal fogEnd = _lighting.GetPropertyChangedSignal("FogEnd");
+            fogEnd.BindScheduler(scheduler);
+            fogEnd.Connect((Action<object[]>)(_ => fogEndSignals++));
+            _lighting.LightingChanged.BindScheduler(scheduler);
+            _lighting.LightingChanged.Connect((Action<object[]>)(_ => lightingChanged++));
+            RecordingSink sink = new();
+            _lighting.AttachSink(sink);
+            long revision = Revision(_lighting);
+
+            _lighting.SetFogEnd(500d);
+            _lighting.SetFogStart(150d);
+            _lighting.SetFogColor(new RbxColor3(0.2f, 0.3f, 0.4f));
+            scheduler.Advance(0d);
+
+            CollectionAssert.AreEqual(new[] { "FogEnd", "FogStart", "FogColor" }, changed);
+            Assert.AreEqual(1, fogEndSignals);
+            Assert.AreEqual(0, lightingChanged, "the mirror lists the fog properties as LightingChanged's exceptions");
+            Assert.IsTrue(_lighting.IsDriven, "a fog write drives the world like any Lighting write");
+            Assert.Greater(Revision(_lighting), revision, "a fog write is a change of the service");
+            Assert.AreEqual(3, sink.States.Count);
+            Assert.AreEqual(150f, sink.States[2].FogStart);
+            Assert.AreEqual(500f, sink.States[2].FogEnd);
+            Assert.AreEqual(new RbxColor3(0.2f, 0.3f, 0.4f), sink.States[2].FogColor);
+            Assert.IsFalse(RbxLightingMapping.IsFogAtDefaults(sink.States[2]));
+
+            _lighting.SetBrightness(2d);
+            scheduler.Advance(0d);
+            Assert.AreEqual(1, lightingChanged, "twin: a property outside the fog still fires LightingChanged");
+        }
+
+        [Test]
+        public void P9_Fog_AnEqualWriteFiresNothing_NegativeTwin()
+        {
+            ModScheduler scheduler = new(new NoThreadFactory(), new RbxAccumulatingTimeSource());
+            List<string> changed = new();
+            _lighting.Changed.BindScheduler(scheduler);
+            _lighting.Changed.Connect((Action<object[]>)(arguments => changed.Add((string)arguments[0])));
+            RecordingSink sink = new();
+            _lighting.AttachSink(sink);
+            long revision = Revision(_lighting);
+
+            _lighting.SetFogStart(0d);
+            _lighting.SetFogEnd(100000d);
+            _lighting.SetFogColor(RbxLighting.DefaultFogColor);
+            scheduler.Advance(0d);
+
+            Assert.AreEqual(0, changed.Count, "writing the defaults over the defaults is not a change");
+            Assert.AreEqual(0, sink.States.Count);
+            Assert.AreEqual(revision, Revision(_lighting));
+            Assert.IsFalse(_lighting.IsDriven);
+
+            _lighting.SetFogEnd(600d);
+            _lighting.SetFogEnd(600d);
+            scheduler.Advance(0d);
+            CollectionAssert.AreEqual(new[] { "FogEnd" }, changed, "the second, equal write fires nothing");
+            Assert.AreEqual(1, sink.States.Count);
+        }
+
+        [Test]
+        public void P9_Fog_RefusesNonFiniteValues_AndKeepsAnyFiniteOneAsSet()
+        {
+            foreach (double bad in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity })
+            {
+                RbxError start = Assert.Throws<RbxError>(() => _lighting.SetFogStart(bad));
+                Assert.AreEqual(RbxErrorCode.BadArgument, start.Code);
+                StringAssert.Contains("Lighting.FogStart needs a finite number", start.Message);
+                RbxError end = Assert.Throws<RbxError>(() => _lighting.SetFogEnd(bad));
+                StringAssert.Contains("Lighting.FogEnd needs a finite number", end.Message);
+            }
+
+            RbxError color = Assert.Throws<RbxError>(() => _lighting.SetFogColor(new RbxColor3(0f, float.NaN, 0f)));
+            StringAssert.Contains("Lighting.FogColor needs a Color3 with finite components", color.Message);
+            Assert.AreEqual(RbxLighting.DefaultFogEnd, _lighting.FogEnd, "a refused write leaves the fog alone");
+            Assert.AreEqual(RbxLighting.DefaultFogColor, _lighting.FogColor);
+            Assert.IsFalse(_lighting.IsDriven);
+
+            _lighting.SetFogStart(800d);
+            _lighting.SetFogEnd(-25d);
+            Assert.AreEqual(800f, _lighting.FogStart, "the mirror states no range and no order, so both stay as set");
+            Assert.AreEqual(-25f, _lighting.FogEnd);
+            _lighting.SetFogEnd(1e300);
+            Assert.AreEqual(float.MaxValue, _lighting.FogEnd, "past the float range it saturates, never turns infinite");
+            _lighting.SetFogStart(-1e300);
+            Assert.AreEqual(-float.MaxValue, _lighting.FogStart);
+        }
+
+        [Test]
+        public void P9_Fog_ReachesTheDurableState_AndRoundTripsThroughARestore()
+        {
+            _lighting.SetFogStart(150d);
+            _lighting.SetFogEnd(600d);
+            _lighting.SetFogColor(RbxColor3.FromRGB(196f, 214f, 214f));
+            RbxLightingDurableState saved = _lighting.CaptureDurableState();
+            Assert.AreEqual(150f, saved.FogStart);
+            Assert.AreEqual(600f, saved.FogEnd);
+            Assert.AreEqual(RbxColor3.FromRGB(196f, 214f, 214f), saved.FogColor);
+
+            InstanceRegistry otherRegistry = new();
+            RbxLighting other = (RbxLighting)DataModelBootstrap.CreateGame(otherRegistry).GetService("Lighting");
+            RecordingSink sink = new();
+            other.AttachSink(sink);
+            other.RestoreDurableState(saved);
+
+            Assert.AreEqual(saved, other.CaptureDurableState(), "a restore reproduces the saved fog");
+            Assert.AreEqual(600f, other.FogEnd);
+            Assert.AreEqual(_lighting.CaptureState(), sink.States[sink.States.Count - 1], "the sink sees the restored fog");
+        }
+
+        [Test]
+        public void P9_Fog_AStateSavedBeforeTheFogMembers_ReadsAndRestoresTheDefaults_NegativeTwin()
+        {
+            RbxLightingDurableState beforeFog = new(12f, 0f, 1f, RbxLighting.DefaultAmbient,
+                RbxLighting.DefaultOutdoorAmbient, 0.5f, 1f);
+            Assert.AreEqual(RbxLighting.DefaultFogStart, beforeFog.FogStart);
+            Assert.AreEqual(RbxLighting.DefaultFogEnd, beforeFog.FogEnd);
+            Assert.AreEqual(RbxLighting.DefaultFogColor, beforeFog.FogColor);
+            RbxLightingDurableState beforeScales = new(12f, 0f, 1f, RbxLighting.DefaultAmbient,
+                RbxLighting.DefaultOutdoorAmbient);
+            Assert.AreEqual(RbxLighting.DefaultFogEnd, beforeScales.FogEnd);
+            Assert.AreEqual(RbxLighting.DefaultFogEnd, RbxLightingDurableState.Defaults.FogEnd);
+            RbxLightingState stateBeforeFog = new(12f, 0f, 1f, RbxLighting.DefaultAmbient,
+                RbxLighting.DefaultOutdoorAmbient, RbxSunModel.SunDirection(12d, 0d), 1f, 1f);
+            Assert.IsTrue(RbxLightingMapping.IsFogAtDefaults(stateBeforeFog), "a state built without fog carries the defaults");
+
+            _lighting.SetFogEnd(50d);
+            _lighting.SetFogColor(new RbxColor3(1f, 0f, 0f));
+            _lighting.RestoreDurableState(beforeFog);
+
+            Assert.AreEqual(RbxLighting.DefaultFogEnd, _lighting.FogEnd, "restoring a block without fog puts the defaults back");
+            Assert.AreEqual(RbxLighting.DefaultFogColor, _lighting.FogColor);
+            Assert.AreEqual(0.5f, _lighting.EnvironmentDiffuseScale);
+        }
+
+        [Test]
+        public void P9_Mapping_IsFogAtDefaults_TurnsFalseOnceAnyFogValueMoves()
+        {
+            RbxVector3 sun = RbxSunModel.SunDirection(12d, 0d);
+            RbxColor3 grey = RbxLighting.DefaultAmbient;
+            RbxLightingState defaults = new(12f, 0f, 1f, grey, grey, sun, 1f, 1f, 0f, 100000f, RbxLighting.DefaultFogColor);
+            RbxLightingState start = new(12f, 0f, 1f, grey, grey, sun, 1f, 1f, 1f, 100000f, RbxLighting.DefaultFogColor);
+            RbxLightingState end = new(12f, 0f, 1f, grey, grey, sun, 1f, 1f, 0f, 99999f, RbxLighting.DefaultFogColor);
+            RbxLightingState color = new(12f, 0f, 1f, grey, grey, sun, 1f, 1f, 0f, 100000f,
+                new RbxColor3(0.75f, 0.75f, 0.7f));
+
+            Assert.IsTrue(RbxLightingMapping.IsFogAtDefaults(defaults));
+            Assert.IsFalse(RbxLightingMapping.IsFogAtDefaults(start));
+            Assert.IsFalse(RbxLightingMapping.IsFogAtDefaults(end));
+            Assert.IsFalse(RbxLightingMapping.IsFogAtDefaults(color));
+            Assert.AreNotEqual(defaults, end, "the fog takes part in the state's equality, so a sink sees the change");
+        }
+
         [Test]
         public void P9_DurableState_AScriptWriteAfterTheRestore_AdvancesTheRevision_NegativeTwin()
         {
@@ -440,11 +616,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             Assert.IsTrue(_registry.Catalog.TryGetKnownUnimplementedClass("SpotLight",
                 out RbxKnownUnimplementedClassDescriptor spot));
             Assert.AreEqual("P9", spot.Phase);
-            Assert.IsTrue(_registry.Catalog.TryGetKnownUnimplementedMember("Lighting", "FogEnd",
-                RbxKnownUnimplementedMemberAccess.Read, out _, out RbxKnownUnimplementedMemberDescriptor fog));
-            Assert.AreEqual("P9", fog.Phase);
+            Assert.IsTrue(_registry.Catalog.TryGetKnownUnimplementedMember("Lighting", "ExposureCompensation",
+                RbxKnownUnimplementedMemberAccess.Read, out _, out RbxKnownUnimplementedMemberDescriptor exposure));
+            Assert.AreEqual("P9", exposure.Phase);
             Assert.IsFalse(_registry.Catalog.TryGetKnownUnimplementedMember("Lighting", "ClockTime",
                 RbxKnownUnimplementedMemberAccess.Read, out _, out _), "a shipped member has no stub");
+            foreach (string fog in new[] { "FogStart", "FogEnd", "FogColor" })
+            {
+                Assert.IsFalse(_registry.Catalog.TryGetKnownUnimplementedMember("Lighting", fog,
+                    RbxKnownUnimplementedMemberAccess.Read, out _, out _), fog + " shipped, so it has no read stub");
+                Assert.IsFalse(_registry.Catalog.TryGetKnownUnimplementedMember("Lighting", fog,
+                    RbxKnownUnimplementedMemberAccess.Write, out _, out _), fog + " shipped, so it has no write stub");
+            }
             Assert.IsTrue(_registry.Catalog.TryGetKnownUnimplementedMember("Lighting", "Technology",
                 RbxKnownUnimplementedMemberAccess.Write, out _, out RbxKnownUnimplementedMemberDescriptor tech));
             Assert.AreEqual(RbxKnownUnimplementedMemberStatus.Unsupported, tech.Status);

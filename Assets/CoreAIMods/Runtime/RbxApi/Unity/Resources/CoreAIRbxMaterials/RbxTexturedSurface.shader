@@ -28,6 +28,7 @@ Shader "CoreAI/Rbx/Textured Surface"
         [HideInInspector] _Cutoff("Alpha Cutoff", Range(0,1)) = 0.5
         [HideInInspector] _RbxSkyExposure("Sky Exposure", Range(0,1)) = 1
         [HideInInspector] _RbxSkyExposureSource("Sky Exposure From Vertex Colour", Float) = 0
+        [HideInInspector] _RbxCellTiles("One Tile Per Terrain Cell Face", Float) = 0
     }
 
     SubShader
@@ -105,6 +106,7 @@ Shader "CoreAI/Rbx/Textured Surface"
                 float _AlphaFromPartColor;
                 float _RbxSkyExposure;
                 float _RbxSkyExposureSource;
+                float _RbxCellTiles;
             CBUFFER_END
 
             struct Attributes
@@ -219,7 +221,9 @@ Shader "CoreAI/Rbx/Textured Surface"
                 // WHY: the map repeats every whole tile, so only the fractional part of the edge
                 // offset matters. Folding it before the position term keeps U small on a huge part,
                 // where an offset of several hundred tiles would eat the float precision of the UV.
-                float2 edgeOffset = float2(frac(uOffset * uvScale.x), 0.0);
+                // A Terrain block twin (_RbxCellTiles = 1) drops it: its world-space chunk has no part
+                // size, and every cell edge must fall on a whole tile so each face shows one tile.
+                float2 edgeOffset = float2(frac(uOffset * uvScale.x), 0.0) * (1.0 - saturate(_RbxCellTiles));
                 return float2(dot(positionAligned, uAxis), dot(positionAligned, vAxis)) * uvScale
                     + edgeOffset;
             }

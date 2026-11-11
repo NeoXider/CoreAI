@@ -121,7 +121,7 @@ namespace CoreAI.Ai.SelfRepair
             string id = (modId ?? "").Trim();
             string said = string.IsNullOrWhiteSpace(summary)
                 ? "the AI did not say what it changed (" + Lines(comparison.FailingLines) + " -> " +
-                  Lines(comparison.RepairedLines) + ")"
+                  Lines(comparison.RepairedLines) + ")."
                 : "the AI says: " + Sentence(summary.Trim());
             StringBuilder line = new();
             if (comparison.IsSuspicious)

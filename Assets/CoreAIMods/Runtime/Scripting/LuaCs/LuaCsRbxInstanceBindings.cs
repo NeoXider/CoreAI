@@ -2280,7 +2280,8 @@ namespace CoreAI.Ai.LuaCs
             ("MaterialVariant", Names("BaseMaterial", "ColorMap", "NormalMap", "RoughnessMap",
                 "MetalnessMap", "StudsPerTile")),
             ("Lighting", Names("ClockTime", "TimeOfDay", "GeographicLatitude", "Brightness", "Ambient",
-                "OutdoorAmbient", "EnvironmentDiffuseScale", "EnvironmentSpecularScale")),
+                "OutdoorAmbient", "EnvironmentDiffuseScale", "EnvironmentSpecularScale", "FogStart", "FogEnd",
+                "FogColor")),
             ("Light", Names("Brightness", "Color", "Enabled", "Shadows")),
             ("PointLight", Names("Range")),
             ("ValueBase", Names("Value")),
@@ -4019,6 +4020,15 @@ namespace CoreAI.Ai.LuaCs
                 case "EnvironmentSpecularScale":
                     value = (double)lighting.EnvironmentSpecularScale;
                     return true;
+                case "FogStart":
+                    value = (double)lighting.FogStart;
+                    return true;
+                case "FogEnd":
+                    value = (double)lighting.FogEnd;
+                    return true;
+                case "FogColor":
+                    value = LuaCsRbxDatatypeBindings.Wrap(lighting.FogColor);
+                    return true;
                 case "LightingChanged":
                     value = LuaCsRbxDatatypeBindings.Wrap(lighting.LightingChanged, context);
                     return true;
@@ -4069,6 +4079,18 @@ namespace CoreAI.Ai.LuaCs
                 case "EnvironmentSpecularScale":
                     context.RequireWorldEditForWrite(self, key);
                     lighting.SetEnvironmentSpecularScale(ReadAssignedNumber(value, self.ClassName, key));
+                    return true;
+                case "FogStart":
+                    context.RequireWorldEditForWrite(self, key);
+                    lighting.SetFogStart(ReadAssignedNumber(value, self.ClassName, key));
+                    return true;
+                case "FogEnd":
+                    context.RequireWorldEditForWrite(self, key);
+                    lighting.SetFogEnd(ReadAssignedNumber(value, self.ClassName, key));
+                    return true;
+                case "FogColor":
+                    context.RequireWorldEditForWrite(self, key);
+                    lighting.SetFogColor(ReadAssignedColor3(value, self.ClassName, key));
                     return true;
                 default:
                     return false;

@@ -551,13 +551,12 @@ namespace CoreAI.Sandbox.LuaCs
         }
 
         // WHY a count hook signals a trip by cancelling instead of throwing - the Lua-CSharp facts it rests on
-        // (decompiled from the shipped Lua.dll):
-        // - LuaVirtualMachine.ExecutePerInstructionHook sets LuaState.IsInHook = true before it calls the count
-        //   hook and clears it only after the hook RETURNS; there is no finally. While the flag is set,
-        //   LuaVirtualMachine.MoveNext counts every frame it enters against the static DummyHookCount, so the
-        //   hook never fires again on that state, and SetHook does not clear the flag. A hook that threw
-        //   therefore disarmed every guard on the state: `pcall(runaway); pcall(work)` ran `work` unguarded,
-        //   and every later guarded run on the same state (the next mod event handler) had no budget at all.
+        // (read from the shipped Lua.dll, 0.5.8):
+        // - A cancellation of the run's own token is the one signal no protected call lets through to Lua code; a
+        //   thrown trip is not, because xpcall runs its handler for anything else (below).
+        // - Up to 0.5.6 a hook that threw also left LuaState.IsInHook set, so no count hook fired on that state
+        //   again and every later guarded run on it had no budget. 0.5.8 restores the flag in a finally after a
+        //   hook throws, is cancelled or cannot set up its frame; LuaCsVmContractEditModeTests fails if it stops.
         // - Right after a hook returns, the same method calls ThrowIfCancellationRequested on the running
         //   context's token, and the VM checks that token again at every JMP, FORLOOP, CALL and TAILCALL and
         //   after every C# function returns. A cancelled token ends the run within one loop iteration, however
@@ -572,8 +571,8 @@ namespace CoreAI.Sandbox.LuaCs
         /// <summary>
         /// Signals a budget trip from inside a count hook: cancels <paramref name="runSource"/>, whose token
         /// the guarded run executes with, and reports whether the context the hook fired in reads that token.
-        /// When it does (true), the hook must RETURN NORMALLY: the VM then clears its in-hook flag and raises
-        /// the cancellation itself. When it does not (false), the hook fired inside host code that runs Lua on
+        /// When it does (true), the hook must RETURN NORMALLY: the VM then raises the cancellation itself, which no
+        /// protected call catches. When it does not (false), the hook fired inside host code that runs Lua on
         /// this thread with a token of its own; the hook then has to throw <see cref="ForeignContextTrip"/>.
         /// </summary>
         /// <param name="runSource">The source whose token the guarded run was started with.</param>
@@ -595,12 +594,12 @@ namespace CoreAI.Sandbox.LuaCs
         }
 
         // WHY a throw here at all: the hook fired in Lua that host code runs on this thread with a token of its
-        // own, and cancelling the run's token cannot stop that call. The throw leaves the in-hook flag set:
-        // LuaCsExecutionGuard clears it on its state when the run ends, and a coroutine hook's thread is dead
-        // after its trip. WHY a cancellation and not the trip's Lua error: pcall rethrows every
-        // OperationCanceledException. xpcall does NOT: it checks only its own token, which in a foreign context
-        // is not the cancelled one, and then runs its handler with the in-hook flag still set - unguarded, as is
-        // every frame after it until the run's own token is checked (audit A2-01: 60M iterations in a handler).
+        // own, and cancelling the run's token cannot stop that call. The VM restores its in-hook flag after the
+        // throw (Lua-CSharp 0.5.8; up to 0.5.6 LuaCsExecutionGuard had to clear it), so the state stays guarded.
+        // WHY a cancellation and not the trip's Lua error: pcall rethrows every OperationCanceledException.
+        // xpcall does NOT: it checks only its own token, which in a foreign context is not the cancelled one, and
+        // then runs its handler and every frame after it until the run's own token is checked (audit A2-01, on
+        // 0.5.6 with the in-hook flag still set: 60M unguarded iterations in a handler).
         // So no mod code may ever run in a foreign context, and none can: every host function that calls back
         // into mod code passes on the token it was called with, and the sandbox's coroutine.resume refuses a
         // handle's thread (see HandleThreads), the one way mod code used to run with a token (the handle's) other

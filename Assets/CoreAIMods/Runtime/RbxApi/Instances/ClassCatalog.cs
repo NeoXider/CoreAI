@@ -1007,18 +1007,16 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>
         /// The <c>Lighting</c> members of the mirror's dump the P9 day-cycle slice does not answer: the
-        /// rest of P9 is planned (fog, colour shift, environment and exposure, shadows, the moon), and the
+        /// rest of P9 is planned (colour shift, exposure, shadows, the moon), and the
         /// three <c>RobloxScriptSecurity</c> members stay deliberately out of reach of scripts.
         /// </summary>
         private static void RegisterLightingKnownUnimplementedMembers(ClassCatalog catalog)
         {
             const string phase = "P9";
             const string lookWorkaround =
-                "set Lighting.ClockTime, Brightness, Ambient, OutdoorAmbient, EnvironmentDiffuseScale and "
-                + "EnvironmentSpecularScale, which are live; the rest of the look is the host's until this member "
-                + "lands";
-            const string fogWorkaround =
-                "fog follows the host's look settings until the fog members land";
+                "set Lighting.ClockTime, Brightness, Ambient, OutdoorAmbient, EnvironmentDiffuseScale, "
+                + "EnvironmentSpecularScale, FogStart, FogEnd and FogColor, which are live; the rest of the look is "
+                + "the host's until this member lands";
             const string moonWorkaround =
                 "read Lighting:GetSunDirection(); the moon is not modelled until this member lands";
             const string securityWorkaround =
@@ -1029,9 +1027,6 @@ namespace CoreAI.Mods.Rbx.Instances
                 RbxKnownUnimplementedMemberDescriptor.PlannedProperty("ColorShift_Top", phase, lookWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.PlannedProperty(
                     "ExposureCompensation", phase, lookWorkaround),
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("FogColor", phase, fogWorkaround),
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("FogEnd", phase, fogWorkaround),
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("FogStart", phase, fogWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.PlannedProperty("GlobalShadows", phase, lookWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.PlannedProperty("ShadowSoftness", phase, lookWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.PlannedMethod("GetMoonDirection", phase, moonWorkaround),

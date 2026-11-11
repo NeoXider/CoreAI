@@ -33,6 +33,15 @@ namespace CoreAI.Mods.Rbx.Instances
         public RbxLightingState(float clockTime, float geographicLatitude, float brightness,
             RbxColor3 ambient, RbxColor3 outdoorAmbient, RbxVector3 sunDirection, float environmentDiffuseScale,
             float environmentSpecularScale)
+            : this(clockTime, geographicLatitude, brightness, ambient, outdoorAmbient, sunDirection,
+                environmentDiffuseScale, environmentSpecularScale, RbxLighting.DefaultFogStart,
+                RbxLighting.DefaultFogEnd, RbxLighting.DefaultFogColor)
+        {
+        }
+
+        public RbxLightingState(float clockTime, float geographicLatitude, float brightness,
+            RbxColor3 ambient, RbxColor3 outdoorAmbient, RbxVector3 sunDirection, float environmentDiffuseScale,
+            float environmentSpecularScale, float fogStart, float fogEnd, RbxColor3 fogColor)
         {
             ClockTime = clockTime;
             GeographicLatitude = geographicLatitude;
@@ -42,6 +51,9 @@ namespace CoreAI.Mods.Rbx.Instances
             SunDirection = sunDirection;
             EnvironmentDiffuseScale = environmentDiffuseScale;
             EnvironmentSpecularScale = environmentSpecularScale;
+            FogStart = fogStart;
+            FogEnd = fogEnd;
+            FogColor = fogColor;
         }
 
         /// <summary>Hours after midnight, [0, 24).</summary>
@@ -68,6 +80,18 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>Share of the sky's reflections, [0, 1].</summary>
         public float EnvironmentSpecularScale { get; }
 
+        /// <summary>
+        /// Depth from the camera, in studs, at which fog begins to show, as the script set it: never clamped,
+        /// and not ordered against <see cref="FogEnd"/> (a sink must cope with <c>FogEnd</c> at or below it).
+        /// </summary>
+        public float FogStart { get; }
+
+        /// <summary>Depth from the camera, in studs, at which fog is completely opaque, as set; the default 100000 shows none.</summary>
+        public float FogEnd { get; }
+
+        /// <summary>The hue of the fog.</summary>
+        public RbxColor3 FogColor { get; }
+
         public bool Equals(RbxLightingState other)
         {
             return ClockTime.Equals(other.ClockTime)
@@ -77,7 +101,10 @@ namespace CoreAI.Mods.Rbx.Instances
                    && OutdoorAmbient == other.OutdoorAmbient
                    && SunDirection == other.SunDirection
                    && EnvironmentDiffuseScale.Equals(other.EnvironmentDiffuseScale)
-                   && EnvironmentSpecularScale.Equals(other.EnvironmentSpecularScale);
+                   && EnvironmentSpecularScale.Equals(other.EnvironmentSpecularScale)
+                   && FogStart.Equals(other.FogStart)
+                   && FogEnd.Equals(other.FogEnd)
+                   && FogColor == other.FogColor;
         }
 
         public override bool Equals(object obj)
@@ -108,6 +135,15 @@ namespace CoreAI.Mods.Rbx.Instances
         public RbxLightingDurableState(float clockTime, float geographicLatitude, float brightness,
             RbxColor3 ambient, RbxColor3 outdoorAmbient, float environmentDiffuseScale,
             float environmentSpecularScale)
+            : this(clockTime, geographicLatitude, brightness, ambient, outdoorAmbient, environmentDiffuseScale,
+                environmentSpecularScale, RbxLighting.DefaultFogStart, RbxLighting.DefaultFogEnd,
+                RbxLighting.DefaultFogColor)
+        {
+        }
+
+        public RbxLightingDurableState(float clockTime, float geographicLatitude, float brightness,
+            RbxColor3 ambient, RbxColor3 outdoorAmbient, float environmentDiffuseScale,
+            float environmentSpecularScale, float fogStart, float fogEnd, RbxColor3 fogColor)
         {
             ClockTime = clockTime;
             GeographicLatitude = geographicLatitude;
@@ -116,6 +152,9 @@ namespace CoreAI.Mods.Rbx.Instances
             OutdoorAmbient = outdoorAmbient;
             EnvironmentDiffuseScale = environmentDiffuseScale;
             EnvironmentSpecularScale = environmentSpecularScale;
+            FogStart = fogStart;
+            FogEnd = fogEnd;
+            FogColor = fogColor;
         }
 
         /// <summary>Hours after midnight; <c>TimeOfDay</c> is derived from it and not stored.</summary>
@@ -134,6 +173,15 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary><c>EnvironmentSpecularScale</c>; a block saved before it existed reads 1.</summary>
         public float EnvironmentSpecularScale { get; }
+
+        /// <summary><c>FogStart</c> in studs; a block saved before the fog members existed reads 0.</summary>
+        public float FogStart { get; }
+
+        /// <summary><c>FogEnd</c> in studs; a block saved before the fog members existed reads 100000.</summary>
+        public float FogEnd { get; }
+
+        /// <summary><c>FogColor</c>; a block saved before the fog members existed reads (0.75, 0.75, 0.75).</summary>
+        public RbxColor3 FogColor { get; }
 
         /// <summary>The class defaults of <c>Full-API-Dump.json</c>, with the new-place environment scales.</summary>
         public static RbxLightingDurableState Defaults => new(
@@ -233,6 +281,21 @@ namespace CoreAI.Mods.Rbx.Instances
                 : state.EnvironmentDiffuseScale > 1f ? 1f : state.EnvironmentDiffuseScale;
             return new RbxColor3(ambient.R + (outdoor.R - ambient.R) * share,
                 ambient.G + (outdoor.G - ambient.G) * share, ambient.B + (outdoor.B - ambient.B) * share);
+        }
+
+        /// <summary>
+        /// True while <c>FogStart</c>, <c>FogEnd</c> and <c>FogColor</c> all hold the class defaults, which is what a
+        /// world that never set fog carries (the world package writes no fog key then, so a load reads the same).
+        /// </summary>
+        /// <remarks>
+        /// WHY a state test and not a "fog was written" flag: the package stores only values, so a flag would not
+        /// survive a save and a load, and the same world would look different before and after.
+        /// </remarks>
+        public static bool IsFogAtDefaults(in RbxLightingState state)
+        {
+            return state.FogStart.Equals(RbxLighting.DefaultFogStart)
+                   && state.FogEnd.Equals(RbxLighting.DefaultFogEnd)
+                   && state.FogColor == RbxLighting.DefaultFogColor;
         }
 
         /// <summary>The outdoor ambient after daylight: full by day, <see cref="NightOutdoorAmbientFloor"/> at night.</summary>

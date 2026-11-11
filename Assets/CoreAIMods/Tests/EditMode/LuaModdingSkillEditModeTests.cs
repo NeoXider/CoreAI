@@ -306,6 +306,29 @@ namespace CoreAI.Tests.EditMode
             StringAssert.DoesNotContain("`Camera.FieldOfView`,", text, "FieldOfView is no longer a loud stub");
         }
 
+        /// <summary>
+        /// Ratchet, P9 fog: the fog members that left the ClassCatalog stub table must be named in the lighting
+        /// section with the dump's FogEnd default, and the section's "Not yet" list must stop naming them.
+        /// </summary>
+        [Test]
+        public void RbxApiInstructions_DocumentsTheShippedFogMembers_AndNoLongerListsThemAsNotYet()
+        {
+            ClassCatalog catalog = ClassCatalog.CreateMvp1();
+            string lighting = RbxSection("lighting");
+            foreach (string member in new[] { "FogStart", "FogEnd", "FogColor" })
+            {
+                Assert.IsFalse(catalog.TryGetKnownUnimplementedMember(
+                        "Lighting", member, RbxKnownUnimplementedMemberAccess.Read, out _, out _),
+                    "Lighting." + member + " ships and must leave the stub table");
+                StringAssert.Contains("`" + member + "`", lighting, "Lighting." + member + " ships but the section never names it");
+            }
+
+            StringAssert.Contains("100000", lighting, "the section gives the dump's FogEnd default");
+            int notYet = lighting.IndexOf("- Not yet", System.StringComparison.Ordinal);
+            Assert.GreaterOrEqual(notYet, 0, "the section still lists what is not implemented yet");
+            StringAssert.DoesNotContain("Fog", lighting.Substring(notYet), "no fog member is listed as not yet");
+        }
+
         [Test]
         public async Task ReadSkillTool_ReturnsRbxApiInstructions()
         {

@@ -310,15 +310,20 @@ namespace CoreAI.Sandbox.LuaCs
         // for the allocation backstop to catch a doubling concat bomb.
         private const int CoroutineHookInstructionBatch = 4;
 
-        // WHY: A coroutine body runs on a CHILD LuaState that does NOT inherit LuaCsExecutionGuard's hook,
-        // so an unbounded loop inside a resumed coroutine would escape every budget and hang the game.
-        // Wrapping `coroutine.resume` arms a per-resume step+time+alloc guard hook on the child state and
-        // clears it afterwards, so the coroutine body is cut like any other guarded execution.
+        // WHY: A coroutine body runs on a CHILD LuaState, outside the hook of the run that resumes it. Since
+        // Lua-CSharp 0.5.8 the child starts with a copy of the hook installed on its creator when it was created
+        // - the creating run's hook, with a fresh counter, not a budget for any later resume - and up to 0.5.6 it
+        // had none, so an unbounded loop inside a resumed coroutine would escape every budget and hang the game.
+        // Wrapping `coroutine.resume` arms a per-resume step+time+alloc guard hook on the child state, replacing
+        // whatever it inherited, and clears it afterwards, so the coroutine body is cut like any other guarded
+        // execution and charged to the run that resumes it (LuaCsVmContractEditModeTests).
         //
         // The native coroutine.wrap is REMOVED (set nil), not left native: its resumer drives a hidden child
-        // thread through the library's OWN internal resume, bypassing the wrapped coroutine.resume below, so a
-        // wrap-created body would run with NO guard hook — an unbounded-loop / allocation-bomb host-hang
-        // vector. A Lua redefinition needs a sync-over-async Load/Execute that DEADLOCKS on a
+        // thread through the library's OWN internal resume, bypassing the wrapped coroutine.resume below, so
+        // nothing arms a budget for a wrap-created body. Up to 0.5.6 it ran with NO guard hook — an
+        // unbounded-loop / allocation-bomb host-hang vector; since 0.5.8 it runs the hook it inherited, charged
+        // to whichever run holds that pooled hook, never to the caller, and that hook's trip cancels a token the
+        // body does not run with. A Lua redefinition needs a sync-over-async Load/Execute that DEADLOCKS on a
         // SynchronizationContext-bearing thread (editor domain reload). InstallLuauCoroutineExtensions then
         // installs a C# wrap that resumes through the guarded coroutine.resume, so its body runs under the same
         // per-resume budget as any raw coroutine.
@@ -880,9 +885,10 @@ namespace CoreAI.Sandbox.LuaCs
         // Concat path, 2,880 B of native stack a level), so `mt.__concat = function(a, b) return a .. b end;
         // local _ = o .. 'x'` still unwinds quadratically with no hook firing: 2.6 s at a mod-imposed depth of
         // 1,000 and 24-28 s unbounded under a 10 s budget. It cannot be counted as a catchable error from here:
-        // no sandbox code runs where the VM enters the metamethod, and the only code that runs inside it, a
-        // count hook, must never throw (a throw leaves Lua-CSharp's in-hook flag set and disarms every guard on
-        // the thread), so a hook could only END the run. The smallest in-sandbox alternative: each hook, once
+        // no sandbox code runs where the VM enters the metamethod, and the only code that runs inside it is a
+        // count hook. Up to Lua-CSharp 0.5.6 a hook that threw left the VM's in-hook flag set and disarmed every
+        // guard on the thread, so a hook could only END the run; 0.5.8 restores the flag, so a hook could now
+        // raise the catchable C-stack line there. The smallest in-sandbox alternative: each hook, once
         // the call-stack frame count has grown, counts the frames whose caller instruction is a CONCAT
         // (CallStackFrame.CallerInstructionIndex into the caller's LuaClosure.Proto.Code, all public) and trips
         // the run past MaxCCallDepth; it misses a metamethod that tail-calls a helper, whose frame's
@@ -982,7 +988,8 @@ namespace CoreAI.Sandbox.LuaCs
         /// <c>xpcall</c> as one counted call back into Lua, like <see cref="CountedPCall"/>: below the limit the
         /// native xpcall runs with this call's own context, and its message handler runs inside that same counted
         /// call. At the limit the handler is given the C-stack line (see <see cref="XPCallPastTheLimit"/>), and after
-        /// the engine's own value-stack overflow it is given that line (see <see cref="RunHandlerAfterOverflow"/>).
+        /// the engine's own stack overflow it is given that line (see <see cref="RunHandlerAfterOverflow"/> and
+        /// <see cref="XPCallBody"/>).
         /// </summary>
         private static System.Threading.Tasks.ValueTask<int> CountedXPCall(LuaFunctionExecutionContext ctx,
             CancellationToken ct)
@@ -1000,6 +1007,13 @@ namespace CoreAI.Sandbox.LuaCs
             int frameCount = ctx.State.CallStackFrameCount;
             LuaValue handler = ctx.ArgumentCount > 1 ? ctx.GetArgument(1) : LuaValue.Nil;
             depth.Local += LightCallLevels;
+            if (open < XPCallBodyMaxOpenLevels && handler.Type == LuaValueType.Function
+                                               && ctx.GetArgument(0).TryRead(out LuaFunction body))
+            {
+                _pendingXPCallBody = body;
+                ctx.State.Stack[frameBase] = new LuaValue(XPCallBody);
+            }
+
             System.Threading.Tasks.ValueTask<int> call;
             try
             {
@@ -1007,10 +1021,12 @@ namespace CoreAI.Sandbox.LuaCs
             }
             catch
             {
+                _pendingXPCallBody = null;
                 ExitCCall(depth, LightCallLevels);
                 throw;
             }
 
+            _pendingXPCallBody = null;
             if (!call.IsCompleted || !call.IsFaulted)
             {
                 return ExitWhenComplete(call, depth, LightCallLevels, null, null);
@@ -1028,6 +1044,52 @@ namespace CoreAI.Sandbox.LuaCs
             ExitCCall(depth, LightCallLevels);
             return new System.Threading.Tasks.ValueTask<int>(
                 System.Threading.Tasks.Task.FromException<int>(fault));
+        }
+
+        // WHY (Lua-CSharp 0.5.8): the engine's overflow of its call depth (LuaState.MaxCallDepth) is an error native
+        // xpcall catches, and native xpcall hands its handler the error object, which the VM's wrapped overflow does
+        // not carry: the handler got nil where Luau gives it the "stack overflow" line, and `"failed: " .. e` in the
+        // handler then failed too. The protected function runs through XPCallBody, which gives that overflow the line
+        // as its error object before native xpcall sees it; every other outcome passes through untouched.
+        // WHY only the outermost xpcalls: XPCallBody is one more call into the VM on the native stack, about a third of
+        // an xpcall level (NativeStack_EveryChannelStaysWithinItsWeight_AtTheCap), so a chain of nested xpcalls would
+        // outgrow the weight MaxCCallDepth gives it. Bounded to the first levels, the cost is a constant; an xpcall
+        // nested deeper than that hands its handler what native xpcall hands it.
+        /// <summary>
+        /// Calls back into Lua that may be open below an <c>xpcall</c> whose protected function runs through
+        /// <see cref="XPCallBody"/>.
+        /// </summary>
+        private const int XPCallBodyMaxOpenLevels = 8;
+
+        /// <summary>The function the next <see cref="XPCallBody"/> on this OS thread runs; set right before it is called.</summary>
+        [ThreadStatic]
+        private static LuaFunction _pendingXPCallBody;
+
+        /// <summary>
+        /// Stands in for <c>xpcall</c>'s protected function (see <see cref="CountedXPCall"/>): runs it with this call's
+        /// arguments and results, and raises the engine's overflow inside it with <see cref="EngineStackOverflowMessage"/>.
+        /// </summary>
+        private static readonly LuaFunction XPCallBody = new("xpcall", RunXPCallBody);
+
+        private static async System.Threading.Tasks.ValueTask<int> RunXPCallBody(LuaFunctionExecutionContext ctx,
+            CancellationToken ct)
+        {
+            LuaFunction body = _pendingXPCallBody;
+            _pendingXPCallBody = null;
+            try
+            {
+                return await ctx.State.RunAsync(body, ctx.ArgumentCount, ctx.ReturnFrameBase, ct);
+            }
+            catch (Exception ex) when (CarriesNoErrorValue(ex) && IsEngineStackOverflow(ex) && !ct.IsCancellationRequested)
+            {
+                throw new LuaRuntimeException(ctx.State, (LuaValue)EngineStackOverflowMessage, 0);
+            }
+        }
+
+        /// <summary>True when native xpcall would hand its handler nil for <paramref name="ex"/>.</summary>
+        private static bool CarriesNoErrorValue(Exception ex)
+        {
+            return !(ex is LuaRuntimeException runtime) || runtime.ErrorObject.Type == LuaValueType.Nil;
         }
 
         /// <summary>What <c>xpcall</c> returns when even its message handler has no room left to run in (Luau's text).</summary>

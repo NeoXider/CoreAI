@@ -7,12 +7,14 @@ namespace CoreAI.Mods.Rbx.Instances
     /// <summary>
     /// Roblox <c>Lighting</c>, the day-cycle slice: <c>ClockTime</c> and <c>TimeOfDay</c> (one clock, two
     /// views), <c>GeographicLatitude</c>, <c>Brightness</c>, <c>Ambient</c>, <c>OutdoorAmbient</c>,
-    /// <c>EnvironmentDiffuseScale</c>, <c>EnvironmentSpecularScale</c>, <c>GetMinutesAfterMidnight</c>,
-    /// <c>SetMinutesAfterMidnight</c>, <c>GetSunDirection</c> and
-    /// <c>LightingChanged</c>. Defaults are the class defaults of <c>Full-API-Dump.json</c>. Every real
+    /// <c>EnvironmentDiffuseScale</c>, <c>EnvironmentSpecularScale</c>, <c>FogStart</c>, <c>FogEnd</c>,
+    /// <c>FogColor</c>, <c>GetMinutesAfterMidnight</c>, <c>SetMinutesAfterMidnight</c>, <c>GetSunDirection</c>
+    /// and <c>LightingChanged</c>. Defaults are the class defaults of <c>Full-API-Dump.json</c>. Every real
     /// change fires <c>Changed</c> with the property name, that property's
-    /// <c>GetPropertyChangedSignal</c> and <c>LightingChanged(false)</c>; an equal write fires nothing.
-    /// What the state looks like on screen is the attached <see cref="IRbxLightingSink"/>'s business.
+    /// <c>GetPropertyChangedSignal</c> and <c>LightingChanged(false)</c>, except that the three fog
+    /// properties do not fire <c>LightingChanged</c> (the mirror's <c>Lighting.yaml</c> lists them as its
+    /// exceptions); an equal write fires nothing. What the state looks like on screen is the attached
+    /// <see cref="IRbxLightingSink"/>'s business.
     /// </summary>
     public sealed class RbxLighting : RbxInstance
     {
@@ -38,6 +40,12 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary><c>EnvironmentSpecularScale</c> of a new place: 1 (see <see cref="DefaultEnvironmentDiffuseScale"/>).</summary>
         public const float DefaultEnvironmentSpecularScale = 1f;
 
+        /// <summary><c>Full-API-Dump.json</c>: <c>FogStart</c> 0 studs.</summary>
+        public const float DefaultFogStart = 0f;
+
+        /// <summary><c>Full-API-Dump.json</c>: <c>FogEnd</c> 100000 studs, so far that a world shows no fog.</summary>
+        public const float DefaultFogEnd = 100000f;
+
         private const double SecondsPerDay = 86400d;
         private const double HoursPerDay = 24d;
         private const double MinutesPerDay = 1440d;
@@ -50,6 +58,9 @@ namespace CoreAI.Mods.Rbx.Instances
         private RbxColor3 _outdoorAmbient = DefaultOutdoorAmbient;
         private float _environmentDiffuseScale = DefaultEnvironmentDiffuseScale;
         private float _environmentSpecularScale = DefaultEnvironmentSpecularScale;
+        private float _fogStart = DefaultFogStart;
+        private float _fogEnd = DefaultFogEnd;
+        private RbxColor3 _fogColor = DefaultFogColor;
         private IRbxLightingSink _sink;
         private bool _sinkFaultReported;
         private bool _restoring;
@@ -65,6 +76,9 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary><c>Full-API-Dump.json</c>: <c>OutdoorAmbient</c> (0.5, 0.5, 0.5).</summary>
         public static RbxColor3 DefaultOutdoorAmbient => new(0.5f, 0.5f, 0.5f);
+
+        /// <summary><c>Full-API-Dump.json</c>: <c>FogColor</c> (0.75, 0.75, 0.75).</summary>
+        public static RbxColor3 DefaultFogColor => new(0.75f, 0.75f, 0.75f);
 
         /// <summary>
         /// True once this world drives its lighting: a script changed a day-cycle property, a saved
@@ -105,6 +119,15 @@ namespace CoreAI.Mods.Rbx.Instances
 
         /// <summary>Share of the sky's reflections on smooth and metal surfaces, [0, 1].</summary>
         public float EnvironmentSpecularScale => _environmentSpecularScale;
+
+        /// <summary>Depth from the camera, in studs, at which fog begins to show; as set (never clamped or ordered).</summary>
+        public float FogStart => _fogStart;
+
+        /// <summary>Depth from the camera, in studs, at which fog is completely opaque; as set (never clamped or ordered).</summary>
+        public float FogEnd => _fogEnd;
+
+        /// <summary>The hue of the fog.</summary>
+        public RbxColor3 FogColor => _fogColor;
 
         /// <summary>Attaches the sink (null detaches); a world that already drives its lighting pushes to it at once.</summary>
         public void AttachSink(IRbxLightingSink sink)
@@ -249,18 +272,61 @@ namespace CoreAI.Mods.Rbx.Instances
             Changed(nameof(EnvironmentSpecularScale));
         }
 
+        /// <summary>
+        /// Sets <c>FogStart</c> in studs. Any finite value is kept as set: the mirror states no range, nor that
+        /// <c>FogStart</c> must stay below <c>FogEnd</c>; a value past the float range saturates at it.
+        /// </summary>
+        public void SetFogStart(double studs)
+        {
+            float next = NarrowStuds(studs, "FogStart");
+            if (_fogStart.Equals(next))
+            {
+                return;
+            }
+
+            _fogStart = next;
+            FogChanged(nameof(FogStart));
+        }
+
+        /// <summary>Sets <c>FogEnd</c> in studs; kept as set like <see cref="SetFogStart"/>.</summary>
+        public void SetFogEnd(double studs)
+        {
+            float next = NarrowStuds(studs, "FogEnd");
+            if (_fogEnd.Equals(next))
+            {
+                return;
+            }
+
+            _fogEnd = next;
+            FogChanged(nameof(FogEnd));
+        }
+
+        public void SetFogColor(RbxColor3 color)
+        {
+            RequireFinite(color, "FogColor");
+            if (_fogColor == color)
+            {
+                return;
+            }
+
+            _fogColor = color;
+            FogChanged(nameof(FogColor));
+        }
+
         /// <summary>The current state as a sink receives it.</summary>
         public RbxLightingState CaptureState()
         {
             return new RbxLightingState(_clockTime, _geographicLatitude, _brightness, _ambient,
-                _outdoorAmbient, GetSunDirection(), _environmentDiffuseScale, _environmentSpecularScale);
+                _outdoorAmbient, GetSunDirection(), _environmentDiffuseScale, _environmentSpecularScale,
+                _fogStart, _fogEnd, _fogColor);
         }
 
         /// <summary>What the world package stores in its <c>lighting</c> block.</summary>
         public RbxLightingDurableState CaptureDurableState()
         {
             return new RbxLightingDurableState(_clockTime, _geographicLatitude, _brightness, _ambient,
-                _outdoorAmbient, _environmentDiffuseScale, _environmentSpecularScale);
+                _outdoorAmbient, _environmentDiffuseScale, _environmentSpecularScale, _fogStart, _fogEnd,
+                _fogColor);
         }
 
         /// <summary>
@@ -285,6 +351,9 @@ namespace CoreAI.Mods.Rbx.Instances
                 SetOutdoorAmbient(state.OutdoorAmbient);
                 SetEnvironmentDiffuseScale(state.EnvironmentDiffuseScale);
                 SetEnvironmentSpecularScale(state.EnvironmentSpecularScale);
+                SetFogStart(state.FogStart);
+                SetFogEnd(state.FogEnd);
+                SetFogColor(state.FogColor);
             }
             finally
             {
@@ -370,24 +439,34 @@ namespace CoreAI.Mods.Rbx.Instances
                 NotifyPropertyChanged(nameof(TimeOfDay));
             }
 
-            AfterChange();
+            AfterChange(true);
         }
 
         private void Changed(string propertyName)
         {
             NotifyPropertyChanged(propertyName);
-            AfterChange();
+            AfterChange(true);
         }
 
-        private void AfterChange()
+        /// <summary>
+        /// A fog property's change: <c>Changed</c> and its property signal fire, <c>LightingChanged</c> does
+        /// not (the mirror's <c>Lighting.yaml</c> names the three fog properties as that event's exceptions).
+        /// </summary>
+        private void FogChanged(string propertyName)
+        {
+            NotifyPropertyChanged(propertyName);
+            AfterChange(false);
+        }
+
+        private void AfterChange(bool fireLightingChanged)
         {
             if (!_restoring)
             {
                 Registry?.AdvanceRevision(Id);
             }
 
-            RbxScriptSignal lightingChanged = LightingChanged;
-            if (lightingChanged.HasConnections)
+            RbxScriptSignal lightingChanged = fireLightingChanged ? LightingChanged : null;
+            if (lightingChanged != null && lightingChanged.HasConnections)
             {
                 lightingChanged.Fire(NoSkyChange);
             }
@@ -444,6 +523,22 @@ namespace CoreAI.Mods.Rbx.Instances
                     "Lighting." + member + " needs a finite number, got " + value.ToString(CultureInfo.InvariantCulture),
                     "check the arithmetic that produced it (0/0, math.huge) before assigning");
             }
+        }
+
+        /// <summary>A finite distance in studs narrowed to the float Roblox stores, saturating at the float range.</summary>
+        /// <remarks>
+        /// WHY saturate: a plain cast turns a finite double past 3.4e38 into an infinite float, which the world
+        /// package refuses to read back, so one "no fog" idiom (a huge FogEnd) would make the saved world unloadable.
+        /// </remarks>
+        private static float NarrowStuds(double studs, string member)
+        {
+            RequireFinite(studs, member);
+            if (studs > float.MaxValue)
+            {
+                return float.MaxValue;
+            }
+
+            return studs < -float.MaxValue ? -float.MaxValue : (float)studs;
         }
 
         private static void RequireFinite(RbxColor3 color, string member)

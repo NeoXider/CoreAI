@@ -67,6 +67,9 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsFalse(builder.Exists(typeof(INetworkBridge), includeInterfaceTypes: true),
                 "an empty provider field must leave the container without any transport registration");
+            // WHY: the scope's self-repair entry point resolves the mod runtime when the container is built, so the
+            // host services a real parent scope provides must exist here too.
+            RegisterMinimalHostServices(builder);
             using IObjectResolver container = builder.Build();
             Assert.IsNull(container.ResolveOrDefault<INetworkBridge>(),
                 "the installer's ResolveOrDefault<INetworkBridge>() must see nothing - that is what selects NullNetworkBridge");

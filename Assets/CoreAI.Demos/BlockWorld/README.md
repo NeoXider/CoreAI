@@ -134,7 +134,7 @@ reloads on its own.
 | `blockworld_hud` | the whole interface (UXML and USS text through `UxmlService`), the key legend, health in survival, the hotbar choice and the "Building the world" screen | `BlockWorldSelected`, `BlockWorldSlot` |
 | `blockworld_daynight` | the clock (`Lighting.ClockTime`, a fresh world starts at 10:00), the sky's light (`OutdoorAmbient`, low at night) and the light where the sky does not reach (`Ambient`, low all day, so caves are dark), `/time` (a `TextChatCommand`) and the L key | `BlockWorldTime` (set it to "noon", "18:30", "stop", "go") |
 | `blockworld_torches` | torches with a PointLight and a flame, the light budget | `BlockWorldTorches` |
-| `blockworld_villagers` | Mira, Tobin and Elda: character Models under `workspace` with Roblox's R6 body (`Head`, `Torso`, `Left Arm` ...), which the platform's character rig animates as it does the player's, in their own clothes, with hair and two eyes that follow the head, placed around the spawn in the frame of the first view (Mira in it), held until the ground under them exists, their `AIService` agents and brains | on each Model `NpcAgent`, `NpcBrain`, `NpcState` (the host writes `NpcAction`); `BlockWorldVillagerReply` |
+| `blockworld_villagers` | Mira, Tobin and Elda: character Models under `workspace` with Roblox's R6 body (`Head`, `Torso`, `Left Arm` ...), which the platform's character rig animates as it does the player's, in their own clothes, with hair and two eyes that follow the head, placed around the spawn in the frame of the first view (Mira in it) on the nearest level ground, so none starts in a pit or on a ledge, held until the ground under them exists, their `AIService` agents and brains | on each Model `NpcAgent`, `NpcBrain`, `NpcState` (the host writes `NpcAction`); `BlockWorldVillagerReply` |
 | `blockworld_survival` | health from the Humanoid, fall damage (a fall is read from `Humanoid.StateChanged`), death and the respawn at the spawn; off in creative | `BlockWorldHealth`, `BlockWorldMaxHealth`, `BlockWorldDeaths` |
 | `blockworld_autopilot` | the block world's goals and facts for the game's autopilot, and the goals only a block world knows: gather, build, home | on the Player `Autopilot`, `AutopilotGoals`, `AutopilotState` (the host writes `AutopilotGoal`; the mod writes the Player only while the autopilot drives, so `/undo` keeps working); `BlockWorldAutopilot` |
 
@@ -156,8 +156,8 @@ Not done on purpose today: the mods still share state through workspace attribut
   costs its cells, twelve more, and up to 24 for its caves; 220 a frame). Trees grow until about 3,000
   instructions a frame are spent, after a frame that plans them. The fullest frame stays near 4,000
   instructions, under half the per-resume budget every Heartbeat handler gets (10,000). Nothing is generated
-  while the mod loads (a reload must fit an AI tool call); the spawn column, which has no caves, comes first, in
-  under forty frames (it has no caves and no wood), and a column with caves and a wood takes about seventy.
+  while the mod loads (a reload must fit an AI tool call); the spawn column comes first, in
+  under forty frames (it has no caves and no wood), and a column with caves and a wood takes about eighty.
 - The torch mod keeps at most 48 lit torches and says so when it is full. The host adds its own light budget:
   desktop (Forward+) keeps 64 lights, the WebGL tier keeps the 8 nearest on and reports it.
 - The HUD rewrites a label only when its text changes, so an idle frame writes nothing to the UI.

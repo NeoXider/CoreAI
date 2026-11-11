@@ -195,6 +195,24 @@ namespace CoreAI.Mods.WorldPackages
                     sink.Number(lighting.EnvironmentSpecularScale);
                 }
 
+                if (!lighting.FogStart.Equals(RbxLighting.DefaultFogStart))
+                {
+                    sink.Name("fog_start");
+                    sink.Number(lighting.FogStart);
+                }
+
+                if (!lighting.FogEnd.Equals(RbxLighting.DefaultFogEnd))
+                {
+                    sink.Name("fog_end");
+                    sink.Number(lighting.FogEnd);
+                }
+
+                if (lighting.FogColor != RbxLighting.DefaultFogColor)
+                {
+                    sink.Name("fog_color");
+                    Vector(sink, lighting.FogColor.R, lighting.FogColor.G, lighting.FogColor.B);
+                }
+
                 sink.EndObject();
             }
 

@@ -1,6 +1,7 @@
 using System;
 using CoreAI.Ai;
 using CoreAI.Ai.Logging;
+using CoreAI.Ai.LuaCs;
 using CoreAI.Ai.SelfRepair;
 using CoreAI.Authority;
 using CoreAI.ChatOverlay;
@@ -24,9 +25,11 @@ namespace CoreAI.Composition
     public sealed class CoreAiModSelfRepairSettings
     {
         [Header("Runtime self-repair")]
-        [Tooltip("Automatic repairs a failing AI-written mod without asking; Ask First reports it with a /fixmod hint; "
-                 + "Off only reports it.")]
-        public LuaModRuntimeRepairMode mode = LuaModRuntimeRepairMode.Automatic;
+        [Tooltip("By Backend (default) repairs a failing AI-written mod without asking when the model is local "
+                 + "(LLMUnity, or LM Studio / llama.cpp on this machine or the local network) and asks first with a "
+                 + "paid or unknown backend, so no token is spent before /fixmod; Automatic always repairs; Ask First "
+                 + "reports it with a /fixmod hint; Off only reports it.")]
+        public LuaModRuntimeRepairMode mode = LuaModRuntimeRepairMode.ByBackend;
 
         [Tooltip("AI Written Only leaves mods the player wrote and bundled samples alone (they are reported, and "
                  + "/fixmod still repairs them on request); All Mods repairs every failing mod.")]
@@ -188,7 +191,8 @@ namespace CoreAI.Composition
                     container.ResolveOrDefault<ILuaModSourceStore>(),
                     () => Time.realtimeSinceStartupAsDouble,
                     recorder != null ? () => recorder.CurrentRequest : null,
-                    log);
+                    log,
+                    CreatePorts(container, actor));
             }
 
             if (_settings.consoleEnabled && logs != null)
@@ -307,6 +311,66 @@ namespace CoreAI.Composition
             return orchestrator == null
                 ? null
                 : new OrchestratorLuaModRepairTurnRunner(orchestrator, role => identity.GetActorContext(role), modelAvailable);
+        }
+
+        /// <summary>
+        /// The loop's services from the scope: the backend's cost for the Programmer role, the undo history's repair
+        /// face, the runtime's pause, and the Programmer's chat history for the one system-event note of an incident.
+        /// </summary>
+        private static LuaModSelfRepairPorts CreatePorts(IObjectResolver container, ActorContext actor)
+        {
+            LuaCsModStack stack = container.ResolveOrDefault<LuaCsModStack>();
+            IAgentMemoryStore memory = container.ResolveOrDefault<IAgentMemoryStore>();
+            AgentMemoryPolicy memoryPolicy = container.ResolveOrDefault<AgentMemoryPolicy>();
+            return new LuaModSelfRepairPorts
+            {
+                BackendCost = CostProbe(container),
+                Undo = container.ResolveOrDefault<IRbxWorldUndoService>() as IRbxWorldRepairUndo,
+                Pause = stack == null ? null : (id, reason) => stack.Runtime != null && stack.Runtime.TryQuarantine(actor, id, reason),
+                HistoryNote = memory == null ? null : note => NoteInHistory(memory, memoryPolicy, note)
+            };
+        }
+
+        /// <summary>
+        /// The backend's cost for the Programmer role: the Hub's endpoint route of the role when it names its
+        /// endpoints, otherwise the global execution mode and HTTP base URL; Unknown without settings.
+        /// </summary>
+        private static Func<LuaModRepairBackendCost> CostProbe(IObjectResolver container)
+        {
+            ILlmEndpointRegistry registry = container.ResolveOrDefault<ILlmEndpointRegistry>();
+            CoreAISettingsAsset settings = container.ResolveOrDefault<ICoreAISettings>() as CoreAISettingsAsset;
+            return () =>
+            {
+                LuaModRepairBackendCost routed =
+                    LuaModRepairBackendCostRules.ClassifyRole(registry, BuiltInAgentRoleIds.Programmer);
+                if (routed != LuaModRepairBackendCost.Unknown || settings == null)
+                {
+                    return routed;
+                }
+
+                return LuaModRepairBackendCostRules.Classify(settings.ExecutionMode, settings.ApiBaseUrl);
+            };
+        }
+
+        /// <summary>
+        /// Stores the note under the internal "tool" history role, which the orchestrator replays to the model as
+        /// context and the chat panel does not show; nothing when the role keeps no chat history.
+        /// </summary>
+        private static void NoteInHistory(IAgentMemoryStore memory, AgentMemoryPolicy memoryPolicy, string note)
+        {
+            bool persist = false;
+            if (memoryPolicy != null)
+            {
+                AgentMemoryPolicy.RoleMemoryConfig config = memoryPolicy.GetRoleConfig(BuiltInAgentRoleIds.Programmer);
+                if (!config.WithChatHistory)
+                {
+                    return;
+                }
+
+                persist = config.PersistChatHistory;
+            }
+
+            memory.AppendChatMessage(BuiltInAgentRoleIds.Programmer, "tool", note, persist);
         }
 
         private static Func<bool> ModelProbe(IObjectResolver container)

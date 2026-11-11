@@ -70,8 +70,11 @@ namespace CoreAI.Tests.PlayMode.RbxApi
             RbxTerrainPresenter presenter = _host.AddComponent<RbxTerrainPresenter>();
             // WHY the plain face rules: the block comparison below sets a LeafyGrass side face against a Grass
             // side face to check the two materials' albedo, which the grass-block rule would draw as earth.
+            // WHY the photo look: these captures check the catalog's photographed sets (their roughness, the
+            // LeafyGrass gain, both catalogs), which painted block tiles would replace on Terrain cells.
             presenter.RendererFactory = (terrain, parent) => new RbxTerrainRenderer(terrain, parent,
-                mesher: new BlockyTerrainChunkMesher(TerrainFaceMaterialRules.None));
+                mesher: new BlockyTerrainChunkMesher(TerrainFaceMaterialRules.None),
+                blockLook: TerrainBlockLook.PhotoSets);
             presenter.Bind(_terrain);
 
             GameObject cameraObject = new("Terrain look camera");
@@ -191,6 +194,8 @@ namespace CoreAI.Tests.PlayMode.RbxApi
             Color[] flatSea = Shoot("terrain_sea_grazing_flat.png");
             water.SetFloat("_BumpStrength", bump);
             Color groundColor = profile.SkyGroundColor;
+            // WHY the haze off: a ground that follows the haze would ignore the magenta this shot plants.
+            profile.SkyGroundFollowsHaze = false;
             profile.SkyGroundColor = new Color(1f, 0f, 1f, 1f);
             _applier.Apply(profile, GraphicsOptionsResolver.Resolve(GraphicsOptions.Default, GraphicsQualityPreset.High),
                 LookMode.Apply);
@@ -201,6 +206,7 @@ namespace CoreAI.Tests.PlayMode.RbxApi
 
             Color[] magentaGround = Shoot("terrain_sea_grazing_magenta_ground.png");
             profile.SkyGroundColor = groundColor;
+            profile.SkyGroundFollowsHaze = true;
             RbxWaterTime.ClearOverride();
             float notBlue = Share(seaShot, sea, IsDullGreyOrBrown);
             float notBlueFar = Share(seaShot, farSea, IsDullGreyOrBrown);

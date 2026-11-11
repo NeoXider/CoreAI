@@ -558,6 +558,15 @@ Owner's questions and decisions on the Block World (2026-11-11):
 
 Lua runtime and performance (P19):
 
+- [ ] **Scheduler-thread hooked path on Lua-CSharp 0.5.8 may be slower.** After the VM update (2026-11-11), the
+      vmbench coroutine-handle batch-4 row was lower in both rounds (26.0/23.7 → 17.5/17.4 M instr/s, CoreCLR),
+      while perfbench's production `LuaCsCoroutineHandle.Resume(numeric loop)` row did not confirm it; the machine
+      was contended (CPU 30-100 %). Re-measure both on a quiet machine, then on Mono Boehm, before calling it
+      either way (`dev-docs/DEPENDENCY_VERSIONS_2026-11-11.md`, "Verified on 2026-11-11").
+- [ ] **Lua-CSharp 0.5.8 in players.** The update was verified on the portable CoreCLR leg only: run the Lua
+      EditMode gates in the editor, `WebGlLuaSelfTest` in a WebGL player and one IL2CPP player. Report upstream
+      that native `xpcall` hands its handler nil for every wrapped C# exception (the sandbox maps only the
+      call-depth overflow, `LuaCsSecureEnvironment.XPCallBody`).
 - [ ] **Luau library residue (MVP13).** A plain assignment into a frozen table still writes (DEV-106); a
       `\u{...}` escape downlevels to UTF-8 bytes and does not compare equal to the same text typed in
       source; Lua-CSharp's own `table.insert`, `remove`, `sort` and `concat` are not step-charged;

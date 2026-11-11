@@ -24,7 +24,7 @@ whole CLR, and reuse what the VM already provides where it is safe.
 
 | Capability | Reason |
 |---|---|
-| `io`, `os`, `debug`, `package`, `require`, `load`/`loadstring`, `loadfile`/`dofile`, `collectgarbage`, `string.dump`, `coroutine.wrap` | Files, processes, eval, introspection, module loading, unguarded coroutine resumes — all removed from the secured environment. With the Rbx API attached, `os` comes back as a CoreAI table holding only `os.time` and `os.clock` |
+| `io`, `package`, `require`, `load`, `loadfile`/`dofile`, `string.dump`, and the VM's native `os`, `debug`, `loadstring`, `collectgarbage` and `coroutine.wrap` | Files, processes, eval, introspection, module loading, unguarded coroutine resumes — all removed from the secured environment. Where Luau has a member of the same name the sandbox installs its own in place of the native one: `coroutine.wrap` resumes through the guarded `coroutine.resume` (the native one resumes inside the VM, where no budget can be armed), `debug` holds only Luau's `traceback`, `info`, profiling and memory-category members, `collectgarbage` answers `"count"` only, and `loadstring` returns `nil` and the reason. With the Rbx API attached, `os` comes back as a CoreAI table holding only `os.time`, `os.clock`, `os.date` and `os.difftime` |
 | Arbitrary metatables on host tables | Complicates escapes through `__index`/`__newindex`; world APIs are explicit functions |
 | Raw CLR object access | Only registered host callbacks are visible; the Full tier (opt-in) is the sole reflection path |
 
@@ -86,11 +86,15 @@ WebGL-specific switch). Prefer registering explicit typed APIs over the Full tie
   public-getmetatable fallback cannot provide that parity. See the
   [downlevel module contract](../../CoreAIMods/Runtime/LuauDownlevel/README.md) for options and limitations.
 - A curated subset of the standard library is exposed (`string`, `math`, `table`, `coroutine`, bitwise,
-  …); `io`/`os`/`debug`/`package` are withheld from the secured environment (the Rbx API re-adds a
-  two-member `os` with `os.time`/`os.clock`).
-- `coroutine.create`/`resume`/`yield`/`status` are available; `coroutine.wrap` is removed and
-  `coroutine.resume` is budget-guarded. Long-lived scripts should `coroutine.yield()` across frames
-  rather than busy-loop inside a one-shot chunk.
+  …); `io`/`package` and the VM's native `os`/`debug` are withheld from the secured environment (the
+  sandbox installs Luau's `debug` subset, and the Rbx API adds an `os` with `os.time`, `os.clock`,
+  `os.date` and `os.difftime`).
+- `coroutine.create`/`resume`/`yield`/`status`/`wrap`/`isyieldable`/`close` are available.
+  `coroutine.resume` is budget-guarded, and `coroutine.wrap` is the sandbox's own, built on that guarded
+  resume. The VM's native `wrap` stays removed: it resumes inside the library where CoreAI arms no hook, and
+  since Lua-CSharp 0.5.8 its body runs the hook its thread inherited from the run that created it, so its
+  cost would be charged to that run instead of the caller's. Long-lived scripts should `coroutine.yield()`
+  across frames rather than busy-loop inside a one-shot chunk.
 
 ## Checklist for New Bindings
 

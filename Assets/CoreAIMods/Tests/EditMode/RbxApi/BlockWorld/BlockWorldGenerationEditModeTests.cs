@@ -24,7 +24,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         /// SHA-256 of the Terrain package entry (<c>TerrainVoxelCodec</c>, canonical chunk order) after seed 1337
         /// streamed the 21 columns of view radius 2 around the origin. A change here is a change of the generated world.
         /// </summary>
-        private const string GoldenSeed1337Radius2 = "14cbe894943d06034b10930d5a7ddca9bb7e11255b54d13a2a466d64335b05e0";
+        private const string GoldenSeed1337Radius2 = "aee6793b5ff4fcabe52e77427eda6198784c4d8b2fc67230c540a33a032a1531";
 
         private SynchronizationContext _savedContext;
 
@@ -168,6 +168,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
             return world;
         }
 
+        /// <summary>True when the pillar's column was generated (its bedrock row is laid last).</summary>
+        private static bool Generated(BlockWorldTestWorld world, int x, int z)
+        {
+            return world.Material(x, -16, z) == BlockWorldTestWorld.Slot("Basalt");
+        }
+
         /// <summary>The highest cell of the pillar that is ground (not air, water, trunk or leaves), or -16.</summary>
         private static int TopGround(BlockWorldTestWorld world, int x, int z)
         {
@@ -200,6 +206,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
             {
                 for (int z = -32; z <= 47; z++)
                 {
+                    if (!Generated(world, x, z))
+                    {
+                        continue;
+                    }
+
                     int top = TopGround(world, x, z);
                     highest = Math.Max(highest, top);
                     lowest = Math.Min(lowest, top);

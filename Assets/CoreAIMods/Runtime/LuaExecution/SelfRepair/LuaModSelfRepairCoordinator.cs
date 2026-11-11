@@ -680,7 +680,7 @@ namespace CoreAI.Ai.SelfRepair
                     state.Watch = !paused;
                     Say(id, LuaLogLevel.Warn, "Could not fix '" + id + "' after " +
                                               incident.Attempt.ToString(CultureInfo.InvariantCulture) + " tries." +
-                                              (paused ? PausedSentence : " It keeps running: only part of it fails.") +
+                                              (paused ? PausedSentence : " It keeps running.") +
                                               " /fixmod " + id + " tries again; " + GaveUpUndoWay(state.UndoRecording));
                     break;
                 }

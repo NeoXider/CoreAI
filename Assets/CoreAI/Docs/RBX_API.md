@@ -473,12 +473,18 @@ The day-cycle slice of P9, with Roblox's names and the class defaults of the API
 | `Ambient` / `OutdoorAmbient` | (0.5, 0.5, 0.5) | the sky-occluded hue and the outdoor hue |
 | `EnvironmentDiffuseScale` | 1 in a new world (DEV-93) | the sky's share of the ambient; clamped to [0, 1] |
 | `EnvironmentSpecularScale` | 1 in a new world (DEV-93) | the sky's share of the reflections on smooth and metal surfaces; clamped to [0, 1] |
+| `FogStart` | 0 | depth from the camera, in studs, where the fog begins |
+| `FogEnd` | 100000 | depth, in studs, where the fog is fully opaque; at 100000 a world shows no fog |
+| `FogColor` | (0.75, 0.75, 0.75) | the fog's hue |
 | `GetSunDirection()` | | unit `Vector3` towards the sun, below the horizon at night |
-| `LightingChanged(skyChanged)` | | fires once per real change with `false` |
+| `LightingChanged(skyChanged)` | | fires once per real change with `false`, except a fog change (as in Roblox) |
 
 A real change fires `Changed`, `GetPropertyChangedSignal` (a `ClockTime` change fires `TimeOfDay`'s too) and
-`LightingChanged`; an equal write fires nothing. Writes need WorldEdit; a non-finite value is `BAD_ARGUMENT`.
-`ClockTime`, the colours and the two environment scales are tweenable, and all of them are saved with the
+`LightingChanged`; an equal write fires nothing. The three fog properties fire `Changed` and their property
+signal but not `LightingChanged`: the mirror names them as that event's exceptions. Writes need WorldEdit; a
+non-finite value is `BAD_ARGUMENT`. The mirror states no range for the fog distances, so any finite number is
+kept as set (a value past the float range saturates at it) and `FogStart` may exceed `FogEnd`. `ClockTime`, the
+colours, the two environment scales and the fog distances are tweenable, and all of them are saved with the
 world. At 0 both environment scales leave only `Ambient` and no sky reflections, which is how a cave or a
 cellar reads dark: tween them down when the player goes below ground.
 
@@ -493,9 +499,11 @@ step from -6 to +6 degrees of elevation; the light is switched off below), makes
 the sky follows, and sets a trilight ambient: sky and equator blend from `OutdoorAmbient` scaled by daylight
 (down to 15% at night) at `EnvironmentDiffuseScale` 1 towards `Ambient` at 0, ground from `Ambient` (DEV
 candidates P9-a and P9-g); `EnvironmentSpecularScale` multiplies the default look's sky reflections (its sky
-reflection probe and the environment reflection intensity). Until a script, a tween or a saved world sets a
-Lighting property, nothing is applied and the host scene keeps its authored lighting; switch the sink off with
-**Drive Scene Lighting** on `RbxWorldHost`. The rest of P9 (fog, `ColorShift_*`, exposure, shadows, the moon,
+reflection probe and the environment reflection intensity). The sink also receives `FogStart`, `FogEnd` and
+`FogColor` in `RbxLightingState`; a world that never set them carries the defaults
+(`RbxLightingMapping.IsFogAtDefaults`), and the host look keeps its own haze then. Until a script, a tween or a
+saved world sets a Lighting property, nothing is applied and the host scene keeps its authored lighting; switch
+the sink off with **Drive Scene Lighting** on `RbxWorldHost`. The rest of P9 (`ColorShift_*`, exposure, shadows, the moon,
 `Sky`, `Atmosphere`, the post effects, `SpotLight`, `SurfaceLight`) are loud stubs planned for P9;
 `LightingStyle`, `PrioritizeLightingQuality` and `Technology` are `RobloxScriptSecurity` and unsupported.
 

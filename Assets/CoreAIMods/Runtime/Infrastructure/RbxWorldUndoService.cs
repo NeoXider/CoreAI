@@ -257,6 +257,8 @@ namespace CoreAI.Mods.WorldPackages
                         Bits(durable.OutdoorAmbient));
                     state = Combine(Combine(state, Bits(durable.EnvironmentDiffuseScale)),
                         Bits(durable.EnvironmentSpecularScale));
+                    state = Combine(Combine(Combine(state, Bits(durable.FogStart)), Bits(durable.FogEnd)),
+                        Bits(durable.FogColor));
                     break;
                 }
                 case RbxStarterPlayer starterPlayer:
@@ -677,7 +679,9 @@ namespace CoreAI.Mods.WorldPackages
                 if (window != null && chained && window.CanJoin(top))
                 {
                     top.JoinRepair(after, _valueEdits, mutation.Sequence);
-                    window.Recorded(top, RbxWorldRepairRecording.JoinedRepairedChange);
+                    window.Recorded(top, top.RepairOf.Length > 0
+                        ? RbxWorldRepairRecording.OwnEntry
+                        : RbxWorldRepairRecording.JoinedRepairedChange);
                 }
                 else
                 {

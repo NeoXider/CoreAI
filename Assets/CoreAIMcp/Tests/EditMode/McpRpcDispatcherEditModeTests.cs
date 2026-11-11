@@ -156,8 +156,16 @@ namespace CoreAI.Mcp.Tests
                 new JObject { ["level"] = level }, CancellationToken.None);
 
             AssertAdapterContent(dispatched, expected, isError);
-            Assert.AreEqual(isError ? 0 : 1, logs.Queries,
-                "An invalid level must be rejected before querying the log service.");
+            if (isError)
+            {
+                Assert.AreEqual(0, logs.Queries,
+                    "An invalid level must be rejected before querying the log service.");
+            }
+            else
+            {
+                // WHY at least one: the tool reads the entries and then the cursor it reports as next_sequence.
+                Assert.GreaterOrEqual(logs.Queries, 1, "A valid level reads the log service.");
+            }
         }
 
         [TestCase(false, "missing-action")]

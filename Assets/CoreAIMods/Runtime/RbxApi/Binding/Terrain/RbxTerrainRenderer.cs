@@ -38,7 +38,15 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         /// </summary>
         public const int MaxLightRefreshesPastBudget = 32;
 
+        /// <summary>Material property a block twin sets to 1: one whole tile per cell face, on the cell grid.</summary>
+        public const string CellTilesProperty = "_RbxCellTiles";
+
+        private const string TexturedShaderResource = "CoreAIRbxMaterials/RbxTexturedSurface";
+        private const string TexturedShaderName = "CoreAI/Rbx/Textured Surface";
+        private const string EmissionKeyword = "_RBX_EMISSION";
+
         private static readonly int SkyExposureSourceId = Shader.PropertyToID(SkyExposureSourceProperty);
+        private static readonly int CellTilesId = Shader.PropertyToID(CellTilesProperty);
 
         private readonly RbxTerrain _terrain;
         private readonly IRbxMaterialProvider<Material> _materials;
@@ -49,6 +57,7 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         private readonly TerrainChunkMeshBuffers _buffers = new();
         private readonly RbxTerrainMeshBuilder _builder = new();
         private readonly TerrainSkyExposure _exposure;
+        private readonly TerrainBlockLook _blockLook;
         private readonly Queue<TerrainChunkCoord> _dirty = new();
         private readonly Dictionary<long, bool> _dirtyFull = new();
         private readonly Dictionary<long, ChunkView> _views = new();
@@ -66,14 +75,19 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         /// <paramref name="materials"/> uses the hybrid texture/procedural catalog; a null
         /// <paramref name="mesher"/> uses <see cref="BlockyTerrainChunkMesher"/>. Every chunk already
         /// in the store is queued, so a loaded world appears without a write. Light fades out
-        /// <paramref name="skyReach"/> cells past a cave mouth (<see cref="TerrainSkyExposure.Reach"/>).
+        /// <paramref name="skyReach"/> cells past a cave mouth (<see cref="TerrainSkyExposure.Reach"/>). Cells are
+        /// drawn by <paramref name="blockLook"/>; null paints blocks (<see cref="TerrainBlockLook.Default"/>) with the
+        /// default catalog, and draws every material from <paramref name="materials"/> when a host hands its own
+        /// (<see cref="TerrainBlockLook.PhotoSets"/>).
         /// </summary>
         public RbxTerrainRenderer(RbxTerrain terrain, Transform parent,
             IRbxMaterialProvider<Material> materials = null, ITerrainChunkMesher mesher = null, ILog log = null,
-            int skyReach = TerrainSkyExposure.DefaultReach)
+            int skyReach = TerrainSkyExposure.DefaultReach, TerrainBlockLook blockLook = null)
         {
             _terrain = terrain ?? throw new ArgumentNullException(nameof(terrain));
             _exposure = new TerrainSkyExposure(terrain.Store, skyReach);
+            // WHY photo sets for a host's own provider: a host that brings its own materials expects to see them.
+            _blockLook = blockLook ?? (materials == null ? TerrainBlockLook.Default : TerrainBlockLook.PhotoSets);
             _ownsMaterials = materials == null;
             _materials = materials ?? new RbxTextureMaterialProvider();
             _mesher = mesher ?? new BlockyTerrainChunkMesher();
@@ -113,6 +127,9 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
 
         /// <summary>The sky exposure this renderer lights its chunks with; also answers how exposed any cell is.</summary>
         public TerrainSkyExposure SkyExposure => _exposure;
+
+        /// <summary>How this renderer draws each material as a cell: a painted block tile or the catalog's surface.</summary>
+        public TerrainBlockLook BlockLook => _blockLook;
 
         /// <summary>The chunks the last <see cref="ProcessDirty"/> call re-meshed or relit; reused between calls.</summary>
         public IReadOnlyList<TerrainChunkCoord> LastProcessedChunks => _lastProcessed;
@@ -478,7 +495,16 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             }
 
             RbxMaterialId id = TerrainMaterials.ToMaterialId(slot);
-            if (!_materials.TryGetMaterial(in id, out Material material))
+            bool found = _materials.TryGetMaterial(in id, out Material material);
+            TerrainBlockStyle style = _blockLook.StyleOf(slot);
+            Material block = style == TerrainBlockStyle.Photo ? null : BlockTwin(slot, style, material);
+            if (block != null)
+            {
+                _slotMaterials[slot] = block;
+                return block;
+            }
+
+            if (!found)
             {
                 _log?.Warn("[CoreAI.RbxApi] Terrain material " + id + " is missing from the material catalog; "
                            + "its cells draw with the diagnostic fallback.", LogTag.World);
@@ -487,6 +513,76 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             material = TerrainCopy(material);
             _slotMaterials[slot] = material;
             return material;
+        }
+
+        /// <summary>
+        /// The block twin of a material: the textured surface with the painted tile of <paramref name="style"/>, one
+        /// whole tile per cell face, the sky exposure from the vertex colours, and the catalog material's glow (lava).
+        /// Null when the textured shader is not in the build, so the catalog surface is drawn instead.
+        /// </summary>
+        /// <remarks>
+        /// WHY a material of its own and not a keyword: the block look is textures and material floats on a twin no
+        /// Part ever draws with, so the Part's surface is untouched, no shader variant is added and the chunks stay
+        /// on the SRP Batcher.
+        /// </remarks>
+        private Material BlockTwin(byte slot, TerrainBlockStyle style, Material source)
+        {
+            Shader shader = source != null && source.HasProperty(CellTilesId) ? source.shader : TexturedShader();
+            if (shader == null
+                || !RbxTerrainBlockTextures.TryGet(style, out Texture2D albedo, out Texture2D normal,
+                    out Texture2D roughness))
+            {
+                return null;
+            }
+
+            Material twin = new(shader)
+            {
+                name = "Terrain block " + TerrainMaterials.GetName(slot),
+                hideFlags = HideFlags.HideAndDontSave,
+                enableInstancing = true
+            };
+            twin.SetTexture(BlockIds.BaseMap, albedo);
+            twin.SetTexture(BlockIds.BumpMap, normal);
+            twin.SetTexture(BlockIds.RoughnessMap, roughness);
+            twin.SetColor(BlockIds.BaseColor, Color.white);
+            twin.SetColor(BlockIds.Color, Color.white);
+            twin.SetColor(BlockIds.MaterialColor, Color.white);
+            twin.SetFloat(BlockIds.PartColorInfluence, 0f);
+            // WHY one cell per tile: a 4-stud cell edge then always falls on a whole tile in world space.
+            twin.SetFloat(BlockIds.TextureScale,
+                1f / ((float)TerrainBoxRasterizer.CellStuds * RbxSpace.MetersPerStud));
+            twin.SetFloat(BlockIds.TextureAspect, 1f);
+            twin.SetFloat(BlockIds.BumpScale, 1f);
+            twin.SetFloat(BlockIds.RoughnessScale, 1f);
+            twin.SetFloat(BlockIds.InvertRoughness, 0f);
+            twin.SetFloat(BlockIds.CavityStrength, 0f);
+            twin.SetFloat(BlockIds.MetalAlbedoLift, 0f);
+            twin.DisableKeyword("_RBX_METALLIC_MAP");
+            twin.DisableKeyword("_RBX_OCCLUSION_MAP");
+            twin.DisableKeyword("_RBX_NORMAL_DIRECTX");
+            bool glows = source != null && source.IsKeywordEnabled(EmissionKeyword)
+                                        && source.HasProperty(BlockIds.EmissionColor);
+            if (glows)
+            {
+                twin.SetColor(BlockIds.EmissionColor, source.GetColor(BlockIds.EmissionColor));
+                twin.SetFloat(BlockIds.EmissionThreshold, source.GetFloat(BlockIds.EmissionThreshold));
+                twin.EnableKeyword(EmissionKeyword);
+            }
+            else
+            {
+                twin.DisableKeyword(EmissionKeyword);
+            }
+
+            twin.SetFloat(SkyExposureSourceId, 1f);
+            twin.SetFloat(CellTilesId, 1f);
+            _ownedCopies.Add(twin);
+            return twin;
+        }
+
+        private static Shader TexturedShader()
+        {
+            Shader shader = Resources.Load<Shader>(TexturedShaderResource);
+            return shader != null ? shader : Shader.Find(TexturedShaderName);
         }
 
         /// <summary>
@@ -549,6 +645,26 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             {
                 Object.DestroyImmediate(target);
             }
+        }
+
+        private static class BlockIds
+        {
+            public static readonly int BaseMap = Shader.PropertyToID("_BaseMap");
+            public static readonly int BumpMap = Shader.PropertyToID("_BumpMap");
+            public static readonly int RoughnessMap = Shader.PropertyToID("_RoughnessMap");
+            public static readonly int BaseColor = Shader.PropertyToID("_BaseColor");
+            public static readonly int Color = Shader.PropertyToID("_Color");
+            public static readonly int MaterialColor = Shader.PropertyToID("_MaterialColor");
+            public static readonly int PartColorInfluence = Shader.PropertyToID("_PartColorInfluence");
+            public static readonly int TextureScale = Shader.PropertyToID("_TextureScale");
+            public static readonly int TextureAspect = Shader.PropertyToID("_TextureAspect");
+            public static readonly int BumpScale = Shader.PropertyToID("_BumpScale");
+            public static readonly int RoughnessScale = Shader.PropertyToID("_RoughnessScale");
+            public static readonly int InvertRoughness = Shader.PropertyToID("_InvertRoughness");
+            public static readonly int CavityStrength = Shader.PropertyToID("_CavityStrength");
+            public static readonly int MetalAlbedoLift = Shader.PropertyToID("_MetalAlbedoLift");
+            public static readonly int EmissionColor = Shader.PropertyToID("_EmissionColor");
+            public static readonly int EmissionThreshold = Shader.PropertyToID("_EmissionThreshold");
         }
 
         private sealed class ChunkView

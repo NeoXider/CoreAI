@@ -202,11 +202,13 @@ An unknown, unregistered name still fails immediately at `GetService()` with `UN
 [Sandbox & limits](#sandbox--limits).
 
 ## Coroutines (work across frames, WebGL-safe)
-`coroutine.create/resume/yield/status` are available (`coroutine.wrap` is removed; `coroutine.resume` runs under
-the per-resume budget). A coroutine lets a mod spread a sequence over time
+`coroutine.create/resume/yield/status/wrap/isyieldable/close` are available. `coroutine.resume` runs the coroutine
+under the per-resume budget, and `coroutine.wrap` is the sandbox's own, built on that guarded resume, so a wrapped
+body has the same budget (the VM's native `wrap` resumes where no budget can be armed, so it is not exposed). A
+coroutine lets a mod spread a sequence over time
 without blocking — it yields, the host advances the frame, and you resume it next tick. Under Lua-CSharp this
 is frame-pumped, so `coroutine.yield` works on WebGL too (a blocking wait would deadlock single-threaded WASM;
-the bundled VM is Lua-CSharp v0.5.6).
+the bundled VM is Lua-CSharp v0.5.8).
 See `coroutine_countdown.lua`. Do NOT busy-wait; yield and resume from a timer/handler.
 
 - `coroutine.resume` works only on a coroutine your code made with `coroutine.create`. Handed a task,

@@ -1034,7 +1034,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             ("Lighting", new[]
             {
                 "ClockTime", "TimeOfDay", "GeographicLatitude", "Brightness", "Ambient", "OutdoorAmbient",
-                "EnvironmentDiffuseScale", "EnvironmentSpecularScale"
+                "EnvironmentDiffuseScale", "EnvironmentSpecularScale", "FogStart", "FogEnd", "FogColor"
             }),
             ("Light", new[] { "Brightness", "Color", "Enabled", "Shadows" }),
             ("PointLight", new[] { "Range" }),

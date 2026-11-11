@@ -2073,7 +2073,12 @@ namespace CoreAI.Mods.WorldPackages
                     Ambient = new[] { lighting.Ambient.R, lighting.Ambient.G, lighting.Ambient.B },
                     OutdoorAmbient = new[] { lighting.OutdoorAmbient.R, lighting.OutdoorAmbient.G, lighting.OutdoorAmbient.B },
                     EnvironmentDiffuseScale = lighting.EnvironmentDiffuseScale,
-                    EnvironmentSpecularScale = lighting.EnvironmentSpecularScale
+                    EnvironmentSpecularScale = lighting.EnvironmentSpecularScale,
+                    FogStart = lighting.FogStart,
+                    FogEnd = lighting.FogEnd,
+                    FogColor = lighting.FogColor == RbxLighting.DefaultFogColor
+                        ? null
+                        : new[] { lighting.FogColor.R, lighting.FogColor.G, lighting.FogColor.B }
                 };
             }
 
@@ -2480,6 +2485,13 @@ namespace CoreAI.Mods.WorldPackages
         {
             RequireLength(dto.Ambient, 3, "lighting.ambient");
             RequireLength(dto.OutdoorAmbient, 3, "lighting.outdoor_ambient");
+            RbxColor3 fogColor = RbxLighting.DefaultFogColor;
+            if (dto.FogColor != null)
+            {
+                RequireLength(dto.FogColor, 3, "lighting.fog_color");
+                fogColor = new RbxColor3(dto.FogColor[0], dto.FogColor[1], dto.FogColor[2]);
+            }
+
             return new RbxLightingDurableState(
                 dto.ClockTime,
                 dto.GeographicLatitude,
@@ -2487,7 +2499,10 @@ namespace CoreAI.Mods.WorldPackages
                 new RbxColor3(dto.Ambient[0], dto.Ambient[1], dto.Ambient[2]),
                 new RbxColor3(dto.OutdoorAmbient[0], dto.OutdoorAmbient[1], dto.OutdoorAmbient[2]),
                 dto.EnvironmentDiffuseScale,
-                dto.EnvironmentSpecularScale);
+                dto.EnvironmentSpecularScale,
+                dto.FogStart,
+                dto.FogEnd,
+                fogColor);
         }
 
         private static PartProperties BuildPartProperties(WorldPartDto dto)
@@ -2870,7 +2885,9 @@ namespace CoreAI.Mods.WorldPackages
                 || !IsFinite(lighting.Ambient.R) || !IsFinite(lighting.Ambient.G) || !IsFinite(lighting.Ambient.B)
                 || !IsFinite(lighting.OutdoorAmbient.R) || !IsFinite(lighting.OutdoorAmbient.G)
                 || !IsFinite(lighting.OutdoorAmbient.B)
-                || !IsUnitScale(lighting.EnvironmentDiffuseScale) || !IsUnitScale(lighting.EnvironmentSpecularScale))
+                || !IsUnitScale(lighting.EnvironmentDiffuseScale) || !IsUnitScale(lighting.EnvironmentSpecularScale)
+                || !IsFinite(lighting.FogStart) || !IsFinite(lighting.FogEnd) || !IsFinite(lighting.FogColor.R)
+                || !IsFinite(lighting.FogColor.G) || !IsFinite(lighting.FogColor.B))
             {
                 throw new RbxWorldPackageException(
                     "World package lighting needs finite values, a clock_time within [0, 24) and environment scales "
@@ -3814,6 +3831,20 @@ namespace CoreAI.Mods.WorldPackages
             [JsonProperty("environment_specular_scale", DefaultValueHandling = DefaultValueHandling.Ignore)]
             [DefaultValue(RbxLighting.DefaultEnvironmentSpecularScale)]
             public float EnvironmentSpecularScale = RbxLighting.DefaultEnvironmentSpecularScale;
+
+            // WHY omitted at their defaults (0 and 100000 studs, the dump's grey): a block written before the fog
+            // members existed, and every block whose fog was never set, stay byte-identical; a missing key reads
+            // its default, and a null colour is the omitted default colour.
+            [JsonProperty("fog_start", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            [DefaultValue(RbxLighting.DefaultFogStart)]
+            public float FogStart = RbxLighting.DefaultFogStart;
+
+            [JsonProperty("fog_end", DefaultValueHandling = DefaultValueHandling.Ignore)]
+            [DefaultValue(RbxLighting.DefaultFogEnd)]
+            public float FogEnd = RbxLighting.DefaultFogEnd;
+
+            [JsonProperty("fog_color", NullValueHandling = NullValueHandling.Ignore)]
+            public float[] FogColor;
         }
 
         [Serializable]

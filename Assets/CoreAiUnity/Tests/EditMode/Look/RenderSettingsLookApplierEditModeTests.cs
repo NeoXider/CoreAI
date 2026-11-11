@@ -11,8 +11,10 @@ namespace CoreAI.Tests.EditMode
     /// The pipeline-independent look: sky, ambient, fog and directional-light shadows follow the profile
     /// and the options under <see cref="LookMode.Apply"/>, a scene-authored sky and fog survive
     /// <see cref="LookMode.FillMissing"/>, <see cref="LookMode.Off"/> changes nothing,
-    /// <see cref="RenderSettingsLookApplier.Revert"/> puts the scene back exactly, and an ambient another
-    /// system claims (<see cref="LookAmbientOwnership"/>) is left to it until the claim is released.
+    /// <see cref="RenderSettingsLookApplier.Revert"/> puts the scene back exactly, an ambient another
+    /// system claims (<see cref="LookAmbientOwnership"/>) is left to it until the claim is released, and with the
+    /// procedural sky the colour below the horizon and the fog follow the haze of the sun's position (twins: the
+    /// profile's fixed colours when switched off, and a scene's own fog under FillMissing).
     /// </summary>
     public sealed class RenderSettingsLookApplierEditModeTests
     {
@@ -75,6 +77,8 @@ namespace CoreAI.Tests.EditMode
             RequireProceduralSkyShader();
             RenderSettings.skybox = null;
             RenderSettings.fog = false;
+            // WHY the haze off: this test checks the profile's own fog colour; following the haze is tested below.
+            _profile.FogFollowsHaze = false;
 
             _applier.Apply(_profile, Options(), LookMode.Apply);
 
@@ -319,6 +323,108 @@ namespace CoreAI.Tests.EditMode
             claim.Dispose();
             Assert.AreEqual(AmbientMode.Trilight, RenderSettings.ambientMode,
                 "a reverted look does not take the ambient back when the claim ends");
+        }
+
+        [Test]
+        public void TheSkyBelowTheHorizon_AndTheFog_FollowTheHazeOfTheSun()
+        {
+            RequireProceduralSkyShader();
+            Light savedSun = RenderSettings.sun;
+            try
+            {
+                RenderSettings.skybox = null;
+                Light sun = NewDirectionalLight(LightShadows.None);
+                RenderSettings.sun = sun;
+                sun.transform.rotation = Quaternion.Euler(50f, 30f, 0f);
+
+                _applier.Apply(_profile, Options(), LookMode.Apply);
+
+                Assert.IsTrue(_applier.TryGetHazeColors(out Color ground, out Color fog));
+                Vector3 towardSun = -sun.transform.forward;
+                Color tint = _profile.SkyTint;
+                ProceduralSkyHaze.GroundColorMatchingHaze(towardSun.x, towardSun.y, towardSun.z, tint.r, tint.g, tint.b,
+                    _profile.SkyAtmosphereThickness, out float red, out float green, out float blue);
+                AssertColor(new Color(red, green, blue), ground, 0.01f, "the ground colour continues the haze");
+                ProceduralSkyHaze.HorizonHaze(towardSun.x, towardSun.y, towardSun.z, tint.r, tint.g, tint.b,
+                    _profile.SkyAtmosphereThickness, out float hazeR, out float hazeG, out float hazeB);
+                float exposure = _profile.SkyExposure;
+                AssertColor(new Color(Mathf.Clamp01(hazeR * exposure), Mathf.Clamp01(hazeG * exposure),
+                    Mathf.Clamp01(hazeB * exposure)), fog, 0.01f, "the fog is the haze");
+                Assert.Greater(ground.b, _profile.SkyGroundColor.linear.b * 2f, "not the brown floor any more");
+
+                sun.transform.rotation = Quaternion.Euler(3f, 30f, 0f);
+                _applier.Apply(_profile, Options(), LookMode.Apply);
+                Assert.IsTrue(_applier.TryGetHazeColors(out Color _, out Color duskFog));
+                Assert.Greater(duskFog.r / Mathf.Max(duskFog.b, 1e-4f), fog.r / Mathf.Max(fog.b, 1e-4f),
+                    "the fog warms as the sun sets");
+
+                _applier.Revert();
+                Assert.IsFalse(_applier.TryGetHazeColors(out Color _, out Color _), "a reverted look follows nothing");
+            }
+            finally
+            {
+                RenderSettings.sun = savedSun;
+            }
+        }
+
+        [Test]
+        public void WithTheHazeOff_TheSkyAndFogKeepTheProfilesColours_NegativeTwin()
+        {
+            RequireProceduralSkyShader();
+            Light savedSun = RenderSettings.sun;
+            try
+            {
+                RenderSettings.skybox = null;
+                Light sun = NewDirectionalLight(LightShadows.None);
+                RenderSettings.sun = sun;
+                sun.transform.rotation = Quaternion.Euler(50f, 30f, 0f);
+                _profile.SkyGroundFollowsHaze = false;
+                _profile.FogFollowsHaze = false;
+
+                _applier.Apply(_profile, Options(), LookMode.Apply);
+
+                AssertColor(_profile.SkyGroundColor, _applier.ProceduralSkyMaterial.GetColor("_GroundColor"), 1e-4f,
+                    "the profile's ground colour");
+                AssertColor(_profile.FogColor, RenderSettings.fogColor, 1e-4f, "the profile's fog colour");
+            }
+            finally
+            {
+                RenderSettings.sun = savedSun;
+            }
+        }
+
+        [Test]
+        public void FillMissing_KeepsTheScenesOwnFog_EvenWhenTheSkyFollowsTheHaze_NegativeTwin()
+        {
+            RequireProceduralSkyShader();
+            Light savedSun = RenderSettings.sun;
+            try
+            {
+                RenderSettings.skybox = NewMaterial("Default-Skybox");
+                RenderSettings.fog = true;
+                RenderSettings.fogColor = Color.red;
+                Light sun = NewDirectionalLight(LightShadows.None);
+                RenderSettings.sun = sun;
+                sun.transform.rotation = Quaternion.Euler(50f, 30f, 0f);
+
+                _applier.Apply(_profile, Options(), LookMode.FillMissing);
+
+                Assert.AreSame(_applier.ProceduralSkyMaterial, RenderSettings.skybox);
+                Assert.IsTrue(_applier.TryGetHazeColors(out Color ground, out Color _));
+                Assert.Greater(ground.b, 0.2f, "the look's own sky still follows the haze");
+                Assert.AreEqual(Color.red, RenderSettings.fogColor, "the scene's fog is the scene's");
+            }
+            finally
+            {
+                RenderSettings.sun = savedSun;
+            }
+        }
+
+        private static void AssertColor(Color expected, Color actual, float tolerance, string message)
+        {
+            Assert.AreEqual(expected.r, actual.r, tolerance, message + " (red)");
+            Assert.AreEqual(expected.g, actual.g, tolerance, message + " (green)");
+            Assert.AreEqual(expected.b, actual.b, tolerance, message + " (blue)");
         }
 
         private static void WriteOwnersAmbient()

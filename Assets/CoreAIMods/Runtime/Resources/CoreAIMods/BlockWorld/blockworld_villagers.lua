@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_villagers
 name: Block World 6 - Villagers
-version: 1.2.0
+version: 1.3.0
 active: false
 capabilities: All
 category: Samples/Block World
@@ -14,6 +14,7 @@ description: Part of the Block World demo. Three villagers live by the spawn - M
 -- at command time), and the platform's character rig animates it (idle, walk, jump, fall) as it does the player.
 -- The rig owns the six parts: they are unanchored and never collide, and the root (an invisible 2x2x1 box resting
 -- on the floor) is the only collider. The hair is this mod's own and follows the Head after the rig has posed it.
+-- A villager's home is the nearest level ground to its planned spot, so it does not start in a pit or on a ledge.
 -- The agent comes from AIService:CreateAgent, which only a game that turned AI from
 -- Lua on allows; a refusal is caught, its reason kept, and every greeting then explains it. Chat lines reach the
 -- agents through the host (a line that names a villager, follows up, or is said within its hearing radius goes to
@@ -227,6 +228,60 @@ local function groundUnder(spot)
     return workspace:Raycast(Vector3.new(spot.X, 200, spot.Z), Vector3.new(0, -400, 0), groundParams)
 end
 
+-- A villager stands on ground, never on the sea, a trunk or a crown.
+local STAND_ON = { [Enum.Material.Grass] = true, [Enum.Material.Sand] = true, [Enum.Material.Ground] = true,
+    [Enum.Material.Rock] = true, [Enum.Material.Snow] = true }
+local SIDES = { Vector3.new(4, 0, 0), Vector3.new(-4, 0, 0), Vector3.new(0, 0, 4), Vector3.new(0, 0, -4) }
+-- WHY nearest first and at most two cells away: the home stays where the heading frame puts it whenever it can.
+local NEAR = {}
+for dx = -2, 2 do
+    for dz = -2, 2 do
+        NEAR[#NEAR + 1] = Vector3.new(dx * 4, 0, dz * 4)
+    end
+end
+table.sort(NEAR, function(a, b)
+    return a.Magnitude < b.Magnitude
+end)
+
+local function standable(spot)
+    local hit = groundUnder(spot)
+    if not hit then
+        return nil
+    end
+    local cell = terrain:WorldToCell(hit.Position - Vector3.new(0, 1, 0))
+    local corner = terrain:CellCornerToWorld(cell.X, cell.Y, cell.Z)
+    local materials = terrain:ReadVoxels(Region3.new(corner, corner + Vector3.new(4, 4, 4)), 4)
+    return STAND_ON[materials[1][1][1]] and hit or nil
+end
+
+-- WHY a search: on hilly ground the planned spot can be a pit or a ledge, and a villager stood there walks into the
+-- step at once and never gets anywhere. The nearest spot whose ground is level with its four neighbours wins;
+-- with none, the caller keeps the planned spot.
+local function levelSpot(spot)
+    for _, offset in ipairs(NEAR) do
+        local here = spot + offset
+        local hit = standable(here)
+        if hit then
+            local level = true
+            for _, side in ipairs(SIDES) do
+                local beside = groundUnder(here + side)
+                if not beside or math.abs(beside.Position.Y - hit.Position.Y) > 0.5 then
+                    level = false
+                    break
+                end
+            end
+            if level then
+                return here, hit
+            end
+        end
+    end
+    return nil
+end
+
+-- WHY one search a frame: a search can cost a hundred ground probes, and three in one Heartbeat would crowd the
+-- mod's instruction budget.
+local searchesLeft = 0
+
 -- Stands the villager on the ground found under its home (the root's box on the floor) and lets the motor have it.
 local function letGo(villager, groundY)
     villager.home = Vector3.new(villager.home.X, groundY + 1, villager.home.Z)
@@ -254,6 +309,16 @@ local function tryPlace(villager, force)
     if not hit and not force then
         return
     end
+    if hit then
+        if searchesLeft <= 0 then
+            return
+        end
+        searchesLeft = searchesLeft - 1
+        local level, levelHit = levelSpot(spot)
+        if level then
+            spot, hit = level, levelHit
+        end
+    end
     -- WHY 3 under the spawn: BlockWorldSpawn is 4 studs above the spawn's ground, the root's centre 1.
     villager.home = Vector3.new(spot.X, spawn.Y - 3, spot.Z)
     villager.model:PivotTo(CFrame.new(villager.home))
@@ -274,9 +339,15 @@ local function keepOnGround(villager)
         return
     end
     local hit = groundUnder(villager.home)
-    if hit then
-        letGo(villager, hit.Position.Y)
+    if not hit or searchesLeft <= 0 then
+        return
     end
+    searchesLeft = searchesLeft - 1
+    local level, levelHit = levelSpot(villager.home)
+    if level then
+        villager.home, hit = level, levelHit
+    end
+    letGo(villager, hit.Position.Y)
 end
 
 -- ---- talking ----------------------------------------------------------------------------------------
@@ -351,6 +422,7 @@ RunService.Heartbeat:Connect(function(dt)
         return
     end
     waited = waited + dt
+    searchesLeft = 1
     for _, villager in ipairs(VILLAGERS) do
         if villager.home then
             keepOnGround(villager)

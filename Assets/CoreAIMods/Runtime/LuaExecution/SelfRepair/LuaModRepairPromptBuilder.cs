@@ -190,10 +190,13 @@ namespace CoreAI.Ai.SelfRepair
                 StringComparison.Ordinal);
             bool sameSite = string.Equals(context.PreviousSite.Describe(modId), context.Site.Describe(modId),
                 StringComparison.Ordinal);
+            string where = context.Site.Describe(modId);
             text.Append(sameError && sameSite
                 ? ", but it fails with the same error at the same line: that change did not reach the cause."
-                : ", and it now fails with the error above instead of \"" +
-                  Clip(SingleLine(context.PreviousError), 160) + "\".");
+                : sameError
+                    ? ", but it still fails with the same error, now at " + (where.Length > 0 ? where : "another line") + "."
+                    : ", and it now fails with the error above instead of \"" +
+                      Clip(SingleLine(context.PreviousError), 160) + "\".");
             text.Append(" The source below is your last version; try a different fix.");
             return text.ToString();
         }

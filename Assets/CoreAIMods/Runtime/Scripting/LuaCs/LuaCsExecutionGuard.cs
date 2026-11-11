@@ -8,7 +8,6 @@ using CoreAI.Mods.Rbx.Instances.Scheduling;
 using CoreAI.Scripting;
 using Lua;
 using Lua.Runtime;
-using Lua.Standard;
 
 namespace CoreAI.Sandbox.LuaCs
 {
@@ -953,11 +952,6 @@ namespace CoreAI.Sandbox.LuaCs
 
             hook.End(_observability != null);
             installed.Pop();
-            if (hook.LeftInHookFlagSet)
-            {
-                ClearInHookFlag(state);
-            }
-
             try
             {
                 if (installed.Count > 0)
@@ -1018,43 +1012,6 @@ namespace CoreAI.Sandbox.LuaCs
             // (and whatever it closes over) reachable until the hook happens to be rented again.
             hook.Release();
             ReturnHook(hook);
-        }
-
-        // WHY debug.sethook's C# implementation and not reflection on the internal LuaState.IsInHook field:
-        // Lua-CSharp resets that flag only in a finally around a hook it calls itself, and
-        // DebugLibrary.SetHook, given a hook with the 'r' mask on the thread that is running it, calls that
-        // hook once as a "return" event and clears the flag in exactly such a finally. It is public API
-        // (the debug library itself is never opened in the sandbox), so it behaves the same under Mono and
-        // IL2CPP with no link.xml entry; EndGuard's SetHook afterwards replaces the no-op hook it installs.
-        private static readonly LuaFunction InHookFlagReset =
-            new("coreai_guard_in_hook_reset", DebugLibrary.Instance.SetHook);
-
-        private static readonly LuaFunction NoOpReturnHook =
-            new("coreai_guard_in_hook_reset_noop", (ctx, ct) => new ValueTask<int>(ctx.Return()));
-
-        /// <summary>
-        /// Clears the in-hook flag a hook that threw left set on <paramref name="state"/> (see
-        /// <see cref="LuaCsCoroutineHandle.ForeignContextTrip"/>); until then no count hook fires on it again.
-        /// Best-effort: the trip being reported must not be replaced by a failure here.
-        /// </summary>
-        private static void ClearInHookFlag(LuaState state)
-        {
-            try
-            {
-                LuaValue[] arguments = { new LuaValue(NoOpReturnHook), "r" };
-                ValueTask<LuaValue[]> reset = state.CallAsync(new LuaValue(InHookFlagReset), arguments.AsSpan(),
-                    CancellationToken.None);
-                // WHY only read when complete: both functions are synchronous C# functions, so the call has
-                // finished here and GetResult only surfaces its outcome; nothing is ever waited on (WebGL).
-                if (reset.IsCompleted)
-                {
-                    reset.GetAwaiter().GetResult();
-                }
-            }
-            catch (Exception)
-            {
-                // WHY swallowed: see the summary; the caller re-arms or clears the hook right after.
-            }
         }
 
         /// <summary>
@@ -1142,7 +1099,6 @@ namespace CoreAI.Sandbox.LuaCs
             private long _lastYieldTimestamp;
             private LuaCsGuardTripKind _trip;
             private LuaCsHostFunctionException _tripError;
-            private bool _leftInHookFlagSet;
             private bool _nested;
             private int _restoredCallBase;
 
@@ -1176,12 +1132,6 @@ namespace CoreAI.Sandbox.LuaCs
 
             /// <summary>The error the current execution ends with once <see cref="HasTripped"/>.</summary>
             public LuaCsHostFunctionException TripError => _tripError;
-
-            /// <summary>
-            /// True when this hook had to throw (see <see cref="LuaCsCoroutineHandle.ForeignContextTrip"/>),
-            /// which leaves Lua-CSharp's in-hook flag set on the state until the guard clears it.
-            /// </summary>
-            public bool LeftInHookFlagSet => _leftInHookFlagSet;
 
             /// <inheritdoc />
             internal override long RemainingSteps => _stepLimit - _steps;
@@ -1230,7 +1180,6 @@ namespace CoreAI.Sandbox.LuaCs
                 _steps = 0;
                 _trip = LuaCsGuardTripKind.None;
                 _tripError = null;
-                _leftInHookFlagSet = false;
                 _maxSteps = maxSteps < 1 ? 1 : maxSteps;
                 _stepLimit = _maxSteps;
                 _timeoutMs = timeoutMs < 1 ? 1 : timeoutMs;
@@ -1425,7 +1374,6 @@ namespace CoreAI.Sandbox.LuaCs
                     return new System.Threading.Tasks.ValueTask<int>(ctx.Return());
                 }
 
-                _leftInHookFlagSet = true;
                 throw LuaCsCoroutineHandle.ForeignContextTrip(_tripError);
             }
 
@@ -1445,15 +1393,9 @@ namespace CoreAI.Sandbox.LuaCs
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
-                    // WHY return instead of rethrow: a hook that throws leaves the state's in-hook flag set
-                    // (see LuaCsCoroutineHandle.CancelGuardedRun), while the VM checks this same token the
-                    // moment the hook returns and raises the cancellation itself, flag cleared.
+                    // WHY return instead of rethrow: the VM checks this same token the moment the hook returns and
+                    // raises its own cancellation, the one every other cancelled run ends with.
                     return ctx.Return();
-                }
-                catch (Exception)
-                {
-                    _leftInHookFlagSet = true;
-                    throw;
                 }
                 finally
                 {

@@ -39,7 +39,7 @@ default; a command your game registered first under the same name is kept):
 
 | Command | What it does |
 |---|---|
-| `/undo` | Takes back your latest AI change to the world. With nothing to undo, or after something else changed the world since, it says why and changes nothing. |
+| `/undo` | Takes back your latest AI change to the world. With nothing to undo, or after something else changed the world since, it says why and changes nothing. A change the AI's self-repair fixed is taken back together with its repair. |
 | `/redo` | Puts back the change `/undo` took back, under the same rule. |
 | `/fly` | Toggles flight of your character (Space rises, Left Shift descends). |
 
@@ -51,6 +51,12 @@ another agent made an AI change (its name is in the reason). A script that chang
 day cycle, a flickering torch) does not refuse it and is not recorded; the undo puts back the values of the moment
 before your change, and the script carries on from there. Copies of StarterGui in a player's PlayerGui and the
 player's character are not part of the world, so a respawn never refuses an undo.
+
+When a mod the AI wrote starts failing and the AI repairs it on its own, the repair joins the history entry of the
+change that wrote the mod, as long as nothing else changed the world in between: one `/undo` then takes back your
+request and its repair, and `/redo` puts back the repaired version. With another change in between, the repair is its
+own step, named as one ("The AI's repair of mod 'tower' was undone."). A version an undo puts back is never repaired
+again on its own; `/fixmod <id>` asks for it. See [MOD_CONSOLE.md](MOD_CONSOLE.md#repairs-and-undo).
 
 ## Typing never moves the character
 

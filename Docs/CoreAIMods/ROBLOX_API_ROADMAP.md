@@ -126,7 +126,7 @@ Derived rules:
 
 ## 2. Standing decisions (researched 2026-07; items marked LOCKED are user-confirmed)
 
-- **VM**: keep Lua-CSharp v0.5.6 (bundled `Lua.dll`/`Lua.Annotations.dll` in
+- **VM**: keep Lua-CSharp, now v0.5.8 (2026-11-11; bundled `Lua.dll`/`Lua.Annotations.dll` in
   `Assets/CoreAIMods/Plugins`; Lua 5.2, double-only numbers — near-Luau semantics). No MoonSharp return,
   no native Luau on the client (WebGL). Plan decision D8 (2026-09-24): keep Lua-CSharp with a cheaper
   guard first; native Luau **on the server only**, behind `IScriptEngine`, is the fallback if spike S1
@@ -1785,7 +1785,7 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   times in 30 s, 2 budget trips in 30 s or a quarantine; 3 attempts with 10 s and 30 s backoff, verified by 5 s
   without an error, one repair turn at a time, at most 3 queued and 6 turns per 10 minutes; the turn runs as a host
   turn of the in-world chat (`ChatOverlayController.TryStartHostTurn`: status line, `/stop`, busy rule) and the model
-  applies the fix with its own `manage_mods reload` through the gate, so `/undo` takes it back; `/fixmod <id>`; one
+  applies the fix with its own `manage_mods reload` through the gate, and the fix joins the undo entry of the change it repairs; a paid backend asks first; `/fixmod <id>`; one
   chat line per step; nothing without a model. `watch_mod_logs` is not a new tool: `get_mod_logs` gained
   `since_reload`, a bounded `wait_seconds` (0-10, frame-driven) and the `next_sequence` cursor, 239 to 272 tokens,
   with the load/reload/unload timeline in the mod log (`LuaModLifecycleLog`). The in-game console (F8, `/console`):
@@ -2832,6 +2832,14 @@ Milestones: **the day-cycle slice in M1** — `ClockTime`, `TimeOfDay`, `Geograp
     the default look on a separate Unity copy: the ground darkens from noon to midnight and a torch lights
     a wall at night. Open: the rest of P9 (M2), a Lighting baseline for new worlds, the mood section of
     the skill, the Moon (stubs). Deviations: DEV-50 to DEV-59.
+  - **2026-11-11, fog members live (engine-free and scripting half):** `Lighting.FogStart` (0 studs),
+    `FogEnd` (100000 studs) and `FogColor` (0.75 grey) with the dump's defaults; any finite number is kept
+    as set (the mirror states no range), a non-finite one is `BAD_ARGUMENT`; a change fires `Changed` and
+    its property signal but not `LightingChanged` (the exceptions `Lighting.yaml` lists); tweenable;
+    `RbxLightingState` carries the three to the sink; the `lighting` block writes `fog_start`, `fog_end`
+    and `fog_color` only when they differ from the defaults; the undo mark folds them in. Tests:
+    `P9LightingEngineFreeEditModeTests`, `P9LightingLuaEditModeTests`, `WorldPackageFogEditModeTests`.
+    Open: the Unity sink's fog mapping (until a world sets fog the host look keeps its own haze).
   - *The survey this package started from (release 7.56.0); the lines above supersede it where they
     differ:*
   - `Lighting` is a structure-only service (`CoreAIMods/Runtime/RbxApi/Instances/ClassCatalog.cs:625`,
@@ -2883,8 +2891,10 @@ Milestones: **the day-cycle slice in M1** — `ClockTime`, `TimeOfDay`, `Geograp
       intensity.
     - `ExposureCompensation` drives post exposure.
     - `GlobalShadows` and `ShadowSoftness` drive the sun's shadows.
-    - Fog members drive linear fog, in studs through `RbxSpace`.
-    - Changes fire `Changed`, `GetPropertyChangedSignal` and `LightingChanged`.
+    - Fog members drive linear fog, in studs through `RbxSpace` (the members are live; the sink
+      mapping is open).
+    - Changes fire `Changed`, `GetPropertyChangedSignal` and `LightingChanged` (except the fog
+      members, as `Lighting.yaml` documents).
   - **New-world template**: a fresh CoreAI world writes baseline `Lighting` values chosen to match
     the P7 default profile, the way Roblox's place templates differ from raw class defaults. Class
     defaults stay as in `Full-API-Dump.json`.

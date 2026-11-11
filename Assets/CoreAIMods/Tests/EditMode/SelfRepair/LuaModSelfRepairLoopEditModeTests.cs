@@ -332,7 +332,7 @@ namespace CoreAI.Tests.EditMode.SelfRepair
         }
 
         /// <summary>The real mod stack, the real tool, a recording gate and a scripted model.</summary>
-        private sealed class Harness : IDisposable
+        internal sealed class Harness : IDisposable
         {
             public Harness(LuaModRuntimeRepairOptions options = null, LuaModSelfRepairPorts ports = null)
             {
@@ -388,6 +388,8 @@ namespace CoreAI.Tests.EditMode.SelfRepair
             public LuaModSelfRepairCoordinator Coordinator { get; }
 
             public List<string> Lines { get; } = new();
+
+            public string LastLine => Lines.Count == 0 ? "" : Lines[Lines.Count - 1];
 
             public double Clock { get; set; } = 1000d;
 
@@ -523,7 +525,7 @@ namespace CoreAI.Tests.EditMode.SelfRepair
         }
 
         /// <summary>A gate that runs every mutation at once, tells its observers, and records trigger and actor.</summary>
-        private sealed class RecordingGate : IAttributedWorldMutationGate, IObservableWorldMutationGate
+        internal sealed class RecordingGate : IAttributedWorldMutationGate, IObservableWorldMutationGate
         {
             private readonly List<IRbxWorldMutationObserver> _observers = new();
             private long _sequence;
@@ -580,7 +582,7 @@ namespace CoreAI.Tests.EditMode.SelfRepair
         }
 
         /// <summary>The chat feed: what the player was told.</summary>
-        private sealed class RecordingMessages : IChatOverlayMessages
+        internal sealed class RecordingMessages : IChatOverlayMessages
         {
             public List<string> Posted { get; } = new();
 
@@ -595,7 +597,7 @@ namespace CoreAI.Tests.EditMode.SelfRepair
             }
         }
 
-        private sealed class SilentGameLogger : IGameLogger
+        internal sealed class SilentGameLogger : IGameLogger
         {
             public void LogDebug(GameLogFeature feature, string message, UnityEngine.Object context = null)
             {

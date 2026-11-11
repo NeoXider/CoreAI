@@ -559,9 +559,9 @@ namespace CoreAI.Tests.EditMode
         {
             // WHY: a trip can land while a host function runs Lua on the guarded state with a token of its own
             // (the signal runner builds its body with CancellationToken.None). Cancelling the run's token cannot
-            // stop that nested call, so the hook has to throw there, which leaves Lua-CSharp's in-hook flag set;
-            // the guard must clear it, or every later run on the state is unguarded - the same hole as a
-            // throwing trip.
+            // stop that nested call, so the hook has to throw there. Up to Lua-CSharp 0.5.6 the throw left the
+            // VM's in-hook flag set and the guard cleared it; since 0.5.8 the VM restores it itself
+            // (LuaCsVmContractEditModeTests). Either way every later run on the state must stay guarded.
             LuaCsSecureEnvironment env = new();
             LuaCsApiRegistry registry = new();
             registry.RegisterCallback("run_detached", (ctx, ct) =>
@@ -582,7 +582,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsInstanceOf<LuaStepBudgetException>(tripped.HostException);
 
             Assert.Throws<LuaCsHostFunctionException>(() => env.RunChunk(state, FiniteRunaway, guard),
-                "the next runaway on the same state must be cut, so the guard must have cleared the hook flag");
+                "the next runaway on the same state must be cut, so the hook must fire again after the throw");
             Assert.AreEqual(2, observer.Records.Count);
             Assert.AreEqual(LuaCsGuardTripKind.Steps, observer.Records[0].TrippedBudget);
             Assert.AreEqual(LuaCsGuardTripKind.Steps, observer.Records[1].TrippedBudget);

@@ -68,9 +68,14 @@ namespace CoreAI.Look
         [SerializeField]
         private Color skyTint = new(0.52f, 0.58f, 0.66f, 1f);
 
-        [Tooltip("Procedural sky ground colour below the horizon.")]
+        [Tooltip("Procedural sky ground colour below the horizon, used while the ground does not follow the haze.")]
         [SerializeField]
         private Color skyGroundColor = new(0.38f, 0.36f, 0.34f, 1f);
+
+        [Tooltip("Recolour the procedural sky below the horizon as the sun moves, so it continues the haze above " +
+                 "the horizon instead of drawing a brown floor past the edge of the world.")]
+        [SerializeField]
+        private bool skyGroundFollowsHaze = true;
 
         [Tooltip("Procedural sky sun disc size.")]
         [Range(0f, 1f)]
@@ -120,9 +125,14 @@ namespace CoreAI.Look
         private Color flatAmbientGround = new(0.3f, 0.29f, 0.28f, 1f);
 
         [Header("Fog")]
-        [Tooltip("Fog colour.")]
+        [Tooltip("Fog colour, used while the fog does not follow the haze.")]
         [SerializeField]
         private Color fogColor = new(0.66f, 0.74f, 0.82f, 1f);
+
+        [Tooltip("With the procedural sky, take the fog colour from the sky's haze at the horizon as the sun moves, " +
+                 "so distant ground fades into the sky behind it by day and goes dark at night.")]
+        [SerializeField]
+        private bool fogFollowsHaze = true;
 
         [Tooltip("Fog falloff.")]
         [SerializeField]
@@ -211,6 +221,26 @@ namespace CoreAI.Look
         {
             get => skyGroundColor;
             set => skyGroundColor = value;
+        }
+
+        /// <summary>
+        /// True: the procedural sky's colour below the horizon is recomputed from the sun's position so it continues
+        /// the haze above the horizon (<see cref="SkyGroundColor"/> is then unused).
+        /// </summary>
+        public bool SkyGroundFollowsHaze
+        {
+            get => skyGroundFollowsHaze;
+            set => skyGroundFollowsHaze = value;
+        }
+
+        /// <summary>
+        /// True: with the procedural sky, the fog takes the sky's haze colour at the horizon as the sun moves
+        /// (<see cref="FogColor"/> is then unused).
+        /// </summary>
+        public bool FogFollowsHaze
+        {
+            get => fogFollowsHaze;
+            set => fogFollowsHaze = value;
         }
 
         /// <summary>Procedural sky sun disc size.</summary>

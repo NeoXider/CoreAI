@@ -4,6 +4,7 @@ using CoreAI.Ai.LuaCs;
 using CoreAI.Ai.Npc;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Terrain;
 using NUnit.Framework;
 
 namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
@@ -128,6 +129,74 @@ workspace:SetAttribute('TestHairHeld', body.Hair.Anchored and not body.Hair.CanC
 
             Assert.Greater(moved, 1d, "a head moved after this frame's render step has left its hair behind");
             Assert.AreEqual(0d, after, 0.01d, "the next render step puts the hair back on the head");
+            _world.AssertHealthy(Mod);
+        }
+
+        // WHY these cells: with the spawn at (2, 10, 2) and no heading, Tobin's planned spot is (18, -2), the
+        // middle of cell (4, -1); the ground's top face is at 8, and a pit there drops it to 4.
+        private const int TobinCellX = 4;
+        private const int TobinCellZ = -1;
+
+        private void StartOnGround(bool pitUnderTobin)
+        {
+            _world = new BlockWorldTestWorld(new BlockWorldTestOptions
+            {
+                Ai = new CoreAiLuaAiOptions { AllowAgentsFromLua = false }
+            });
+            TerrainMaterials.TryGetSlot("Basalt", out byte bedrock);
+            TerrainMaterials.TryGetSlot("Grass", out byte grass);
+            for (int x = -8; x <= 10; x++)
+            {
+                for (int z = -8; z <= 6; z++)
+                {
+                    _world.Terrain.Store.SetCell(x, -16, z, bedrock, 255);
+                    for (int y = -15; y <= 1; y++)
+                    {
+                        _world.Terrain.Store.SetCell(x, y, z, grass, 255);
+                    }
+                }
+            }
+
+            if (pitUnderTobin)
+            {
+                _world.Terrain.Store.SetCell(TobinCellX, 1, TobinCellZ, TerrainMaterials.Air, 0);
+            }
+
+            _world.SetAttribute("BlockWorldSpawn", new RbxVector3(2, 10, 2));
+            _world.SetAttribute("BlockWorldReady", true);
+            _world.Load(Mod);
+            _world.Frame(30);
+        }
+
+        private RbxVector3 TobinStands()
+        {
+            _world.LoadSource("test_tobin_at", "workspace:SetAttribute('TestTobinAt', workspace.Tobin.HumanoidRootPart.Position) "
+                                               + "workspace:SetAttribute('TestTobinHeld', workspace.Tobin.HumanoidRootPart.Anchored)");
+            Assert.AreEqual(false, _world.Attribute("TestTobinHeld"), "Tobin's ground exists, so he is let go");
+            return (RbxVector3)_world.Attribute("TestTobinAt");
+        }
+
+        [Test]
+        public void P6_Villagers_AHomeInAPit_MovesToTheNearestLevelGround()
+        {
+            StartOnGround(pitUnderTobin: true);
+
+            RbxVector3 at = TobinStands();
+            float moved = new RbxVector3(at.X - 18f, 0f, at.Z + 2f).Magnitude;
+            Assert.AreEqual(9d, at.Y, 0.01d, "Tobin's root rests on the level ground (top face 8), not in the pit (4)");
+            Assert.That(moved, Is.InRange(4f, 12f), "the new home is the nearest level spot, within two cells of the plan");
+            _world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_Villagers_AHomeOnLevelGround_StaysWhereItWasPlanned_NegativeTwin()
+        {
+            StartOnGround(pitUnderTobin: false);
+
+            RbxVector3 at = TobinStands();
+            Assert.AreEqual(9d, at.Y, 0.01d, "Tobin's root rests on the ground");
+            Assert.AreEqual(18d, at.X, 0.01d, "on level ground the planned spot is kept");
+            Assert.AreEqual(-2d, at.Z, 0.01d, "on level ground the planned spot is kept");
             _world.AssertHealthy(Mod);
         }
 

@@ -60,9 +60,9 @@ local SPAWN_SEARCH = 24         -- rings of pillars searched for land around the
 -- beyond it are still being made.
 local SPAWN_FROM = CHUNK / 2
 local TREE_GRID = 3             -- a column offers one tree place per 3 x 3 cells (4 x 4 places)
-local WOOD = 0.12               -- forest noise above this is a wood
+local WOOD = 0                  -- forest noise above this is a wood (about half of the land)
 local WOOD_CHANCE = 0.9         -- a place in a wood grows a tree this often
-local FIELD_CHANCE = 0.07       -- a place in the open, this often
+local FIELD_CHANCE = 0.1        -- a place in the open, this often
 -- WHY a cost and not a count: a tall tree is a quarter of a big one; a frame grows trees until about 3,000 of its
 -- instructions are spent (a big oak alone is about 2,400), and planning them takes a frame of its own.
 local TREE_FRAME_COST = 3000
@@ -596,12 +596,23 @@ end
 -- How good the first view from pillar (x0, z0) at height h0 along heading `angle` is, from the heights alone: a rise
 -- in the middle distance (a hill or a peak, snow counts extra), water, a beach and a wood near enough to see, and a
 -- penalty when a slope right in front blocks the view.
+local spawnHeights = {}       -- the spawn search's heights, read once each (the search runs while the mod loads)
+local function spawnSearchHeight(x, z)
+    local key = x * 65536 + z
+    local h = spawnHeights[key]
+    if not h then
+        h = surfaceHeight(x, z)
+        spawnHeights[key] = h
+    end
+    return h
+end
+
 local function viewScore(x0, z0, h0, angle)
     local dx, dz = math.cos(angle), math.sin(angle)
     local rise, snow, sea, shore, wood, blocked = 0, false, false, false, false, false
-    for step = 6, 42, 4 do
+    for step = 6, 42, 6 do
         local x, z = x0 + math.round(dx * step), z0 + math.round(dz * step)
-        local h = surfaceHeight(x, z)
+        local h = spawnSearchHeight(x, z)
         if step <= 10 and h - h0 > 3 then
             blocked = true
         end
@@ -619,18 +630,19 @@ local function viewScore(x0, z0, h0, angle)
         - (blocked and 8 or 0)
 end
 
--- The spawn and its heading: of nine lowland pillars around the middle of the first column (rows 1 to 4) and sixteen
+-- The spawn and its heading: of nine lowland pillars around the middle of the first column (rows 1 to 4) and eight
 -- headings each, the pair with the best view (a little closer to the middle wins a tie). From the heights alone, so a
--- saved world finds the same spawn.
+-- saved world finds the same spawn. WHY eight headings and seven samples a ray: the search runs while the mod loads,
+-- which must fit an AI tool call (100 ms); about 450 heights do.
 local function chooseSpawn()
     local best = nil
     for dz = -4, 4, 4 do
         for dx = -4, 4, 4 do
             local x0, z0 = SPAWN_FROM + dx, SPAWN_FROM + dz
-            local h0 = surfaceHeight(x0, z0)
+            local h0 = spawnSearchHeight(x0, z0)
             if h0 >= 1 and h0 <= 4 then
-                for index = 0, 15 do
-                    local angle = index * math.pi / 8
+                for index = 0, 7 do
+                    local angle = index * math.pi / 4
                     local score = viewScore(x0, z0, h0, angle) - 0.15 * (math.abs(dx) + math.abs(dz))
                     if not best or score > best.score then
                         best = { score = score, x = x0, z = z0, h = h0, angle = angle }

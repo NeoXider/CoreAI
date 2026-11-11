@@ -296,15 +296,16 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             world.Load("m", @"
                 local L = game:GetService('Lighting')
                 local function try(f) local ok, err = pcall(f) return tostring(ok) .. '|' .. tostring(err) end
-                store_set('fog', try(function() return L.FogEnd end))
-                store_set('fogWrite', try(function() L.FogEnd = 50 end))
+                store_set('exposure', try(function() return L.ExposureCompensation end))
+                store_set('exposureWrite', try(function() L.ExposureCompensation = 1 end))
                 store_set('moon', try(function() return L:GetMoonPhase() end))
                 store_set('tech', try(function() return L.Technology end))
                 store_set('sky', try(function() return Instance.new('Sky') end))
                 store_set('spot', try(function() return Instance.new('SpotLight') end))");
 
-            StringAssert.Contains("NOT_IMPLEMENTED: Lighting.FogEnd is planned for P9.", world.Get("m", "fog"));
-            StringAssert.Contains("is planned for P9", world.Get("m", "fogWrite"));
+            StringAssert.Contains("NOT_IMPLEMENTED: Lighting.ExposureCompensation is planned for P9.",
+                world.Get("m", "exposure"));
+            StringAssert.Contains("is planned for P9", world.Get("m", "exposureWrite"));
             StringAssert.Contains("Lighting:GetMoonPhase is planned for P9", world.Get("m", "moon"));
             StringAssert.Contains("deliberately unsupported", world.Get("m", "tech"));
             StringAssert.Contains("Instance.new(\"Sky\") is planned for P9", world.Get("m", "sky"));
@@ -349,6 +350,86 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             Assert.AreEqual(1f, world.Roblox.Lighting.EnvironmentSpecularScale, 1e-4f);
             StringAssert.Contains("EnvironmentDiffuseScale", world.Get("m", "changed"));
             StringAssert.Contains("EnvironmentSpecularScale", world.Get("m", "changed"));
+        }
+
+        [Test]
+        public void P9_Lighting_Fog_ReadsTheDumpDefaults_SetsReachTheSink_AndTween()
+        {
+            World world = BuildWorld();
+            RecordingSink sink = new();
+            world.Roblox.Lighting.AttachSink(sink);
+            world.Load("m", @"
+                local L = game:GetService('Lighting')
+                store_set('defaults', table.concat({ tostring(L.FogStart), tostring(L.FogEnd), tostring(L.FogColor),
+                    typeof(L.FogColor) }, '|'))
+                L.FogColor = Color3.fromRGB(196, 214, 214)
+                L.FogStart = 150
+                L.FogEnd = 600
+                store_set('set', tostring(L.FogStart) .. '|' .. tostring(L.FogEnd))
+                game:GetService('TweenService'):Create(L, TweenInfo.new(0.5, Enum.EasingStyle.Linear),
+                    {FogStart = 50, FogEnd = 100, FogColor = Color3.new(0, 0, 0)}):Play()");
+
+            Assert.AreEqual("0|100000|0.75, 0.75, 0.75|Color3", world.Get("m", "defaults"));
+            Assert.AreEqual("150|600", world.Get("m", "set"));
+            Assert.AreEqual(3, sink.States.Count, "each fog write reaches the sink");
+            Assert.AreEqual(150f, sink.States[2].FogStart);
+            Assert.AreEqual(600f, sink.States[2].FogEnd);
+            Assert.AreEqual(196f / 255f, sink.States[2].FogColor.R, 1e-6f);
+            Assert.AreEqual(214f / 255f, sink.States[2].FogColor.G, 1e-6f);
+
+            world.Frames(45);
+            Assert.AreEqual(50f, world.Roblox.Lighting.FogStart, 1e-3f);
+            Assert.AreEqual(100f, world.Roblox.Lighting.FogEnd, 1e-3f);
+            Assert.AreEqual(0f, world.Roblox.Lighting.FogColor.B, 1e-6f);
+            Assert.AreEqual(world.Roblox.Lighting.CaptureState(), sink.States[sink.States.Count - 1]);
+        }
+
+        [Test]
+        public void P9_Lighting_Fog_FiresChangedAndItsSignal_ButNotLightingChanged()
+        {
+            World world = BuildWorld();
+            world.Load("m", @"
+                local L = game:GetService('Lighting')
+                local changed, fogEnd, lighting = {}, 0, 0
+                L.Changed:Connect(function(name) table.insert(changed, name); store_set('changed', table.concat(changed, ',')) end)
+                L:GetPropertyChangedSignal('FogEnd'):Connect(function() fogEnd = fogEnd + 1; store_set('fogEnd', tostring(fogEnd)) end)
+                L.LightingChanged:Connect(function() lighting = lighting + 1; store_set('lighting', tostring(lighting)) end)
+                L.FogEnd = 500
+                L.FogEnd = 500
+                L.FogColor = Color3.new(1, 0, 0)
+                L.Brightness = 2");
+            world.Frames(2);
+
+            Assert.AreEqual("FogEnd,FogColor,Brightness", world.Get("m", "changed"));
+            Assert.AreEqual("1", world.Get("m", "fogEnd"), "the equal second write fired nothing");
+            Assert.AreEqual("1", world.Get("m", "lighting"),
+                "only the Brightness write fires LightingChanged; the mirror exempts the fog properties");
+        }
+
+        [Test]
+        public void P9_Lighting_Fog_RefusesWrongTypesAndNonFiniteValues_NegativeTwin()
+        {
+            World world = BuildWorld();
+            world.Load("m", @"
+                local L = game:GetService('Lighting')
+                local function try(f) local ok, err = pcall(f) return tostring(ok) .. '|' .. tostring(err) end
+                store_set('end', try(function() L.FogEnd = 'far' end))
+                store_set('start', try(function() L.FogStart = {} end))
+                store_set('color', try(function() L.FogColor = 5 end))
+                store_set('nan', try(function() L.FogEnd = 0/0 end))
+                store_set('huge', try(function() L.FogStart = math.huge end))
+                store_set('signal', try(function() return L:GetPropertyChangedSignal('FogColor') end))
+                store_set('after', tostring(L.FogStart) .. '|' .. tostring(L.FogEnd) .. '|' .. tostring(L.FogColor))");
+
+            StringAssert.StartsWith("false|", world.Get("m", "end"));
+            StringAssert.Contains("Lighting.FogEnd expects a number", world.Get("m", "end"));
+            StringAssert.Contains("Lighting.FogStart expects a number", world.Get("m", "start"));
+            StringAssert.Contains("Lighting.FogColor expects a Color3", world.Get("m", "color"));
+            StringAssert.Contains("Lighting.FogEnd needs a finite number", world.Get("m", "nan"));
+            StringAssert.Contains("Lighting.FogStart needs a finite number", world.Get("m", "huge"));
+            StringAssert.StartsWith("true|", world.Get("m", "signal"), "a fog property is a bound property");
+            Assert.AreEqual("0|100000|0.75, 0.75, 0.75", world.Get("m", "after"), "refused writes leave the fog alone");
+            Assert.IsFalse(world.Roblox.Lighting.IsDriven);
         }
 
         // ---- PointLight --------------------------------------------------------------------------

@@ -185,11 +185,18 @@ When the limiter is saturated, `execute_lua` returns `Lua rate limit exceeded (.
   body IS `coroutine.yield`, or ends in `return coroutine.yield(...)`, cannot be suspended by Lua-CSharp
   (no Lua function below the yield); its resume fails with that same line and the fix
   (`local r = coroutine.yield(...) return r`), which differs from Luau.
-- `coroutine.wrap` is removed from the secured environment (its resumer would bypass the guard hook);
-  `coroutine.resume` is replaced by a budget-guarded wrapper that arms the per-resume step, time and
+- `coroutine.resume` is replaced by a budget-guarded wrapper that arms the per-resume step, time and
   allocation limits on the coroutine's own state. The allocation limit is the budget of the run that
   resumes the coroutine — a mod's `HandlerMaxAllocatedBytes` for its handlers, task threads and main
-  chunk — and a coroutine it resumes in turn inherits it.
+  chunk — and a coroutine it resumes in turn inherits it. Since Lua-CSharp 0.5.8 a thread created while a
+  hook is installed starts with a copy of that hook (the creating run's, with a fresh counter); every
+  resume path arms the thread's own hook first, so an inherited hook never runs one of its instructions and
+  its cost goes to the run that resumes it (`LuaCsVmContractEditModeTests`). The VM's native
+  `coroutine.wrap` is removed: its function resumes the thread inside the library, where no hook can be
+  armed, so on 0.5.6 the body ran unguarded and on 0.5.8 it runs the inherited hook of the run that created
+  it — charged to whichever run holds that pooled hook, never to the caller, with a trip that cancels a
+  token the body does not run with. The sandbox's own `coroutine.wrap` resumes through the guarded
+  `coroutine.resume` instead (see the budget list above).
 - **A nested run borrows from the run it is nested in.** A raw coroutine under `coroutine.resume`, a
   scheduler thread `task.spawn` runs at once, and a guarded call that starts inside a run — re-entering
   the same state, or a `mods_call` export on another mod's state — each get their own budget or what
@@ -234,9 +241,14 @@ When the limiter is saturated, `execute_lua` returns `Lua rate limit exceeded (.
   whole across states. The call that would pass the cap raises `C stack overflow (<boundary>: more than 128
   levels of nested calls from library functions back into Lua)` (`CStackOverflowMessage`), an ordinary error:
   a `pcall` past the cap returns `false` and the line, and an `xpcall` hands it to its handler, which gets an
-  eighth more room before "error in error handling". Plain Lua recursion that fills the engine's own value
-  stack is caught the same way: `pcall` returns `false` and the engine's `stack overflow` line, and an
-  `xpcall` runs its handler with that line. `pcall` and `xpcall` are counted, native calls: the caller's
+  eighth more room before "error in error handling". Plain Lua recursion that reaches the engine's own limit
+  (`LuaState.MaxCallDepth`, 100,000 frames a thread on Lua-CSharp 0.5.8, or its value stack) is caught the
+  same way: `pcall` returns `false` and the engine's `stack overflow` line, and an `xpcall` runs its handler
+  with that line. WHY the line needs help: native xpcall hands its handler the error's error object, which
+  the engine's overflow does not carry, so the sandbox runs an `xpcall`'s protected function through a small
+  C# frame that gives it the line (`XPCallBody`); that frame costs native stack, so only an `xpcall` with
+  fewer than 8 counted calls open below it gets it, and a deeper one hands its handler `nil`.
+  `pcall` and `xpcall` are counted, native calls: the caller's
   context, the same error values, no allocation on the success path, and a budget trip still uncatchable.
   WHY 128 weighted levels: each of these calls is a nested VM run on the .NET stack, and the only other bound,
   `RuntimeHelpers.TryEnsureSufficientExecutionStack` inside Lua-CSharp, may be a constant `true` on IL2CPP,
@@ -253,8 +265,8 @@ When the limiter is saturated, `execute_lua` returns `Lua rate limit exceeded (.
   measured yet. WHY a cap at all: an error raised N levels deep is rethrown once per level with a growing
   stack trace, so unwinding costs about N² with no instruction running and no hook able to fire. Plain Lua
   recursion and the metamethods the VM runs in its own loop are not counted. Not counted yet: `__concat`,
-  which the VM calls as a nested run where no sandbox code sits (the guard hook can only end such a run, not
-  raise a catchable error), and host callbacks other than `warn` that re-enter Lua outside
+  which the VM calls as a nested run where no sandbox code sits but the guard hook, and host callbacks other
+  than `warn` that re-enter Lua outside
   `CallCountedAsync`; a composition cannot configure the cap.
 - `execute_lua` (`LuaCsGameToolExecutor`) and `LuaCsAiEnvelopeProcessor` normalize and truncate results:
   the result summary is capped at **4,000 characters** and error messages are normalized and capped at **500 characters** (`LuaCsAiEnvelopeProcessor.MaxResultSummaryLength` / `MaxErrorMessageLength`) before they reach the model or the repair path.
@@ -286,17 +298,19 @@ When the limiter is saturated, `execute_lua` returns `Lua rate limit exceeded (.
   it tripped in: `pcall` and `xpcall` inside that run let it through, `xpcall`'s handler does not run,
   and the state stays guarded for every later run. Only the host sees the trip line — or, for a raw
   coroutine, the code that called `coroutine.resume`, which gets `false` plus the line while the
-  coroutine is dead. Mechanism: Lua-CSharp's per-instruction hook sets `LuaState.IsInHook` and clears it
-  only when the hook returns normally, so a hook that threw would leave every later hook on that state
-  silent and the next runaway unguarded. The hook therefore records the trip, cancels the token the run
-  executes with and returns; the VM raises the cancellation itself at its next jump, loop or call,
-  `pcall`/`xpcall` do not catch a cancellation, and the guard's entry points turn it back into the trip's
-  one-line `LuaCsHostFunctionException` (the typed cause in `HostException`). Each raw coroutine has its
+  coroutine is dead. Mechanism: the hook records the trip, cancels the token the run executes with and
+  returns; the VM raises the cancellation itself at its next jump, loop or call, `pcall`/`xpcall` do not
+  catch a cancellation, and the guard's entry points turn it back into the trip's one-line
+  `LuaCsHostFunctionException` (the typed cause in `HostException`). A thrown trip would not be final:
+  `xpcall` runs its handler for anything but a cancellation of its own token. Each raw coroutine has its
   own trip source for its whole life. A hook that fires inside host code running Lua with its own token
-  still has to throw; `EndGuard` then clears the stuck flag through the public `DebugLibrary.SetHook` (no
-  reflection). Sandbox cap refusals and the per-call string-pattern step refusal stay ordinary errors
-  that `pcall` catches. This relies on Lua-CSharp internals verified on .NET 8; the Mono/IL2CPP check
-  is still open.
+  still has to throw (a cancellation, which `pcall` rethrows); the state stays guarded afterwards because
+  the VM restores its in-hook flag after a hook that throws, is cancelled or cannot set up its frame. Up to
+  Lua-CSharp 0.5.6 it did not — a hook that threw left `LuaState.IsInHook` set and every later hook on that
+  state silent — and the guard cleared the flag itself through `DebugLibrary.SetHook`; that workaround went
+  with 0.5.8, and `LuaCsVmContractEditModeTests` fails if a VM build loses the restore. Sandbox cap
+  refusals and the per-call string-pattern step refusal stay ordinary errors that `pcall` catches. This
+  relies on Lua-CSharp internals verified on .NET 8; the Mono/IL2CPP check is still open.
 - `coreai_world_load_scene` supports an optional scene whitelist check. (This is one of the classic
   build bindings: in the default production composition it is **disabled** — a stub raises an error
   pointing at the Rbx API — and the whitelist only matters on hosts that opt into the build bindings.)

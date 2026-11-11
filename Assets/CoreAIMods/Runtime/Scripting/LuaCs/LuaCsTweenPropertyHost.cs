@@ -496,6 +496,12 @@ namespace CoreAI.Ai.LuaCs
                     return TweenPropertySample.SupportedValue((double)lighting.EnvironmentDiffuseScale, "number");
                 case "EnvironmentSpecularScale":
                     return TweenPropertySample.SupportedValue((double)lighting.EnvironmentSpecularScale, "number");
+                case "FogStart":
+                    return TweenPropertySample.SupportedValue((double)lighting.FogStart, "number");
+                case "FogEnd":
+                    return TweenPropertySample.SupportedValue((double)lighting.FogEnd, "number");
+                case "FogColor":
+                    return TweenPropertySample.SupportedValue(lighting.FogColor, "Color3");
                 case "TimeOfDay":
                     return TweenPropertySample.Unsupported("string");
                 default:
@@ -535,6 +541,15 @@ namespace CoreAI.Ai.LuaCs
                     break;
                 case "EnvironmentSpecularScale":
                     lighting.SetEnvironmentSpecularScale((double)value);
+                    break;
+                case "FogStart":
+                    lighting.SetFogStart((double)value);
+                    break;
+                case "FogEnd":
+                    lighting.SetFogEnd((double)value);
+                    break;
+                case "FogColor":
+                    lighting.SetFogColor((RbxColor3)value);
                     break;
             }
         }

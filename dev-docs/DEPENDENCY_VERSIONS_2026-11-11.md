@@ -12,7 +12,7 @@ this note covers what changed since.
 
 | Dependency | Pinned here | Latest stable (date) | Behind | Recommendation |
 |---|---|---|---|---|
-| Lua-CSharp (`Lua.dll`, NuGet `LuaCSharp`) | 0.5.6 = tag `v0.5.6` `d9fb336` (2026-07-29) | **0.5.8** (2026-10-25); `main` is 105 commits past it, unreleased | 2 releases | **Update now to 0.5.8**, behind the Lua gates listed below |
+| Lua-CSharp (`Lua.dll`, NuGet `LuaCSharp`) | **0.5.8** = commit `c735770` (2026-10-25), landed 2026-11-11; was 0.5.6 = tag `v0.5.6` `d9fb336` | **0.5.8** (2026-10-25); `main` is 105 commits past it, unreleased | 0 | **Done** (see "Verified on 2026-11-11" below); take 0.5.9 when it ships |
 | Microsoft.Extensions.AI / .Abstractions | 9.10.2 (2025-11-02) | 11.0.0 (2026-11-10); 10.11.0 (2026-10-14); 9.10.2 is the last 9.x | 2 majors | **Stay**: 10.x/11.x need System.Text.Json 10/11, and Unity substitutes its own 8.0.0.0 |
 | System.Text.Json | 8.0.6 | 11.0.0 (2026-11-10); 8.0.6 is the last 8.x | 3 majors | **Stay** (engine-bound) |
 | System.Numerics.Tensors + Microsoft.Bcl.Numerics | 9.0.22 (2026-10-25) | 11.0.0; **9.0.23** (2026-11-10, the last .NET 9 servicing build) | 1 patch | **Next release**: move both to 9.0.23 as one pair |
@@ -70,20 +70,26 @@ Two inventory findings that are not version questions:
   - `PROGRESS.research-vmfork.md` (2026-08-31) records that `Assets/CoreAIMods/Plugins/Lua.dll` is byte-identical to
     `lib/netstandard2.1/Lua.dll` of the official NuGet `LuaCSharp` 0.5.6 package (438,272 bytes, SHA-256
     `BE5ACC6819888E3EBDC2509EB7779D52E43B437C8EB1130E24C5CDA0407BAF3F`). Today's NuGet catalog lists the same size.
-    `Lua.Annotations.dll` is presumably `LuaCSharp.Annotations` 0.5.6; its size was **not checked**.
+    Its `Lua.Annotations.dll` was 8,192 bytes, SHA-256 `9B3AAADAE38DA84195A15403F8DF135BDCFD9D37AE496348A1B3E0BA8892CDB2`.
+  - **Since 2026-11-11 the plugins are the official 0.5.8 netstandard2.1 libraries** (repository signatures verified
+    with `dotnet nuget verify`, commit `c735770a21407226cfd1204bbe11a25de27cddf9`): `Lua.dll` 453,632 bytes, SHA-256
+    `2494E456E1B4D13D77665E5D3725B3EDED4B932F05D8B4B38492A3F98EB2CB7C`; `Lua.Annotations.dll` 8,192 bytes, SHA-256
+    `B8D2A81CD1AB1F171C2620D220D71A91286E9BD335D9AD4AC795B33194476F46`. The `.meta` files are unchanged. Assembly
+    identity (`Lua, Version=1.0.0.0`) and references (netstandard 2.1, `Microsoft.Bcl.TimeProvider` 8.0.0.0,
+    `System.Runtime.CompilerServices.Unsafe` 6.0.0.0) are the same as 0.5.6's.
   - The bump to stock 0.5.6 is recorded in `Assets/CoreAI/CHANGELOG.md` §6.13.1 (2026-07-31). Before that, CoreAI
     shipped a locally patched 0.5.5.
-- **No build or copy script exists in the repository** (none found). The update procedure is therefore manual. To
-  repeat it:
-  1. Download `LuaCSharp.<ver>.nupkg` and `LuaCSharp.Annotations.<ver>.nupkg` from nuget.org.
-  2. Take `lib/netstandard2.1/Lua.dll` and `Lua.Annotations.dll`, and record their SHA-256.
-  3. Overwrite the two files in `Assets/CoreAIMods/Plugins/` **keeping the existing `.meta` files**, so the GUIDs and
-     import settings stay.
-  4. Check that the TimeProvider and Unsafe dependency floors are still met (they are for 0.5.8).
-  5. Update `IScriptEngine.EngineVersion` (it reports `0.5.6` today).
-  6. Update the docs that name the version, and record the hash in the CHANGELOG.
-
-  Consider committing a small script for steps 1–2, so the next bump is one command.
+- **Update procedure.** `python -I tools/update_lua_csharp.py <LuaCSharp.<ver>.nupkg>
+  <LuaCSharp.Annotations.<ver>.nupkg> [--apply]` reads the two netstandard2.1 libraries from the packages (it
+  downloads nothing), prints version, commit, dependencies and SHA-256, and with `--apply` overwrites the two files
+  in `Assets/CoreAIMods/Plugins/` in place, keeping the `.meta` files, and checks the hash on disk. By hand:
+  1. Download `LuaCSharp.<ver>.nupkg` and `LuaCSharp.Annotations.<ver>.nupkg` from nuget.org and verify them.
+  2. Run the script, or take `lib/netstandard2.1/Lua.dll` and `Lua.Annotations.dll` yourself and record their
+     SHA-256.
+  3. Check that the TimeProvider and Unsafe dependency floors are still met.
+  4. Update `IScriptEngine.EngineVersion` (`LuaCsScriptEngine.cs`).
+  5. Update the docs that name the version, and record the hashes in the CHANGELOG.
+  6. Run the gates of "Verified on 2026-11-11" below, `LuaCsVmContractEditModeTests` first.
 
 ### Releases after the pin
 
@@ -185,6 +191,63 @@ Two inventory findings that are not version questions:
 - **Luau-style syntax.** Still none. `Keywords.cs` at v0.5.8 and `main` lists only the Lua 5.2 keywords (no
   `continue`). Nothing in the scanner, README or releases adds compound assignment, type annotations or `//` (a Lua 5.3
   operator, which 5.2 lacks). `Assets/CoreAIMods/Runtime/LuauDownlevel` stays required.
+
+### Verified on 2026-11-11 (the 0.5.8 landing)
+
+Method: the portable Lua tier (`tools/portable/LuaTests`, CoreCLR .NET 8) was built twice from one frozen copy of
+the tree, once against each `Lua.dll` (a scratch targets file rewrote the `Lua` reference), and the same class
+filters ran on both. Unity, Mono, IL2CPP and WebGL were **not** run; the EditMode gates are for the next editor run.
+
+- **Gates, 0.5.6 → 0.5.8** (passed / failed / not executed): sandbox and secure environment 268/2/3 → 267/3/3, back to
+  268/2/3 with the xpcall fix below; execution guard 118 → 118; coroutines and scheduler 176/0/6 both; corpora
+  114 both; bundled samples and Block World 175/0/14 both; Rbx bindings 833/0/3 both; allocation budgets 39 both;
+  mod runtime and world packages 591/0/7 both; Luau libraries, self-repair and script sessions 211 both;
+  ReplicationWireS2 1 both. The two failures on both VMs were environmental or in-flight work, not the VM
+  (`NativeStack_EveryChannelStaysWithinItsWeight_AtTheCap` on CoreCLR, `ModsContractRegressionTests.LUAU007`).
+- **#353/#354, the in-hook flag.** On 0.5.6 a count hook that threw, threw a cancellation, returned a cancelled or
+  faulted task, or faulted after an await left every later hook on the state silent; on 0.5.8 all of them fire
+  again, and so do hooks after the hook's own frame failed at the call-depth limit (`VM_CountHook*` in
+  `Sandbox/LuaCsVmContractEditModeTests`). With the guard's `ClearInHookFlag` call removed,
+  `TripInsideHostCodeRunningItsOwnLua_StillEndsTheRun_AndTheStateStaysGuarded` fails on 0.5.6 and every guard,
+  sandbox and coroutine gate passes on 0.5.8; with #354 the workaround could not have cleared a set flag anyway.
+  **The workaround (`ClearInHookFlag`, `InHookFlagReset`, `NoOpReturnHook`, `LeftInHookFlagSet`) was removed.
+  Going back to 0.5.6 requires restoring it** from the parent of the commit that removed it
+  (`git log -S ClearInHookFlag -- Assets/CoreAIMods/Runtime/Scripting/LuaCs/LuaCsExecutionGuard.cs`); the
+  `VM_CountHook*` tests fail loudly on any VM build without the `finally`.
+- **#355, inherited hooks.** Confirmed: `coroutine.create`, `CreateCoroutine` and native `wrap` copy the creator's
+  hook at creation (later changes on the creator do not propagate; the thread's own `SetHook` replaces it). No
+  CoreAI path runs an inherited hook: the guarded `coroutine.resume`, the coroutine handle and the sandbox's own
+  `coroutine.wrap` arm the thread's hook before its first instruction. Pinned by charge-once tests for a
+  coroutine created and resumed in one call, resumed by a nested call later, and created inside a signal handler
+  and resumed across fires within (and past) the handler's budget. The native `coroutine.wrap` stays removed: its
+  body would run the creating run's pooled hook, charged to whichever run holds it, with a trip that cancels a
+  token the body does not run with.
+- **Instruction counts unchanged**: guard 2004 steps for the reference loop, coroutine creation 4, scheduler handle
+  2008/3012, capped handle 2009/3014, perfbench `parts-2048-heartbeat` 4,912 steps per frame on both VMs
+  (`StepCounts_OfTheReferenceLoop_AreTheBatchedCountsOnEveryGuardedPath`).
+- **Behaviour changes mods can see** (`Sandbox/LuaCsVmCorrectnessEditModeTests`, each failing on 0.5.6): `#t` of a
+  table filled backwards with 9+ elements was 8, and `table.sort` sorted only 8; `obj:Method()` on a local whose
+  `__index` is a Lua function received the key string as `self` (CoreAI's C# `__index` proxies were never affected);
+  a positional `table.insert` no longer shifts values past the border `#t` reports. Nothing CoreAI ships inserts by
+  position into a table with holes.
+- **One break, fixed in CoreAI.** 0.5.8's native `xpcall` catches the overflow of `LuaState.MaxCallDepth` (100,000
+  frames a thread) instead of letting it escape, but hands its handler the exception's error object, which is nil
+  for that overflow; `xpcall(f, function(e) return "failed: " .. e end)` then failed. `CountedXPCall` runs the
+  protected function through `XPCallBody`, which gives that overflow the `stack overflow` line, for `xpcall`s with
+  fewer than 8 counted calls open below them (the frame costs about 1.3 KB of native stack; unbounded it would have
+  outgrown the xpcall weight). Upstream behaviour worth reporting: native `xpcall` passes nil for every wrapped C#
+  exception.
+- **Measured** (CoreCLR, exact bytes; timings on a contended machine were within noise): #339 removes 72 bytes per
+  synchronously completed generic async call. A Part member read 192 → 120 B, a `Vector3` member read 264 → 192 B,
+  a method call (`IsA`, `FindFirstChild`) 192 → 120 B; Part writes and Lua `__index`/`__newindex` functions stay 0 B.
+  A Heartbeat handler fire is 72 B cheaper (1/8/64 handlers: 496/3,576/28,216 → 424/3,000/23,608 B per frame); the
+  `parts-2048-heartbeat` frame 20,248 → 19,960 B, `sample-mods` p50 about 18.4–20.4 KB → 15.3 KB. The guard's hook
+  tax did not change measurably (vmbench batch 4 at 19–22 % of raw on 0.5.6, 25–28 % on 0.5.8, both noisy).
+  vmbench's coroutine-handle batch-4 row was lower on 0.5.8 in both rounds (26.0/23.7 → 17.5/17.4 M instr/s) while
+  perfbench's production handle row did not confirm it: re-measure on a quiet machine (TODO.md). Native stack per
+  counted call grew about 4 % (#317's check at the delegate entry; `task.spawn` 9,936 → 10,208 B per level).
+- **Not verified**: Mono, IL2CPP and WebGL players, and the parser message changes of #351 beyond the tests that pin
+  them (all passed).
 
 ### Unreleased `main`: watch, do not build from it
 

@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using CoreAI.Ai;
 using CoreAI.Ai.SelfRepair;
 using CoreAI.Authority;
+using CoreAI.Composition;
 using CoreAI.Logging;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.WorldPackages;
@@ -307,7 +308,7 @@ namespace CoreAI.Tests.EditMode.SelfRepair
             {
                 Session = new P3HeadlessSession(new P3MemoryPackageStore(), new P3MemorySourceStore());
                 Session.Gate.AddObserver(this);
-                LocalActorIdentityProvider identity = new("player-chat");
+                IActorIdentityProvider identity = CoreServicesInstaller.DefaultLocalHostIdentityProvider;
                 Actor = identity.GetActorContext(BuiltInAgentRoleIds.Programmer);
                 Tool = new LuaModsLlmTool(Session.Controller.Runtime, new CoreAISettingsOptions(), NullLog.Instance,
                     P3Fixtures.SessionCapabilities, true, identity, BuiltInAgentRoleIds.Programmer, Session.Gate);
