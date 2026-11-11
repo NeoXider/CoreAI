@@ -242,7 +242,8 @@ logs → self-repair. The AI can read what it broke and fix it without a human i
 multiplayer room, each player has their own AI under their own identity.
 
 **Current state.** Shipped and battle-tested: orchestrator with parallel tool execution, agent
-memory, self-service skills (`read_skill`/`manage_skills`, ~91% token savings vs. inlining),
+memory, self-service skills (`read_skill`/`manage_skills`; about 91% fewer tool-definition tokens in the
+documented 50-tool example, an estimate that P15 replaces with a measurement),
 runtime multi-endpoint LLM routing (dynamic endpoint/profile CRUD, per-role/per-agent/per-request
 profiles, secret hygiene via `SecretReference`), streaming that survives small-model reality,
 resilience decorators, and the quarantine-not-unload mod error policy with auto-repair prompts for
@@ -337,9 +338,10 @@ D7).
 ### Track G — Platforms, look, performance & scale
 
 **Goal.** Everything works in built players (RUNTIME-first): Standalone Mono and IL2CPP, WebGL as
-solo / pure client / creator-mode client, a Linux dedicated server, and Android as a client. Budgets
-bound every mod: per-resume step/time/allocation guards, coroutine resume guards, Lua generation rate
-limits. A room holds ~100 players within the scale targets (§4).
+solo or as a client of a server (it never hosts), a Linux dedicated server, and Android as a client.
+Budgets bound every mod: per-resume step/time/allocation guards, coroutine resume guards, Lua generation
+rate limits. Speed is stated only as a published measurement (P19). The room size is chosen after spike
+S1; 100 players per room stays the aspiration (§4).
 
 **Current state.** Lua-CSharp is managed and AOT/WebGL-safe; sandbox budgets and the coroutine guard
 are shipped and adversarially audited (a budget trip cannot be caught by `pcall` and never disarms the

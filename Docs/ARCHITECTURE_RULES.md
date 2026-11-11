@@ -63,8 +63,8 @@ CoreAI is a framework for many AI-driven games, not one game (`AGENTS.md`). Norm
 - **Configure, replace, or leave out** — each of the three must be possible without editing package code: options or
   profile data to configure, an interface registration to replace, and no hard dependency on a block a game omits.
 - **Opinions live in presets, not in blocks.** Defaults are one preset among several (e.g. solo AI sandbox,
-  player-host co-op, dedicated N-player server, embed-in-my-game); a product (such as the planned Roblox-like
-  Studio+Play app) is a preset plus its own code on top, never a special case inside a package.
+  player-host co-op, dedicated N-player server, embed-in-my-game); a product (such as the planned realtime
+  play-and-create game) is a preset plus its own code on top, never a special case inside a package.
 - **Proof by test:** each shipped preset has a boot test, and a block that claims to be replaceable has a test that
   replaces it with a fake.
 - Existing code that violates this is tracked in `TODO.md` and fixed when touched (the grandfathering rule above).

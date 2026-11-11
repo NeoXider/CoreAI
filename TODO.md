@@ -444,10 +444,9 @@ both CHANGELOGs, `[7.48.0]`. Verified in Unity 6000.3.14f1 on the settled tree (
 6593 passed / 0 failed / 16 skipped; portable core 2213 / 0; Lua tier 1846 / 0 / 2 not run. The PlayMode live fixtures and the new benchmark
 tests compile but have **not been run** (they need a model backend).
 
-- [ ] **Owner decision: suite version.** G4's `clean_tool` and the declared tool-error coverage change G4 scores against
-      suite 1.15 (`SuiteVersion` is still "1.15" in `GameCreationBenchmarkPlayModeTests.cs`). Recommended: 1.16.
-      Rows whose G4 had no failed tool call without a failed Lua execution are unaffected and can be carried over
-      (check per run JSON before doing so).
+- [x] **Owner decision: suite version.** Overtaken by suite 2.0 (7.51.0): `SuiteVersion` is "2.0" in
+      `GameCreationBenchmarkPlayModeTests.cs` (checked 2026-11-11), so the 1.15 → 1.16 question no longer
+      applies; the v1.x rows are history in `Docs/BENCHMARK_LEADERBOARD.md`.
 - [ ] **Owner decision: Environment-attributed scenarios leave the score.** Since 7.47.2 a provider timeout after a
       partial build counts as Environment, so a model that keeps timing out drops out of the suite score instead of
       being penalised; the leaderboard handled it by re-running, the policy itself is not guarded.
@@ -466,9 +465,10 @@ tests compile but have **not been run** (they need a model backend).
 - [ ] **Image feedback wording**: any tool's `LlmToolImageResult` reuses the camera feedback prompt ("Camera frame from
       your latest capture...") and replaces the previous image message. Keep it for G6 (the prompt is part of the suite),
       make it neutral for non-camera tools together with a suite-version bump.
-- [ ] The World `capture_camera` tool still returns a base64 `dataUri` (not auto-lifted; `AskWithImageFollowUpAsync`
-      depends on it): move it to `LlmToolImageResult` and deprecate the follow-up helper. Chat-panel external submit
-      still rejects an empty text even with attachments.
+- [ ] The World `capture_camera` tool returns `LlmToolImageResult` now (`CameraLlmTool.cs`, checked
+      2026-11-11), so its move off the base64 `dataUri` is done. Still open: the string overload of
+      `CoreAi.AskWithImageFollowUpAsync` that takes the old capture JSON is not deprecated, and the chat-panel
+      external submit still rejects an empty text even with attachments. Package P16 owns the camera tools.
 - [ ] `SharedLlmUnity` stays `_initializing = true` after a framework abort during `EnsureInitialized` (the next live test
       waits up to 300 s and fails); the loopback server task in `TestAgentSetupHttpRoutingPlayModeTests` is not
       fault-observed when the test fails early (`ObserveFaults` is internal to Shared).

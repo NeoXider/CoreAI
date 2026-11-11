@@ -506,6 +506,9 @@ AgentConfig agent = new AgentBuilder("GameMaster")
 - With skills: 2 meta-tools × ~80 tokens + catalog ~200 tokens = **~360 tokens** per request
 - **Saving: ~91%** of tool-related context
 
+This is arithmetic on the assumed sizes above, not a measurement; real tool definitions and catalogs
+vary, so count your own with the provider-reported token usage before relying on the figure.
+
 ### How the proxy works (for advanced users)
 
 The proxy does not manually reflect delegate parameters or `Task.Result`. It first uses `IJsonInvocableLlmTool`

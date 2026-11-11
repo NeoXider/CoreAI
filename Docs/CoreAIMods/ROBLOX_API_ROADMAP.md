@@ -21,9 +21,10 @@ so has the "Gameplay services I" slice (the old MVP8), and **MVP3 (the world/pla
 closed (2026-09-25, released in 7.47.0)** on the Unity EditMode/PlayMode `FastNoLlm` gate; its contract
 and acceptance evidence are in [`WORLD_PACKAGE.md`](WORLD_PACKAGE.md). Audits of MVP1, MVP2, the gameplay
 services and the multiplayer foundation (2026-09-24) were followed by fix waves and three audit rounds
-over them, recorded in the rung sections below and in `TODO.md`; they shipped in 7.47.0. Next is MVP4 (script contexts),
-the first of the multiplayer rungs. As of the current release, 7.50.2 (2026-10-15), MVP4 has not started: the
-releases after 7.47.0 (7.47.1–7.50.2) are fixes and features outside the ladder (both changelogs).
+over them, recorded in the rung sections below and in `TODO.md`; they shipped in 7.47.0. As of release
+7.56.0 (2026-10-28) MVP4 (script contexts) has not started: the releases after 7.47.0 (7.47.1–7.56.0) are
+fixes and features outside the ladder (both changelogs). On 2026-11-11 the order of work changed to
+demo-gated milestones with twenty new packages (§4.0); the rungs keep their ids.
 
 **Architecture (normative)**: every deliverable in this ladder is built to
 `Docs/ARCHITECTURE_RULES.md` — engine-free Domain assemblies (`noEngineReferences: true`),
@@ -91,11 +92,10 @@ Two principles override Roblox fidelity whenever they conflict:
    *suggested fix* — because the reader is an agent that will immediately try to patch the mod.
    The AI's skill document **is** the documentation: one artifact teaches the LLM and the human, and
    (from MVP18) embeds the machine-readable implemented-vs-stub manifest generated from code.
-2. **Realtime.** The game is created and modified *while it runs*. Live edit is the default: hot
-   reload, live logs, and in-play AI debugging are core features, not tooling extras. The in-game
-   Studio (MVP12) adds an explicit Play/Stop "test run" for a Creator (plan decision D2) — an isolated
-   per-creator session, never a rewind of a world other players are in — so edit-then-play is an
-   option, never the only loop. Every feature must answer "does this work in a built player on
+2. **Realtime.** The game is created and modified *while it runs*. Hot reload, live logs, and in-play
+   AI debugging are core features, not tooling extras. There is one mode (plan decision D9): play and
+   creation happen in the same running world, with no Studio and no Play/Stop switch, and nothing
+   rewinds a world other players are in. Every feature must answer "does this work in a built player on
    device, mid-session?" (see `AGENTS.md` — RUNTIME-first).
 
 Derived rules:
@@ -485,8 +485,8 @@ Rules of the ladder:
   replace-with-fake test, and a preset the rung introduces has a boot test;
   (d) convenient by default (`Docs/ROADMAP.md` §5, principle 10): what the rung adds works in a fresh
   world without configuration, and a host game can switch the default off.
-- **Product split (plan decision D7).** The flagship Studio+Play Roblox-like app lives in its own Unity
-  project and consumes the packages through UPM. This repository keeps the packages, presets, samples,
+- **Product split (plan decision D7).** The flagship — a realtime play-and-create game with no Studio
+  (plan decision D9) — lives in its own Unity project and consumes the packages through UPM. This repository keeps the packages, presets, samples,
   bot clients and test harnesses. Each rung says which side each part lands on.
 
 Effort: **S** ≈ ≤2 agent-days · **M** ≈ ≤1 agent-week · **L** ≈ multi-week, parallelizable · **XL** ≈

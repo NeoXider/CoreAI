@@ -67,7 +67,7 @@ and never rehydrate in another demo.
 
 | Demo | Scene | What it demonstrates | UI tech | Tutorial panel | Mods/Lua (`storeId`) |
 |---|---|---|---|---|---|
-| Moddable Units | `ModdableUnits/ModdableUnitsDemo.unity` | *Aspirational.* Intended "empty arena, mods build the army" (`forge_define`/`forge_spawn`). The forge bindings are **authored but not yet wired** to the mod runtime (`TODO(moddableunits-binding-seam)`). | mixed — `CoreAiChatPanel` (UITK) + uGUI status/mod-manager panel (`CoreAiDemoPanel`) | Status panel (unit types, loaded mods, event log) — **read-only, no buttons** | Yes — `moddable-units-demo` |
+| Moddable Units | `ModdableUnits/ModdableUnitsDemo.unity` | An empty arena where mods build the army (`forge_define`/`forge_spawn`). Wired since 7.55.0: the scene controller is a gameplay-bindings provider of the mods scope (`ModdableUnitsGameplayBindingsEditModeTests`). A live model-driven run is still open (`TODO.md`). | mixed — `CoreAiChatPanel` (UITK) + uGUI status/mod-manager panel (`CoreAiDemoPanel`) | Status panel (unit types, loaded mods, event log) — **read-only, no buttons** | Yes — `moddable-units-demo` |
 | Main CoreAI (dev harness) | `CoreAiUnity/Scenes/_mainCoreAI.unity` | Internal composition/dev scene: a `CompositionRoot` GameObject with `CoreAILifetimeScope` plus an LLMUnity `LLM` / `LLMAgent` host. Not a curated showcase, not in the G11 matrix. | None | None (dev-only) | No |
 
 ---
@@ -112,7 +112,8 @@ and never rehydrate in another demo.
   is enabled only by `FullAccessHubDemoController` and `DemoHubPagesBinder`. The component is still
   present in `LiveMechanicsModsChatDemo`, `MiniRpgModsDemo` and `ModdableUnitsDemo`, where neither surface
   exists, so those three scenes currently offer no ready-made prompts.
-- **Moddable Units** is aspirational — its `forge_*` bindings compile but are not surfaced to running mods
-  until `TODO(moddableunits-binding-seam)` is threaded through the mods installer.
+- **Moddable Units** exposes its `forge_*` bindings to running mods since 7.55.0, through
+  `CoreAiModsLifetimeScope.gameplayBindingsProviders`; what is still open is a recorded live run in which a
+  model builds an army through chat.
 - **DirectorAi** and **WebGlLuaSelfTest** ship as scripts only; attach them to a scene that has a
   `CoreAILifetimeScope` (DirectorAi) or to any scene (WebGlLuaSelfTest).
