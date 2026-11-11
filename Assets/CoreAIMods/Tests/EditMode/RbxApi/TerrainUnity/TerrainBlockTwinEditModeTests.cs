@@ -15,8 +15,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.TerrainUnity
     /// the textured surface that carries its painted tile, one tile per 4-stud cell face and the sky exposure from
     /// the vertex colours, while a Part's catalog material keeps its photographed set and its own tiling; the grass
     /// block keeps its earth sides; Water keeps its own surface; the photo look draws the catalog as before (twin);
-    /// a host's own material provider is drawn as it is unless it asks for blocks; and each tile's textures are built
-    /// once, crisp and mip-mapped.
+    /// a host's own material provider is drawn as it is unless it asks for blocks; each tile's textures are built
+    /// once, crisp and mip-mapped; the cells' water is calmer and turquoise while a Part's water keeps the catalog's
+    /// (twin: the photo look keeps it too); and the corners where blocks meet are shaded through the vertex colours.
     /// </summary>
     [TestFixture]
     public sealed class TerrainBlockTwinEditModeTests
@@ -81,7 +82,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.TerrainUnity
             Assert.AreSame(normal, cobble.GetTexture("_BumpMap"));
             Assert.AreSame(roughness, cobble.GetTexture("_RoughnessMap"));
             Assert.AreEqual(1f, cobble.GetFloat(RbxTerrainRenderer.CellTilesProperty), "one tile per cell face");
-            Assert.AreEqual(1f / (4f * RbxSpace.MetersPerStud), cobble.GetFloat("_TextureScale"), 1e-4f,
+            Assert.AreEqual(1f / RbxSpace.LengthToUnity(4f), cobble.GetFloat("_TextureScale"), 1e-4f,
                 "one tile spans one 4-stud cell");
             Assert.AreEqual(1f, cobble.GetFloat(RbxTerrainRenderer.SkyExposureSourceProperty),
                 "the cell still reads its sky exposure, so caves stay dark");
@@ -164,6 +165,95 @@ namespace CoreAI.Tests.EditMode.RbxApi.TerrainUnity
             Assert.IsFalse(RbxTerrainBlockTextures.TryGet(TerrainBlockStyle.Photo, out Texture2D none,
                 out Texture2D _, out Texture2D _), "the photo style has no tile");
             Assert.IsNull(none);
+        }
+
+        [Test]
+        public void Blocks_TuneTheCellsWater_ButNotAPartsWater()
+        {
+            _renderer = new RbxTerrainRenderer(_terrain, _host.transform, _catalog,
+                new BlockyTerrainChunkMesher(TerrainFaceMaterialRules.None), blockLook: TerrainBlockLook.Blocks);
+            Fill(0, 0, 0, 2, 1, 2, TerrainMaterials.Water);
+            Drain();
+
+            Material water = WaterMaterial();
+            Material partWater = PartMaterial("Water");
+            TerrainWaterLook calm = TerrainBlockLook.Blocks.Water;
+            Assert.AreEqual(calm.WaveScale, water.GetFloat("_PatternScale"), 1e-5f, "a longer, calmer swell");
+            Assert.AreEqual(calm.WaveStrength, water.GetFloat("_BumpStrength"), 1e-5f);
+            Assert.AreEqual(calm.Smoothness, water.GetFloat("_Smoothness"), 1e-5f);
+            Assert.AreEqual(calm.Absorption, water.GetFloat("_Absorption"), 1e-5f, "shallow water shows its colour");
+            Assert.Greater(water.GetColor("_MaterialColor").g, water.GetColor("_MaterialColor").r + 0.3f, "turquoise");
+            Assert.AreNotEqual(calm.WaveScale, partWater.GetFloat("_PatternScale"), "a Part of Water keeps the catalog's");
+        }
+
+        [Test]
+        public void ThePhotoLook_KeepsTheCatalogsWater_NegativeTwin()
+        {
+            _renderer = new RbxTerrainRenderer(_terrain, _host.transform, _catalog,
+                new BlockyTerrainChunkMesher(TerrainFaceMaterialRules.None), blockLook: TerrainBlockLook.PhotoSets);
+            Fill(0, 0, 0, 2, 1, 2, TerrainMaterials.Water);
+            Drain();
+
+            Assert.AreEqual(PartMaterial("Water").GetFloat("_PatternScale"), WaterMaterial().GetFloat("_PatternScale"));
+        }
+
+        [Test]
+        public void Blocks_ShadeTheCornersWhereBlocksMeet_ThroughTheVertexColours()
+        {
+            _renderer = new RbxTerrainRenderer(_terrain, _host.transform, blockLook: TerrainBlockLook.Blocks);
+            Fill(0, 0, 0, 8, 1, 8, Slot("Rock"));
+            Fill(3, 1, 3, 1, 1, 1, Slot("Rock"));
+            Drain();
+
+            Assert.AreEqual(TerrainBlockLook.Blocks.CornerShade, ChunkMaterial("Rock").GetFloat(
+                RbxTerrainRenderer.CornerShadeProperty), "the twin draws the shade");
+            Mesh mesh = Chunk().GetComponent<MeshFilter>().sharedMesh;
+            Color32[] colors = mesh.colors32;
+            Vector3[] vertices = mesh.vertices;
+            Vector3[] normals = mesh.normals;
+            int shadedFloorCorners = 0;
+            int openFloorCorners = 0;
+            float floorTop = RbxSpace.LengthToUnity(4f);
+            for (int vertex = 0; vertex < vertices.Length; vertex++)
+            {
+                if (normals[vertex].y < 0.5f || Mathf.Abs(vertices[vertex].y - floorTop) > 1e-3f)
+                {
+                    continue;
+                }
+
+                if (colors[vertex].r < 255)
+                {
+                    shadedFloorCorners++;
+                }
+                else
+                {
+                    openFloorCorners++;
+                }
+
+                Assert.AreEqual(colors[vertex].r, colors[vertex].g, "the shade is grey");
+            }
+
+            Assert.AreEqual(12, shadedFloorCorners, "the four floor cells beside the block shade the two corners "
+                                                    + "that touch it, the four diagonal ones the one corner");
+            Assert.Greater(openFloorCorners, 200, "the rest of the floor is open");
+            Assert.AreEqual(0f, TerrainBlockLook.PhotoSets.CornerShade, "the photo look draws no shade");
+        }
+
+        [Test]
+        public void Preload_BuildsEveryPaintedStyleOnce_AndThePhotoLookBuildsNothing()
+        {
+            RbxTerrainBlockTextures.Preload(TerrainBlockLook.Blocks);
+            Assert.AreEqual(0, RbxTerrainBlockTextures.Preload(TerrainBlockLook.Blocks), "a second preload builds nothing");
+            Assert.AreEqual(0, RbxTerrainBlockTextures.Preload(TerrainBlockLook.PhotoSets), "the photo look paints nothing");
+            Assert.AreEqual(0, RbxTerrainBlockTextures.Preload(null));
+            foreach (TerrainBlockStyle style in System.Enum.GetValues(typeof(TerrainBlockStyle)))
+            {
+                if (style != TerrainBlockStyle.Photo)
+                {
+                    Assert.IsTrue(RbxTerrainBlockTextures.TryGet(style, out Texture2D _, out Texture2D _, out Texture2D _),
+                        style + " is ready");
+                }
+            }
         }
 
         private static byte Slot(string name)

@@ -19,6 +19,10 @@ namespace CoreAI.Mods.Rbx.Binding
     /// <see cref="LookAmbientOwnership"/> claim, so the default look leaves the ambient to the day cycle and
     /// takes it back once the revert has restored the scene. It also publishes <c>Ambient</c> as the light of
     /// surfaces the sky does not reach (the Rbx materials' <c>_RbxOccludedAmbient</c>), which a cave falls to.
+    /// Once a script sets <c>FogStart</c>, <c>FogEnd</c> or <c>FogColor</c> away from Roblox's defaults the sink claims the
+    /// fog (<see cref="LookAmbientOwnership.ClaimFog"/>) and draws it as linear fog from <c>FogStart</c> to
+    /// <c>FogEnd</c> in <c>FogColor</c>; back at the defaults it puts the scene's fog back and releases the claim, so the
+    /// look's own haze returns (DEV candidate: Roblox draws no fog at <c>FogEnd</c> 100000).
     /// </summary>
     public sealed class UnityRbxLightingSink : IRbxLightingSink
     {
@@ -46,6 +50,16 @@ namespace CoreAI.Mods.Rbx.Binding
         /// <summary>The owner name this sink claims the ambient under (<see cref="LookAmbientOwnership.Owners"/>).</summary>
         public const string AmbientOwnerName = "CoreAI.Mods Lighting";
 
+        /// <summary>The owner name this sink claims the fog under (<see cref="LookAmbientOwnership.FogOwners"/>).</summary>
+        public const string FogOwnerName = "CoreAI.Mods Lighting fog";
+
+        private System.IDisposable _fogClaim;
+        private bool _originalFog;
+        private FogMode _originalFogMode;
+        private Color _originalFogColor;
+        private float _originalFogStart;
+        private float _originalFogEnd;
+
         /// <param name="sun">The directional light to drive; null resolves <c>RenderSettings.sun</c>, then the
         /// scene's first active directional light, at the first apply.</param>
         public UnityRbxLightingSink(Light sun = null) : this(sun, null)
@@ -67,6 +81,9 @@ namespace CoreAI.Mods.Rbx.Binding
 
         /// <summary>True while this sink holds its ambient claim: from the first apply until <see cref="Revert"/>.</summary>
         public bool ClaimsAmbient => _ambientClaim != null;
+
+        /// <summary>True while a world's own fog is drawn: some fog property is away from Roblox's defaults.</summary>
+        public bool ClaimsFog => _fogClaim != null;
 
         /// <summary>Scales the sun's intensity after the Roblox mapping (1 keeps <c>Brightness</c> as the intensity at noon).</summary>
         public float SunIntensityScale { get; set; } = 1f;
@@ -120,6 +137,7 @@ namespace CoreAI.Mods.Rbx.Binding
             // WHY through the ownership seam: the sky reflections are the look's probe, which this sink does not
             // own; the look scales them by this value for as long as the claim is held.
             _ambientOwnership.SetSkyReflectionScale(state.EnvironmentSpecularScale);
+            ApplyFog(in state);
         }
 
         /// <summary>Puts the last applied state on screen again, after a host pass rewrote <c>RenderSettings</c>.</summary>
@@ -162,6 +180,54 @@ namespace CoreAI.Mods.Rbx.Binding
 
             _ambientClaim?.Dispose();
             _ambientClaim = null;
+            ReleaseFog();
+        }
+
+        private void ApplyFog(in RbxLightingState state)
+        {
+            if (RbxLightingMapping.IsFogAtDefaults(in state))
+            {
+                ReleaseFog();
+                return;
+            }
+
+            if (_fogClaim == null)
+            {
+                _originalFog = RenderSettings.fog;
+                _originalFogMode = RenderSettings.fogMode;
+                _originalFogColor = RenderSettings.fogColor;
+                _originalFogStart = RenderSettings.fogStartDistance;
+                _originalFogEnd = RenderSettings.fogEndDistance;
+                _fogClaim = _ambientOwnership.ClaimFog(FogOwnerName);
+            }
+
+            float start = RbxSpace.LengthToUnity(state.FogStart);
+            float end = RbxSpace.LengthToUnity(state.FogEnd);
+            RenderSettings.fog = true;
+            RenderSettings.fogMode = FogMode.Linear;
+            RenderSettings.fogStartDistance = start;
+            // WHY a floor: Roblox keeps any order of the two distances, while Unity's linear fog divides by their
+            // difference; an end at or before the start fogs everything past the start.
+            RenderSettings.fogEndDistance = Mathf.Max(end, start + 0.01f);
+            RenderSettings.fogColor = ToColor(state.FogColor);
+        }
+
+        private void ReleaseFog()
+        {
+            if (_fogClaim == null)
+            {
+                return;
+            }
+
+            // WHY the scene's fog first: releasing the claim lets the look write its own fog over it, if it owns one.
+            RenderSettings.fog = _originalFog;
+            RenderSettings.fogMode = _originalFogMode;
+            RenderSettings.fogColor = _originalFogColor;
+            RenderSettings.fogStartDistance = _originalFogStart;
+            RenderSettings.fogEndDistance = _originalFogEnd;
+            System.IDisposable claim = _fogClaim;
+            _fogClaim = null;
+            claim.Dispose();
         }
 
         private void Capture(Light sun)

@@ -420,6 +420,46 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        [Test]
+        public void AClaimedFog_IsLeftToItsOwner_AndTheLooksFogReturnsOnRelease()
+        {
+            RequireProceduralSkyShader();
+            RenderSettings.skybox = null;
+            RenderSettings.fog = false;
+            _profile.FogFollowsHaze = false;
+            System.IDisposable claim = _ownership.ClaimFog("world fog");
+            RenderSettings.fog = true;
+            RenderSettings.fogMode = FogMode.Linear;
+            RenderSettings.fogColor = Color.red;
+
+            _applier.Apply(_profile, Options(), LookMode.Apply);
+
+            Assert.AreEqual(Color.red, RenderSettings.fogColor, "the world's fog colour stays");
+            Assert.AreEqual(FogMode.Linear, RenderSettings.fogMode, "and its mode");
+
+            claim.Dispose();
+
+            Assert.AreEqual(_profile.FogColor, RenderSettings.fogColor, "the look's fog is back");
+            Assert.AreEqual(_profile.FogMode, RenderSettings.fogMode);
+        }
+
+        [Test]
+        public void Revert_WhileTheFogIsClaimed_LeavesTheOwnersFog_NegativeTwin()
+        {
+            RenderSettings.skybox = null;
+            RenderSettings.fog = false;
+            _applier.Apply(_profile, Options(), LookMode.Apply);
+            System.IDisposable claim = _ownership.ClaimFog("world fog");
+            RenderSettings.fogColor = Color.green;
+
+            _applier.Revert();
+
+            Assert.AreEqual(Color.green, RenderSettings.fogColor, "a reverted look does not write over a claimed fog");
+            Assert.IsTrue(RenderSettings.fog);
+            claim.Dispose();
+            Assert.AreEqual(Color.green, RenderSettings.fogColor, "nor takes it back when the claim ends");
+        }
+
         private static void AssertColor(Color expected, Color actual, float tolerance, string message)
         {
             Assert.AreEqual(expected.r, actual.r, tolerance, message + " (red)");

@@ -320,6 +320,8 @@ namespace CoreAI.Editor.RbxMaterials
                 AmbientOcclusionAssetPath = occlusion
             };
             RbxMaterialSurfaceProfiles.Apply(entry);
+            // WHY 0: a Bridge or Fab export is calibrated; its roughness map is the surface's, floor or not.
+            entry.RoughnessFloor = 0f;
             return entry;
         }
 

@@ -69,6 +69,52 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void FogClaims_Nest_AndFogChangedFiresOnlyAtTheEdges()
+        {
+            LookAmbientOwnership ownership = new();
+            int fogChanges = 0;
+            ownership.FogChanged += () => fogChanges++;
+
+            IDisposable world = ownership.ClaimFog("world fog");
+            IDisposable weather = ownership.ClaimFog("weather");
+            world.Dispose();
+            world.Dispose();
+
+            Assert.IsTrue(ownership.IsFogClaimed, "one fog claim is still held");
+            CollectionAssert.AreEqual(new[] { "weather" }, ownership.FogOwners);
+            Assert.AreEqual(1, fogChanges);
+            weather.Dispose();
+            Assert.IsFalse(ownership.IsFogClaimed);
+            Assert.AreEqual(2, fogChanges, "the last release gives the fog back");
+            Assert.Throws<ArgumentException>(() => ownership.ClaimFog(""));
+        }
+
+        [Test]
+        public void TheFogAndTheAmbient_AreClaimedSeparately_NegativeTwin()
+        {
+            LookAmbientOwnership ownership = new();
+            int ambientChanges = 0;
+            int fogChanges = 0;
+            ownership.Changed += () => ambientChanges++;
+            ownership.FogChanged += () => fogChanges++;
+
+            using (ownership.Claim("day cycle"))
+            {
+                Assert.IsTrue(ownership.IsClaimed);
+                Assert.IsFalse(ownership.IsFogClaimed, "a day cycle that drives the ambient does not own the fog");
+            }
+
+            using (ownership.ClaimFog("world fog"))
+            {
+                Assert.IsTrue(ownership.IsFogClaimed);
+                Assert.IsFalse(ownership.IsClaimed, "a world's fog does not own the ambient");
+            }
+
+            Assert.AreEqual(2, ambientChanges);
+            Assert.AreEqual(2, fogChanges);
+        }
+
+        [Test]
         public void AClaimNeedsAnOwner()
         {
             LookAmbientOwnership ownership = new();

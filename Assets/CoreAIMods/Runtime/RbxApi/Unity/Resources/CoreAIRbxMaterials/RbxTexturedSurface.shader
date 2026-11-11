@@ -12,6 +12,7 @@ Shader "CoreAI/Rbx/Textured Surface"
         _BumpScale("Normal Strength", Range(0,2)) = 1.0
         _RoughnessMap("Roughness Map", 2D) = "white" {}
         _RoughnessScale("Roughness Scale", Range(0,4)) = 1.0
+        _RoughnessFloor("Roughness Floor", Range(0,1)) = 0
         [Toggle] _InvertRoughness("Map Stores Smoothness", Float) = 0
         _MetallicMap("Metalness Map", 2D) = "black" {}
         _OcclusionMap("Ambient Occlusion Map", 2D) = "white" {}
@@ -29,6 +30,7 @@ Shader "CoreAI/Rbx/Textured Surface"
         [HideInInspector] _RbxSkyExposure("Sky Exposure", Range(0,1)) = 1
         [HideInInspector] _RbxSkyExposureSource("Sky Exposure From Vertex Colour", Float) = 0
         [HideInInspector] _RbxCellTiles("One Tile Per Terrain Cell Face", Float) = 0
+        [HideInInspector] _RbxCornerShade("Terrain Corner Shade Strength", Range(0,1)) = 0
     }
 
     SubShader
@@ -98,6 +100,7 @@ Shader "CoreAI/Rbx/Textured Surface"
                 float _TextureAspect;
                 float _BumpScale;
                 float _RoughnessScale;
+                float _RoughnessFloor;
                 float _InvertRoughness;
                 float _CavityStrength;
                 float _MetalAlbedoLift;
@@ -107,6 +110,7 @@ Shader "CoreAI/Rbx/Textured Surface"
                 float _RbxSkyExposure;
                 float _RbxSkyExposureSource;
                 float _RbxCellTiles;
+                float _RbxCornerShade;
             CBUFFER_END
 
             struct Attributes
@@ -127,6 +131,7 @@ Shader "CoreAI/Rbx/Textured Surface"
                 float2 halfExtentXZ : TEXCOORD4;
                 float fogDepth : TEXCOORD5;
                 half skyExposure : TEXCOORD6;
+                half cornerShade : TEXCOORD7;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
                 UNITY_VERTEX_OUTPUT_STEREO
             };
@@ -288,6 +293,9 @@ Shader "CoreAI/Rbx/Textured Surface"
                 half axisRoughness = lerp(axisRoughnessSample, 1.0h - axisRoughnessSample,
                     saturate(_InvertRoughness));
                 axisRoughness = saturate(axisRoughness * _RoughnessScale);
+                // WHY a remap and not a max: polished sets (Granite002A averages 0.023) drew as mirrors; onto
+                // floor..1 the surface turns satin and keeps the map's own variation above the floor.
+                axisRoughness = lerp((half)_RoughnessFloor, 1.0h, axisRoughness);
                 half3 normalTS = UnpackNormalScale(SAMPLE_TEXTURE2D_GRAD(_BumpMap,
                     sampler_BumpMap, projection.uv, projection.derivativeX,
                     projection.derivativeY), _BumpScale);
@@ -343,6 +351,7 @@ Shader "CoreAI/Rbx/Textured Surface"
                 // which is why Y is not passed: top and bottom faces carry no size term.
                 output.halfExtentXZ = objectAxisScale.xz * 0.5;
                 output.skyExposure = RbxVertexSkyExposure(input.color, _RbxSkyExposureSource, _RbxSkyExposure);
+                output.cornerShade = RbxVertexCornerShade(input.color, _RbxSkyExposureSource, _RbxCornerShade);
                 return output;
             }
 
@@ -425,6 +434,9 @@ Shader "CoreAI/Rbx/Textured Surface"
                     materialAlbedo *= lerp(1.0h, occlusion, (half)saturate(_CavityStrength));
                 #endif
                 half3 albedo = materialAlbedo * partModulation;
+                // WHY half on the albedo: the corner shade is the block game's baked occlusion; all of it dims the sky's
+                // light, and half of it the sun's, so an inner corner reads at noon without going black.
+                albedo *= lerp(1.0h, input.cornerShade, 0.5h);
                 float3 normalWS = normalize(mappedNormalWS);
                 half3 emission = half3(0.0h, 0.0h, 0.0h);
                 #if defined(_RBX_EMISSION)
@@ -445,7 +457,7 @@ Shader "CoreAI/Rbx/Textured Surface"
                 surfaceData.smoothness = saturate(1.0h - roughness);
                 surfaceData.normalTS = half3(0.0h, 0.0h, 1.0h);
                 surfaceData.emission = emission;
-                surfaceData.occlusion = occlusion;
+                surfaceData.occlusion = occlusion * input.cornerShade;
                 surfaceData.alpha = 1.0h;
                 RbxApplySkyExposure(input.skyExposure, surfaceData);
 

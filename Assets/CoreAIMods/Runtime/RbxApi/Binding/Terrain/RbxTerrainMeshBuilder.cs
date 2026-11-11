@@ -12,8 +12,11 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
     /// Turns the faces a <see cref="ITerrainChunkMesher"/> produced into Unity meshes: the solid
     /// faces as one mesh with a submesh per material slot (ascending slot order), the water faces as
     /// a mesh of their own. Positions go through <see cref="RbxSpace"/>, the one conversion boundary.
-    /// Every vertex carries its sky exposure in the vertex colour's alpha (255 under the open sky; the
-    /// colour's RGB stays white), which the terrain materials read to dim the sky's light in caves.
+    /// Every vertex carries its sky exposure in the vertex colour's alpha (255 under the open sky) and its corner
+    /// shade in the colour's RGB (255 for an open corner, darker where blocks meet), which the terrain materials read
+    /// to dim the sky's light in caves and to shade the inner corners between blocks. Each quad is split along the
+    /// diagonal whose corners are the less shaded pair, so a single shaded corner stays a soft corner instead of a
+    /// streak along the split.
     /// </summary>
     /// <remarks>
     /// WHY world-space vertices on an identity transform: the material shaders project their
@@ -28,6 +31,7 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         private readonly List<Vector3> _normals = new();
         private readonly List<Color32> _colors = new();
         private readonly byte[] _corners = new byte[4];
+        private readonly byte[] _shades = new byte[4];
         private readonly List<int> _indices = new();
         private readonly int[] _submeshStart = new int[TerrainMaterials.SlotCount];
         private readonly int[] _submeshLength = new int[TerrainMaterials.SlotCount];
@@ -147,12 +151,26 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
                 }
 
                 AppendColors(in quad, exposure);
-                _indices.Add(first);
-                _indices.Add(first + 2);
-                _indices.Add(first + 1);
-                _indices.Add(first);
-                _indices.Add(first + 3);
-                _indices.Add(first + 2);
+                int shadeA = _colors[first].r + _colors[first + 2].r;
+                int shadeB = _colors[first + 1].r + _colors[first + 3].r;
+                if (shadeA >= shadeB)
+                {
+                    _indices.Add(first);
+                    _indices.Add(first + 2);
+                    _indices.Add(first + 1);
+                    _indices.Add(first);
+                    _indices.Add(first + 3);
+                    _indices.Add(first + 2);
+                }
+                else
+                {
+                    _indices.Add(first + 1);
+                    _indices.Add(first + 3);
+                    _indices.Add(first + 2);
+                    _indices.Add(first + 1);
+                    _indices.Add(first);
+                    _indices.Add(first + 3);
+                }
             }
         }
 
@@ -179,26 +197,35 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
 
             exposure.GetCornerExposures(in quad, out byte corner0, out byte corner1, out byte corner2,
                 out byte corner3);
+            exposure.GetCornerOcclusion(in quad, out byte shade0, out byte shade1, out byte shade2, out byte shade3);
             if (quad.Band != TerrainFaceBand.Whole)
             {
                 _corners[0] = corner0;
                 _corners[1] = corner1;
                 _corners[2] = corner2;
                 _corners[3] = corner3;
-                corner0 = BandCorner(in quad, 0);
-                corner1 = BandCorner(in quad, 1);
-                corner2 = BandCorner(in quad, 2);
-                corner3 = BandCorner(in quad, 3);
+                corner0 = BandCorner(in quad, 0, _corners);
+                corner1 = BandCorner(in quad, 1, _corners);
+                corner2 = BandCorner(in quad, 2, _corners);
+                corner3 = BandCorner(in quad, 3, _corners);
+                _shades[0] = shade0;
+                _shades[1] = shade1;
+                _shades[2] = shade2;
+                _shades[3] = shade3;
+                shade0 = BandCorner(in quad, 0, _shades);
+                shade1 = BandCorner(in quad, 1, _shades);
+                shade2 = BandCorner(in quad, 2, _shades);
+                shade3 = BandCorner(in quad, 3, _shades);
             }
 
-            _colors.Add(new Color32(255, 255, 255, corner0));
-            _colors.Add(new Color32(255, 255, 255, corner1));
-            _colors.Add(new Color32(255, 255, 255, corner2));
-            _colors.Add(new Color32(255, 255, 255, corner3));
+            _colors.Add(new Color32(shade0, shade0, shade0, corner0));
+            _colors.Add(new Color32(shade1, shade1, shade1, corner1));
+            _colors.Add(new Color32(shade2, shade2, shade2, corner2));
+            _colors.Add(new Color32(shade3, shade3, shade3, corner3));
         }
 
-        /// <summary>The whole face's exposure along a corner's vertical edge, read at the height the band moved it to.</summary>
-        private byte BandCorner(in TerrainFaceQuad quad, int corner)
+        /// <summary>A whole face's corner value along a corner's vertical edge, read at the height the band moved it to.</summary>
+        private static byte BandCorner(in TerrainFaceQuad quad, int corner, byte[] whole)
         {
             TerrainFaceGeometry.GetCorner(quad.Face, corner, out int dx, out int dy, out int dz);
             int partner = corner;
@@ -212,8 +239,8 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
                 }
             }
 
-            float bottom = dy == 0 ? _corners[corner] : _corners[partner];
-            float top = dy == 0 ? _corners[partner] : _corners[corner];
+            float bottom = dy == 0 ? whole[corner] : whole[partner];
+            float top = dy == 0 ? whole[partner] : whole[corner];
             return (byte)Mathf.RoundToInt(bottom + (top - bottom) * quad.CornerHeight(dy));
         }
 

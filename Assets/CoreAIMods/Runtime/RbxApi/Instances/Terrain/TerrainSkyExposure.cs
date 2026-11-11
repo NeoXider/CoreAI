@@ -45,6 +45,12 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
         /// <summary>Exposure byte of a cell under the open sky.</summary>
         public const byte FullExposure = 255;
 
+        /// <summary>
+        /// Corner shade bytes by how many of the three cells around a face corner are solid (0, 1, 2, or both sides):
+        /// open, beside one block, in a step, in an inner corner.
+        /// </summary>
+        public static readonly byte[] CornerShadeLevels = { 255, 212, 168, 128 };
+
         private const byte Blocking = byte.MaxValue;
         private const int Edge = TerrainChunkCoord.Size;
         private const int ColumnCells = Edge * Edge;
@@ -193,6 +199,48 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
             corner1 = Corner(front, face * 4 + 1);
             corner2 = Corner(front, face * 4 + 2);
             corner3 = Corner(front, face * 4 + 3);
+        }
+
+        /// <summary>
+        /// The corner shade (ambient occlusion) at the four corners of a face, in <see cref="TerrainFaceGeometry"/>
+        /// corner order, 255 for an open corner down to <see cref="CornerShadeLevels"/>[3] in an inner corner: the
+        /// block-game rule over the two cells beside a corner and the cell diagonal to it, all in the layer in front of
+        /// the face (both sides solid counts as fully shaded whatever the diagonal is). Only solid cells shade; Water
+        /// and Air do not. The face's cell must lie in the chunk last prepared.
+        /// </summary>
+        /// <remarks>
+        /// WHY here: the cells it reads are exactly the ones <see cref="GetCornerExposures"/> reads, already marked in
+        /// the window the chunk was prepared with, so the shade costs three lookups per corner and no extra pass.
+        /// </remarks>
+        public void GetCornerOcclusion(in TerrainFaceQuad quad, out byte corner0, out byte corner1, out byte corner2,
+            out byte corner3)
+        {
+            if (!_prepared)
+            {
+                throw new InvalidOperationException("Prepare a chunk before reading its face corners.");
+            }
+
+            int face = (int)quad.Face;
+            int front = IndexOf(quad.CellX, quad.CellY, quad.CellZ) + _frontStep[face];
+            corner0 = Shade(front, face * 4);
+            corner1 = Shade(front, face * 4 + 1);
+            corner2 = Shade(front, face * 4 + 2);
+            corner3 = Shade(front, face * 4 + 3);
+        }
+
+        private byte Shade(int front, int slot)
+        {
+            int firstStep = _firstStep[slot];
+            int secondStep = _secondStep[slot];
+            bool sideA = _cells[front + firstStep] == Blocking;
+            bool sideB = _cells[front + secondStep] == Blocking;
+            if (sideA && sideB)
+            {
+                return CornerShadeLevels[3];
+            }
+
+            bool diagonal = _cells[front + firstStep + secondStep] == Blocking;
+            return CornerShadeLevels[(sideA ? 1 : 0) + (sideB ? 1 : 0) + (diagonal ? 1 : 0)];
         }
 
         /// <summary>

@@ -72,6 +72,18 @@ namespace CoreAI.PerfBench
                 return sum;
             }, "per chunk, 64 chunks spread over the reference world, faces meshed beforehand"));
 
+            cases.Add(new MicroCase("terrain", "sky exposure and corner shade: every face corner of one chunk", ops =>
+            {
+                long sum = 0;
+                for (int i = 0; i < ops; i++)
+                {
+                    int pick = i % sample.Count;
+                    sum += Light(exposure, sample[pick], sampleFaces[pick], true);
+                }
+
+                return sum;
+            }, "the row above plus the block-game corner shade the renderer writes into the vertex RGB"));
+
             List<TerrainChunkCoord> pending = new();
             store.Changed += change =>
             {
@@ -185,7 +197,8 @@ namespace CoreAI.PerfBench
             throw new InvalidOperationException("the reference world has no cave to open a shaft into");
         }
 
-        private static long Light(TerrainSkyExposure exposure, TerrainChunkCoord coord, TerrainChunkMeshBuffers buffers)
+        private static long Light(TerrainSkyExposure exposure, TerrainChunkCoord coord, TerrainChunkMeshBuffers buffers,
+            bool shade = false)
         {
             exposure.PrepareChunk(coord);
             long sum = 0;
@@ -197,6 +210,11 @@ namespace CoreAI.PerfBench
                     TerrainFaceQuad quad = quads[index];
                     exposure.GetCornerExposures(in quad, out byte a, out byte b, out byte c, out byte d);
                     sum += a + b + c + d;
+                    if (shade)
+                    {
+                        exposure.GetCornerOcclusion(in quad, out byte e, out byte f, out byte g, out byte h);
+                        sum += e + f + g + h;
+                    }
                 }
             }
 

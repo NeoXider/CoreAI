@@ -18,6 +18,8 @@ namespace CoreAI.Look
     /// last claim is released. With its procedural sky the look follows the sun: the sky below the horizon continues
     /// the haze above it (<see cref="CoreAiLookProfile.SkyGroundFollowsHaze"/>) and the fog takes the haze colour
     /// (<see cref="CoreAiLookProfile.FogFollowsHaze"/>), recomputed whenever the sun has moved before a frame renders.
+    /// A fog another system claims (<see cref="LookAmbientOwnership.ClaimFog"/>, a world's <c>Lighting</c> fog) is
+    /// left to it, and the look's fog returns when the last fog claim is released.
     /// </summary>
     public class RenderSettingsLookApplier : ICoreAiLookApplier
     {
@@ -54,6 +56,8 @@ namespace CoreAI.Look
         private bool _hazeSubscribed;
         private bool _hazeValid;
         private Vector3 _hazeSun;
+        private bool _hazeGroundFollows;
+        private bool _hazeFogFollows;
         private bool _ownsFog;
 
         /// <summary>
@@ -91,6 +95,7 @@ namespace CoreAI.Look
             {
                 _ambientOwnership.Changed += HandleAmbientOwnershipChanged;
                 _ambientOwnership.SkyReflectionScaleChanged += HandleSkyReflectionScaleChanged;
+                _ambientOwnership.FogChanged += HandleFogOwnershipChanged;
                 _ownershipSubscribed = true;
             }
 
@@ -100,7 +105,7 @@ namespace CoreAI.Look
             }
 
             _ownsFog = mode == LookMode.Apply || _snapshot.FogMissing;
-            if (_ownsFog)
+            if (_ownsFog && !_ambientOwnership.IsFogClaimed)
             {
                 ApplyFog(profile, options);
             }
@@ -144,6 +149,7 @@ namespace CoreAI.Look
             {
                 _ambientOwnership.Changed -= HandleAmbientOwnershipChanged;
                 _ambientOwnership.SkyReflectionScaleChanged -= HandleSkyReflectionScaleChanged;
+                _ambientOwnership.FogChanged -= HandleFogOwnershipChanged;
                 _ownershipSubscribed = false;
             }
 
@@ -163,7 +169,7 @@ namespace CoreAI.Look
             {
                 // WHY: an ambient someone else owns stays theirs; writing the scene's original back would
                 // undo a day cycle that outlives this scope.
-                _snapshot.Restore(!_ambientOwnership.IsClaimed);
+                _snapshot.Restore(!_ambientOwnership.IsClaimed, !_ambientOwnership.IsFogClaimed);
                 DynamicGI.UpdateEnvironment();
             }
 
@@ -240,6 +246,21 @@ namespace CoreAI.Look
             }
         }
 
+        private void HandleFogOwnershipChanged()
+        {
+            // WHY only on release: the claimant writes its own fog right after claiming; a released fog would keep the
+            // last owner's colour and distances until the look's next apply.
+            if (_ambientOwnership.IsFogClaimed || !_ownsFog || _snapshot == null || _lastProfile == null
+                || _lastOptions == null || _lastMode == LookMode.Off || SceneManager.GetActiveScene() != _capturedScene)
+            {
+                return;
+            }
+
+            ApplyFog(_lastProfile, _lastOptions);
+            _hazeValid = false;
+            UpdateHaze();
+        }
+
         private void HandleBeginContextRendering(ScriptableRenderContext context, List<Camera> cameras)
         {
             UpdateHaze();
@@ -252,8 +273,7 @@ namespace CoreAI.Look
         private void UpdateHaze()
         {
             CoreAiLookProfile profile = _lastProfile;
-            if (profile == null || _proceduralSky == null || RenderSettings.skybox != _proceduralSky
-                || (!profile.SkyGroundFollowsHaze && !profile.FogFollowsHaze))
+            if (profile == null || _proceduralSky == null || RenderSettings.skybox != _proceduralSky)
             {
                 return;
             }
@@ -265,12 +285,17 @@ namespace CoreAI.Look
             }
 
             Vector3 towardSun = -sun.transform.forward;
-            if (_hazeValid && Vector3.Dot(towardSun, _hazeSun) > HazeSunTolerance)
+            // WHY the switches too: a profile switched on or off while the sun stands still must still take effect.
+            if (_hazeValid && Vector3.Dot(towardSun, _hazeSun) > HazeSunTolerance
+                           && _hazeGroundFollows == profile.SkyGroundFollowsHaze
+                           && _hazeFogFollows == profile.FogFollowsHaze)
             {
                 return;
             }
 
             _hazeSun = towardSun;
+            _hazeGroundFollows = profile.SkyGroundFollowsHaze;
+            _hazeFogFollows = profile.FogFollowsHaze;
             _hazeValid = true;
             Color tint = profile.SkyTint;
             float thickness = profile.SkyAtmosphereThickness;
@@ -287,7 +312,16 @@ namespace CoreAI.Look
                 _proceduralSky.SetColor(GroundColorId, profile.SkyGroundColor);
             }
 
-            if (profile.FogFollowsHaze && _ownsFog && RenderSettings.fog)
+            if (!_ownsFog || _ambientOwnership.IsFogClaimed || !RenderSettings.fog)
+            {
+                return;
+            }
+
+            if (!profile.FogFollowsHaze)
+            {
+                RenderSettings.fogColor = profile.FogColor;
+            }
+            else
             {
                 ProceduralSkyHaze.HorizonHaze(towardSun.x, towardSun.y, towardSun.z, tint.r, tint.g, tint.b, thickness,
                     out float red, out float green, out float blue);
@@ -540,7 +574,7 @@ namespace CoreAI.Look
                 RenderSettings.ambientGroundColor = _ambientGround;
             }
 
-            public void Restore(bool includeAmbient)
+            public void Restore(bool includeAmbient, bool includeFog)
             {
                 RestoreSky();
                 if (includeAmbient)
@@ -549,6 +583,11 @@ namespace CoreAI.Look
                 }
 
                 RenderSettings.reflectionIntensity = _reflectionIntensity;
+                if (!includeFog)
+                {
+                    return;
+                }
+
                 RenderSettings.fog = _fog;
                 RenderSettings.fogMode = _fogMode;
                 RenderSettings.fogColor = _fogColor;

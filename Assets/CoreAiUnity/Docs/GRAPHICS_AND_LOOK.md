@@ -133,6 +133,34 @@ environment reflection intensity by it and follows every change at once. A world
 it back to 1 when it reverts. Both appliers take an optional `LookAmbientOwnership` in their constructor;
 `Shared` is the default.
 
+### The horizon: the sky below it and the fog follow the haze
+
+Unity's procedural sky draws the hemisphere below the horizon as a fixed ground colour attenuated by a long,
+reddening light path. Past the edge of a world that is still streaming in, that read as a brown floor (about
+sRGB 79, 75, 71 under a haze of 183, 205, 209 at 10:00 in the Block World). With its procedural sky the look
+now recolours the ground as the sun moves (`CoreAiLookProfile.SkyGroundFollowsHaze`, on by default):
+`ProceduralSkyHaze` (engine-free, `CoreAI.Look`) evaluates the sky's own single-scattering model on the CPU and
+solves for the ground colour that makes the sky three degrees below the horizon equal the haze just above it,
+averaged round the horizon. It follows the day: pale haze at noon, warm at dusk, dark at night. Measured on the
+Block World's sky alone, the band below the horizon moved from rgb(79, 75, 71) to rgb(184, 206, 207) under a
+haze of rgb(183, 205, 209). While the look owns the fog, the fog takes the same haze colour
+(`FogFollowsHaze`, on by default), so distant ground fades into the sky behind it by day and goes dark at night
+instead of glowing blue. Both are recomputed before a frame renders, only when the sun has turned by more than
+about 0.05 degrees, and both fall back to the profile's `SkyGroundColor` and `FogColor` when switched off.
+
+A world's own fog wins. `Lighting.FogStart`, `FogEnd` and `FogColor` (Roblox's defaults 0, 100000 studs and
+grey 0.75) are drawn by the Lighting sink as linear fog from `FogStart` to `FogEnd` in `FogColor` once a script
+sets any of them away from the defaults; the sink then claims the fog (`LookAmbientOwnership.ClaimFog`), the
+look leaves the fog's switch, mode, colour and distances alone, and the look's haze returns when the world's
+fog is back at the defaults or the world ends. A world that never sets fog keeps the look's haze, where
+Roblox would draw none (a recorded deviation).
+
+```csharp
+IDisposable fog = LookAmbientOwnership.Shared.ClaimFog("weather");
+// ... write RenderSettings.fog, fogMode, fogColor and the distances ...
+fog.Dispose();   // the look's own fog comes back
+```
+
 ### Caves: sky exposure per surface
 
 The ambient and the reflections a world draws come from the sky, so on their own they reach the inside of a

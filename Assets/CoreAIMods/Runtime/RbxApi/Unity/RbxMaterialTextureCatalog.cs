@@ -142,6 +142,7 @@ namespace CoreAI.Mods.Rbx.Rendering
             [SerializeField, Min(0f)] private float _normalStrength = 1f;
             [SerializeField, Range(0f, 1f)] private float _cavityStrength;
             [SerializeField, Range(0f, 1f)] private float _metalAlbedoLift;
+            [SerializeField] private float _roughnessFloor = -1f;
             [SerializeField] private RbxEmissionMode _emissionMode = RbxEmissionMode.MaterialDefault;
             [SerializeField, ColorUsage(false, true)] private Color _emissionColor = Color.black;
             [SerializeField, Range(0f, 1f)] private float _emissionThreshold = 0.5f;
@@ -265,6 +266,24 @@ namespace CoreAI.Mods.Rbx.Rendering
             {
                 get => _metalAlbedoLift;
                 set => _metalAlbedoLift = Mathf.Clamp01(value);
+            }
+
+            /// <summary>
+            /// The roughness the surface never goes below, 0..1: the shader remaps the scaled map onto floor..1. A
+            /// negative value (every entry saved before the field existed loads as -1) lets
+            /// <see cref="RbxMaterialRoughnessFloors"/> decide, so the polished packaged sets turn satin without the
+            /// catalog asset being rebuilt; 0 keeps the map as it is.
+            /// </summary>
+            public float RoughnessFloor
+            {
+                get => _roughnessFloor;
+                set => _roughnessFloor = value < 0f ? -1f : Mathf.Clamp01(value);
+            }
+
+            /// <summary>The floor in effect: the entry's own, or the material's default when it leaves it open.</summary>
+            public float ResolveRoughnessFloor()
+            {
+                return _roughnessFloor >= 0f ? Mathf.Clamp01(_roughnessFloor) : RbxMaterialRoughnessFloors.For(_materialName);
             }
 
             /// <summary>

@@ -149,8 +149,10 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
 
         // ---- palettes (sRGB, dark to light) ---------------------------------------------------------------
 
+        // WHY not lime: the first palette ran to 0x86C84B and the tonemapped lawn read lime and busy at mid range;
+        // these stay as green but sit a little lower and bluer, closer to a summer lawn.
         private static readonly uint[] GrassPalette =
-            { 0x3A6B1D, 0x447C22, 0x4F8D28, 0x5A9D2E, 0x66AC35, 0x74BA3E, 0x86C84B };
+            { 0x3A6A22, 0x437927, 0x4D882D, 0x579633, 0x62A33A, 0x6EAF42, 0x7CBB4D };
 
         private static readonly uint[] LeafPalette =
             { 0x1E4414, 0x285619, 0x33681F, 0x3F7B26, 0x4C8E2E, 0x5BA138, 0x6DB345 };
@@ -163,8 +165,9 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
 
         private static readonly uint[] SandPalette = { 0xCCB079, 0xD5BB85, 0xDDC591, 0xE4CE9C, 0xEAD6A8, 0xF0DFB5 };
 
+        // WHY warm greys: a cool grey under the blue sky read as blue-grey slate rather than stone.
         private static readonly uint[] StonePalette =
-            { 0x5A5B5F, 0x646569, 0x6E6F73, 0x78797D, 0x838488, 0x8E8F93, 0x9A9B9F };
+            { 0x5C5B58, 0x666562, 0x706F6B, 0x7A7975, 0x858480, 0x908F8A, 0x9C9A95 };
 
         private static readonly uint[] CobblePalette =
             { 0x515256, 0x5D5E62, 0x6A6B6F, 0x77787C, 0x85868A, 0x939498, 0xA3A4A8 };
@@ -210,8 +213,8 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
         private static Canvas GrassTop()
         {
             Canvas canvas = new(0.88f, 0.9f);
-            float[] field = Field((x, y) => 0.32f * Fbm(x, y, 4, 2, 11) + 0.2f * Noise(x, y, 8, 8, 12)
-                                            + 0.48f * Rnd(x, y, 13));
+            float[] field = Field((x, y) => 0.4f * Fbm(x, y, 4, 2, 11) + 0.22f * Noise(x, y, 8, 8, 12)
+                                            + 0.38f * Rnd(x, y, 13));
             float[] ranks = Equalize(field);
             int[] levels = new int[P];
             for (int i = 0; i < P; i++)
@@ -220,7 +223,7 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
             }
 
             Rng rng = new(14);
-            for (int blade = 0; blade < 11; blade++)
+            for (int blade = 0; blade < 8; blade++)
             {
                 int x = rng.Range(0, S - 1);
                 int y = rng.Range(0, S - 1);

@@ -763,6 +763,7 @@ namespace CoreAI.Mods.Rbx.Rendering
             material.SetFloat(PropertyIds.TextureAspect, textureAspect);
             material.SetFloat(PropertyIds.BumpScale, Mathf.Max(0f, entry.NormalStrength));
             material.SetFloat(PropertyIds.RoughnessScale, Mathf.Max(0f, entry.RoughnessScale));
+            material.SetFloat(PropertyIds.RoughnessFloor, entry.ResolveRoughnessFloor());
             material.SetFloat(PropertyIds.InvertRoughness, entry.IsSmoothnessMap ? 1f : 0f);
             material.SetFloat(PropertyIds.CavityStrength, entry.CavityStrength);
             material.SetFloat(PropertyIds.MetalAlbedoLift, entry.MetalAlbedoLift);
@@ -837,6 +838,7 @@ namespace CoreAI.Mods.Rbx.Rendering
             public static readonly int TextureAspect = Shader.PropertyToID("_TextureAspect");
             public static readonly int BumpScale = Shader.PropertyToID("_BumpScale");
             public static readonly int RoughnessScale = Shader.PropertyToID("_RoughnessScale");
+            public static readonly int RoughnessFloor = Shader.PropertyToID("_RoughnessFloor");
             public static readonly int InvertRoughness = Shader.PropertyToID("_InvertRoughness");
             public static readonly int BaseMap = Shader.PropertyToID("_BaseMap");
             public static readonly int BumpMap = Shader.PropertyToID("_BumpMap");

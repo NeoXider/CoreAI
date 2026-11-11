@@ -10,8 +10,8 @@ sparse chunk store, and each 16 x 16 x 16-cell chunk draws as one face-culled me
 | Layer | Assembly | Where | What |
 |---|---|---|---|
 | Domain | `CoreAI.RbxApi.Datatypes` | `Datatypes/RbxRegion3.cs` | `Region3` |
-| Domain | `CoreAI.RbxApi.Instances` | this folder | chunk store, bounds and budgets, change sets, snapshots, `FillBlock` rasterizer, region rules, the package codec, the face-culled mesher and its port, the face material rules, the sky exposure, the voxel ray march, the `Terrain` instance |
-| Unity adapter | `CoreAI.RbxApi.Binding` | `Binding/Terrain` | chunk meshes, renderers and colliders, the per-frame re-mesh pass, colliders built on demand for bodies and rays, the part sky exposure pass, the raycast hit resolver |
+| Domain | `CoreAI.RbxApi.Instances` | this folder | chunk store, bounds and budgets, change sets, snapshots, `FillBlock` rasterizer, region rules, the package codec, the face-culled mesher and its port, the face material rules, the block look and its tile painter, the sky exposure and corner shade, the voxel ray march, the `Terrain` instance |
+| Unity adapter | `CoreAI.RbxApi.Binding` | `Binding/Terrain` | chunk meshes, renderers and colliders, the block tile textures, the per-frame re-mesh pass, colliders built on demand for bodies and rays, the part sky exposure pass, the raycast hit resolver |
 | Lua | `CoreAI.Mods` | `Scripting/LuaCs/Terrain` | `Region3` global, the `Terrain` methods, `workspace.Terrain` |
 
 The store (`TerrainChunkStore`) is single-threaded and engine-free. Every write is one operation over a
@@ -24,8 +24,8 @@ Every change set also carries `ChangedCells`, the box of the cells that changed 
 Replaceable blocks: `ITerrainChunkMesher` (engine-free; the default is `BlockyTerrainChunkMesher`),
 `IRbxTerrainRenderer` (Unity; supplied through `RbxTerrainPresenter.RendererFactory`), the material
 provider the renderer draws with, the face rules (`TerrainFaceMaterialRules`, handed to the mesher), the
-sky reach (`RbxTerrainRenderer`'s `skyReach`), and `TerrainLimits` (presets `Desktop` and `WebGl`, or a
-host's own).
+sky reach (`RbxTerrainRenderer`'s `skyReach`), the block look (`RbxTerrainRenderer`'s `blockLook`), and
+`TerrainLimits` (presets `Desktop` and `WebGl`, or a host's own).
 
 ## Grass blocks: what each face shows
 
@@ -43,6 +43,45 @@ It is a drawing rule only. `ReadVoxels`, `workspace:Raycast` (the hit resolver r
 and saved worlds report plain Grass. A host chooses other rules (`TerrainFaceMaterialRules.None` draws
 every material on every face; `With(material, rule)` adds snow on rock or sand on sandstone) and passes them
 to the mesher it hands the renderer.
+
+## Block tiles: what a cell looks like
+
+A 4-stud cell needs a picture made for one block face: stones you can count, planks between their seams,
+leaves with gaps. A photographed set laid across the world shows a fragment of itself on a face (a fan of
+paving setts reads as bathroom tile, a herringbone floor as parquet), and the same set repeated once per face
+turns into a visible grid. So by default (`TerrainBlockLook.Blocks`) every solid Terrain material is drawn with
+a block tile painted in code by `TerrainBlockPainter`: 16 x 16 texels, tileable, from periodic value noise,
+wrapped Worley cells and short palettes, with a height field that bakes a top-left key light into the colours
+and becomes the normal map. The painter is engine-free and seeded, so every client and test sees the same
+block; it ships no texture files. `TerrainBlockLook` names the style per material (Grass a lawn, LeafyGrass
+leaves with dark gaps and light tips, Ground brown earth, Rock stone, Cobblestone cobbles in mortar, WoodPlanks
+four boards, Brick, Sand, and so on for all 21 solids).
+
+`RbxTerrainBlockTextures` turns each tile into three textures (colour, normal, roughness), every texel
+enlarged to an 8 x 8 block and mip-mapped, so faces stay crisp a few studs away and calm far away (about
+4 MB for all 21). The renderer draws each painted material with a twin of the textured surface (`Terrain
+block <Material>`) that sets `_RbxCellTiles` to 1 and `_TextureScale` to one tile per cell: the projection is
+the world-space one Parts use, with the side faces' part-size offset dropped, so every cell edge falls on a
+whole tile and each face shows exactly one tile. The twin is textures and material floats only: no shader
+variant is added, the chunks stay on the SRP Batcher, and a Part of the same material keeps the catalog's
+photographed set and tiling. The grass-block rule above works with the tiles (the 3/16 band is exactly three
+texel rows of the grass tile), the sky exposure is read as before, and CrackedLava keeps its glow.
+
+`TerrainBlockLook.PhotoSets` draws every material from the catalog as before; a renderer given its own material
+provider uses it unless it also asks for blocks. `With(material, style)` changes one material.
+
+Water keeps its own surface, but the block look tunes the cells' copy of it (`TerrainWaterLook.Calm`): a swell
+about 12 studs long under a gentle chop instead of the 5-stud ripples that crawled across a lake, slightly less
+mirror-like, and a turquoise body. A Part of Water keeps the catalog's water.
+
+Corner shade: where blocks meet, the inner corner darkens, the way block games bake ambient occlusion into
+their vertices. `TerrainSkyExposure.GetCornerOcclusion` counts the solid cells beside and diagonal to each
+face corner in the layer in front of the face (Water and Air never shade) and the renderer writes the result
+into the vertex colour's RGB (`CornerShadeLevels`: 255 open, 212, 168, 128 in an inner corner); each quad is
+split along the diagonal of its less shaded pair, so one shaded corner stays a soft corner. The twin's
+`_RbxCornerShade` (the look's `CornerShade`, 1 for blocks, 0 for photo sets) scales it: all of it dims the
+sky's light, half of it the sun's. It reads the cells the exposure window already holds, so it costs three
+lookups per corner.
 
 ## Sky exposure: caves are dark at noon
 
@@ -103,10 +142,14 @@ need WorldEdit and pass the same authority checks as a Part property write.
 - **Blocky cells.** A cell with any occupancy draws as a full cube; Roblox smooths terrain by occupancy.
 - **Water.** A transparent block with no collider and no swimming; rays pass through it as if
   `RaycastParams.IgnoreWater` were always true.
-- **Grass blocks (DEV candidate).** Roblox draws Terrain smooth, with grass on every surface a Grass voxel
+- **Grass blocks (DEV-105).** Roblox draws Terrain smooth, with grass on every surface a Grass voxel
   shows; CoreAI's blocky cells draw a Grass cell as a grass block (grass on top, earth on the sides under a
   grass band, earth underneath) by default, because that is what a block world is expected to look like.
   A drawing rule: the cell stays Grass for every API. Parts with `Material.Grass` are unchanged.
+- **Block tiles and corner shade (DEV candidate).** Roblox draws every Terrain material with its own
+  smooth-terrain textures; CoreAI draws a cell with a painted 16-texel block tile per face and darkens the
+  corners where blocks meet, and calms the cells' water. A drawing rule: `ReadVoxels`, raycasts and saved
+  worlds keep the material, and Parts keep the catalog's look; `TerrainBlockLook.PhotoSets` restores it.
 - **Sky exposure.** Roblox's own sky occlusion is a voxel lighting grid of its engine; CoreAI's is the
   per-vertex flood above, of Terrain cells only (Parts do not block the sky).
 - **Class.** `Terrain` sits under `PVInstance`, not `BasePart`: `IsA("BasePart")` is false and the
@@ -116,8 +159,8 @@ need WorldEdit and pass the same authority checks as a Part property write.
   occupancy. One call sweeps at most 4,194,304 cells; cells outside the bounds are skipped.
 - **Occupancy** is stored in 1/255 steps; any positive occupancy keeps at least one step.
 - **Materials.** Only the 23 items `Material.yaml` marks "Applies to Terrain" are accepted; any other
-  raises BAD_ARGUMENT. Their look comes from the material catalog (`Terrain:SetMaterialColor` and the
-  `Water*` properties are stubs).
+  raises BAD_ARGUMENT. Their look comes from the block look above, or from the material catalog with
+  `TerrainBlockLook.PhotoSets` (`Terrain:SetMaterialColor` and the `Water*` properties are stubs).
 - **Bounds and budgets.** Region calls outside the bounds raise BAD_ARGUMENT; a write past the cell or
   chunk budget raises BUDGET_EXCEEDED and changes nothing. Desktop: +-32,768 studs across, +-4,096 up and
   down, 16,777,216 cells, 16,384 chunks. WebGL: +-8,192 across, +-2,048, 4,194,304 cells, 4,096 chunks.

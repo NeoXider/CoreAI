@@ -272,8 +272,43 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
             return (tangent * normalTs.x + bitangent * normalTs.y + normal * normalTs.z).normalized;
         }
 
+        [Test]
+        public void CellTiles_PutEveryTerrainCellEdgeOnAWholeTile_OnEveryFace()
+        {
+            StringAssert.Contains("* (1.0 - saturate(_RbxCellTiles))", _texturedSource,
+                "the side-face offset is dropped by the block twin's float");
+            const float cell = 4f * 0.28f;
+            const float cellScale = 1f / cell;
+            Vector3[] faces =
+            {
+                Vector3.right, Vector3.left, Vector3.forward, Vector3.back, Vector3.up, Vector3.down
+            };
+            foreach (Vector3 face in faces)
+            {
+                for (int corner = 0; corner < 8; corner++)
+                {
+                    // A cell corner of a world-space chunk (identity transform, so the "part" is 1 m wide).
+                    Vector3 position = new((corner * 3 - 7) * cell, (corner % 3 - 1) * cell, (5 - corner * 2) * cell);
+                    Vector2 cellTiles = FaceUv(position, new Vector2(0.5f, 0.5f), face, cellScale, 1f);
+                    Assert.AreEqual(Mathf.Round(cellTiles.x), cellTiles.x, 1e-3f, face + " U on a whole tile");
+                    Assert.AreEqual(Mathf.Round(cellTiles.y), cellTiles.y, 1e-3f, face + " V on a whole tile");
+                }
+            }
+
+            // Twin: without the float a side face of the chunk is shifted by its part-size offset.
+            Vector2 shifted = FaceUv(new Vector3(cell, 0f, cell), new Vector2(0.5f, 0.5f), Vector3.right, cellScale, 0f);
+            Assert.Greater(Mathf.Abs(shifted.x - Mathf.Round(shifted.x)), 0.05f, "a Part keeps its edge offset");
+        }
+
         /// <summary>Port of RbxFaceUv, with the texture scale applied.</summary>
         private static Vector2 FaceUv(Vector3 position, Vector2 halfExtentXZ, Vector3 faceNormal)
+        {
+            return FaceUv(position, halfExtentXZ, faceNormal, UvScale, 0f);
+        }
+
+        /// <summary>Port of RbxFaceUv at <paramref name="uvScale"/>, with the block twin's <c>_RbxCellTiles</c>.</summary>
+        private static Vector2 FaceUv(Vector3 position, Vector2 halfExtentXZ, Vector3 faceNormal, float uvScale,
+            float cellTiles)
         {
             float horizontalLength = new Vector2(faceNormal.x, faceNormal.z).magnitude;
             Vector3 uAxis = new(-1f, 0f, 0f);
@@ -295,10 +330,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Unity
                 }
             }
 
-            float scaledOffset = uOffset * UvScale;
-            float edgeOffset = scaledOffset - Mathf.Floor(scaledOffset);
-            return new Vector2(Vector3.Dot(position, uAxis) * UvScale + edgeOffset,
-                Vector3.Dot(position, vAxis) * UvScale);
+            float scaledOffset = uOffset * uvScale;
+            float edgeOffset = (scaledOffset - Mathf.Floor(scaledOffset)) * (1f - Mathf.Clamp01(cellTiles));
+            return new Vector2(Vector3.Dot(position, uAxis) * uvScale + edgeOffset,
+                Vector3.Dot(position, vAxis) * uvScale);
         }
 
         /// <summary>Port of RbxCurvedAxisWeights.</summary>

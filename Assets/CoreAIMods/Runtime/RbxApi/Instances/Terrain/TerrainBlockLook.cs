@@ -19,13 +19,16 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
     {
         private readonly TerrainBlockStyle[] _styles;
 
-        private TerrainBlockLook(TerrainBlockStyle[] styles)
+        private TerrainBlockLook(TerrainBlockStyle[] styles, TerrainWaterLook water, float cornerShade)
         {
             _styles = styles;
+            Water = water;
+            CornerShade = cornerShade;
         }
 
         /// <summary>Every material from the material catalog, as before block tiles existed.</summary>
-        public static TerrainBlockLook PhotoSets { get; } = new(new TerrainBlockStyle[TerrainMaterials.SlotCount]);
+        public static TerrainBlockLook PhotoSets { get; } =
+            new(new TerrainBlockStyle[TerrainMaterials.SlotCount], TerrainWaterLook.Catalog, 0f);
 
         /// <summary>Every solid Terrain material as a painted block; Water keeps its own surface.</summary>
         public static TerrainBlockLook Blocks { get; } = PhotoSets
@@ -49,10 +52,21 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
             .With("Asphalt", TerrainBlockStyle.Asphalt)
             .With("Salt", TerrainBlockStyle.Salt)
             .With("Ice", TerrainBlockStyle.Ice)
-            .With("Glacier", TerrainBlockStyle.Glacier);
+            .With("Glacier", TerrainBlockStyle.Glacier)
+            .WithWater(TerrainWaterLook.Calm)
+            .WithCornerShade(1f);
 
         /// <summary>The look a renderer uses when it is given none.</summary>
         public static TerrainBlockLook Default => Blocks;
+
+        /// <summary>How the surface of Water cells is tuned; <see cref="TerrainWaterLook.Catalog"/> keeps the catalog's water.</summary>
+        public TerrainWaterLook Water { get; }
+
+        /// <summary>
+        /// How strongly the painted cells darken where blocks meet (the corner shade the mesh carries,
+        /// <see cref="TerrainSkyExposure.GetCornerOcclusion"/>), 0..1; 0 draws none.
+        /// </summary>
+        public float CornerShade { get; }
 
         /// <summary>The style <paramref name="slot"/> is drawn with; <see cref="TerrainBlockStyle.Photo"/> for Air and Water.</summary>
         public TerrainBlockStyle StyleOf(byte slot)
@@ -99,7 +113,25 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
 
             TerrainBlockStyle[] copy = (TerrainBlockStyle[])_styles.Clone();
             copy[slot] = style;
-            return new TerrainBlockLook(copy);
+            return new TerrainBlockLook(copy, Water, CornerShade);
+        }
+
+        /// <summary>A copy whose Water cells are tuned by <paramref name="water"/>.</summary>
+        public TerrainBlockLook WithWater(TerrainWaterLook water)
+        {
+            return new TerrainBlockLook((TerrainBlockStyle[])_styles.Clone(), water, CornerShade);
+        }
+
+        /// <summary>A copy that shades the corners where blocks meet by <paramref name="strength"/> (0..1).</summary>
+        /// <exception cref="ArgumentOutOfRangeException">The strength is outside 0..1.</exception>
+        public TerrainBlockLook WithCornerShade(float strength)
+        {
+            if (!(strength >= 0f) || strength > 1f)
+            {
+                throw new ArgumentOutOfRangeException(nameof(strength), strength, "the corner shade is 0..1");
+            }
+
+            return new TerrainBlockLook((TerrainBlockStyle[])_styles.Clone(), Water, strength);
         }
 
         /// <summary>A copy with the material named <paramref name="materialName"/> drawn as <paramref name="style"/>.</summary>
@@ -113,5 +145,72 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
 
             return With(slot, style);
         }
+    }
+}
+
+namespace CoreAI.Mods.Rbx.Instances.Terrain
+{
+    /// <summary>
+    /// The tuning of the Water surface on Terrain cells, applied to the cells' copy of the catalog water only (a Part
+    /// of Water keeps the catalog's): wave scale in cycles per metre, wave strength, smoothness and the water's own
+    /// colour (0..1, in the same sRGB terms as the catalog's water colour).
+    /// </summary>
+    public readonly struct TerrainWaterLook
+    {
+        /// <summary>A tuning; <paramref name="overrides"/> false keeps the catalog water as it is.</summary>
+        public TerrainWaterLook(bool overrides, float waveScale, float waveStrength, float smoothness, float red,
+            float green, float blue, float absorption)
+        {
+            if (overrides && (!(waveScale > 0f) || !(waveStrength >= 0f) || !(smoothness >= 0f) || smoothness > 1f
+                              || !(red >= 0f) || !(green >= 0f) || !(blue >= 0f) || !(absorption >= 0f)))
+            {
+                throw new System.ArgumentOutOfRangeException(nameof(waveScale),
+                    "a water tuning needs a positive wave scale, a wave strength, colour and absorption of at least "
+                    + "0, and a smoothness in 0..1");
+            }
+
+            Overrides = overrides;
+            Absorption = absorption;
+            WaveScale = waveScale;
+            WaveStrength = waveStrength;
+            Smoothness = smoothness;
+            Red = red;
+            Green = green;
+            Blue = blue;
+        }
+
+        /// <summary>The catalog's water, untouched.</summary>
+        public static TerrainWaterLook Catalog => default;
+
+        /// <summary>
+        /// The block world's water: a swell about 12 studs long under a gentle chop instead of the 5-stud ripples that
+        /// crawled across a lake, slightly less mirror-like, and a turquoise body colour that shallow water already
+        /// shows (it absorbs about twice as fast as the catalog's, so a lake over sand reads as water, not clear glass).
+        /// </summary>
+        public static TerrainWaterLook Calm => new(true, 0.3f, 0.13f, 0.9f, 0.05f, 0.52f, 0.6f, 1.3f);
+
+        /// <summary>True when the cells' water is tuned; false keeps the catalog water.</summary>
+        public bool Overrides { get; }
+
+        /// <summary>Wave cycles per metre of the long swell (the chop is a fixed multiple of it).</summary>
+        public float WaveScale { get; }
+
+        /// <summary>How far the waves tilt the surface normal.</summary>
+        public float WaveStrength { get; }
+
+        /// <summary>Surface smoothness, 0..1.</summary>
+        public float Smoothness { get; }
+
+        /// <summary>The water's own colour, red.</summary>
+        public float Red { get; }
+
+        /// <summary>The water's own colour, green.</summary>
+        public float Green { get; }
+
+        /// <summary>The water's own colour, blue.</summary>
+        public float Blue { get; }
+
+        /// <summary>How fast the water takes its own colour with depth, per metre (the catalog's water uses 0.6).</summary>
+        public float Absorption { get; }
     }
 }

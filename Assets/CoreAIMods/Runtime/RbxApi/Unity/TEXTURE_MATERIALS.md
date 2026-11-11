@@ -28,7 +28,9 @@ Each `RbxMaterialTextureCatalog.Entry` stores:
 - whether the scalar surface map stores smoothness rather than roughness;
 - optional metalness and ambient-occlusion textures;
 - tile width in studs, intrinsic colour, Part.Color influence, roughness scale, and normal strength;
-- cavity strength and metal albedo lift, both 0 unless the packaged CC0 tuning sets them (see below).
+- cavity strength and metal albedo lift, both 0 unless the packaged CC0 tuning sets them (see below);
+- roughness floor (`RoughnessFloor`): negative, as every entry saved before the field existed loads, leaves it to
+  the material (see "Polished materials" below); 0 keeps the map as it is.
 
 Albedo, normal, and roughness/smoothness are required. An incomplete entry logs one error while the
 shared cache is built and falls back to that material's procedural surface. It never returns Unity's
@@ -99,6 +101,25 @@ The packaged relief table gives it a grey intrinsic colour of 1.2 (sRGB, about 1
 `ApplyPackagedRelief` and the retuner write into the entry; every other set keeps white. Catalogs
 imported before this change keep their values until **CoreAI > Materials > Retune surface profiles**
 runs (the roughness for both catalogs, the intrinsic colour for the packaged one).
+
+## Polished materials: a roughness floor
+
+The packaged roughness maps of the polished materials are nearly black: Granite002A averages 0.023, Foil002
+0.051, Marble016 0.115 and Ice003 0.140, so with their scales the surfaces rendered at an effective roughness of
+0.02 to 0.06, as mirrors, and even the largest scale a profile allows (4) left Granite at 0.09. The shader therefore
+remaps the scaled map onto `_RoughnessFloor`..1 (`lerp(floor, 1, roughness)`), which keeps the map's variation, and
+`RbxMaterialRoughnessFloors` gives the four a floor whenever their entry leaves it to the material: Granite 0.38,
+Marble 0.22, Foil 0.18, Ice 0.12, which puts them at about 0.39, 0.27, 0.2 and 0.18. Every other material, and
+every entry that sets its own floor (a Bridge or Fab import writes 0), keeps its map as it is. No catalog asset
+has to be rebuilt; it is a material float, not a keyword.
+
+## Terrain cells draw painted blocks, Parts draw these sets
+
+Terrain cells do not use these sets by default: `TerrainBlockLook.Blocks` draws each solid Terrain material with
+a 16-texel block tile painted in code, one tile per cell face (see the Terrain README,
+`Instances/Terrain/README.md`). The terrain renderer builds its own material for that (`_RbxCellTiles` 1); the
+catalog's shared material, and so every Part of the same material, is untouched. `TerrainBlockLook.PhotoSets`
+draws Terrain from this catalog again.
 
 ## Relief that survives distance: baked cavity maps
 

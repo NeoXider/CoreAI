@@ -25,6 +25,9 @@ namespace CoreAI.Editor.RbxMaterials
         public float NormalStrength { get; set; } = 1f;
         public float CavityStrength { get; set; }
         public float MetalAlbedoLift { get; set; }
+
+        /// <summary>The entry's roughness floor; -1 leaves it to the material (the packaged CC0 sets).</summary>
+        public float RoughnessFloor { get; set; } = -1f;
     }
 
     /// <summary>Shared import settings and serialized catalog writer.</summary>
@@ -230,6 +233,7 @@ namespace CoreAI.Editor.RbxMaterials
             SetFloat(entry, "_normalStrength", data.NormalStrength);
             SetFloat(entry, "_cavityStrength", data.CavityStrength);
             SetFloat(entry, "_metalAlbedoLift", data.MetalAlbedoLift);
+            SetFloat(entry, "_roughnessFloor", data.RoughnessFloor);
         }
 
         private static void SetString(SerializedProperty parent, string name, string value)

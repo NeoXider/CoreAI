@@ -1,19 +1,21 @@
 --[[@coreai
 id: blockworld_daynight
 name: Block World 4 - Day and night
-version: 1.2.0
+version: 1.3.0
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo. A day lasts eight minutes and a fresh world starts at 10:00 - the mod advances Lighting.ClockTime and lowers the sky's light (Lighting.OutdoorAmbient) at night, while Lighting.Ambient, the light a surface the sky does not reach gets, stays low all day, so torches matter after dusk and in caves at any hour. Set the time with /time noon, /time 18:30, /time stop or /time go where the host offers chat commands, with the L key (noon, dusk, midnight, dawn), or from any script or the AI by setting the workspace attribute BlockWorldTime to the same words. A ClockTime written by someone else is kept: the clock carries on from it.
+description: Part of the Block World demo. A day lasts eight minutes and a fresh world starts at 10:00 - the mod advances Lighting.ClockTime and lowers the sky's light (Lighting.OutdoorAmbient) at night, while Lighting.Ambient, the light a surface the sky does not reach gets, stays low all day, so torches matter after dusk and in caves at any hour. The fog (Lighting.FogColor, FogStart, FogEnd) takes the sky's colour - pale blue by day, warm at dawn and dusk, dark at night - and is whole where the streamed land ends, so nobody sees its edge. Set the time with /time noon, /time 18:30, /time stop or /time go where the host offers chat commands, with the L key (noon, dusk, midnight, dawn), or from any script or the AI by setting the workspace attribute BlockWorldTime to the same words. A ClockTime written by someone else is kept: the clock carries on from it.
 ]]
 
 -- The clock reads Lighting.ClockTime back before every step, so a time set by the AI, another mod or a saved
 -- world is adopted rather than overwritten. The sun follows ClockTime by itself; what this mod adds is the
 -- ambient light, with Roblox's two roles: OutdoorAmbient is the sky's light on every surface under open sky (a
 -- hillside in shadow included), lowered at night as Roblox games do; Ambient is what a surface the sky does not
--- reach gets (a cave, a covered room), and stays low at every hour, so a cave is dark at noon.
+-- reach gets (a cave, a covered room), and stays low at every hour, so a cave is dark at noon. The fog is whole
+-- just short of the stream radius blockworld_world publishes (BlockWorldViewStuds); without that attribute the
+-- distances are left to whoever set them.
 
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
@@ -35,6 +37,12 @@ local DAY_OUTDOOR = Color3.fromRGB(195, 196, 204)
 local NIGHT_OUTDOOR = Color3.fromRGB(34, 40, 74)
 -- WHY this low: a torch must matter in a cave; the walls stay just visible, so a player can find the way out.
 local AMBIENT = Color3.fromRGB(22, 24, 34)
+-- WHY these: the haze of the default look at the horizon by day, a warm dusk, and a night sky dark enough for torches.
+local DAY_FOG = Color3.fromRGB(198, 220, 228)
+local DUSK_FOG = Color3.fromRGB(222, 176, 140)
+local NIGHT_FOG = Color3.fromRGB(12, 16, 28)
+local FOG_EDGE = 6               -- studs short of the stream radius where the fog is whole
+local FOG_START_SHARE = 0.7      -- where it begins, as a share of where it is whole: 122 of 175 on a desktop
 
 local paused = false
 local cycleIndex = 0
@@ -78,6 +86,17 @@ local function daylight(hours)
     return 1 - smoothstep(17.5, 20, hours)
 end
 
+-- WHY the land's own radius: past it there is nothing, so a fog that ends later shows the world's edge; the WebGL
+-- player streams fewer columns and gets a nearer fog with no change here.
+local function applyFogDistance()
+    local reach = workspace:GetAttribute("BlockWorldViewStuds")
+    if type(reach) ~= "number" or reach <= FOG_EDGE then
+        return
+    end
+    Lighting.FogEnd = reach - FOG_EDGE
+    Lighting.FogStart = (reach - FOG_EDGE) * FOG_START_SHARE
+end
+
 local shownDaylight = -1
 local function applyAmbient(hours)
     local light = daylight(hours)
@@ -87,6 +106,9 @@ local function applyAmbient(hours)
     shownDaylight = light
     Lighting.OutdoorAmbient = NIGHT_OUTDOOR:Lerp(DAY_OUTDOOR, light)
     Lighting.Ambient = AMBIENT
+    -- WHY dusk peaks half way through the light's fall (18:45, and 6:15 at dawn): the warm colour is reached there.
+    local dusk = 1 - math.abs(light * 2 - 1)
+    Lighting.FogColor = NIGHT_FOG:Lerp(DAY_FOG, light):Lerp(DUSK_FOG, dusk)
 end
 
 local function twoDigits(value)
@@ -175,5 +197,7 @@ if workspace:GetAttribute("BlockWorldClockStarted") ~= true then
     Lighting.ClockTime = START_HOURS
 end
 applyAmbient(Lighting.ClockTime)
+applyFogDistance()
+workspace:GetAttributeChangedSignal("BlockWorldViewStuds"):Connect(applyFogDistance)
 print("[blockworld] day and night: " .. describe(Lighting.ClockTime) .. ", a day lasts " .. math.floor(DAY_SECONDS / 60)
     .. " minutes. L changes the time.")

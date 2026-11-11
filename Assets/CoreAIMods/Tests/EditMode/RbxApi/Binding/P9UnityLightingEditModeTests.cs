@@ -165,6 +165,109 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             Assert.AreEqual(AmbientMode.Flat, RenderSettings.ambientMode);
         }
 
+        [Test]
+        public void Sink_AWorldsFog_IsDrawnAsLinearFogInStuds_AndClaimedFromTheLook_UntilItIsBackAtTheDefaults()
+        {
+            bool savedFog = RenderSettings.fog;
+            FogMode savedMode = RenderSettings.fogMode;
+            Color savedColor = RenderSettings.fogColor;
+            float savedStart = RenderSettings.fogStartDistance;
+            float savedEnd = RenderSettings.fogEndDistance;
+            try
+            {
+                RenderSettings.fog = false;
+                RenderSettings.fogColor = Color.red;
+                UnityRbxLightingSink sink = NewSink();
+                RbxLightingState noon = State(12f);
+                RbxLightingState foggy = new(12f, 41.7f, 2f, noon.Ambient, noon.OutdoorAmbient, noon.SunDirection, 1f, 1f,
+                    150f, 600f, RbxColor3.FromRGB(196f, 214f, 214f));
+
+                sink.Apply(in foggy);
+
+                Assert.IsTrue(sink.ClaimsFog);
+                Assert.IsTrue(sink.AmbientOwnership.IsFogClaimed, "the look leaves the world's fog alone");
+                Assert.IsTrue(RenderSettings.fog);
+                Assert.AreEqual(FogMode.Linear, RenderSettings.fogMode);
+                Assert.AreEqual(RbxSpace.LengthToUnity(150f), RenderSettings.fogStartDistance, 1e-4f, "FogStart in studs");
+                Assert.AreEqual(RbxSpace.LengthToUnity(600f), RenderSettings.fogEndDistance, 1e-4f, "FogEnd in studs");
+                Assert.AreEqual(196f / 255f, RenderSettings.fogColor.r, 1e-3f);
+                Assert.AreEqual(214f / 255f, RenderSettings.fogColor.g, 1e-3f);
+
+                sink.Apply(in noon);
+
+                Assert.IsFalse(sink.ClaimsFog, "back at the defaults the world draws no fog of its own");
+                Assert.IsFalse(sink.AmbientOwnership.IsFogClaimed, "and the look's haze may return");
+                Assert.IsFalse(RenderSettings.fog, "the scene's own fog is put back");
+                Assert.AreEqual(Color.red, RenderSettings.fogColor);
+
+                sink.Apply(in foggy);
+                sink.Revert();
+                Assert.IsFalse(sink.AmbientOwnership.IsFogClaimed, "a revert releases the fog");
+                Assert.IsFalse(RenderSettings.fog);
+            }
+            finally
+            {
+                RenderSettings.fog = savedFog;
+                RenderSettings.fogMode = savedMode;
+                RenderSettings.fogColor = savedColor;
+                RenderSettings.fogStartDistance = savedStart;
+                RenderSettings.fogEndDistance = savedEnd;
+            }
+        }
+
+        [Test]
+        public void Sink_AWorldThatNeverSetsFog_LeavesTheFogToTheLook_NegativeTwin()
+        {
+            bool savedFog = RenderSettings.fog;
+            Color savedColor = RenderSettings.fogColor;
+            try
+            {
+                RenderSettings.fog = true;
+                RenderSettings.fogColor = Color.blue;
+                UnityRbxLightingSink sink = NewSink();
+                RbxLightingState noon = State(12f);
+
+                sink.Apply(in noon);
+
+                Assert.IsFalse(sink.ClaimsFog);
+                Assert.IsFalse(sink.AmbientOwnership.IsFogClaimed);
+                Assert.IsTrue(RenderSettings.fog);
+                Assert.AreEqual(Color.blue, RenderSettings.fogColor, "the look's fog is untouched");
+            }
+            finally
+            {
+                RenderSettings.fog = savedFog;
+                RenderSettings.fogColor = savedColor;
+            }
+        }
+
+        [Test]
+        public void Sink_AFogEndBeforeItsStart_FogsEverythingPastTheStart()
+        {
+            bool savedFog = RenderSettings.fog;
+            float savedStart = RenderSettings.fogStartDistance;
+            float savedEnd = RenderSettings.fogEndDistance;
+            try
+            {
+                UnityRbxLightingSink sink = NewSink();
+                RbxLightingState noon = State(12f);
+                RbxLightingState inverted = new(12f, 41.7f, 2f, noon.Ambient, noon.OutdoorAmbient, noon.SunDirection, 1f,
+                    1f, 300f, 100f, RbxLighting.DefaultFogColor);
+
+                sink.Apply(in inverted);
+
+                Assert.AreEqual(RbxSpace.LengthToUnity(300f), RenderSettings.fogStartDistance, 1e-4f);
+                Assert.Greater(RenderSettings.fogEndDistance, RenderSettings.fogStartDistance,
+                    "Unity's linear fog never divides by zero or a negative span");
+            }
+            finally
+            {
+                RenderSettings.fog = savedFog;
+                RenderSettings.fogStartDistance = savedStart;
+                RenderSettings.fogEndDistance = savedEnd;
+            }
+        }
+
         // ---- the backend -----------------------------------------------------------------------------
 
         [Test]

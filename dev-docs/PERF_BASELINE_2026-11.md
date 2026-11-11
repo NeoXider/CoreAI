@@ -261,6 +261,28 @@ Derived:
   more vertex attribute (COLOR) and one more interpolator, and the fragment does one select and a few multiplies.
   Terrain vertices grow from 24 to 28 bytes (the colour); Parts' meshes are unchanged.
 
+Re-measured at 23:44 with the block look (painted tiles, corner shade), `--only terrain`, CoreCLR, commit d5e7fdd
+plus the uncommitted look work, while a Unity editor ran tests on the same machine (so every row is slower than the
+rows above by about a quarter; read the rows against each other):
+
+| Case | CoreCLR µs/op |
+|---|---:|
+| mesh one chunk (face culling + the grass-block face rule), per chunk | 74.0 |
+| sky exposure: light one chunk's window (gather, classify, flood), per chunk | 187.9 |
+| sky exposure: light one chunk and every face corner, per chunk | 198.8 |
+| sky exposure and corner shade: every face corner of one chunk (new row) | 234.9 |
+
+- The corner shade (the block-game ambient occlusion in the vertex RGB) adds about 36 µs a chunk, 18% of the light
+  pass: three window lookups per face corner, no extra pass. The window itself (30 x 30 x 30 cells for reach 6) is
+  still the cost: a surface chunk with a tree on it has shaded cells under the canopy, so it classifies and floods
+  the whole window. Two cheap reductions remain, not done: classify only up to the window's highest column top (the
+  rows above it are all open and a flood never enters them, about half of a surface window), and cache the levels of
+  a chunk's own cells so neighbouring chunks stop recomputing them (each window overlaps 26 others).
+- The painted block textures cost nothing per chunk: 21 styles are painted and uploaded once per process (16 x 16
+  texels each, enlarged to 128 x 128 with mips, about 4 MB in all); `RbxTerrainBlockTextures.Preload` moves that
+  to a loading screen. The block twins are one material per Terrain material, like the photo copies, so draw calls
+  do not change.
+
 ## 5. Verified findings
 
 File and line references are against HEAD `654bb318`. Other agents had uncommitted edits in some of the cited

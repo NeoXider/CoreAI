@@ -11,8 +11,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
     /// <summary>
     /// P6, the Block World's day-and-night mod (<c>blockworld_daynight</c>) on the real <c>Lighting</c> service: the
     /// clock advances <c>ClockTime</c> by the length of a day, a time set elsewhere is adopted, the ambient light is
-    /// darker at midnight than at noon, and the time words of <c>/time</c> (through the <c>BlockWorldTime</c>
-    /// attribute and the L key) set, pause and resume it, while a word it does not know changes nothing.
+    /// darker at midnight than at noon, the fog takes the day, dusk and night colours and is whole before the
+    /// streamed land ends, and the time words of <c>/time</c> (through the <c>BlockWorldTime</c> attribute and the
+    /// L key) set, pause and resume it, while a word it does not know changes nothing.
     /// </summary>
     [TestFixture]
     public sealed class BlockWorldDayNightEditModeTests
@@ -109,6 +110,73 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
                 "Lighting.Ambient, the light of a cave, does not follow the sun");
             Assert.Less(noonAmbient, 0.2f, "and is low: a torch matters there");
             Assert.Greater(noonOutdoor, noonAmbient * 4f, "while the sky's light by day is several times brighter");
+        }
+
+        [Test]
+        public void P6_DayNight_TheFog_TakesTheDayDuskAndNightColours()
+        {
+            SetTime("noon");
+            AssertColour(198, 220, 228, Lighting.FogColor, "the day's pale haze at noon");
+            SetTime("18:45");
+            AssertColour(222, 176, 140, Lighting.FogColor, "the warm dusk half way through the light's fall");
+            SetTime("6:15");
+            AssertColour(222, 176, 140, Lighting.FogColor, "and the same at dawn");
+            SetTime("midnight");
+            AssertColour(12, 16, 28, Lighting.FogColor, "the dark night sky at midnight");
+            _world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_DayNight_WithoutAStreamedWorld_TheFogDistancesAreLeftAlone_NegativeTwin()
+        {
+            Assert.AreEqual(RbxLighting.DefaultFogEnd, Lighting.FogEnd, "no BlockWorldViewStuds, no fog distance");
+            Assert.AreEqual(RbxLighting.DefaultFogStart, Lighting.FogStart);
+        }
+
+        // WHY the radius rule restated here: the world streams the columns (dx, dz) from the player's column with
+        // dx * dx + dz * dz <= r * r + 1, and the fog must be whole before the nearest column it leaves out, seen
+        // from any point of the player's column (a corner is the worst), on a desktop (4) and in WebGL (3).
+        [TestCase(4)]
+        [TestCase(3)]
+        public void P6_DayNight_TheFogIsWhole_BeforeTheStreamedLandEnds_OnEveryPlatform(int radius)
+        {
+            _world.Dispose();
+            _world = new BlockWorldTestWorld();
+            _world.SetAttribute("BlockWorldViewRadius", (double)radius);
+            _world.Load("blockworld_world");
+            _world.Load(Mod);
+            _world.Frame();
+
+            const float column = 64f;
+            double nearestGap = double.MaxValue;
+            for (int dx = -radius - 1; dx <= radius + 1; dx++)
+            {
+                for (int dz = -radius - 1; dz <= radius + 1; dz++)
+                {
+                    if (dx * dx + dz * dz > radius * radius + 1)
+                    {
+                        double gx = System.Math.Max(System.Math.Abs(dx) - 1, 0) * column;
+                        double gz = System.Math.Max(System.Math.Abs(dz) - 1, 0) * column;
+                        nearestGap = System.Math.Min(nearestGap, System.Math.Sqrt(gx * gx + gz * gz));
+                    }
+                }
+            }
+
+            TestContext.WriteLine("radius " + radius + ": land sure to reach " + nearestGap.ToString("0.0")
+                                  + " studs, fog from " + Lighting.FogStart.ToString("0.0") + " to "
+                                  + Lighting.FogEnd.ToString("0.0"));
+            Assert.LessOrEqual(Lighting.FogEnd, nearestGap, "no player sees past the fog to the world's edge");
+            Assert.Less(Lighting.FogEnd, radius * column, "and so it is whole inside the nominal stream radius");
+            Assert.Greater(Lighting.FogEnd, nearestGap - 20d, "yet it does not hide land the world has made");
+            Assert.That(Lighting.FogStart, Is.GreaterThan(0f).And.LessThan(Lighting.FogEnd));
+            _world.AssertHealthy(Mod, "blockworld_world");
+        }
+
+        private static void AssertColour(int r, int g, int b, RbxColor3 actual, string what)
+        {
+            Assert.AreEqual(r / 255f, actual.R, 0.5f / 255f, what + " (red)");
+            Assert.AreEqual(g / 255f, actual.G, 0.5f / 255f, what + " (green)");
+            Assert.AreEqual(b / 255f, actual.B, 0.5f / 255f, what + " (blue)");
         }
 
         [TestCase("dawn", 6d)]

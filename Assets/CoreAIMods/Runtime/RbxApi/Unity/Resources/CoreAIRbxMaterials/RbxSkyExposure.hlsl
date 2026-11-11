@@ -18,6 +18,13 @@ half RbxVertexSkyExposure(half4 vertexColor, float exposureSource, float exposur
     return exposureSource > 0.5 ? vertexColor.a : (half)saturate(exposure);
 }
 
+// WHY the same source switch: only a Terrain copy reads vertex colours; its RGB carries the corner shade (the block
+// game's ambient occlusion where blocks meet), scaled by the copy's strength. A Part gets 1.
+half RbxVertexCornerShade(half4 vertexColor, float exposureSource, float strength)
+{
+    return exposureSource > 0.5 ? lerp(1.0h, vertexColor.r, (half)saturate(strength)) : 1.0h;
+}
+
 // WHY through occlusion: UniversalFragmentPBR multiplies its ambient and its reflections, and nothing
 // else, by surfaceData.occlusion. What the sky no longer gives is replaced by the occluded ambient on the
 // diffuse part, added as emission so URP's own terms stay as they are.

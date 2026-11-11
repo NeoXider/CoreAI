@@ -39,6 +39,22 @@ now, so a model that has never seen this demo can build "here".
 
 In a WebGL player the module sets `BlockWorldViewRadius` to 3 columns before the world mod loads.
 
+## The world
+
+One seed always makes the same world. At the sea level lie the sea, lakes and sandy beaches; above them grass
+lowlands with woods (one stands near the spawn) and single trees of three shapes: round oaks, tall narrow trees
+and big oaks. Hills rise in steps a block or two high, and a step's side shows the earth under the grass, as in
+Minecraft. High ground (eleven blocks above the sea and more) and faces too steep to hold soil are bare rock,
+and the highest peaks, fourteen blocks above the sea and more, are snow over rock. Caves run under the hills
+and open onto their sides (see [Caves](#caves)). The land is streamed around you, four columns of 64 studs each
+way on a desktop and three in a WebGL player, the column you look toward first. A fog in the sky's colour hides
+where the land ends: it is whole at 175 studs on a desktop and 137 in WebGL, the nearest the edge can be from
+anywhere in your column (the view radius is a circle of columns, so the land reaches less far along a diagonal).
+
+The three villagers live around the spawn, each on the nearest level ground to their place in the first view, so
+none starts in a pit or on a ledge. A Humanoid does not climb a step a whole block high, so a villager keeps to the
+ground it can walk on and does not go up a hill.
+
 ## Controls
 
 The key legend is on screen at the bottom right.
@@ -61,8 +77,6 @@ The key legend is on screen at the bottom right.
 
 Reach is five blocks, measured from your character's eyes, where the first-person camera is. Bedrock, the bottom
 layer, cannot be broken, and a block is never placed where you stand.
-
-Not built: a hand or a held block in the corner of the view, as Minecraft has; the hotbar shows what you hold.
 
 ## Prompts to try
 
@@ -88,8 +102,6 @@ Press G to leave creative. In survival:
 - At zero health you die: a notice says so and after three seconds you are back at the spawn with full health.
 - Press G again and all of it stops: no damage, endless blocks, health back to full.
 
-Not built: mobs, hunger and crafting. The game has none of them today and does not pretend to.
-
 ## Caves
 
 Under the hills run winding tunnels with a few larger chambers, five to twelve blocks down. Where the ground
@@ -106,6 +118,17 @@ saved world changed since. Walking, flying, looking around, the clock, the villa
 do not count. Breaking or placing a block, putting down or taking back a torch, or another AI change after it
 does: then `/undo` changes nothing and says why, and the World Loads page in the Hub restores an autosave
 instead. So try it right after the AI built: "Build a watchtower here", look at it, `/undo`, `/redo`.
+
+## What is not built
+
+The game has none of these today and does not pretend to:
+
+- a hand or a held block in the corner of the view, as Minecraft has; the hotbar shows what you hold;
+- mobs, hunger, crafting, and an inventory beyond the nine hotbar slots;
+- rivers, flowers and any land but one temperate coast (sea, beaches, grass, woods, rock, snow);
+- undoing your own blocks: `/undo` takes back the AI's changes only;
+- villagers that climb: a step a whole block high stops them;
+- a character look beyond Roblox's R6 body with clothes, hair and eyes.
 
 ## What needs a model
 
@@ -129,10 +152,10 @@ reloads on its own.
 
 | Mod | Owns | Talks to the others through |
 |---|---|---|
-| `blockworld_world` | the seeded world: sea and lakes, sandy beaches, grass lowlands with woods and single trees (round oaks, tall narrow trees, big oaks), hills whose steps show earth, rocky ridges and snowy peaks, caves with hillside mouths, bedrock; streamed around you in budgeted steps (your own column first, then the one whose edge is nearest you, what is in front of the camera before what is behind); the spawn and the heading you first face; a new player held until the first view is built | `BlockWorldSeed`, `BlockWorldSpawn`, `BlockWorldSpawnLook`, `BlockWorldReady`, `BlockWorldOpened`, `BlockWorldOpeningColumns`, `BlockWorldColumns` |
+| `blockworld_world` | the seeded world: sea and lakes, sandy beaches, grass lowlands with woods and single trees (round oaks, tall narrow trees, big oaks), hills whose steps show earth, rocky ridges and snowy peaks, caves with hillside mouths, bedrock; streamed around you in budgeted steps (your own column first, then the one whose edge is nearest you, what is in front of the camera before what is behind); the spawn and the heading you first face; a new player held until the first view is built | `BlockWorldSeed`, `BlockWorldSpawn`, `BlockWorldSpawnLook`, `BlockWorldReady`, `BlockWorldOpened`, `BlockWorldOpeningColumns`, `BlockWorldColumns`, `BlockWorldViewStuds` (how far the land is sure to reach) |
 | `blockworld_build` | the crosshair target and its outline, breaking and placing, reach, creative or survival, the view | `CrosshairCell`, `CrosshairPlaceCell`, `CrosshairNormal`, `CrosshairPartName`, `CrosshairModelName`, `BlockWorldCreative`, `BlockWorldPlaced`, `BlockWorldBroken`, `BlockWorldCount_<Material>` |
 | `blockworld_hud` | the whole interface (UXML and USS text through `UxmlService`), the key legend, health in survival, the hotbar choice and the "Building the world" screen | `BlockWorldSelected`, `BlockWorldSlot` |
-| `blockworld_daynight` | the clock (`Lighting.ClockTime`, a fresh world starts at 10:00), the sky's light (`OutdoorAmbient`, low at night) and the light where the sky does not reach (`Ambient`, low all day, so caves are dark), `/time` (a `TextChatCommand`) and the L key | `BlockWorldTime` (set it to "noon", "18:30", "stop", "go") |
+| `blockworld_daynight` | the clock (`Lighting.ClockTime`, a fresh world starts at 10:00), the sky's light (`OutdoorAmbient`, low at night) and the light where the sky does not reach (`Ambient`, low all day, so caves are dark), the fog (pale by day, warm at dawn and dusk, dark at night, whole just short of `BlockWorldViewStuds`), `/time` (a `TextChatCommand`) and the L key | `BlockWorldTime` (set it to "noon", "18:30", "stop", "go") |
 | `blockworld_torches` | torches with a PointLight and a flame, the light budget | `BlockWorldTorches` |
 | `blockworld_villagers` | Mira, Tobin and Elda: character Models under `workspace` with Roblox's R6 body (`Head`, `Torso`, `Left Arm` ...), which the platform's character rig animates as it does the player's, in their own clothes, with hair and two eyes that follow the head, placed around the spawn in the frame of the first view (Mira in it) on the nearest level ground, so none starts in a pit or on a ledge, held until the ground under them exists, their `AIService` agents and brains | on each Model `NpcAgent`, `NpcBrain`, `NpcState` (the host writes `NpcAction`); `BlockWorldVillagerReply` |
 | `blockworld_survival` | health from the Humanoid, fall damage (a fall is read from `Humanoid.StateChanged`), death and the respawn at the spawn; off in creative | `BlockWorldHealth`, `BlockWorldMaxHealth`, `BlockWorldDeaths` |
@@ -164,11 +187,14 @@ Not done on purpose today: the mods still share state through workspace attribut
 
 ## Tests
 
-- Lua tier, no Unity: `Assets/CoreAIMods/Tests/EditMode/RbxApi/BlockWorld/` (generation golden, build, HUD, day and
-  night, torches, villagers, autopilot, survival, all eight together, caves).
+- Lua tier, no Unity: `Assets/CoreAIMods/Tests/EditMode/RbxApi/BlockWorld/` (generation golden, relief and snowy peaks,
+  woods, hillside cave mouths, build, HUD and its veil, day and night, torches, villagers and their level-ground
+  homes, autopilot, survival, all eight together, caves).
 - The mods in a running world: `Assets/CoreAIMods/Tests/PlayMode/RbxApi/BlockWorld/BlockWorldPlayModeTests.cs`.
 - This scene as a player opens it: `BlockWorldScenePlayModeTests.cs` next to it (one player on generated ground
   whose sunlit Grass top is drawn unlike its Ground twin, the HUD from the runtime UI host, place and break with the outline and the reach, noon against midnight and a torch
   on masked crops, a scripted model's watchtower and `/undo`, a villager answering by name, the no-model answers,
-  a survival fall that hurts and a lethal one that respawns you, a cave at noon with and without a torch).
+  a survival fall that hurts and a lethal one that respawns you, a cave at noon with and without a torch, the
+  characters in the shoulder view idle and walking, `/time midnight` typed in the chat, and the world from a
+  hilltop, a wood and a cave mouth with and without a torch).
   It writes its frames to `artifacts/blockworld/`.

@@ -501,7 +501,10 @@ the sky follows, and sets a trilight ambient: sky and equator blend from `Outdoo
 candidates P9-a and P9-g); `EnvironmentSpecularScale` multiplies the default look's sky reflections (its sky
 reflection probe and the environment reflection intensity). The sink also receives `FogStart`, `FogEnd` and
 `FogColor` in `RbxLightingState`; a world that never set them carries the defaults
-(`RbxLightingMapping.IsFogAtDefaults`), and the host look keeps its own haze then. Until a script, a tween or a
+(`RbxLightingMapping.IsFogAtDefaults`), and the host look keeps its own haze then. Once any of them differs, the
+sink draws linear fog from `FogStart` to `FogEnd` (studs through `RbxSpace`) in `FogColor` and claims the fog
+from the look (`LookAmbientOwnership.ClaimFog`); back at the defaults it puts the scene's fog back and the look's
+haze returns. Until a script, a tween or a
 saved world sets a Lighting property, nothing is applied and the host scene keeps its authored lighting; switch
 the sink off with **Drive Scene Lighting** on `RbxWorldHost`. The rest of P9 (`ColorShift_*`, exposure, shadows, the moon,
 `Sky`, `Atmosphere`, the post effects, `SpotLight`, `SurfaceLight`) are loud stubs planned for P9;

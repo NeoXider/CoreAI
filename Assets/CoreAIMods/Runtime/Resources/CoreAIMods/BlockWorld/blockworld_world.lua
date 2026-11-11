@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_world
 name: Block World 1 - World
-version: 1.3.0
+version: 1.3.1
 active: false
 capabilities: All
 category: Samples/Block World
@@ -25,6 +25,8 @@ description: Part of the Block World demo (the eight mods of the Samples/Block W
 --   BlockWorldSeed (number), BlockWorldReady (true once the spawn column exists),
 --   BlockWorldOpened (false while a new player waits for the first view), BlockWorldOpeningColumns (how many
 --   columns that view needs), BlockWorldSpawn (Vector3, studs), BlockWorldColumns (columns generated),
+--   BlockWorldViewStuds (how far the streamed land is sure to reach from anywhere in the player's column, in
+--   studs: the fog hides the world's edge there),
 --   BlockWorldNotice (text).
 
 local Players = game:GetService("Players")
@@ -492,6 +494,24 @@ workspace:SetAttribute("BlockWorldColumns", 0)
 workspace:SetAttribute("BlockWorldReady", false)
 workspace:SetAttribute("BlockWorldOpened", false)
 workspace:SetAttribute("BlockWorldOpeningColumns", OPENING_COLUMNS)
+
+-- WHY the nearest column left out, measured from the worst place in the player's column: the view radius is a
+-- circle of columns, so the land reaches less far along a diagonal and from a column's corner than straight ahead
+-- (4 columns: 181 studs, not 256). Past this distance a player may see where the world ends.
+local function landReach()
+    local nearest = math.huge
+    for dx = -viewRadius - 1, viewRadius + 1 do
+        for dz = -viewRadius - 1, viewRadius + 1 do
+            if dx * dx + dz * dz > viewRadius * viewRadius + 1 then
+                local gx = math.max(math.abs(dx) - 1, 0)
+                local gz = math.max(math.abs(dz) - 1, 0)
+                nearest = math.min(nearest, math.sqrt(gx * gx + gz * gz))
+            end
+        end
+    end
+    return nearest * CHUNK * CELL
+end
+workspace:SetAttribute("BlockWorldViewStuds", landReach())
 
 local function finishColumn(finished)
     generated[columnKey(finished.cx, finished.cz)] = true

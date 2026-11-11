@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_hud
 name: Block World 3 - HUD and hotbar
-version: 1.2.0
+version: 1.2.1
 active: false
 capabilities: All
 category: Samples/Block World
@@ -118,11 +118,11 @@ local USS = [[
 .health { color: rgb(255, 150, 150); }
 .health.is-low { background-color: rgba(150, 24, 24, 0.85); color: rgb(255, 255, 255); }
 .veil { position: absolute; left: 0; top: 0; right: 0; bottom: 0; align-items: center; justify-content: center;
-  background-color: rgb(118, 166, 214); }
-.veil-title { font-size: 46px; color: rgb(255, 255, 255); -unity-font-style: bold;
-  text-shadow: 2px 2px 4px rgba(20, 40, 70, 0.6); }
-.veil-progress { margin-top: 10px; font-size: 20px; color: rgba(255, 255, 255, 0.92); }
-.veil-tip { margin-top: 36px; font-size: 18px; color: rgba(255, 255, 255, 0.85); }
+  background-color: rgb(184, 206, 207); }
+.veil-title { font-size: 46px; color: rgb(34, 52, 64); -unity-font-style: bold;
+  text-shadow: 1px 1px 3px rgba(255, 255, 255, 0.5); }
+.veil-progress { margin-top: 10px; font-size: 20px; color: rgba(34, 52, 64, 0.92); }
+.veil-tip { margin-top: 36px; font-size: 18px; color: rgba(34, 52, 64, 0.85); }
 .is-hidden { display: none; }
 ]]
 
@@ -273,6 +273,7 @@ workspace:GetAttributeChangedSignal("BlockWorldAutopilot"):Connect(refreshAutopi
 
 -- The veil covers the screen while the world mod holds a new player for the first view (BlockWorldOpened false),
 -- so the first thing seen is the land around the spawn, not the void around one column.
+-- WHY its colour (.veil): the default look's haze just below the horizon at 10:00, so it lifts into the same sky.
 local function refreshVeil()
     if workspace:GetAttribute("BlockWorldOpened") ~= false then
         veil:AddClass("is-hidden")

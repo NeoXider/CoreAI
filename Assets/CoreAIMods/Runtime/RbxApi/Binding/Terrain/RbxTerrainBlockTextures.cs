@@ -13,7 +13,7 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
     /// WHY enlarged with hard texel edges and then filtered: a 16-texel tile filtered as it is blurs every texel into
     /// its neighbours up close, and point filtering shimmers far away. Copying each texel into an 8 x 8 block keeps
     /// the edges crisp at a few studs while trilinear filtering and the mip chain (whose fourth level is exactly
-    /// the painted tile) keep distant blocks calm. 21 styles cost about 3 MB of texture memory.
+    /// the painted tile) keep distant blocks calm. 21 styles cost about 4 MB of texture memory.
     /// </remarks>
     public static class RbxTerrainBlockTextures
     {
@@ -56,6 +56,26 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             normal = set.Normal;
             roughness = set.Roughness;
             return true;
+        }
+
+        /// <summary>
+        /// Builds the textures of every style <paramref name="look"/> paints, so a host can pay for them behind its
+        /// loading screen instead of in the first frames that draw each material; returns the styles built now.
+        /// </summary>
+        public static int Preload(TerrainBlockLook look)
+        {
+            if (look == null)
+            {
+                return 0;
+            }
+
+            int before = BuildCount;
+            for (byte slot = 0; slot < TerrainMaterials.SlotCount; slot++)
+            {
+                TryGet(look.StyleOf(slot), out Texture2D _, out Texture2D _, out Texture2D _);
+            }
+
+            return BuildCount - before;
         }
 
         private static Texture2D Build(TerrainBlockTile tile, byte[] source, int channels, TextureFormat format,

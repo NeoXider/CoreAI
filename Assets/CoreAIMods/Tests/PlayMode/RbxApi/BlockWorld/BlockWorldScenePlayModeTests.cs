@@ -421,6 +421,20 @@ return 'watchtower built'";
                 peakTop + toSpawn * 60f + new RbxVector3(0f, -18f, 0f));
             yield return Frames(20);
             yield return ShootWithUi("world_hilltop.png");
+            // WHY the same view at dusk and at night: the fog takes the sky's colour, and a far view shows it best.
+            foreach ((string time, string shot) in new[] { ("18:45", "world_hilltop_dusk.png"), ("0:00", "world_hilltop_night.png") })
+            {
+                Workspace().SetAttribute("BlockWorldTime", time);
+                yield return Frames(3);
+                Workspace().SetAttribute("BlockWorldTime", "stop");
+                yield return Frames(10);
+                yield return ShootWithUi(shot);
+            }
+
+            Workspace().SetAttribute("BlockWorldTime", "10:30");
+            yield return Frames(3);
+            Workspace().SetAttribute("BlockWorldTime", "stop");
+            yield return Frames(10);
 
             (int X, int Z) densest = (Mathf.FloorToInt(sx / 8f), Mathf.FloorToInt(sz / 8f));
             int most = 0;
@@ -489,7 +503,8 @@ return 'watchtower built'";
 
             Record("world: peak " + peak + " (" + (peak.y - GroundTop(terrain, sx, sz, trunkSlot, leafSlot))
                    + " rows above the spawn), densest wood " + most + " trunks in an 8 x 8 block at (" + woodX + ", " + woodZ
-                   + "), cave mouth " + (found ? mouth + " opening toward " + outside : "none") + ", torches " + torches);
+                   + "), cave mouth " + (found ? mouth + " opening toward " + outside : "none") + ", torches " + torches
+                   + "; fog " + FogLine());
             Expect(peak.y >= 11, "a high peak within forty cells of the spawn");
             Expect(most >= 5, "a wood within forty cells of the spawn");
             Expect(found, "a cave mouth opens onto a hillside within 48 cells of the spawn");
@@ -544,6 +559,13 @@ return 'watchtower built'";
             }
 
             return length;
+        }
+
+        private string FogLine()
+        {
+            RbxLighting lighting = (RbxLighting)CurrentWorld().Game.FindFirstChildOfClass("Lighting");
+            return lighting.FogStart.ToString("0") + " to " + lighting.FogEnd.ToString("0") + " studs (land reach "
+                   + Workspace().GetAttribute("BlockWorldViewStuds") + "), colour " + lighting.FogColor;
         }
 
         private static int GroundTop(RbxTerrain terrain, int x, int z, byte trunk, byte leaves)
@@ -1463,6 +1485,8 @@ return 'watchtower built'";
             // WHY trial values: Lighting.Ambient is chosen on these shots (pitch black against walls barely seen); a
             // Heartbeat connected after the day-night mod's holds each one for its shot, and unloading drops it.
             StringBuilder trials = new();
+            RbxLighting caveLighting = (RbxLighting)CurrentWorld().Game.FindFirstChildOfClass("Lighting");
+            RbxColor3 modAmbient = caveLighting.Ambient;
             foreach ((int r, int g, int b) in new[] { (34, 40, 74), (56, 60, 80), (80, 84, 104) })
             {
                 string trialId = "test_cave_ambient_" + r;
@@ -1476,6 +1500,8 @@ return 'watchtower built'";
                     .Append("; ");
             }
 
+            // WHY put back here: the day-night mod writes Ambient only when the daylight changes, and the clock stands.
+            caveLighting.SetAmbient(modAmbient);
             yield return Frames(5);
 
             // WHY the torch at the camera's own cell: its light reaches the floor crop ahead, its flame stays out of it.

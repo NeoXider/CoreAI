@@ -41,12 +41,16 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         /// <summary>Material property a block twin sets to 1: one whole tile per cell face, on the cell grid.</summary>
         public const string CellTilesProperty = "_RbxCellTiles";
 
+        /// <summary>Material property a block twin sets to the look's corner shade strength (the mesh colour's RGB).</summary>
+        public const string CornerShadeProperty = "_RbxCornerShade";
+
         private const string TexturedShaderResource = "CoreAIRbxMaterials/RbxTexturedSurface";
         private const string TexturedShaderName = "CoreAI/Rbx/Textured Surface";
         private const string EmissionKeyword = "_RBX_EMISSION";
 
         private static readonly int SkyExposureSourceId = Shader.PropertyToID(SkyExposureSourceProperty);
         private static readonly int CellTilesId = Shader.PropertyToID(CellTilesProperty);
+        private static readonly int CornerShadeId = Shader.PropertyToID(CornerShadeProperty);
 
         private readonly RbxTerrain _terrain;
         private readonly IRbxMaterialProvider<Material> _materials;
@@ -63,7 +67,6 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         private readonly Dictionary<long, ChunkView> _views = new();
         private readonly Dictionary<Collider, TerrainChunkCoord> _colliders = new();
         private readonly Dictionary<int, Material[]> _materialSets = new();
-        private readonly Dictionary<Material, Material> _terrainCopies = new();
         private readonly List<Material> _ownedCopies = new();
         private readonly Material[] _slotMaterials = new Material[TerrainMaterials.SlotCount];
         private readonly List<TerrainChunkCoord> _lastProcessed = new();
@@ -294,7 +297,6 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             }
 
             _ownedCopies.Clear();
-            _terrainCopies.Clear();
             if (_ownsMaterials && _materials is IDisposable disposable)
             {
                 disposable.Dispose();
@@ -511,8 +513,30 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             }
 
             material = TerrainCopy(material);
+            if (slot == TerrainMaterials.Water)
+            {
+                ApplyWaterLook(material);
+            }
+
             _slotMaterials[slot] = material;
             return material;
+        }
+
+        /// <summary>Tunes the cells' own copy of the water (<see cref="TerrainBlockLook.Water"/>); a Part's water is untouched.</summary>
+        private void ApplyWaterLook(Material water)
+        {
+            TerrainWaterLook look = _blockLook.Water;
+            if (!look.Overrides || water == null || !_ownedCopies.Contains(water) || !water.HasProperty(BlockIds.WaveScale))
+            {
+                return;
+            }
+
+            water.SetFloat(BlockIds.WaveScale, look.WaveScale);
+            water.SetFloat(BlockIds.WaveStrength, look.WaveStrength);
+            water.SetFloat(BlockIds.WaterSmoothness, look.Smoothness);
+            water.SetFloat(BlockIds.WaterAbsorption, look.Absorption);
+            float alpha = water.GetColor(BlockIds.MaterialColor).a;
+            water.SetColor(BlockIds.MaterialColor, new Color(look.Red, look.Green, look.Blue, alpha));
         }
 
         /// <summary>
@@ -549,8 +573,7 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             twin.SetColor(BlockIds.MaterialColor, Color.white);
             twin.SetFloat(BlockIds.PartColorInfluence, 0f);
             // WHY one cell per tile: a 4-stud cell edge then always falls on a whole tile in world space.
-            twin.SetFloat(BlockIds.TextureScale,
-                1f / ((float)TerrainBoxRasterizer.CellStuds * RbxSpace.MetersPerStud));
+            twin.SetFloat(BlockIds.TextureScale, 1f / RbxSpace.LengthToUnity((float)TerrainBoxRasterizer.CellStuds));
             twin.SetFloat(BlockIds.TextureAspect, 1f);
             twin.SetFloat(BlockIds.BumpScale, 1f);
             twin.SetFloat(BlockIds.RoughnessScale, 1f);
@@ -575,6 +598,7 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
 
             twin.SetFloat(SkyExposureSourceId, 1f);
             twin.SetFloat(CellTilesId, 1f);
+            twin.SetFloat(CornerShadeId, _blockLook.CornerShade);
             _ownedCopies.Add(twin);
             return twin;
         }
@@ -593,6 +617,9 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         /// WHY a copy and not a keyword or a property block: a Part never draws with the copy, so it never
         /// reads a vertex colour its mesh does not have; the switch is a material float, so no shader
         /// variant is added; and without a property block the chunks stay on the SRP Batcher.
+        /// WHY one copy per slot, taken at once: the catalog lends its materials (a pooled variant may be set up for
+        /// another material by the next lookup), so copies shared by source object drew every slot with the material
+        /// resolved first; <see cref="Resolve"/> already keeps one material per slot.
         /// </remarks>
         private Material TerrainCopy(Material source)
         {
@@ -601,19 +628,13 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
                 return source;
             }
 
-            if (_terrainCopies.TryGetValue(source, out Material copy) && copy != null)
-            {
-                return copy;
-            }
-
-            copy = new Material(source)
+            Material copy = new(source)
             {
                 name = source.name,
                 hideFlags = source.hideFlags,
                 enableInstancing = source.enableInstancing
             };
             copy.SetFloat(SkyExposureSourceId, 1f);
-            _terrainCopies[source] = copy;
             _ownedCopies.Add(copy);
             return copy;
         }
@@ -665,6 +686,10 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             public static readonly int MetalAlbedoLift = Shader.PropertyToID("_MetalAlbedoLift");
             public static readonly int EmissionColor = Shader.PropertyToID("_EmissionColor");
             public static readonly int EmissionThreshold = Shader.PropertyToID("_EmissionThreshold");
+            public static readonly int WaveScale = Shader.PropertyToID("_PatternScale");
+            public static readonly int WaveStrength = Shader.PropertyToID("_BumpStrength");
+            public static readonly int WaterSmoothness = Shader.PropertyToID("_Smoothness");
+            public static readonly int WaterAbsorption = Shader.PropertyToID("_Absorption");
         }
 
         private sealed class ChunkView

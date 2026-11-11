@@ -79,6 +79,23 @@ namespace CoreAI.Tests.EditMode.RbxApi.TerrainUnity
             }
         }
 
+        private static List<string> QuadCorners(int[] indices)
+        {
+            List<string> quads = new();
+            for (int start = 0; start + 6 <= indices.Length; start += 6)
+            {
+                SortedSet<int> corners = new();
+                for (int offset = 0; offset < 6; offset++)
+                {
+                    corners.Add(indices[start + offset]);
+                }
+
+                quads.Add(string.Join(",", corners));
+            }
+
+            return quads;
+        }
+
         private Mesh SolidMesh(TerrainChunkCoord coord)
         {
             Assert.IsTrue(_renderer.TryGetChunkObject(coord, out GameObject chunk), "chunk " + coord + " has an object");
@@ -141,7 +158,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.TerrainUnity
             Assert.AreEqual(255, UpFaceAlpha(hill, 8, 8, 1, true), "the hill top straight above the tunnel");
             foreach (Color32 color in hill.colors32)
             {
-                Assert.IsTrue(color.r == 255 && color.g == 255 && color.b == 255, "RGB stays white for a later block light");
+                Assert.IsTrue(color.r == color.g && color.g == color.b, "RGB is the grey corner shade");
+                Assert.Contains(color.r, TerrainSkyExposure.CornerShadeLevels,
+                    "a whole face corner is one of the corner shade levels");
             }
         }
 
@@ -183,7 +202,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.TerrainUnity
                 Assert.AreEqual(before.subMeshCount, after.subMeshCount);
                 for (int submesh = 0; submesh < before.subMeshCount; submesh++)
                 {
-                    CollectionAssert.AreEqual(before.GetIndices(submesh), after.GetIndices(submesh));
+                    // WHY per quad: the corner shade may split a quad along its other diagonal; it is still the same
+                    // four corners.
+                    CollectionAssert.AreEqual(QuadCorners(before.GetIndices(submesh)),
+                        QuadCorners(after.GetIndices(submesh)), "quads of " + coord);
                 }
 
                 Color32[] colors = after.colors32;
