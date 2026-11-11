@@ -1,12 +1,12 @@
 --[[@coreai
 id: blockworld_build
 name: Block World 2 - Build
-version: 1.2.1
+version: 1.3.0
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo. Breaking and placing blocks at the crosshair: a thin outline shows the block you look at, left click breaks it, right click places the hotbar block on the face you look at, holding a button repeats, and nothing happens beyond a reach of five blocks. Bedrock cannot be broken and a block is never placed inside you. G switches between creative (endless blocks) and survival (you place what you broke, and a tree trunk gives planks); you start in first person, as in Minecraft, and V switches to third person behind your character and back. Publishes the crosshair cell as workspace attributes (CrosshairCell, CrosshairPlaceCell, CrosshairNormal) so the AI and other mods build where you look.
+description: Part of the Block World demo. Breaking and placing blocks at the crosshair: a thin outline shows the block you look at, left click breaks it, right click places the hotbar block on the face you look at, holding a button repeats, and nothing happens beyond a reach of five blocks. Bedrock cannot be broken and a block is never placed inside you. G switches between creative (endless blocks) and survival (you place what you broke, and a tree trunk gives planks); you start in first person, as in Minecraft, and V switches to third person behind your character and back. Left Control held, or W tapped twice, sprints while you walk forward (1.3 times the walk; twice the flying speed in the air), never while flying down, in water or with the chat open. Publishes the crosshair cell as workspace attributes (CrosshairCell, CrosshairPlaceCell, CrosshairNormal) so the AI and other mods build where you look.
 ]]
 
 -- The target is found once per frame: a ray from the camera along its look direction (the crosshair is the
@@ -18,7 +18,8 @@ description: Part of the Block World demo. Breaking and placing blocks at the cr
 --
 -- Reads: BlockWorldSelected (the hotbar item; set by blockworld_hud, Grass when nobody set it).
 -- Writes: CrosshairHasTarget, CrosshairCell, CrosshairPlaceCell, CrosshairNormal, CrosshairPartName, CrosshairModelName,
---         BlockWorldCreative, BlockWorldPlaced, BlockWorldBroken, BlockWorldCount_<Material>, BlockWorldNotice.
+--         BlockWorldCreative, BlockWorldPlaced, BlockWorldBroken, BlockWorldCount_<Material>, BlockWorldNotice,
+--         BlockWorldSprinting.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -216,6 +217,21 @@ local function publishCount(name)
     workspace:SetAttribute("BlockWorldCount_" .. name, counts[name] or 0)
 end
 
+-- The lowest and highest points of a character's own parts: its feet and the top of its head, whatever its size.
+local function bodySpan(character)
+    local low, high = math.huge, -math.huge
+    for _, part in ipairs(character:GetChildren()) do
+        if part:IsA("BasePart") then
+            local half = part.Size.Y / 2
+            low = math.min(low, part.Position.Y - half)
+            high = math.max(high, part.Position.Y + half)
+        end
+    end
+    return low, high
+end
+
+-- WHY measured from the parts: the root rests on the floor and the body may be scaled, so a fixed offset from the
+-- root put the feet two studs too low and refused a block under a player at the top of a jump.
 local function overlapsCharacter(cell)
     local character = localCharacter()
     local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -223,10 +239,11 @@ local function overlapsCharacter(cell)
         return false
     end
     local p = root.Position
+    local low, high = bodySpan(character)
     local x0, y0, z0 = cell.X * CELL, cell.Y * CELL, cell.Z * CELL
     return p.X + 1 > x0 and p.X - 1 < x0 + CELL
         and p.Z + 1 > z0 and p.Z - 1 < z0 + CELL
-        and p.Y + 2.5 > y0 and p.Y - 3 < y0 + CELL
+        and high > y0 + 0.01 and low < y0 + CELL - 0.01
 end
 
 local function breakTarget()
@@ -320,6 +337,75 @@ workspace:GetAttributeChangedSignal("BlockWorldCreative"):Connect(function()
     end
 end)
 
+-- ---- sprinting --------------------------------------------------------------------------------------------
+-- Left Control held, or W tapped twice, while walking forward: a sprint at 1.3 times the walk, and twice the
+-- flying speed (the host flies at twice WalkSpeed). Not while flying down, in water, or with the chat open (the chat
+-- takes the keys, so they never reach here).
+
+local SPRINT_FACTOR = 22 / 17   -- 22 studs a second from 17
+local FLY_SPRINT_FACTOR = 2
+local DOUBLE_TAP_SECONDS = 0.3
+
+local forwardHeld, sprintKeyHeld, sprintTapped, shiftHeld = false, false, false, false
+local lastForwardTap = -math.huge
+local baseSpeed, sprintSpeed, sprintHumanoid = nil, nil, nil
+
+local function inWater(root)
+    local cell = terrain:WorldToCell(root.Position)
+    local corner = terrain:CellCornerToWorld(cell.X, cell.Y, cell.Z)
+    local materials = terrain:ReadVoxels(Region3.new(corner, corner + Vector3.new(CELL, CELL, CELL)), 4)
+    return materials[1][1][1] == Enum.Material.Water
+end
+
+-- WHY the walk speed is read, not assumed: the world mod gives the body its walk, and a sprint returns to it.
+local function updateSprint()
+    local character = localCharacter()
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not root then
+        return
+    end
+    if humanoid ~= sprintHumanoid then
+        sprintHumanoid, sprintSpeed = humanoid, nil
+    end
+    local flying = humanoid:GetState() == Enum.HumanoidStateType.Flying
+    local sprinting = (sprintKeyHeld or sprintTapped) and forwardHeld and not (flying and shiftHeld)
+        and not inWater(root)
+    if sprinting then
+        if not sprintSpeed then
+            baseSpeed = humanoid.WalkSpeed
+        end
+        sprintSpeed = baseSpeed * (flying and FLY_SPRINT_FACTOR or SPRINT_FACTOR)
+        if math.abs(humanoid.WalkSpeed - sprintSpeed) > 0.01 then
+            humanoid.WalkSpeed = sprintSpeed
+        end
+    elseif sprintSpeed then
+        humanoid.WalkSpeed = baseSpeed
+        sprintSpeed = nil
+    end
+    if workspace:GetAttribute("BlockWorldSprinting") ~= sprinting then
+        workspace:SetAttribute("BlockWorldSprinting", sprinting)
+    end
+end
+
+local function onMoveKey(keyCode, down, gameProcessed)
+    if keyCode == Enum.KeyCode.W or keyCode == Enum.KeyCode.Up then
+        if down and not gameProcessed then
+            local now = time()
+            sprintTapped = now - lastForwardTap <= DOUBLE_TAP_SECONDS
+            lastForwardTap = now
+            forwardHeld = true
+        elseif not down then
+            forwardHeld = false
+            sprintTapped = false
+        end
+    elseif keyCode == Enum.KeyCode.LeftControl then
+        sprintKeyHeld = down and not gameProcessed
+    elseif keyCode == Enum.KeyCode.LeftShift then
+        shiftHeld = down and not gameProcessed
+    end
+end
+
 -- ---- input --------------------------------------------------------------------------------------------
 
 local breakHeld, placeHeld = false, false
@@ -345,7 +431,12 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    onMoveKey(input.KeyCode, true, gameProcessed)
+end)
+
 UserInputService.InputEnded:Connect(function(input)
+    onMoveKey(input.KeyCode, false, false)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         breakHeld = false
     elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
@@ -355,6 +446,7 @@ end)
 
 RunService.Heartbeat:Connect(function(dt)
     refreshTarget()
+    updateSprint()
     if breakHeld or placeHeld then
         repeatTimer = repeatTimer - dt
         if repeatTimer <= 0 then

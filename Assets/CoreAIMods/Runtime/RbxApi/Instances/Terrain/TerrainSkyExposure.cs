@@ -69,6 +69,10 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
         private readonly int[] _oldTops = new int[ColumnCells];
         private readonly HashSet<long> _walked = new();
         private readonly List<WalkStep> _walk = new();
+        private readonly Dictionary<long, ChunkLevels> _chunkLevels = new();
+        private readonly Stack<ChunkLevels> _freeChunkLevels = new();
+        private bool _awaitingCollect;
+        private int _floodRows;
 
         private byte[] _cells = Array.Empty<byte>();
         private int[] _tops = Array.Empty<int>();
@@ -107,6 +111,24 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
 
         /// <summary>Cells light travels past an opening before it is gone; the level of an open cell.</summary>
         public int Reach { get; }
+
+        /// <summary>Chunks <see cref="PrepareChunk"/> lit from the store (a test and diagnostics counter).</summary>
+        public long ChunkLightCount { get; private set; }
+
+        /// <summary>
+        /// Chunks <see cref="PrepareChunk"/> took from the levels it kept for them, because no write since could
+        /// have changed their light (a test and diagnostics counter).
+        /// </summary>
+        public long ChunkCacheHitCount { get; private set; }
+
+        /// <summary>Chunks whose levels are kept for the next <see cref="PrepareChunk"/>.</summary>
+        public int CachedChunkCount => _chunkLevels.Count;
+
+        /// <summary>
+        /// Rows of its window the last flood classified and walked: the window's height, or fewer when its
+        /// highest column top lies below the window's top (every row above that is open sky).
+        /// </summary>
+        public int LastFloodRows { get; private set; }
 
         /// <summary>True when a cell of <paramref name="material"/> keeps the sky from the cells below it.</summary>
         public static bool BlocksSky(byte material)
@@ -163,9 +185,94 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
         /// Lights chunk <paramref name="coord"/> and the cells around it, ready for
         /// <see cref="GetCornerExposures"/> on any face of that chunk. Reuses its buffers.
         /// </summary>
+        /// <remarks>
+        /// WHY the levels are kept per chunk: a chunk is prepared again whenever it is re-meshed or relit, and
+        /// most of those times nothing near it changed its light; the kept levels are dropped for every chunk a
+        /// write touches or sits next to (<see cref="OnStoreChanged"/>) and every chunk whose light it may have
+        /// changed (<see cref="CollectLightAffectedChunks"/>). A write whose light was never collected drops them
+        /// all, so a caller that only watches the store still reads fresh light.
+        /// </remarks>
         public void PrepareChunk(TerrainChunkCoord coord)
         {
+            if (_awaitingCollect)
+            {
+                _awaitingCollect = false;
+                ForgetAllChunkLevels();
+            }
+
+            long key = coord.Key;
+            if (_chunkLevels.TryGetValue(key, out ChunkLevels kept))
+            {
+                UseChunkLevels(coord, kept);
+                ChunkCacheHitCount++;
+                return;
+            }
+
             PrepareBox(coord.MinCellX - 1, coord.MinCellY - 1, coord.MinCellZ - 1, Edge + 2, Edge + 2, Edge + 2);
+            ChunkLightCount++;
+            KeepChunkLevels(key);
+        }
+
+        private void KeepChunkLevels(long key)
+        {
+            const int side = Edge + 2;
+            ChunkLevels kept = _freeChunkLevels.Count > 0 ? _freeChunkLevels.Pop() : new ChunkLevels(side * side * side);
+            int margin = Reach;
+            int target = 0;
+            for (int wy = margin; wy < margin + side; wy++)
+            {
+                for (int wz = margin; wz < margin + side; wz++)
+                {
+                    Buffer.BlockCopy(_cells, wy * _strideY + wz * _strideZ + margin, kept.Cells, target, side);
+                    target += side;
+                }
+            }
+
+            kept.AllOpen = _allOpen;
+            _chunkLevels[key] = kept;
+        }
+
+        private void UseChunkLevels(TerrainChunkCoord coord, ChunkLevels kept)
+        {
+            const int side = Edge + 2;
+            _minX = coord.MinCellX - 1;
+            _minY = coord.MinCellY - 1;
+            _minZ = coord.MinCellZ - 1;
+            _sizeX = side;
+            _sizeY = side;
+            _sizeZ = side;
+            _strideZ = side;
+            _strideY = side * side;
+            if (_cells.Length < kept.Cells.Length)
+            {
+                _cells = new byte[kept.Cells.Length];
+                _queue = new int[kept.Cells.Length];
+            }
+
+            Buffer.BlockCopy(kept.Cells, 0, _cells, 0, kept.Cells.Length);
+            BuildCornerSteps();
+            _allOpen = kept.AllOpen;
+            _prepared = true;
+        }
+
+        private void ForgetChunkLevels(TerrainChunkCoord coord)
+        {
+            long key = coord.Key;
+            if (_chunkLevels.TryGetValue(key, out ChunkLevels kept))
+            {
+                _chunkLevels.Remove(key);
+                _freeChunkLevels.Push(kept);
+            }
+        }
+
+        private void ForgetAllChunkLevels()
+        {
+            foreach (ChunkLevels kept in _chunkLevels.Values)
+            {
+                _freeChunkLevels.Push(kept);
+            }
+
+            _chunkLevels.Clear();
         }
 
         /// <summary>
@@ -258,6 +365,28 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
             _topChanges.Clear();
             _changedColumns.Clear();
             IReadOnlyList<TerrainChunkCoord> changed = change.ChangedChunks;
+            // WHY the 26 neighbours too: a chunk's kept levels cover the cells one step past its faces, edges and
+            // corners, so a write in any chunk around it can change what its corners read.
+            if (_chunkLevels.Count > 0)
+            {
+                for (int index = 0; index < changed.Count; index++)
+                {
+                    TerrainChunkCoord around = changed[index];
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        for (int dz = -1; dz <= 1; dz++)
+                        {
+                            for (int dx = -1; dx <= 1; dx++)
+                            {
+                                ForgetChunkLevels(new TerrainChunkCoord(around.X + dx, around.Y + dy, around.Z + dz));
+                            }
+                        }
+                    }
+                }
+
+                _awaitingCollect = changed.Count > 0;
+            }
+
             for (int index = 0; index < changed.Count; index++)
             {
                 TerrainChunkCoord coord = changed[index];
@@ -363,6 +492,82 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
 
                 AddChunksAround(top.X - margin, low - margin, top.Z - margin, top.X + 1 + margin, high + 1 + margin,
                     top.Z + 1 + margin, into);
+            }
+
+            ForgetLevelsAroundChange(change, floor);
+            _awaitingCollect = false;
+        }
+
+        /// <summary>
+        /// Drops the kept levels of every chunk whose box (the chunk and one cell round it) lies within reach of
+        /// the change's cells or of a column whose top moved; one cell wider than the relight test, because the
+        /// kept box reaches one cell past the chunk.
+        /// </summary>
+        private void ForgetLevelsAroundChange(TerrainChangeSet change, int floor)
+        {
+            if (_chunkLevels.Count == 0)
+            {
+                return;
+            }
+
+            int reach = Reach + 1;
+            TerrainCellBox cells = change.ChangedCells;
+            if (!cells.IsEmpty)
+            {
+                ForgetChunkLevelsIn(cells.MinX - reach, cells.MinY - reach, cells.MinZ - reach, cells.MaxX + reach,
+                    cells.MaxY + reach, cells.MaxZ + reach);
+            }
+            else
+            {
+                IReadOnlyList<TerrainChunkCoord> changed = change.ChangedChunks;
+                for (int index = 0; index < changed.Count; index++)
+                {
+                    TerrainChunkCoord coord = changed[index];
+                    ForgetChunkLevelsIn(coord.MinCellX - reach, coord.MinCellY - reach, coord.MinCellZ - reach,
+                        coord.MinCellX + Edge + reach, coord.MinCellY + Edge + reach, coord.MinCellZ + Edge + reach);
+                }
+            }
+
+            if (_topChanges.Count == 0)
+            {
+                return;
+            }
+
+            int minX = int.MaxValue;
+            int minY = int.MaxValue;
+            int minZ = int.MaxValue;
+            int maxX = int.MinValue;
+            int maxY = int.MinValue;
+            int maxZ = int.MinValue;
+            for (int index = 0; index < _topChanges.Count; index++)
+            {
+                TopChange top = _topChanges[index];
+                int low = top.Old == NoTop || top.New == NoTop ? floor : Math.Min(top.Old, top.New);
+                int high = Math.Max(top.Old == NoTop ? floor : top.Old, top.New == NoTop ? floor : top.New);
+                minX = Math.Min(minX, top.X);
+                maxX = Math.Max(maxX, top.X);
+                minZ = Math.Min(minZ, top.Z);
+                maxZ = Math.Max(maxZ, top.Z);
+                minY = Math.Min(minY, low);
+                maxY = Math.Max(maxY, high);
+            }
+
+            ForgetChunkLevelsIn(minX - reach, minY - reach, minZ - reach, maxX + 1 + reach, maxY + 1 + reach,
+                maxZ + 1 + reach);
+        }
+
+        /// <summary>Drops the kept levels of every chunk overlapping the cell box (max exclusive).</summary>
+        private void ForgetChunkLevelsIn(int minX, int minY, int minZ, int maxX, int maxY, int maxZ)
+        {
+            for (int cy = minY >> TerrainChunkCoord.Shift; cy <= (maxY - 1) >> TerrainChunkCoord.Shift; cy++)
+            {
+                for (int cz = minZ >> TerrainChunkCoord.Shift; cz <= (maxZ - 1) >> TerrainChunkCoord.Shift; cz++)
+                {
+                    for (int cx = minX >> TerrainChunkCoord.Shift; cx <= (maxX - 1) >> TerrainChunkCoord.Shift; cx++)
+                    {
+                        ForgetChunkLevels(new TerrainChunkCoord(cx, cy, cz));
+                    }
+                }
             }
         }
 
@@ -679,10 +884,22 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
             {
                 // WHY no flood without an open cell: light only enters from open cells, so a window deep in rock
                 // keeps every shaded cell at 0 exactly as the needed box already holds it.
+                LastFloodRows = 0;
                 return;
             }
 
-            Classify(0, 0, 0, _sizeX, _sizeY, _sizeZ);
+            // WHY only up to the highest column top: every cell above it is open sky, holds the open level and is
+            // never reached by the flood, which only fills shaded cells; the row just above the top is classified
+            // too, as the open neighbour the cells under it are seeded from.
+            int highest = NoTop;
+            for (int column = 0; column < _sizeX * _sizeZ; column++)
+            {
+                highest = Math.Max(highest, _tops[column]);
+            }
+
+            _floodRows = Math.Min(_sizeY, Math.Max(2, highest - _minY + 2));
+            LastFloodRows = _floodRows;
+            Classify(0, 0, 0, _sizeX, _floodRows, _sizeZ);
             MarkPadding();
             Flood();
         }
@@ -776,7 +993,7 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
 
         private void MarkPadding()
         {
-            for (int wy = 0; wy < _sizeY; wy++)
+            for (int wy = 0; wy < _floodRows; wy++)
             {
                 for (int wz = 0; wz < _sizeZ; wz++)
                 {
@@ -830,8 +1047,8 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
                 return;
             }
 
-            int count = _strideY * _sizeY;
-            for (int index = _strideY; index < count - _strideY; index++)
+            int end = _strideY * (_floodRows - 1);
+            for (int index = _strideY; index < end; index++)
             {
                 if (_cells[index] != 0)
                 {
@@ -890,6 +1107,19 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
             ComputeTops(chunkX, chunkZ, tops);
             _columnTops.Add(key, tops);
             return tops;
+        }
+
+        /// <summary>The levels of one chunk's needed box (the chunk and one cell round it), kept between preparations.</summary>
+        private sealed class ChunkLevels
+        {
+            public ChunkLevels(int cellCount)
+            {
+                Cells = new byte[cellCount];
+            }
+
+            public byte[] Cells { get; }
+
+            public bool AllOpen { get; set; }
         }
 
         private void ComputeTops(int chunkX, int chunkZ, int[] tops)

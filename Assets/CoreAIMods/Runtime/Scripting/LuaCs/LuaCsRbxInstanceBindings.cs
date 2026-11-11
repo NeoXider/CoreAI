@@ -1922,6 +1922,16 @@ namespace CoreAI.Ai.LuaCs
                 PivotTo(context, self, ReadPartCFrameArgument(ctx, 1, "PVInstance:PivotTo", 1));
                 return LuaValue.Nil;
             }, "PVInstance");
+            Method("ScaleTo", (ctx, self) =>
+            {
+                context.RequirePivotMutation(self);
+                ScaleModelTo(context, self, ReadDouble(ctx, 1, "Model:ScaleTo", 1));
+                return LuaValue.Nil;
+            }, "Model");
+            Method("GetScale", (_, self) => self is RbxModel scaled
+                ? scaled.Scale
+                : throw RbxError.BadArgument("GetScale is not available on " + self.ClassName, "call GetScale on a Model"),
+                "Model");
 
             // ---- ServiceProvider (DataModel) ----
             Method("GetService", (ctx, self) => context.WrapInstance(
@@ -2191,6 +2201,7 @@ namespace CoreAI.Ai.LuaCs
                    || name == "AddTag"
                    || name == "RemoveTag"
                    || name == "PivotTo"
+                   || name == "ScaleTo"
                    || name == "Kick"
                    || name == "TakeDamage"
                    || name == "MoveTo"
@@ -3105,6 +3116,60 @@ namespace CoreAI.Ai.LuaCs
             throw RbxError.BadArgument(
                 "GetPivot is not available on " + instance.ClassName,
                 "call GetPivot on a BasePart, Model or Camera");
+        }
+
+        /// <summary>
+        /// Mirror <c>Model:ScaleTo</c>: every descendant BasePart's size, and its offset from the model's pivot,
+        /// become their scale-1 values times <paramref name="factor"/>; the pivot stays where it is. The scale-1
+        /// values are remembered by the first call, so ScaleTo(x) then ScaleTo(1) gives the model back exactly.
+        /// A character's rig follows through <see cref="RbxModel.Scale"/> (its joints) and its root's size (its
+        /// physics body).
+        /// </summary>
+        private static void ScaleModelTo(LuaCsRbxModContext context, RbxInstance instance, double factor)
+        {
+            if (!(instance is RbxModel model))
+            {
+                throw RbxError.BadArgument(
+                    "ScaleTo is not available on " + instance.ClassName,
+                    "call ScaleTo on a Model");
+            }
+
+            if (!RbxModelScaling.IsValidFactor(factor))
+            {
+                throw RbxError.BadArgument(
+                    "Model:ScaleTo expects a scale factor above 0",
+                    "pass a positive number, such as 1.5");
+            }
+
+            IPartPropertySink sink = context.PartSink;
+            RbxCFrame pivot = GetPivot(context, model);
+            double current = model.Scale;
+            foreach (RbxInstance descendant in model.GetDescendants())
+            {
+                if (!descendant.IsA("BasePart"))
+                {
+                    continue;
+                }
+
+                PartProperties before = sink.GetPartPropertiesOrDefault(descendant.Id);
+                if (!model.TryGetScaleOrigin(descendant.Id, out RbxVector3 sizeAtOne, out RbxCFrame offsetAtOne))
+                {
+                    RbxModelScaling.OriginAtScaleOne(pivot, before.CFrame, before.Size, current, out sizeAtOne,
+                        out offsetAtOne);
+                    model.RememberScaleOrigin(descendant.Id, sizeAtOne, offsetAtOne);
+                }
+
+                RbxModelScaling.Scaled(pivot, sizeAtOne, offsetAtOne, factor, out RbxVector3 size, out RbxCFrame cframe);
+                sink.SetSize(descendant.Id, size);
+                sink.SetCFrame(descendant.Id, cframe);
+                context.RecordMutation(descendant);
+                PartProperties after = sink.GetPartPropertiesOrDefault(descendant.Id);
+                NotifyPartChanges(descendant, "Size", in before, in after);
+                NotifyPartChanges(descendant, "CFrame", in before, in after);
+            }
+
+            model.SetScale(factor);
+            context.RecordMutation(model);
         }
 
         private static RbxCFrame GetWorldPivot(IPartPropertySink sink, RbxModel model)

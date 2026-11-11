@@ -28,6 +28,17 @@ namespace CoreAI.Mods.Rbx.Binding
     /// walk or fly in (<see cref="RbxCharacterFacing"/>), yaw only, so a character faces where it goes; a
     /// character standing still keeps its heading.
     /// </para>
+    /// <para>
+    /// A bound character root (a part whose collider is its box) gets the body capsule of
+    /// <see cref="RbxCharacterBodyShape"/> with a frictionless material, and its box is switched off: the box was
+    /// two studs tall under a five-stud body, caught the top edge of a block with its square bottom, and its
+    /// friction against a wall it was pushed into ate a jump's rise, so a character could not jump onto one
+    /// block. The capsule covers the body, slides over edges and along walls, and grows with the root's size
+    /// (<c>Model:ScaleTo</c>). Without friction a character would drift once it stops, on a slope or a block's
+    /// rim, so a grounded character with nothing to walk to grips: its capsule takes a material with friction
+    /// until it walks, jumps or leaves the ground. Its velocity is never written for that, so a script that
+    /// moves it by velocity, or a part it stands on, still moves it, against ordinary friction.
+    /// </para>
     /// </remarks>
     public sealed class UnityRbxCharacterMotor : IRbxCharacterMotor
     {
@@ -46,8 +57,15 @@ namespace CoreAI.Mods.Rbx.Binding
         private static float DefaultWorldGravityMetresPerSecondSquared() =>
             RbxSpace.AccelerationToUnity((float)RbxWorldPhysics.DefaultGravity);
 
+        private static PhysicsMaterial _characterMaterial;
+        private static PhysicsMaterial _gripMaterial;
+
         private readonly Rigidbody _body;
         private readonly float _groundProbeOrigin;
+        private readonly BoxCollider _rootBox;
+        private readonly CapsuleCollider _shape;
+        private Vector3 _shapedForScale;
+        private RbxCharacterBodyShape _bodyShape;
         private readonly Func<float> _worldGravityMetresPerSecondSquared;
         private float _walkSpeedMetres = RbxSpace.LengthToUnity((float)RbxHumanoid.DefaultWalkSpeed);
         private double _walkSpeedStuds = RbxHumanoid.DefaultWalkSpeed;
@@ -98,6 +116,143 @@ namespace CoreAI.Mods.Rbx.Binding
             // WHY continuous: a long fall reaches tens of metres per second, and a discrete body passes through
             // a terrain chunk's mesh collider in one step (seen: a 90-stud drop left the world).
             _body.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+            _shape = InstallBodyShape(_body, out _rootBox);
+            FitShape();
+        }
+
+        /// <summary>
+        /// The frictionless material of a character's body capsule: it slides along walls and over block edges
+        /// instead of sticking to what it is pushed into.
+        /// </summary>
+        public static PhysicsMaterial CharacterMaterial
+        {
+            get
+            {
+                if (_characterMaterial == null)
+                {
+                    _characterMaterial = new PhysicsMaterial("CoreAI Character")
+                    {
+                        dynamicFriction = 0f,
+                        staticFriction = 0f,
+                        bounciness = 0f,
+                        frictionCombine = PhysicsMaterialCombine.Minimum,
+                        bounceCombine = PhysicsMaterialCombine.Minimum,
+                        hideFlags = HideFlags.HideAndDontSave
+                    };
+                }
+
+                return _characterMaterial;
+            }
+        }
+
+        /// <summary>
+        /// The material of a character's body capsule while it stands on the ground with nothing to walk to: it
+        /// holds on a slope or a block's rim, and a part it stands on carries it.
+        /// </summary>
+        public static PhysicsMaterial GripMaterial
+        {
+            get
+            {
+                if (_gripMaterial == null)
+                {
+                    _gripMaterial = new PhysicsMaterial("CoreAI Character Grip")
+                    {
+                        dynamicFriction = 1f,
+                        staticFriction = 1f,
+                        bounciness = 0f,
+                        frictionCombine = PhysicsMaterialCombine.Maximum,
+                        bounceCombine = PhysicsMaterialCombine.Minimum,
+                        hideFlags = HideFlags.HideAndDontSave
+                    };
+                }
+
+                return _gripMaterial;
+            }
+        }
+
+        /// <summary>True while the body capsule grips (see <see cref="GripMaterial"/>).</summary>
+        public bool IsGripping => _shape != null && _shape.sharedMaterial == _gripMaterial && _gripMaterial != null;
+
+        /// <summary>The body capsule this motor gave its root; null for a body that brought its own collider.</summary>
+        public CapsuleCollider BodyShape => _shape;
+
+        /// <summary>
+        /// True when <paramref name="body"/> carries a character's body capsule; <paramref name="feetY"/> is then
+        /// the world height of its bottom, in metres.
+        /// </summary>
+        public static bool TryGetFeet(Rigidbody body, out float feetY)
+        {
+            feetY = 0f;
+            if (body == null || !body.TryGetComponent(out CapsuleCollider shape) || !shape.enabled
+                || shape.sharedMaterial == null
+                || (shape.sharedMaterial != _characterMaterial && shape.sharedMaterial != _gripMaterial))
+            {
+                return false;
+            }
+
+            feetY = shape.bounds.min.y;
+            return true;
+        }
+
+        private static CapsuleCollider InstallBodyShape(Rigidbody body, out BoxCollider rootBox)
+        {
+            GameObject gameObject = body.gameObject;
+            if (!gameObject.TryGetComponent(out rootBox) || gameObject.TryGetComponent(out CapsuleCollider _))
+            {
+                rootBox = null;
+                return null;
+            }
+
+            CapsuleCollider shape = gameObject.AddComponent<CapsuleCollider>();
+            shape.direction = 1;
+            shape.sharedMaterial = CharacterMaterial;
+            shape.isTrigger = rootBox.isTrigger;
+            rootBox.enabled = false;
+            return shape;
+        }
+
+        /// <summary>
+        /// Swaps the body capsule between the frictionless material (walking, jumping, in the air) and the grip
+        /// material (standing on the ground with nothing to walk to).
+        /// </summary>
+        private void Grip(bool grip)
+        {
+            if (_shape == null)
+            {
+                return;
+            }
+
+            PhysicsMaterial wanted = grip ? GripMaterial : CharacterMaterial;
+            if (_shape.sharedMaterial != wanted)
+            {
+                _shape.sharedMaterial = wanted;
+            }
+        }
+
+        /// <summary>Sizes the capsule to the root's current size; a no-op while the size has not changed.</summary>
+        private void FitShape()
+        {
+            if (_shape == null || _body == null)
+            {
+                return;
+            }
+
+            if (_rootBox != null && _shape.isTrigger != _rootBox.isTrigger)
+            {
+                _shape.isTrigger = _rootBox.isTrigger;
+            }
+
+            Vector3 scale = _body.transform.lossyScale;
+            if (scale == _shapedForScale)
+            {
+                return;
+            }
+
+            _shapedForScale = scale;
+            _bodyShape = RbxCharacterBodyShape.ForR6Root(RbxSpace.SizeFromUnity(scale));
+            _shape.height = _bodyShape.LocalHeight;
+            _shape.radius = _bodyShape.LocalRadius;
+            _shape.center = new Vector3(0f, _bodyShape.LocalCentreY, 0f);
         }
 
         /// <inheritdoc />
@@ -157,9 +312,38 @@ namespace CoreAI.Mods.Rbx.Binding
         }
 
         /// <inheritdoc />
-        public bool IsGrounded =>
-            _body != null && Physics.Raycast(_body.position, Vector3.down, _groundProbeOrigin + GroundProbeMetres,
-                    Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+        /// <remarks>
+        /// WHY a sphere for the body capsule: a single ray from the centre missed the floor as soon as the centre
+        /// stood past a block's edge, so a character on the rim of a step could not jump. The sphere is four fifths
+        /// of the capsule's width, starts at the root's centre and reaches just below the feet.
+        /// </remarks>
+        public bool IsGrounded
+        {
+            get
+            {
+                if (_body == null)
+                {
+                    return false;
+                }
+
+                if (_shape == null)
+                {
+                    return Physics.Raycast(_body.position, Vector3.down, _groundProbeOrigin + GroundProbeMetres,
+                        Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+                }
+
+                // WHY the centre ray as well: a cast ignores every collider its sphere starts inside, and one Terrain
+                // chunk collider holds both the floor and the wall a body is pressed against, so a sphere that
+                // starts touching that wall would miss the floor under it.
+                float radius = RbxSpace.LengthToUnity(_bodyShape.Radius) * 0.8f;
+                float feet = RbxSpace.LengthToUnity(_bodyShape.BottomBelowRoot);
+                float distance = Mathf.Max(0f, feet - radius) + GroundProbeMetres;
+                return Physics.SphereCast(_body.position, radius, Vector3.down, out RaycastHit _, distance,
+                           Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore)
+                       || Physics.Raycast(_body.position, Vector3.down, feet + GroundProbeMetres,
+                           Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+            }
+        }
 
         /// <inheritdoc />
         public void SetWalkSpeed(double studsPerSecond)
@@ -302,6 +486,9 @@ namespace CoreAI.Mods.Rbx.Binding
                 return;
             }
 
+            FitShape();
+            bool idle = _moveDirectionStuds.Magnitude <= 1e-4f && !_targetMetres.HasValue;
+            Grip(idle && _shape != null && IsGrounded);
             if (_moveDirectionStuds.Magnitude > 1e-4f)
             {
                 RbxVector3 heading = new(_moveDirectionStuds.X, 0f, _moveDirectionStuds.Z);
@@ -377,6 +564,7 @@ namespace CoreAI.Mods.Rbx.Binding
                 return;
             }
 
+            Grip(false);
             float flySpeed = (float)(_walkSpeedStuds * FlySpeedMultiplier);
             RbxVector3 current = RbxSpace.VelocityFromUnity(_body.linearVelocity);
             RbxVector3 next = RbxCharacterControlMath.StepFlightVelocity(

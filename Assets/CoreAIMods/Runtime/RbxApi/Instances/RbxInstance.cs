@@ -1271,12 +1271,56 @@ namespace CoreAI.Mods.Rbx.Instances
         private RbxInstance _primaryPart;
         private RbxCFrame _storedWorldPivot = RbxCFrame.Identity;
         private bool _hasStoredWorldPivot;
+        private double _scale = 1d;
+        private Dictionary<InstanceId, (RbxVector3 Size, RbxCFrame Offset)> _scaleOrigins;
 
         protected internal RbxModel(ClassDescriptor descriptor) : base(descriptor)
         {
         }
 
         public RbxInstance PrimaryPart => _primaryPart;
+
+        /// <summary>Mirror <c>Model:GetScale()</c>: the canonical scale factor, 1 for a new model.</summary>
+        public double Scale => _scale;
+
+        /// <summary>
+        /// The size and pivot-relative offset <paramref name="part"/> had at scale 1, remembered by the first
+        /// <c>ScaleTo</c> that moved it (see <see cref="RbxModelScaling"/>); false before that.
+        /// </summary>
+        public bool TryGetScaleOrigin(InstanceId part, out RbxVector3 sizeAtOne, out RbxCFrame offsetAtOne)
+        {
+            if (_scaleOrigins != null && _scaleOrigins.TryGetValue(part, out (RbxVector3 Size, RbxCFrame Offset) origin))
+            {
+                sizeAtOne = origin.Size;
+                offsetAtOne = origin.Offset;
+                return true;
+            }
+
+            sizeAtOne = default;
+            offsetAtOne = RbxCFrame.Identity;
+            return false;
+        }
+
+        /// <summary>Remembers <paramref name="part"/>'s scale-1 size and offset for every later <c>ScaleTo</c>.</summary>
+        public void RememberScaleOrigin(InstanceId part, RbxVector3 sizeAtOne, in RbxCFrame offsetAtOne)
+        {
+            _scaleOrigins ??= new Dictionary<InstanceId, (RbxVector3 Size, RbxCFrame Offset)>();
+            _scaleOrigins[part] = (sizeAtOne, offsetAtOne);
+        }
+
+        /// <summary>Records the scale factor a <c>ScaleTo</c> just applied.</summary>
+        public void SetScale(double factor)
+        {
+            ThrowIfDestroyed("ScaleTo");
+            if (!RbxModelScaling.IsValidFactor(factor))
+            {
+                throw RbxError.BadArgument(
+                    "Model:ScaleTo expects a scale factor above 0",
+                    "pass a positive number, such as 1.5");
+            }
+
+            _scale = factor;
+        }
 
         public bool HasStoredWorldPivot => _hasStoredWorldPivot;
 
@@ -1334,6 +1378,9 @@ namespace CoreAI.Mods.Rbx.Instances
                 modelCopy._primaryPart = _primaryPart;
                 modelCopy._storedWorldPivot = _storedWorldPivot;
                 modelCopy._hasStoredWorldPivot = _hasStoredWorldPivot;
+                // WHY the factor and not the scale-1 geometry: the copy's parts have ids of their own, so its
+                // first ScaleTo reads their scale-1 values back from the factor, as the original's did.
+                modelCopy._scale = _scale;
             }
         }
 

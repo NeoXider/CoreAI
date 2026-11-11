@@ -41,7 +41,9 @@ namespace CoreAI.Demos.BlockWorld
             "This game is the Block World: a voxel world in workspace.Terrain, in cells of 4 studs. \"Here\" is the "
             + "workspace attribute CrosshairPlaceCell: a Vector3 of whole cell numbers, the empty cell in front of the "
             + "block the player looks at; build up from it. CrosshairCell is the block looked at, CrosshairHasTarget "
-            + "is false for the sky or beyond reach. The RbxApi skill's building section builds a watchtower this way.";
+            + "is false for the sky or beyond reach. A build here is a Terrain write starting at CrosshairPlaceCell "
+            + "(Terrain:FillBlock or FillRegion over the cells, or WriteVoxels); there is no need to read the land "
+            + "first. The RbxApi skill's building section builds a watchtower this way.";
 
         [Tooltip("Mod folder switched on in this scene's mods store at every start; its sub-folders are included.")]
         [SerializeField]
@@ -56,7 +58,7 @@ namespace CoreAI.Demos.BlockWorld
                  + "own default. Set before the world mod loads, as the workspace attribute BlockWorldViewRadius.")]
         [SerializeField]
         [Range(0, 8)]
-        private int webGlViewRadius = 3;
+        private int webGlViewRadius = 6;
 
         private readonly List<string> _switchedOn = new();
         private readonly HereContextProvider _here = new();

@@ -57,7 +57,7 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
     /// </remarks>
     [TestFixture]
     [Category("InputDevice")]
-    public sealed class BlockWorldScenePlayModeTests : InputTestFixture
+    public sealed partial class BlockWorldScenePlayModeTests : InputTestFixture
     {
         private const string ScenePath = "Assets/CoreAI.Demos/BlockWorld/BlockWorld.unity";
         private const string AimModId = "test_blockworld_aim";
@@ -68,7 +68,7 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
         private static readonly string[] BlockWorldMods =
         {
             "blockworld_world", "blockworld_build", "blockworld_hud", "blockworld_daynight", "blockworld_torches",
-            "blockworld_villagers", "blockworld_autopilot", "blockworld_survival"
+            "blockworld_villagers", "blockworld_autopilot", "blockworld_survival", "blockworld_falling"
         };
 
         private const string AimSource = @"
@@ -548,7 +548,7 @@ return 'watchtower built'";
                 RunAsPlayer("test_mouth_inside", "game:GetService('Players'):GetPlayers()[1].Character:PivotTo(CFrame.new("
                                                  + Lua(inside.X) + ", " + Lua(inside.Y + 1f) + ", " + Lua(inside.Z) + "))");
                 yield return Frames(30);
-                RbxVector3 eye = RootPosition(Humanoid()) + new RbxVector3(0f, 1.5f, 0f);
+                RbxVector3 eye = EyePosition();
                 yield return Tap(_keyboard.digit9Key);
                 yield return Aim(eye, floor - outward * (Cell * 1.5f));
                 yield return Click(_mouse.rightButton);
@@ -1097,7 +1097,7 @@ return 'watchtower built'";
             RbxTerrain terrain = Terrain();
             int cellX = Mathf.FloorToInt(root.X / Cell);
             int cellZ = Mathf.FloorToInt(root.Z / Cell);
-            int below = Mathf.FloorToInt((root.Y - 3.5f) / Cell);
+            int below = Mathf.FloorToInt((FeetY() - 0.5f) / Cell);
             byte ground = terrain.Store.GetMaterial(cellX, below, cellZ);
             if (firstFrameShot != null)
             {
@@ -1112,7 +1112,8 @@ return 'watchtower built'";
                 Record("first person: the head's LocalTransparencyModifier " + hidden.ToString("0.00") + ", the eye "
                        + eyeAboveFloor.ToString("0.00") + " studs above the floor");
                 Expect(hidden > 0.99d, "in first person the player's own body is not drawn");
-                Expect(eyeAboveFloor > 4f && eyeAboveFloor < 5f, "the first-person eye is at head height (about 4.5 studs)");
+                Expect(eyeAboveFloor > 6f && eyeAboveFloor < 7f,
+                    "the first-person eye is at a 1.8-block body's eye height (about 6.5 studs)");
             }
 
             yield return CheckGrassIsGreen(root);
@@ -1305,10 +1306,28 @@ return 'watchtower built'";
             int stable = 0;
             int frames = 0;
             float stableSince = Time.realtimeSinceStartup;
-            for (; frames < 6000 && stable < 120; frames++)
+            float settleStart = Time.realtimeSinceStartup;
+            float previousFrame = Time.realtimeSinceStartup;
+            List<float> streamingMs = new();
+            List<float> standingMs = new();
+            StringBuilder milestones = new();
+            int milestone = 0;
+            // WHY these counts: the columns of view radius 4, 6 and 8 (a circle of columns, nearest first).
+            int[] radiusColumns = { 57, 113, 197 };
+            for (; frames < 9000 && stable < 120; frames++)
             {
                 yield return null;
+                float frameMs = (Time.realtimeSinceStartup - previousFrame) * 1000f;
+                previousFrame = Time.realtimeSinceStartup;
                 double columns = Convert.ToDouble(Workspace().GetAttribute("BlockWorldColumns") ?? 0d);
+                (stable > 0 ? standingMs : streamingMs).Add(frameMs);
+                while (milestone < radiusColumns.Length && columns >= radiusColumns[milestone])
+                {
+                    milestones.Append("radius ").Append(4 + milestone * 2).Append(" (").Append(radiusColumns[milestone])
+                        .Append(" columns) after ").Append(frames).Append(" frames, ")
+                        .Append((Time.realtimeSinceStartup - settleStart).ToString("0.0")).Append(" s of wall time; ");
+                    milestone++;
+                }
                 if (Math.Abs(columns - last) < 0.5d)
                 {
                     stable++;
@@ -1338,10 +1357,25 @@ return 'watchtower built'";
             // WHY the stable frames' wall time: the land is whole and the player stands, so it is the standing frame.
             Record("streaming settled at " + last + " columns after " + (frames - stable) + " frames (stable for "
                    + stable + " frames, " + ((Time.realtimeSinceStartup - stableSince) * 1000f / Math.Max(stable, 1))
-                   .ToString("0.0") + " ms of wall time per standing frame)");
+                   .ToString("0.0") + " ms of wall time per standing frame); " + milestones + "wall ms per frame streaming "
+                   + Percentiles(streamingMs) + ", standing " + Percentiles(standingMs) + "; generation steps a frame "
+                   + Workspace().GetAttribute("BlockWorldWorkers"));
         }
 
         // ---- HUD ---------------------------------------------------------------------------------------------------
+
+        private static string Percentiles(List<float> values)
+        {
+            if (values.Count == 0)
+            {
+                return "none";
+            }
+
+            List<float> sorted = new(values);
+            sorted.Sort();
+            return "p50 " + sorted[sorted.Count / 2].ToString("0.0") + " / p95 " + sorted[(int)(sorted.Count * 0.95f)]
+                .ToString("0.0") + " (" + sorted.Count + " frames)";
+        }
 
         private readonly struct LeafScan
         {
@@ -1528,7 +1562,7 @@ return 'watchtower built'";
 
         private IEnumerator CheckPlaceAndBreak()
         {
-            RbxVector3 eye = RootPosition(Humanoid()) + new RbxVector3(0f, 1.5f, 0f);
+            RbxVector3 eye = EyePosition();
             yield return Aim(eye, eye + new RbxVector3(8f, -6f, 3f));
             bool targeted = Equals(Workspace().GetAttribute("CrosshairHasTarget"), true);
             Expect(targeted, "the ground next to the character is under the crosshair");
@@ -1575,7 +1609,7 @@ return 'watchtower built'";
 
         private IEnumerator CheckBeyondReach()
         {
-            RbxVector3 eye = RootPosition(Humanoid()) + new RbxVector3(0f, 1.5f, 0f);
+            RbxVector3 eye = EyePosition();
             int px = Mathf.FloorToInt(eye.X / Cell) + 8;
             int py = Mathf.FloorToInt(eye.Y / Cell) + 3;
             int pz = Mathf.FloorToInt(eye.Z / Cell);
@@ -1614,7 +1648,7 @@ return 'watchtower built'";
             string chat = Lines(overlay, start);
 
             RbxInstance mira = Workspace().FindFirstChild("Mira");
-            RbxVector3 eye = RootPosition(Humanoid()) + new RbxVector3(0f, 1.5f, 0f);
+            RbxVector3 eye = EyePosition();
             RbxVector3 miraAt = mira?.FindFirstChild("HumanoidRootPart") != null
                 ? CurrentWorld().PartSink.GetLivePositionStuds(mira.FindFirstChild("HumanoidRootPart").Id)
                 : eye;
@@ -1807,7 +1841,7 @@ return 'watchtower built'";
 
         private IEnumerator NightWithTorches(int sx, int sz, int row)
         {
-            RbxVector3 eye = RootPosition(Humanoid()) + new RbxVector3(0f, 1.5f, 0f);
+            RbxVector3 eye = EyePosition();
             Vector2Int[] offsets = { new(2, -3), new(-2, -3), new(3, -1), new(-3, -1) };
             // WHY wait: these cells lie behind the first view, and the world streams what the camera faces first.
             for (int frame = 0; frame < 1800 && !HasGroundUnder(sx, sz, row, offsets); frame++)
@@ -2097,7 +2131,7 @@ return 'watchtower built'";
 
         private IEnumerator CheckWatchtowerAndUndo(ScriptedBlockWorldModel model)
         {
-            RbxVector3 eye = RootPosition(Humanoid()) + new RbxVector3(0f, 1.5f, 0f);
+            RbxVector3 eye = EyePosition();
             yield return Aim(eye, eye + new RbxVector3(0f, -6f, 9f));
             bool targeted = Equals(Workspace().GetAttribute("CrosshairHasTarget"), true);
             Expect(targeted, "the ground ahead is under the crosshair");
@@ -2455,6 +2489,29 @@ return 'watchtower built'";
         private RbxVector3 RootPosition(RbxHumanoid humanoid)
         {
             return CurrentWorld().PartSink.GetLivePositionStuds(humanoid.RootPart.Id);
+        }
+
+        /// <summary>The player's eyes: the Head's centre, where the first-person camera is, whatever the body's size.</summary>
+        private RbxVector3 EyePosition()
+        {
+            RbxInstance head = Humanoid()?.Parent?.FindFirstChild("Head");
+            return head != null
+                ? CurrentWorld().PartSink.GetLivePositionStuds(head.Id)
+                : RootPosition(Humanoid()) + new RbxVector3(0f, 1.5f, 0f);
+        }
+
+        private int _feetProbes;
+
+        /// <summary>The lowest point of the player's own parts: the feet.</summary>
+        private float FeetY()
+        {
+            string id = "test_feet_" + ++_feetProbes;
+            RunAsPlayer(id, "local c = game:GetService('Players'):GetPlayers()[1].Character local low = math.huge "
+                            + "for _, p in ipairs(c:GetChildren()) do if p:IsA('BasePart') then "
+                            + "low = math.min(low, p.Position.Y - p.Size.Y / 2) end end "
+                            + "workspace:SetAttribute('TestFeetY', low)");
+            Session().CurrentConcreteRuntime.UnloadMod(PlayerActor(), id);
+            return (float)Convert.ToDouble(Workspace().GetAttribute("TestFeetY") ?? 0d);
         }
 
         private ActorContext PlayerActor()

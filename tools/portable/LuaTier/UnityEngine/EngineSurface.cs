@@ -65,6 +65,11 @@ namespace UnityEngine
             throw PortableEngine.Unavailable("GameObject.GetComponents");
         }
 
+        public bool TryGetComponent<T>(out T component)
+        {
+            throw PortableEngine.Unavailable("GameObject.TryGetComponent");
+        }
+
         public Component AddComponent(Type componentType)
         {
             throw PortableEngine.Unavailable("GameObject.AddComponent");
@@ -87,6 +92,11 @@ namespace UnityEngine
         public GameObject gameObject => throw PortableEngine.Unavailable("Component.gameObject");
 
         public Transform transform => throw PortableEngine.Unavailable("Component.transform");
+
+        public bool TryGetComponent<T>(out T component)
+        {
+            throw PortableEngine.Unavailable("Component.TryGetComponent");
+        }
     }
 
     /// <summary>Compile-time surface of <c>UnityEngine.Behaviour</c>; nothing can construct one here.</summary>
@@ -156,6 +166,8 @@ namespace UnityEngine
             set => throw PortableEngine.Unavailable("Transform.localScale");
         }
 
+        public Vector3 lossyScale => throw PortableEngine.Unavailable("Transform.lossyScale");
+
         public Transform parent => throw PortableEngine.Unavailable("Transform.parent");
 
         public int childCount => throw PortableEngine.Unavailable("Transform.childCount");
@@ -177,6 +189,114 @@ namespace UnityEngine
         protected Collider()
         {
         }
+
+        public bool enabled
+        {
+            get => throw PortableEngine.Unavailable("Collider.enabled");
+            set => throw PortableEngine.Unavailable("Collider.enabled");
+        }
+
+        public bool isTrigger
+        {
+            get => throw PortableEngine.Unavailable("Collider.isTrigger");
+            set => throw PortableEngine.Unavailable("Collider.isTrigger");
+        }
+
+        public Bounds bounds => throw PortableEngine.Unavailable("Collider.bounds");
+
+        public PhysicsMaterial sharedMaterial
+        {
+            get => throw PortableEngine.Unavailable("Collider.sharedMaterial");
+            set => throw PortableEngine.Unavailable("Collider.sharedMaterial");
+        }
+    }
+
+    /// <summary>Compile-time surface of <c>UnityEngine.BoxCollider</c>; nothing can construct one here.</summary>
+    public sealed class BoxCollider : Collider
+    {
+        private BoxCollider()
+        {
+        }
+    }
+
+    /// <summary>Compile-time surface of <c>UnityEngine.CapsuleCollider</c>; nothing can construct one here.</summary>
+    public sealed class CapsuleCollider : Collider
+    {
+        private CapsuleCollider()
+        {
+        }
+
+        public int direction
+        {
+            get => throw PortableEngine.Unavailable("CapsuleCollider.direction");
+            set => throw PortableEngine.Unavailable("CapsuleCollider.direction");
+        }
+
+        public float height
+        {
+            get => throw PortableEngine.Unavailable("CapsuleCollider.height");
+            set => throw PortableEngine.Unavailable("CapsuleCollider.height");
+        }
+
+        public float radius
+        {
+            get => throw PortableEngine.Unavailable("CapsuleCollider.radius");
+            set => throw PortableEngine.Unavailable("CapsuleCollider.radius");
+        }
+
+        public Vector3 center
+        {
+            get => throw PortableEngine.Unavailable("CapsuleCollider.center");
+            set => throw PortableEngine.Unavailable("CapsuleCollider.center");
+        }
+    }
+
+    /// <summary>Compile-time surface of <c>UnityEngine.PhysicsMaterial</c>; creating one needs the engine and is refused.</summary>
+    public sealed class PhysicsMaterial : Object
+    {
+        public PhysicsMaterial(string name)
+        {
+            throw PortableEngine.Unavailable("PhysicsMaterial..ctor");
+        }
+
+        public float dynamicFriction
+        {
+            get => throw PortableEngine.Unavailable("PhysicsMaterial.dynamicFriction");
+            set => throw PortableEngine.Unavailable("PhysicsMaterial.dynamicFriction");
+        }
+
+        public float staticFriction
+        {
+            get => throw PortableEngine.Unavailable("PhysicsMaterial.staticFriction");
+            set => throw PortableEngine.Unavailable("PhysicsMaterial.staticFriction");
+        }
+
+        public float bounciness
+        {
+            get => throw PortableEngine.Unavailable("PhysicsMaterial.bounciness");
+            set => throw PortableEngine.Unavailable("PhysicsMaterial.bounciness");
+        }
+
+        public PhysicsMaterialCombine frictionCombine
+        {
+            get => throw PortableEngine.Unavailable("PhysicsMaterial.frictionCombine");
+            set => throw PortableEngine.Unavailable("PhysicsMaterial.frictionCombine");
+        }
+
+        public PhysicsMaterialCombine bounceCombine
+        {
+            get => throw PortableEngine.Unavailable("PhysicsMaterial.bounceCombine");
+            set => throw PortableEngine.Unavailable("PhysicsMaterial.bounceCombine");
+        }
+    }
+
+    /// <summary>Unity's physics material combine modes, with Unity's numeric values.</summary>
+    public enum PhysicsMaterialCombine
+    {
+        Average = 0,
+        Multiply = 1,
+        Minimum = 2,
+        Maximum = 3
     }
 
     /// <summary>Compile-time surface of <c>UnityEngine.ScriptableObject</c>; nothing can construct one here.</summary>
@@ -306,6 +426,12 @@ namespace UnityEngine
             QueryTriggerInteraction queryTriggerInteraction)
         {
             throw PortableEngine.Unavailable("Physics.Raycast");
+        }
+
+        public static bool SphereCast(Vector3 origin, float radius, Vector3 direction, out RaycastHit hitInfo,
+            float maxDistance, int layerMask, QueryTriggerInteraction queryTriggerInteraction)
+        {
+            throw PortableEngine.Unavailable("Physics.SphereCast");
         }
 
         public static void SyncTransforms()

@@ -67,9 +67,6 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsFalse(builder.Exists(typeof(INetworkBridge), includeInterfaceTypes: true),
                 "an empty provider field must leave the container without any transport registration");
-            // WHY: the scope's self-repair entry point resolves the mod runtime when the container is built, so the
-            // host services a real parent scope provides must exist here too.
-            RegisterMinimalHostServices(builder);
             using IObjectResolver container = builder.Build();
             Assert.IsNull(container.ResolveOrDefault<INetworkBridge>(),
                 "the installer's ResolveOrDefault<INetworkBridge>() must see nothing - that is what selects NullNetworkBridge");
@@ -87,6 +84,40 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsInstanceOf<NullNetworkBridge>(stack.GameplayBindings.RbxApi.NetworkBridge,
                 "with nothing registered the installer must build the Rbx world on the in-process null bridge");
+        }
+
+        /// <summary>
+        /// The scope's container is built in Awake, and nothing of the mod world may be built there: the world
+        /// factory resolves the network bridge, and a transport must not be built in Awake. The self-repair loop
+        /// is therefore built on its pump's first tick. With no host services registered, anything that resolved
+        /// the mod runtime during the build would throw.
+        /// </summary>
+        [Test]
+        public void Configure_BuildingTheContainer_BuildsNothingOfTheModWorld()
+        {
+            ContainerBuilder builder = new();
+            Configure(_scope, builder);
+
+            Assert.DoesNotThrow(() =>
+            {
+                using IObjectResolver container = builder.Build();
+            }, "the self-repair loop must be built on its first tick, not with the container");
+        }
+
+        [Test]
+        public void Configure_TheSelfRepairLoop_IsBuiltOnDemand_OncePerScope()
+        {
+            ContainerBuilder builder = new();
+            Configure(_scope, builder);
+            RegisterMinimalHostServices(builder);
+            using IObjectResolver container = builder.Build();
+
+            CoreAiModSelfRepairEntryPoint loop = container.Resolve<CoreAiModSelfRepairEntryPoint>();
+
+            Assert.IsNotNull(loop.Coordinator, "with a mod runtime in the scope the loop has its coordinator");
+            Assert.AreSame(loop, container.Resolve<CoreAiModSelfRepairEntryPoint>(), "one loop per scope");
+            Assert.DoesNotThrow(() => container.Resolve<CoreAiModSelfRepairPump>().Tick(),
+                "the pump ticks the same loop");
         }
 
         /// <summary>

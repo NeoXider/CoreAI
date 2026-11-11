@@ -3773,13 +3773,19 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public static readonly RbxVector3 RigCameraSubjectOffset = RbxR6Rig.HeadOffsetFromRoot;
 
-        /// <summary>The focus offset above <paramref name="humanoid"/>'s root part the default camera uses.</summary>
+        /// <summary>
+        /// The focus offset above <paramref name="humanoid"/>'s root part the default camera uses, grown by the
+        /// model's <c>ScaleTo</c> factor, so a scaled character's first-person eye stays in its head.
+        /// </summary>
         public static RbxVector3 CameraSubjectOffsetFor(RbxHumanoid humanoid)
         {
             RbxInstance model = humanoid?.Parent;
-            return model != null && !model.IsDestroyed && model.FindFirstChild("Torso") is RbxBasePart
+            RbxVector3 offset = model != null && !model.IsDestroyed && model.FindFirstChild("Torso") is RbxBasePart
                 ? RigCameraSubjectOffset
                 : HumanoidCameraSubjectOffset;
+            return model is RbxModel scaled && !model.IsDestroyed && scaled.Scale != 1d
+                ? offset * (float)scaled.Scale
+                : offset;
         }
 
         private IRbxCameraModule _cameraModule = new RbxDefaultCameraModule();

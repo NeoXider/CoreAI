@@ -19,7 +19,8 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
     /// (<see cref="IRbxTerrainColliderReadiness"/>).
     /// </summary>
     [DisallowMultipleComponent]
-    public sealed class RbxTerrainPresenter : MonoBehaviour, IRbxTerrainHitResolver, IRbxTerrainColliderReadiness
+    public sealed class RbxTerrainPresenter : MonoBehaviour, IRbxTerrainHitResolver, IRbxTerrainColliderReadiness,
+        IRbxTerrainSolidCells
     {
         [SerializeField]
         [Min(1)]
@@ -148,6 +149,12 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         public int EnsureColliders(Bounds unityBounds)
         {
             return Renderer is IRbxTerrainColliderReadiness readiness ? readiness.EnsureColliders(unityBounds) : 0;
+        }
+
+        /// <inheritdoc />
+        public bool IsSolidCell(int x, int y, int z)
+        {
+            return Renderer is IRbxTerrainSolidCells cells && cells.IsSolidCell(x, y, z);
         }
 
         /// <summary>Runs one budgeted re-mesh pass now; returns the chunks processed.</summary>

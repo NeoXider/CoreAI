@@ -1,12 +1,12 @@
 --[[@coreai
 id: blockworld_villagers
 name: Block World 6 - Villagers
-version: 1.4.0
+version: 1.5.0
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo. Three villagers live by the spawn - Mira the baker, Tobin the builder and Elda the fisher - each a character with Roblox's R6 body (Head, Torso, arms and legs) that the platform animates, created by this mod as an AIService agent with a name, a persona and a memory of its own, and given a brain (NpcAgent and NpcBrain on its Model) that lets it wander, greet, face you, follow you and go home. Talk to them in the chat by name ("Tobin, what should I build?") or look at one and press E; they answer in the chat and in a bubble over their heads. They need the game to allow AI from Lua (CoreAiLuaAiOptions.AllowAgentsFromLua) and a model: without the setting they stand still and say why, without a model they answer with a line that says one is needed.
+description: Part of the Block World demo. Three villagers live by the spawn - Mira the baker, Tobin the builder and Elda the fisher - each a character with Roblox's R6 body (Head, Torso, arms and legs) at the player's size, 1.8 blocks tall, that the platform animates, created by this mod as an AIService agent with a name, a persona and a memory of its own, and given a brain (NpcAgent and NpcBrain on its Model) that lets it wander, greet, face you, follow you and go home. Talk to them in the chat by name ("Tobin, what should I build?") or look at one and press E; they answer in the chat and in a bubble over their heads. They need the game to allow AI from Lua (CoreAiLuaAiOptions.AllowAgentsFromLua) and a model: without the setting they stand still and say why, without a model they answer with a line that says one is needed.
 ]]
 
 -- A villager is a Roblox character: a Model directly under the Workspace with a HumanoidRootPart, a Humanoid and
@@ -38,6 +38,8 @@ local TALK_DISTANCE = 14        -- studs: E reaches the nearest villager this cl
 local FACE_DISTANCE = 18        -- studs: a villager with no brain turns to a player this close
 local PLACE_TIMEOUT = 2         -- seconds to wait for the ground under a villager before using the spawn height
 local FOOTING_SECONDS = 0.25    -- how often a walking villager's footing is checked
+local BODY_SCALE = 1.44         -- the player's size: 1.8 blocks tall
+local JUMP_HEIGHT = 5
 local STATE_SECONDS = 5         -- how often the villagers' facts (NpcState) are refreshed
 local BRAIN = "idle, wander, greet, face_player, follow_player, go_home"
 
@@ -140,6 +142,17 @@ local function buildBody(villager)
     humanoid.WalkSpeed = 8
     humanoid.Parent = model
     model.PrimaryPart = root
+    -- WHY scaled before it enters the world: the villagers are the player's size, and the hair and the eyes keep
+    -- their places on the scaled head.
+    pcall(function()
+        model:ScaleTo(BODY_SCALE)
+    end)
+    humanoid.UseJumpPower = false
+    humanoid.JumpHeight = JUMP_HEIGHT
+    local scale = model:GetScale()
+    for _, extra in ipairs(villager.extras) do
+        extra.offset = CFrame.new(extra.offset.Position * scale)
+    end
     model.Parent = workspace
     villager.model, villager.root = model, root
 end
@@ -312,7 +325,7 @@ end
 
 -- Stands the villager on the ground found under its home (the root's box on the floor) and lets the motor have it.
 local function letGo(villager, groundY)
-    villager.home = Vector3.new(villager.home.X, groundY + 1, villager.home.Z)
+    villager.home = Vector3.new(villager.home.X, groundY + villager.root.Size.Y / 2, villager.home.Z)
     villager.model:PivotTo(CFrame.new(villager.home))
     -- WHY CanCollide here: the root is the villager's only collider, made without collision while it was held;
     -- let go without it, the villager falls through the Terrain.
@@ -347,8 +360,8 @@ local function tryPlace(villager, force)
             spot, hit = level, levelHit
         end
     end
-    -- WHY 3 under the spawn: BlockWorldSpawn is 4 studs above the spawn's ground, the root's centre 1.
-    villager.home = Vector3.new(spot.X, spawn.Y - 3, spot.Z)
+    -- WHY 4 under the spawn: BlockWorldSpawn is 4 studs above the spawn's ground; the root rests on it.
+    villager.home = Vector3.new(spot.X, spawn.Y - 4 + villager.root.Size.Y / 2, spot.Z)
     villager.model:PivotTo(CFrame.new(villager.home))
     if hit then
         letGo(villager, hit.Position.Y)
@@ -366,7 +379,8 @@ local function checkFooting(villager)
         spot = villager.home
     end
     local top = topGround(spot)
-    if spot == position and top and position.Y - 1 >= top - 0.5 and position.Y > (BEDROCK_ROW + 2) * 4 then
+    local half = root.Size.Y / 2
+    if spot == position and top and position.Y - half >= top - 0.5 and position.Y > (BEDROCK_ROW + 2) * 4 then
         return
     end
     if spot == position and not top then
@@ -376,7 +390,7 @@ local function checkFooting(villager)
     if not top then
         return
     end
-    villager.model:PivotTo(CFrame.new(spot.X, top + 1, spot.Z))
+    villager.model:PivotTo(CFrame.new(spot.X, top + half, spot.Z))
     -- WHY guarded: a host without body velocities still gets the villager back on top.
     pcall(function()
         root.AssemblyLinearVelocity = Vector3.zero

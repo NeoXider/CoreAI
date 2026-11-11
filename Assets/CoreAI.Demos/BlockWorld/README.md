@@ -32,7 +32,7 @@ opens in another demo.
 `BlockWorldDemoModule` (`Scripts/`) is the only scene glue and holds no game rule. It turns the framework setting
 `CoreAiLuaAiOptions.AllowAgentsFromLua` on for this scene's mods scope (it stays off in every other scene), and on
 the first frame of the published world it switches the `Samples/Block World` folder on in this scene's store and
-loads what the start-up rehydrate did not. It does that at every start, so switching one of the eight mods off in
+loads what the start-up rehydrate did not. It does that at every start, so switching one of the nine mods off in
 the Hub lasts until the next start. It also tells the AI where "here" is: every turn of the Programmer carries, in
 its world state, that the workspace attribute `CrosshairPlaceCell` is the cell the player looks at, with its value
 now, so a model that has never seen this demo can build "here".
@@ -78,7 +78,9 @@ The key legend is on screen at the bottom right.
 | `/fly`, `/undo`, `/redo` | Chat commands of the play world (flight, and the AI's last change) |
 
 Reach is five blocks, measured from your character's eyes, where the first-person camera is. Bedrock, the bottom
-layer, cannot be broken, and a block is never placed where you stand.
+layer, cannot be broken, and a block is never placed where you stand. Sand falls when nothing is under it: break the
+block under a sand pillar, or put sand in the air, and it drops a block every tenth of a second until it rests; it
+never falls into you.
 
 ## Prompts to try
 
@@ -148,7 +150,7 @@ nearby wood and stone), build (a small plank shelter with a doorway) and home ar
 
 ## How the mods are organised
 
-Eight bundled mods in one mod folder, `Samples/Block World` (their `category:`), under
+Nine bundled mods in one mod folder, `Samples/Block World` (their `category:`), under
 `Assets/CoreAIMods/Runtime/Resources/CoreAIMods/BlockWorld/`. Turn the folder on as a whole; each mod also
 reloads on its own.
 
@@ -160,6 +162,7 @@ reloads on its own.
 | `blockworld_daynight` | the clock (`Lighting.ClockTime`, a fresh world starts at 10:00), the sky's light (`OutdoorAmbient`: bright by day, warm and still readable at dusk, a dim blue moonlight at night) and the light where the sky does not reach (`Ambient`, low all day, so caves are dark), the fog (pale by day, a dusky blue haze at dawn and dusk, deep blue at night, whole just short of `BlockWorldViewStuds`), `/time` (a `TextChatCommand`) and the L key | `BlockWorldTime` (set it to "noon", "18:30", "stop", "go") |
 | `blockworld_torches` | torches with a PointLight and a flame, the light budget | `BlockWorldTorches` |
 | `blockworld_villagers` | Mira, Tobin and Elda: character Models under `workspace` with Roblox's R6 body (`Head`, `Torso`, `Left Arm` ...), which the platform's character rig animates as it does the player's, in their own clothes, with hair and two eyes that follow the head, placed around the spawn in the frame of the first view (Mira in it) on the nearest level ground, so none starts in a pit or on a ledge, held until the ground under them exists, their `AIService` agents and brains | on each Model `NpcAgent`, `NpcBrain`, `NpcState` (the host writes `NpcAction`); `BlockWorldVillagerReply` |
+| `blockworld_falling` | falling blocks: Sand with air or water under it falls one block every tenth of a second, the whole run above with it, through water (the pool closes over it); the rule is one table (`FALLS`), so another material can join; it watches the land round the player and picks up a fall a saved world was in the middle of | `BlockWorldFalling` (the pillars with a fall in progress) |
 | `blockworld_survival` | health from the Humanoid, fall damage (a fall is read from `Humanoid.StateChanged`), death and the respawn at the spawn; off in creative | `BlockWorldHealth`, `BlockWorldMaxHealth`, `BlockWorldDeaths` |
 | `blockworld_autopilot` | the block world's goals and facts for the game's autopilot, and the goals only a block world knows: gather, build, home | on the Player `Autopilot`, `AutopilotGoals`, `AutopilotState` (the host writes `AutopilotGoal`; the mod writes the Player only while the autopilot drives, so `/undo` keeps working); `BlockWorldAutopilot` |
 
@@ -191,7 +194,7 @@ Not done on purpose today: the mods still share state through workspace attribut
 
 - Lua tier, no Unity: `Assets/CoreAIMods/Tests/EditMode/RbxApi/BlockWorld/` (generation golden, relief and snowy peaks,
   woods with every leaf on a rooted trunk, the same world whatever order its columns are made in, hillside cave mouths, build, HUD and its veil, day and night, torches, villagers and their level-ground
-  homes, autopilot, survival, all eight together, caves).
+  homes, autopilot, survival, falling sand, all nine together, caves).
 - The mods in a running world: `Assets/CoreAIMods/Tests/PlayMode/RbxApi/BlockWorld/BlockWorldPlayModeTests.cs`.
 - This scene as a player opens it: `BlockWorldScenePlayModeTests.cs` next to it (one player on generated ground
   whose sunlit Grass top is drawn unlike its Ground twin, the HUD from the runtime UI host, place and break with the outline and the reach, noon, a readable dusk and a moonlit midnight against a torch

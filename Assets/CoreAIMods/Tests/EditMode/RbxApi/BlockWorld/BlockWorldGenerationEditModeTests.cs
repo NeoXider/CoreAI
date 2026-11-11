@@ -24,7 +24,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         /// SHA-256 of the Terrain package entry (<c>TerrainVoxelCodec</c>, canonical chunk order) after seed 1337
         /// streamed the 21 columns of view radius 2 around the origin. A change here is a change of the generated world.
         /// </summary>
-        private const string GoldenSeed1337Radius2 = "8f65b7ba7611ba07cb9ca9a740fbe481d12e64db77578b1a0b9f02ad6f35a291";
+        private const string GoldenSeed1337Radius2 = "2df28b3a2e7914d0a286953586f498d9ab9aa690d614c53f2a3bab8f867b2d65";
 
         private SynchronizationContext _savedContext;
 

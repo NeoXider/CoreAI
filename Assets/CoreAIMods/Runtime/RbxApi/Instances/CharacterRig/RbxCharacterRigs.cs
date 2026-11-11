@@ -283,6 +283,7 @@ namespace CoreAI.Mods.Rbx.Instances.CharacterRig
             }
 
             RbxHumanoid humanoid = rig.Humanoid;
+            double scale = humanoid.Parent is RbxModel model ? model.Scale : 1d;
             double speed = MeasureSpeed(humanoid);
             // TODO: pass Humanoid.Sit as seated once Seat and Humanoid.Sit/SeatPart land (the character-rig
             // slice in ClassCatalog); until then nothing seats a character and the Sit pose is never chosen.
@@ -301,12 +302,12 @@ namespace CoreAI.Mods.Rbx.Instances.CharacterRig
                 Undrive(rig, (int)RbxR6Part.Torso);
                 if (!_port.TryGetPose(torsoPart.Id, out torso, out _))
                 {
-                    torso = rootCFrame * RbxR6Rig.RestOffsets[(int)RbxR6Part.Torso];
+                    torso = RbxR6Rig.Joints[0].Part1CFrame(rootCFrame, RbxCFrame.Identity, scale);
                 }
             }
             else
             {
-                torso = RbxR6Rig.Joints[0].Part1CFrame(rootCFrame, rig.Poser.GetTransform(0));
+                torso = RbxR6Rig.Joints[0].Part1CFrame(rootCFrame, rig.Poser.GetTransform(0), scale);
                 Drive(rig, (int)RbxR6Part.Torso);
                 _port.SetPose(torsoPart.Id, torso);
             }
@@ -327,7 +328,7 @@ namespace CoreAI.Mods.Rbx.Instances.CharacterRig
                 }
 
                 Drive(rig, slot);
-                _port.SetPose(limb.Id, RbxR6Rig.Joints[joint].Part1CFrame(torso, rig.Poser.GetTransform(joint)));
+                _port.SetPose(limb.Id, RbxR6Rig.Joints[joint].Part1CFrame(torso, rig.Poser.GetTransform(joint), scale));
             }
         }
 

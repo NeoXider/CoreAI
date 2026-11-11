@@ -27,7 +27,7 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
     /// WHY no jobs: the same code runs in a WebGL player, which has no worker threads, and a chunk
     /// meshes in a fraction of a millisecond; baking colliders off-thread is a desktop-only option.
     /// </remarks>
-    public sealed class RbxTerrainRenderer : IRbxTerrainRenderer, IRbxTerrainColliderReadiness
+    public sealed class RbxTerrainRenderer : IRbxTerrainRenderer, IRbxTerrainColliderReadiness, IRbxTerrainSolidCells
     {
         /// <summary>Material property the terrain copy sets to 1: read the exposure from the vertex colour's alpha.</summary>
         public const string SkyExposureSourceProperty = "_RbxSkyExposureSource";
@@ -112,6 +112,13 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
 
         /// <inheritdoc />
         public RbxTerrain Terrain => _terrain;
+
+        /// <inheritdoc />
+        public bool IsSolidCell(int x, int y, int z)
+        {
+            byte material = _terrain.Store.GetMaterial(x, y, z);
+            return material != TerrainMaterials.Air && material != TerrainMaterials.Water;
+        }
 
         /// <inheritdoc />
         public int PendingChunkCount => _dirtyFull.Count;

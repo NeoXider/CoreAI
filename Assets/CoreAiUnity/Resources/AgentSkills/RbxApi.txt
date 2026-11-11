@@ -298,6 +298,10 @@ alias).
 contents' bounding-box center). `model:PivotTo(cf)` rigidly moves every descendant PVInstance.
 Pivot/property writes need WorldEdit. BaseParts also support `GetPivot()` and `PivotTo(cf)`
 (which moves the part's descendants too), and so does `workspace.CurrentCamera` (a PVInstance).
+`model:ScaleTo(factor)` scales every descendant part's size and offset around the pivot; `ScaleTo(1)` restores
+the original exactly. `model:GetScale()` returns the factor. On a character it also scales the rig, the body
+the character collides with and the first-person eye height. `character:ScaleTo(1.44)` gives a block-game
+body: 1.8 blocks tall.
 
 ## Error messages
 

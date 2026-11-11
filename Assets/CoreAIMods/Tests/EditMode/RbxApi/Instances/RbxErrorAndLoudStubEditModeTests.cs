@@ -168,7 +168,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [TestCase("Model", "TranslateBy", "Model", true)]
         [TestCase("Model", "GetBoundingBox", "Model", true)]
         [TestCase("Model", "GetExtentsSize", "Model", true)]
-        [TestCase("Model", "ScaleTo", "Model", true)]
         [TestCase("Model", "SetPrimaryPartCFrame", "Model", true)]
         [TestCase("Workspace", "GetPartBoundsInBox", "WorldRoot", true)]
         [TestCase("Workspace", "GetPartsInPart", "WorldRoot", true)]

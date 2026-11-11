@@ -14,7 +14,7 @@ Seven **UPM packages** are available for Unity. The base is `coreai` + `coreaiun
 | `com.neoxider.coreaimcp` | MCP server inside the running game; an external MCP client connects to it | `coreaiunity` + `coreaimods` |
 | `com.neoxider.coreaimirror` | Optional networked-world transport | `coreai` + `coreaimods`, Mirror separately |
 
-Mirror is connected via URL `https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAIMirror`. An installed Mirror with the `MIRROR` symbol is required; the package does not include Mirror itself. See the [package manifest](Assets/CoreAIMirror/package.json).
+Mirror is connected via URL `https://github.com/NeoXider/CoreAI.git?path=Assets/CoreAIMirror`. An installed Mirror with the `MIRROR` symbol is required; the package does not include Mirror itself. The transport is compiled and its tests run against Mirror 96.11.4 (the official release package, installed under `Assets/Mirror` without its Examples); 96.0.1 was the version before. See the [package manifest](Assets/CoreAIMirror/package.json).
 
 A Git URL without `#tag` tracks the branch. For a reproducible install, pin the packages to one existing tag from the repository. Current versions are in `package.json`, published changes in the [changelog](Assets/CoreAI/CHANGELOG.md); Unreleased is not a finished release.
 

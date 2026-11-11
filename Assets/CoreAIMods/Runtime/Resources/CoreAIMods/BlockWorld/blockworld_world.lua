@@ -1,12 +1,12 @@
 --[[@coreai
 id: blockworld_world
 name: Block World 1 - World
-version: 1.3.3
+version: 1.5.0
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo (the eight mods of the Samples/Block World folder; turn the whole folder on). Generates a seeded voxel world in workspace.Terrain - islands and coasts with sandy beaches, grass lowlands, hills, rocky ridges and snowy peaks, lakes, woods and single trees of three shapes, winding caves with chambers and mouths that open onto hillsides (flooded below the sea level at the shore), and an unbreakable bedrock floor - and streams it around the player in budgeted steps: the spawn's column first, then what the camera faces. The spawn and the first heading are chosen so the first view shows a peak, water and a wood. The same seed always gives the same world; set the workspace attribute BlockWorldSeed before the mod loads to pick another. Generation only fills empty cells, so a saved build is never overwritten.
+description: Part of the Block World demo (the nine mods of the Samples/Block World folder; turn the whole folder on). Generates a seeded voxel world in workspace.Terrain - islands and coasts with sandy beaches, grass lowlands, hills, rocky ridges and snowy peaks, lakes, woods and single trees of three shapes, winding caves with chambers and mouths that open onto hillsides (flooded below the sea level at the shore), and an unbreakable bedrock floor - and streams it around the player in budgeted steps: the spawn's column first, then what the camera faces. The spawn and the first heading are chosen so the first view shows a peak, water and a wood. The same seed always gives the same world; set the workspace attribute BlockWorldSeed before the mod loads to pick another. Generation only fills empty cells, so a saved build is never overwritten. Each character gets a block game's body: 1.8 blocks tall, a jump of 1.25 blocks and a walk of 4.3 blocks a second.
 ]]
 
 -- How it works. The world is cut into columns of 16 x 32 x 16 cells (one Terrain chunk wide, two
@@ -46,7 +46,7 @@ local ROCK_FROM = 9             -- a surface this high (or this steep: STEEP) is
 local STEEP = 3                 -- rows to the lowest neighbour that make a surface a rock face
 local WATER = -2                -- top row of the sea
 local SHORE = WATER + 1         -- pillars this low get sand instead of grass
-local VIEW_RADIUS = 4           -- columns streamed around the player
+local VIEW_RADIUS = 8           -- columns streamed around the player (512 studs); the demo module sets 6 in WebGL
 local HEIGHT_BUDGET = 32        -- surface heights one frame may sample (each reads five noises)
 -- WHY 220: a cell costs about 16 instructions, so the fullest frame stays near 4,000 of the 5,000 (half the default
 -- resume budget) the tests hold every streaming step to.
@@ -57,6 +57,11 @@ local OPENING_COLUMNS = 4       -- columns made before a new player is let go: t
 local OPENING_SECONDS = 6       -- the longest a new player waits for them
 local PROBE_BUDGET = 1          -- "is this column already generated?" reads per frame (each scans the radius)
 local LOOK_PULL = 0.5           -- columns a column straight ahead of the camera counts as nearer
+-- WHY several steps a frame, each in a handler of its own: every Heartbeat handler runs in its own resume with its own
+-- instruction budget, so a step stays the size the budget tests hold it to while a quick machine runs more of them.
+local MAX_WORKERS = 8           -- generation steps a frame at most
+local LUA_MS_TARGET = 3         -- milliseconds of generation a frame may spend while frames are quick
+local FRAME_MS_LIMIT = 12       -- frames slower than this make the generation back off to one step a frame
 local SPAWN_SEARCH = 24         -- rings of pillars searched for land around the middle of the first column
 -- WHY the middle: a player standing there sees a whole column of ground around them at once, while the columns
 -- beyond it are still being made.
@@ -175,8 +180,9 @@ local function caveRows(x, z, h)
     local half = chamber and CHAMBER_HALF or CAVE_HALF
     local width = chamber and CHAMBER or TUNNEL
     local top = centre + half
+    -- WHY two rows of rock kept under a shore: its sand must rest on something, or it would fall into the cave.
     if h <= SHORE + 1 then
-        top = math.min(top, h - 4)
+        top = math.min(top, h - 5)
     end
     local rows = nil
     for y = math.max(centre - half, BOTTOM + 2), top do
@@ -558,45 +564,87 @@ end
 -- column in front of the camera counts as up to LOOK_PULL columns nearer, so the view fills in before what is
 -- behind the player (ties: lowest dx, then dz).
 local sqrt = math.sqrt
-local function nextMissing(center)
-    local fx = center.X / (CHUNK * CELL)
-    local fz = center.Z / (CHUNK * CELL)
-    local ccx, ccz = math.floor(fx), math.floor(fz)
-    fx, fz = fx - ccx, fz - ccz
-    if not generated[columnKey(ccx, ccz)] then
-        return ccx, ccz
+-- WHY a ring scan with a memory: at radius 8 a scan of every column costs more than a step may; the rings are read
+-- outward from the first one still missing a column, and the scan stops once no farther ring can beat the best.
+local scanCentre, scanFrom = nil, 0
+
+-- The direction that pulls columns nearer: the way the player walks when it walks, else the way the camera looks.
+local function pullDirection()
+    local root = rootPart(localCharacter())
+    if root then
+        local ok, velocity = pcall(function()
+            return root.AssemblyLinearVelocity
+        end)
+        if ok and typeof(velocity) == "Vector3" then
+            local flat = math.sqrt(velocity.X * velocity.X + velocity.Z * velocity.Z)
+            if flat > 2 then
+                return LOOK_PULL * velocity.X / flat, LOOK_PULL * velocity.Z / flat
+            end
+        end
     end
-    local lookX, lookZ = 0, 0
     local camera = workspace.CurrentCamera
     if camera then
         local look = camera.CFrame.LookVector
         local flat = math.sqrt(look.X * look.X + look.Z * look.Z)
         if flat > 0.1 then
-            lookX, lookZ = LOOK_PULL * look.X / flat, LOOK_PULL * look.Z / flat
+            return LOOK_PULL * look.X / flat, LOOK_PULL * look.Z / flat
         end
     end
+    return 0, 0
+end
+
+local function nextMissing(center)
+    local fx = center.X / (CHUNK * CELL)
+    local fz = center.Z / (CHUNK * CELL)
+    local ccx, ccz = math.floor(fx), math.floor(fz)
+    fx, fz = fx - ccx, fz - ccz
+    local centreKey = columnKey(ccx, ccz)
+    if centreKey ~= scanCentre then
+        scanCentre, scanFrom = centreKey, 1
+    end
+    if not generated[centreKey] then
+        return ccx, ccz
+    end
+    local lookX, lookZ = pullDirection()
     local bestX, bestZ, bestScore = nil, nil, math.huge
     local limit = viewRadius * viewRadius + 1
-    for dx = -viewRadius, viewRadius do
-        for dz = -viewRadius, viewRadius do
-            local distance = dx * dx + dz * dz
-            if distance <= limit then
-                local ex = dx - fx
-                if ex < 0 then
-                    ex = math.max(fx - dx - 1, 0)
-                end
-                local ez = dz - fz
-                if ez < 0 then
-                    ez = math.max(fz - dz - 1, 0)
-                end
-                local tx, tz = dx + 0.5 - fx, dz + 0.5 - fz
-                local score = ex + ez - (tx * lookX + tz * lookZ) / sqrt(tx * tx + tz * tz)
-                if score < bestScore and not generated[columnKey(ccx + dx, ccz + dz)] then
-                    bestX, bestZ, bestScore = ccx + dx, ccz + dz, score
-                end
-            end
+    local firstMissing = nil
+    local function consider(dx, dz)
+        if dx * dx + dz * dz > limit or generated[columnKey(ccx + dx, ccz + dz)] then
+            return
+        end
+        local ex = dx - fx
+        if ex < 0 then
+            ex = math.max(fx - dx - 1, 0)
+        end
+        local ez = dz - fz
+        if ez < 0 then
+            ez = math.max(fz - dz - 1, 0)
+        end
+        local tx, tz = dx + 0.5 - fx, dz + 0.5 - fz
+        local score = ex + ez - (tx * lookX + tz * lookZ) / sqrt(tx * tx + tz * tz)
+        if score < bestScore then
+            bestX, bestZ, bestScore = ccx + dx, ccz + dz, score
         end
     end
+    for ring = scanFrom, viewRadius do
+        if bestScore < ring - 1 - LOOK_PULL then
+            break
+        end
+        local before = bestScore
+        for dx = -ring, ring do
+            consider(dx, -ring)
+            consider(dx, ring)
+        end
+        for dz = -ring + 1, ring - 1 do
+            consider(-ring, dz)
+            consider(ring, dz)
+        end
+        if firstMissing == nil and bestScore ~= before then
+            firstMissing = ring
+        end
+    end
+    scanFrom = firstMissing or (viewRadius + 1)
     return bestX, bestZ
 end
 
@@ -742,12 +790,49 @@ workspace:SetAttribute("BlockWorldSpawnLook", spawnLook)
 
 local ready = false
 
+-- A block game's body: 1.8 blocks tall (7.2 studs, the eyes at 6.5), a jump of 1.25 blocks, a walk of 4.3 blocks
+-- a second. WHY here: the body is shaped before it is placed, so the placement measures the body the player has.
+local BODY_SCALE = 1.44
+local JUMP_HEIGHT = 5
+local WALK_SPEED = 17
+
+local function shapeBody(character)
+    pcall(function()
+        character:ScaleTo(BODY_SCALE)
+    end)
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        humanoid.UseJumpPower = false
+        humanoid.JumpHeight = JUMP_HEIGHT
+        humanoid.WalkSpeed = WALK_SPEED
+    end
+end
+
+-- The lowest point of a character's own parts: its feet.
+local function feetOf(character)
+    local low = nil
+    for _, part in ipairs(character:GetChildren()) do
+        if part:IsA("BasePart") then
+            local bottom = part.Position.Y - part.Size.Y / 2
+            low = low and math.min(low, bottom) or bottom
+        end
+    end
+    return low
+end
+
 -- Until the first view exists the character waits at the spawn, anchored, instead of falling into the void.
 local function moveToSpawn(character)
     if not character then
         return
     end
+    shapeBody(character)
     character:PivotTo(CFrame.lookAt(spawn, spawn + spawnLook))
+    -- WHY by the feet: BlockWorldSpawn is 4 studs above the spawn's ground; the feet go half a stud above it,
+    -- whatever the body's size.
+    local feet = feetOf(character)
+    if feet then
+        character:PivotTo(character:GetPivot() + Vector3.new(0, spawn.Y - 3.5 - feet, 0))
+    end
     local root = rootPart(character)
     if root and not opened then
         pcall(function()
@@ -779,6 +864,7 @@ local function placeCharacter(character)
     if not root then
         return
     end
+    shapeBody(character)
     if not isGenerated(spawnColumnX, spawnColumnZ) or root.Position.Y < FALL_FLOOR or insideBlock(root.Position) then
         moveToSpawn(character)
     end
@@ -809,6 +895,45 @@ end
 
 local fallCheck = 0
 local openingWait = 0
+local workers = 1
+local frameMs, generationMs, lastFrameAt = 0, 0, nil
+
+-- One step of streaming: choosing the next column (a step of its own), or one budgeted phase of the column in hand.
+local function streamStep()
+    if stopped then
+        return
+    end
+    local started = os.clock()
+    if job == nil then
+        local center = streamCenter()
+        for _ = 1, PROBE_BUDGET do
+            local cx, cz = nextMissing(center)
+            if cx == nil then
+                becomeOpened()
+                break
+            end
+            if isGenerated(cx, cz) then
+                generated[columnKey(cx, cz)] = true
+                columnsKnown = columnsKnown + 1
+            else
+                job = newJob(cx, cz)
+                break
+            end
+        end
+    else
+        local ok, finishedOrError = pcall(stepJob, job, HEIGHT_BUDGET, PILLAR_BUDGET)
+        if not ok then
+            stopStreaming(tostring(finishedOrError))
+        elseif finishedOrError then
+            finishColumn(job)
+            job = nil
+            becomeReady()
+        end
+    end
+    generationMs = generationMs + (os.clock() - started) * 1000
+    workspace:SetAttribute("BlockWorldWorkers", workers)
+end
+
 RunService.Heartbeat:Connect(function(dt)
     if ready and not opened then
         openingWait = openingWait + dt
@@ -827,37 +952,26 @@ RunService.Heartbeat:Connect(function(dt)
         end
     end
 
-    if stopped then
-        return
-    end
-
-    -- WHY a frame of its own: choosing the next column scans the whole view radius, so its first step waits for
-    -- the next frame and the two never share one frame's budget.
-    if job == nil then
-        local center = streamCenter()
-        for _ = 1, PROBE_BUDGET do
-            local cx, cz = nextMissing(center)
-            if cx == nil then
-                becomeOpened()
-                return
-            end
-            if isGenerated(cx, cz) then
-                generated[columnKey(cx, cz)] = true
-                columnsKnown = columnsKnown + 1
-            else
-                job = newJob(cx, cz)
-                return
-            end
+    -- WHY the workers adapt here, once a frame: the frame's own length is measured between two Heartbeats, and
+    -- the generation's share of it is what the steps of the last frame spent.
+    local now = os.clock()
+    if lastFrameAt then
+        frameMs = frameMs * 0.8 + (now - lastFrameAt) * 1000 * 0.2
+        if frameMs > FRAME_MS_LIMIT or generationMs > LUA_MS_TARGET then
+            workers = math.max(1, workers - 1)
+        elseif generationMs < LUA_MS_TARGET * 0.7 then
+            workers = math.min(MAX_WORKERS, workers + 1)
         end
-        return
     end
-
-    local ok, finishedOrError = pcall(stepJob, job, HEIGHT_BUDGET, PILLAR_BUDGET)
-    if not ok then
-        stopStreaming(tostring(finishedOrError))
-    elseif finishedOrError then
-        finishColumn(job)
-        job = nil
-        becomeReady()
-    end
+    lastFrameAt = now
+    generationMs = 0
+    streamStep()
 end)
+
+for index = 2, MAX_WORKERS do
+    RunService.Heartbeat:Connect(function()
+        if index <= workers then
+            streamStep()
+        end
+    end)
+end

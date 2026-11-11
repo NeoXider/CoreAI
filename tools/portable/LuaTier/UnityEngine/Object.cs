@@ -16,6 +16,12 @@ namespace UnityEngine
             set => throw PortableEngine.Unavailable("Object.name");
         }
 
+        public HideFlags hideFlags
+        {
+            get => throw PortableEngine.Unavailable("Object.hideFlags");
+            set => throw PortableEngine.Unavailable("Object.hideFlags");
+        }
+
         public EntityId GetEntityId()
         {
             throw PortableEngine.Unavailable("Object.GetEntityId");
@@ -35,6 +41,21 @@ namespace UnityEngine
         {
             throw PortableEngine.Unavailable("Object.DestroyImmediate");
         }
+    }
+
+    /// <summary>Unity's object hide flags, with Unity's numeric values.</summary>
+    [Flags]
+    public enum HideFlags
+    {
+        None = 0,
+        HideInHierarchy = 1,
+        HideInInspector = 2,
+        DontSaveInEditor = 4,
+        NotEditable = 8,
+        DontSaveInBuild = 16,
+        DontUnloadUnusedAsset = 32,
+        DontSave = 52,
+        HideAndDontSave = 61
     }
 
     [AttributeUsage(AttributeTargets.Field)]

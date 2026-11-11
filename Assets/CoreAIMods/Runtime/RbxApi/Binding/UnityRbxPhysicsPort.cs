@@ -31,6 +31,7 @@ namespace CoreAI.Mods.Rbx.Binding
 
         private readonly InstanceGameObjectBinder _binder;
         private readonly List<Rigidbody> _bodyScratch = new();
+        private readonly List<Collider> _colliderScratch = new();
         private RaycastHit[] _hitScratch = new RaycastHit[32];
         private Vector3 _gravityMetres =
             new(0f, -RbxSpace.AccelerationToUnity((float)RbxWorldPhysics.DefaultGravity), 0f);
@@ -87,6 +88,10 @@ namespace CoreAI.Mods.Rbx.Binding
                 }
 
                 terrain?.EnsureColliders(SweptBounds(body));
+                if (TerrainHits is CoreAI.Mods.Rbx.Binding.Terrain.IRbxTerrainSolidCells cells)
+                {
+                    LiftOutOfTerrain(body, cells);
+                }
 
                 // WHY Acceleration rather than Force: it is mass-independent, so a part's weight
                 // cannot change how fast it falls — matching Roblox, where Gravity is an
@@ -96,12 +101,39 @@ namespace CoreAI.Mods.Rbx.Binding
             }
         }
 
-        /// <summary>The body's collider box, stretched along two steps of its velocity and grown by a Terrain cell.</summary>
-        private static Bounds SweptBounds(Rigidbody body)
+        /// <summary>
+        /// The body's enabled colliders together, stretched along two steps of its velocity and grown by two Terrain
+        /// cells.
+        /// </summary>
+        /// <remarks>
+        /// WHY every enabled collider and not the first: a character's root keeps its switched-off box as its first
+        /// collider and collides with the body capsule its motor added; the box's empty bounds left the cells the
+        /// body was about to enter without colliders.
+        /// </remarks>
+        private Bounds SweptBounds(Rigidbody body)
         {
-            Bounds bounds = body.TryGetComponent(out Collider collider)
-                ? collider.bounds
-                : new Bounds(body.position, Vector3.zero);
+            _colliderScratch.Clear();
+            body.GetComponents(_colliderScratch);
+            Bounds bounds = new(body.position, Vector3.zero);
+            bool found = false;
+            foreach (Collider collider in _colliderScratch)
+            {
+                if (collider == null || !collider.enabled)
+                {
+                    continue;
+                }
+
+                if (!found)
+                {
+                    bounds = collider.bounds;
+                    found = true;
+                }
+                else
+                {
+                    bounds.Encapsulate(collider.bounds);
+                }
+            }
+
             Vector3 travel = body.linearVelocity * (Time.fixedDeltaTime * 2f);
             Vector3 min = bounds.min;
             Vector3 max = bounds.max;
@@ -109,6 +141,56 @@ namespace CoreAI.Mods.Rbx.Binding
             bounds.Encapsulate(max + travel);
             bounds.Expand(RbxSpace.LengthToUnity((float)Instances.Terrain.TerrainBoxRasterizer.CellStuds) * 2f);
             return bounds;
+        }
+
+        /// <summary>
+        /// Lifts a character whose feet are inside a solid Terrain cell to the top of that column's solid run (up
+        /// to four cells), and stops it falling further into it.
+        /// </summary>
+        /// <remarks>
+        /// WHY only characters and only up: a chunk collider is a surface, so a body that got inside a block (a
+        /// block placed on the player, a collider built a step late) feels nothing there and stays stuck; a
+        /// player expects to stand on the block, as in a block game. A plain part keeps the physics it has.
+        /// </remarks>
+        private static void LiftOutOfTerrain(Rigidbody body,
+            CoreAI.Mods.Rbx.Binding.Terrain.IRbxTerrainSolidCells cells)
+        {
+            if (!UnityRbxCharacterMotor.TryGetFeet(body, out float feetY))
+            {
+                return;
+            }
+
+            float cell = (float)Instances.Terrain.TerrainBoxRasterizer.CellStuds;
+            RbxVector3 feet = RbxSpace.FromUnity(new Vector3(body.position.x, feetY, body.position.z));
+            int x = Mathf.FloorToInt(feet.X / cell);
+            int z = Mathf.FloorToInt(feet.Z / cell);
+            // WHY a tenth of a cell above the feet: a body resting on a block touches its top face, and that
+            // contact must not count as being inside it.
+            int y = Mathf.FloorToInt((feet.Y + cell * 0.1f) / cell);
+            if (!cells.IsSolidCell(x, y, z))
+            {
+                return;
+            }
+
+            int free = y + 1;
+            while (free <= y + 4 && cells.IsSolidCell(x, free, z))
+            {
+                free++;
+            }
+
+            if (free > y + 4)
+            {
+                return;
+            }
+
+            float lift = RbxSpace.LengthToUnity(free * cell - feet.Y) + 0.01f;
+            body.position += new Vector3(0f, lift, 0f);
+            Vector3 velocity = body.linearVelocity;
+            if (velocity.y < 0f)
+            {
+                velocity.y = 0f;
+                body.linearVelocity = velocity;
+            }
         }
 
         /// <inheritdoc />

@@ -102,6 +102,52 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
             _world.AssertHealthy("blockworld_build", Mod);
         }
 
+        // WHY these numbers: a cell is 4 studs, the floor's top is row 0 (y 4), the wall block is cell (5, 1, 5); a wall
+        // torch's foot is on the wall's face 1 stud above its cell's floor and it leans 22.5 degrees out; a floor torch
+        // stands on the middle of its cell; the stick is 2.2 long and the flame sits on its tip.
+        [TestCase(0, 1, 0, 0, 1, 0, 2f, 4f, 2f, TestName = "P6_Torches_OnAFloor_StandUpright_OnTheCellsMiddle")]
+        [TestCase(6, 1, 5, 1, 0, 0, 24f, 5f, 22f, TestName = "P6_Torches_OnAnEastFace_LeanOut_WithTheFootOnTheWall")]
+        [TestCase(4, 1, 5, -1, 0, 0, 20f, 5f, 22f, TestName = "P6_Torches_OnAWestFace_LeanOut_WithTheFootOnTheWall")]
+        [TestCase(5, 1, 6, 0, 0, 1, 22f, 5f, 24f, TestName = "P6_Torches_OnANorthFace_LeanOut_WithTheFootOnTheWall")]
+        [TestCase(5, 1, 4, 0, 0, -1, 22f, 5f, 20f, TestName = "P6_Torches_OnASouthFace_LeanOut_WithTheFootOnTheWall")]
+        public void P6_Torches_SitOnTheirBlock_AsInABlockGame(int x, int y, int z, int nx, int ny, int nz, float footX,
+            float footY, float footZ)
+        {
+            _world.Terrain.Store.SetCell(5, 1, 5, BlockWorldTestWorld.Slot("Rock"), 255);
+            _world.Load(Mod);
+            _world.SetAttribute("CrosshairHasTarget", true);
+            _world.SetAttribute("CrosshairPlaceCell", new RbxVector3(x, y, z));
+            _world.SetAttribute("CrosshairNormal", new RbxVector3(nx, ny, nz));
+            _world.SetAttribute("CrosshairPartName", "");
+            _world.Click(RightButton);
+
+            string key = x + "_" + y + "_" + z;
+            _world.LoadSource("test_torch_shape", "local folder = workspace.BlockWorldTorches "
+                                                  + "local stick = folder:FindFirstChild('Torch_" + key + "') "
+                                                  + "local flame = folder:FindFirstChild('TorchFlame_" + key + "') "
+                                                  + "workspace:SetAttribute('TestUp', stick.CFrame.UpVector) "
+                                                  + "workspace:SetAttribute('TestFoot', (stick.CFrame * CFrame.new(0, -1.1, 0)).Position) "
+                                                  + "workspace:SetAttribute('TestTip', (stick.CFrame * CFrame.new(0, 1.1, 0)).Position) "
+                                                  + "workspace:SetAttribute('TestFlame', flame.Position) "
+                                                  + "workspace:SetAttribute('TestLit', flame:FindFirstChildOfClass('PointLight') ~= nil)");
+            RbxVector3 up = (RbxVector3)_world.Attribute("TestUp");
+            RbxVector3 foot = (RbxVector3)_world.Attribute("TestFoot");
+            RbxVector3 tip = (RbxVector3)_world.Attribute("TestTip");
+            RbxVector3 flame = (RbxVector3)_world.Attribute("TestFlame");
+            float lean = (float)System.Math.Sin(22.5d * System.Math.PI / 180d);
+            float rise = ny > 0 ? 1f : (float)System.Math.Cos(22.5d * System.Math.PI / 180d);
+
+            Assert.AreEqual(footX, foot.X, 0.02f, "the foot's x");
+            Assert.AreEqual(footY, foot.Y, 0.02f, "the foot's height");
+            Assert.AreEqual(footZ, foot.Z, 0.02f, "the foot's z");
+            Assert.AreEqual(rise, up.Y, 0.01f, ny > 0 ? "upright on a floor" : "leaning 22.5 degrees from upright");
+            Assert.AreEqual(ny > 0 ? 0f : lean, up.X * nx + up.Z * nz, 0.01f, "leaning away from the wall, never into it");
+            Assert.AreEqual(0f, up.X * nz - up.Z * nx, 0.01f, "and not sideways along it");
+            Assert.Less((flame - (tip + up * 0.2f)).Magnitude, 0.02f, "the flame sits on the tip");
+            Assert.AreEqual(true, _world.Attribute("TestLit"), "the light is in the flame");
+            _world.AssertHealthy(Mod);
+        }
+
         [Test]
         public void P6_Torches_TheLightBudget_RefusesThe49thTorch_AndTakingOneBackFreesAPlace()
         {

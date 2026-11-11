@@ -37,6 +37,16 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
     }
 
     /// <summary>
+    /// Answers whether a Terrain cell is solid, so the physics port can lift a character whose feet ended up
+    /// inside a block (a block placed on it, a collider built under it a step late) back on top.
+    /// </summary>
+    public interface IRbxTerrainSolidCells
+    {
+        /// <summary>True when cell (x, y, z) holds a material other than Air and Water.</summary>
+        bool IsSolidCell(int x, int y, int z);
+    }
+
+    /// <summary>
     /// The Unity face of one Terrain: turns changed chunks into rendered, colliding meshes under a
     /// per-frame budget. The default is <see cref="RbxTerrainRenderer"/>; a host that wants another look
     /// (a texture-array material, smooth meshing) supplies its own through

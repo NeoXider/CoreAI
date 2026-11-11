@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_hud
 name: Block World 3 - HUD and hotbar
-version: 1.2.1
+version: 1.2.2
 active: false
 capabilities: All
 category: Samples/Block World
@@ -51,7 +51,8 @@ end
 -- The key legend: what a new player needs on screen, one key per line.
 local LEGEND = {
     { "Left click", "break" }, { "Right click", "place" }, { "1-9, wheel", "choose a block" },
-    { "WASD, Space", "walk, jump" }, { "Space twice", "fly" }, { "T", "talk to the AI" },
+    { "WASD, Space", "walk, jump" }, { "Ctrl, W twice", "sprint" }, { "Space twice", "fly" },
+    { "T", "talk to the AI" },
     { "E", "talk to a villager" }, { "P", "autopilot" }, { "L", "time of day" }, { "G", "creative or survival" },
 }
 

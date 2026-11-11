@@ -423,6 +423,10 @@ namespace UnityEngine
         public Vector3 extents => m_Extents;
 
         public Vector3 size => m_Extents * 2.0F;
+
+        public Vector3 min => new(m_Center.x - m_Extents.x, m_Center.y - m_Extents.y, m_Center.z - m_Extents.z);
+
+        public Vector3 max => new(m_Center.x + m_Extents.x, m_Center.y + m_Extents.y, m_Center.z + m_Extents.z);
     }
 
     /// <summary>Compile-time surface of <c>UnityEngine.ColorUtility</c>; its parser is native and refused.</summary>

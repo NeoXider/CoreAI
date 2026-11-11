@@ -50,5 +50,23 @@ namespace CoreAI.Mods.Rbx.Instances.CharacterRig
         {
             return part0 * C0 * transform * C1Inverse;
         }
+
+        /// <summary>
+        /// <see cref="Part1CFrame(RbxCFrame, RbxCFrame)"/> for a rig scaled by <paramref name="scale"/>
+        /// (<c>Model:ScaleTo</c>): the joint's offsets, the positions of C0 and C1, grow with the scale, as the
+        /// mirror scales joint lengths; the angles do not.
+        /// </summary>
+        public RbxCFrame Part1CFrame(RbxCFrame part0, RbxCFrame transform, double scale)
+        {
+            if (scale == 1d)
+            {
+                return Part1CFrame(part0, transform);
+            }
+
+            float factor = (float)scale;
+            RbxCFrame c0 = C0.Rotation + C0.Position * factor;
+            RbxCFrame c1 = C1.Rotation + C1.Position * factor;
+            return part0 * c0 * transform * c1.Inverse();
+        }
     }
 }

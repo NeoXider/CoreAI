@@ -56,7 +56,15 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
   Recorded deviations: the RootJoint lifts the Torso one leg length above the root, because the root's
   box rests on the floor where Roblox's Humanoid holds the root at hip height; a part the rig holds
   pushes nothing (the Unity binder runs it as a kinematic trigger), so the root stays the only
-  collider; limbs are posed at PreRender, so a Heartbeat handler reads last frame's limb pose; a dead
+  collider. In Unity the root collides through a body capsule (`RbxCharacterBodyShape`). It reaches from the
+  root's bottom face to the head's top and is 0.4 × the root's width in radius: 5 × 1.6 studs at the default
+  size. Its material is frictionless while the character walks, jumps or falls, so it slides along walls and
+  over block edges. It grips while the character stands on the ground with nothing to walk to.
+  `Model:ScaleTo(factor)` and `Model:GetScale()` scale every part's size and its offset from the model's
+  pivot. The scale-1 geometry is remembered, so `ScaleTo(1)` restores exactly. The rig scales its joint
+  offsets by the factor, the capsule follows the root's size, and the first-person eye follows the head.
+  `ScaleTo(1.44)` makes a block-game character: 1.8 blocks tall, eyes at 1.62 blocks. Limbs are posed at
+  PreRender, so a Heartbeat handler reads last frame's limb pose; a dead
   character holds its last pose (no BreakJointsOnDeath). Not implemented yet: `Motor6D`/`Weld`
   joints, `Animator`/`Animation`/`AnimationTrack` and `Humanoid:LoadAnimation` (MVP17), seats,
   appearance loading. The network transport is the optional `com.neoxider.coreaimirror` package, not

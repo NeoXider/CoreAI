@@ -555,6 +555,12 @@ Owner's questions and decisions on the Block World (2026-11-11):
       the client composition (MVP4 C5), and a Mirror run under `MIRROR` on 96.11.4.
 - [ ] **WebGL build of the Block World with a launcher and fps numbers** (owner request), after the visual
       fixes and after the Lua VM update to 0.5.8 is in.
+- [ ] **Paste an image from the clipboard into the chat with the agent** (owner request, 2026-11-12, "not
+      now"): Ctrl+V in the Hub chat and in the in-world chat attaches the clipboard's picture to the message, for
+      something copied from the web or a screenshot just taken. Needs: a clipboard image reader per platform (the
+      desktop players and the Editor; in a WebGL player the browser's paste event and `navigator.clipboard.read`,
+      which asks the user for permission), a preview chip with a remove control before sending, the size and
+      count limits the image attachments already have, and the same path to the model as an attached file.
 
 Lua runtime and performance (P19):
 

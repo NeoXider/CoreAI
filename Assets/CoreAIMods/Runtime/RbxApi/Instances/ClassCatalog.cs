@@ -1119,11 +1119,6 @@ namespace CoreAI.Mods.Rbx.Instances
                 RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
                     "GetExtentsSize",
                     "compute the extents from each part's CFrame and Size"),
-                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
-                    "ScaleTo",
-                    "scale each part's Size and its offset from model:GetPivot() explicitly"),
-                RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
-                    "GetScale", "keep the scale factor in an attribute"),
                 RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
                     "ModelStreamingMode", streamingWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod(

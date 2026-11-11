@@ -154,7 +154,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: CoreAI.Demos::CoreAI.Demos.BlockWorld.BlockWorldDemoModule
   modFolder: Samples/Block World
   allowAgentsFromLua: 1
-  webGlViewRadius: 3
+  webGlViewRadius: 6
 --- !u!114 &108262698
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -1,12 +1,12 @@
 --[[@coreai
 id: blockworld_torches
 name: Block World 5 - Torches
-version: 1.0.0
+version: 1.1.0
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo. With the torch in your hand (slot 9), right click puts a torch on the floor or a wall you look at; each carries a flickering PointLight and a glowing flame, so caves and nights can be lit. Left click on a torch takes it back, and a torch whose block is broken drops. The light budget is explicit - at most 48 lit torches from this mod, and a notice says so when it is full; on top of that the host's own light budget applies (desktop Forward+ keeps 64 lights, the WebGL tier keeps the 8 nearest on and reports it).
+description: Part of the Block World demo. With the torch in your hand (slot 9), right click puts a torch on the floor or a wall you look at - upright on the middle of a floor, or leaning out from a wall with its foot on the wall, as in a block game; each carries a flickering PointLight and a glowing flame, so caves and nights can be lit. Left click on a torch takes it back, and a torch whose block is broken drops. The light budget is explicit - at most 48 lit torches from this mod, and a notice says so when it is full; on top of that the host's own light budget applies (desktop Forward+ keeps 64 lights, the WebGL tier keeps the 8 nearest on and reports it).
 ]]
 
 -- Torches are Parts, not Terrain cells: a cell holds only a material, while a torch needs a light and a flame.
@@ -26,6 +26,11 @@ local FLICKERS_PER_FRAME = 12   -- torches whose flame flickers each frame
 local LIGHT_RANGE = 26
 local LIGHT_BRIGHTNESS = 2.2
 local LIGHT_COLOR = Color3.fromRGB(255, 196, 120)
+local STICK_LENGTH = 2.2
+local STICK_WIDTH = 0.4
+local FLAME_SIZE = 0.6
+local WALL_LEAN = math.rad(22.5) -- a wall torch leans this far out from the wall
+local WALL_FOOT = 1             -- studs above the cell's floor where a wall torch's foot meets the wall
 
 local torches = {}              -- array of { cell, support, stick, flame, light, name }
 local byName = {}               -- part name -> torch
@@ -101,18 +106,28 @@ local function placeTorch(cell, normal)
         return nil
     end
 
+    -- WHY a foot and an axis: on a floor the stick stands on the middle of the cell's floor, straight up; on a wall its
+    -- foot is on the wall's face and it leans out by WALL_LEAN, so it reads as fixed to the wall, not hanging by it.
     local center = terrain:CellCenterToWorld(cell.X, cell.Y, cell.Z)
-    local stickPosition
+    local foot, stickCFrame
     if normal.Y > 0.5 then
-        stickPosition = center - Vector3.new(0, CELL / 2 - 1.1, 0)
+        foot = center - Vector3.new(0, CELL / 2, 0)
+        stickCFrame = CFrame.new(foot + Vector3.new(0, STICK_LENGTH / 2, 0))
     else
-        stickPosition = center - normal * (CELL / 2 - 0.35) - Vector3.new(0, 0.3, 0)
+        local outward = Vector3.new(normal.X, 0, normal.Z).Unit
+        foot = center - outward * (CELL / 2) + Vector3.new(0, WALL_FOOT - CELL / 2, 0)
+        local axis = Vector3.new(0, 1, 0):Cross(outward)
+        local tilt = CFrame.fromAxisAngle(axis, WALL_LEAN)
+        stickCFrame = CFrame.new(foot) * tilt * CFrame.new(0, STICK_LENGTH / 2, 0)
     end
     local name = "Torch_" .. key
-    local stick = newPart(name, Vector3.new(0.4, 2.2, 0.4), stickPosition, Enum.Material.WoodPlanks,
-        Color3.fromRGB(110, 76, 44))
-    local flame = newPart("TorchFlame_" .. key, Vector3.new(0.6, 0.6, 0.6), stickPosition + Vector3.new(0, 1.35, 0),
-        Enum.Material.Neon, Color3.fromRGB(255, 170, 60))
+    local stick = newPart(name, Vector3.new(STICK_WIDTH, STICK_LENGTH, STICK_WIDTH), stickCFrame.Position,
+        Enum.Material.WoodPlanks, Color3.fromRGB(110, 76, 44))
+    stick.CFrame = stickCFrame
+    -- WHY on the tip: the flame sits on the stick's end, turned with it, and carries the light.
+    local flame = newPart("TorchFlame_" .. key, Vector3.new(FLAME_SIZE, FLAME_SIZE, FLAME_SIZE),
+        stickCFrame.Position, Enum.Material.Neon, Color3.fromRGB(255, 170, 60))
+    flame.CFrame = stickCFrame * CFrame.new(0, STICK_LENGTH / 2 + FLAME_SIZE / 2 - 0.1, 0)
     local light = Instance.new("PointLight")
     light.Range = LIGHT_RANGE
     light.Brightness = LIGHT_BRIGHTNESS

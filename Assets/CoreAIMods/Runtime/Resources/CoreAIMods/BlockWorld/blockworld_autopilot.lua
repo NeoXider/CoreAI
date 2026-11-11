@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_autopilot
 name: Block World 7 - Autopilot
-version: 1.1.1
+version: 1.1.2
 active: false
 capabilities: All
 category: Samples/Block World
@@ -160,7 +160,14 @@ local function planShelter(root)
     else
         dz = look.Z >= 0 and 1 or -1
     end
-    local feet = terrain:WorldToCell(root.Position - Vector3.new(0, 2.5, 0))
+    -- WHY the body's lowest point: the root rests on the floor and the body may be scaled.
+    local low = root.Position.Y - root.Size.Y / 2
+    for _, part in ipairs(root.Parent:GetChildren()) do
+        if part:IsA("BasePart") then
+            low = math.min(low, part.Position.Y - part.Size.Y / 2)
+        end
+    end
+    local feet = terrain:WorldToCell(Vector3.new(root.Position.X, low + 0.5, root.Position.Z))
     local cx, cz = feet.X + dx * 3, feet.Z + dz * 3
     local floor = feet.Y
     for _ = 1, 6 do

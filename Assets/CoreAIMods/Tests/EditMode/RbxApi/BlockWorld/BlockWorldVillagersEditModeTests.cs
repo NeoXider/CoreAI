@@ -52,6 +52,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
             _world.Frame(150);
         }
 
+        /// <summary>The villagers' scale: the player's 1.8 blocks.</summary>
+        private const float Scale = 1.44f;
+
+        /// <summary>A root resting on a floor whose top face is at 8: its centre half its scaled height of 2 up.</summary>
+        private const double StandingY = 8d + Scale;
+
         private const string Brain = "idle, wander, greet, face_player, follow_player, go_home";
 
         private void TalkTo(string name)
@@ -111,7 +117,8 @@ workspace:SetAttribute('TestHairHeld', body.Hair.Anchored and not body.Hair.CanC
 
             Assert.AreEqual(6d, _world.Number("TestLooseParts"),
                 "the rig poses the six R6 parts: unanchored, and none of them collides");
-            Assert.AreEqual(new RbxVector3(2, 2, 1), _world.Vector("TestRootSize"), "the root is the standard 2x2x1 box");
+            Assert.AreEqual(new RbxVector3(2f * Scale, 2f * Scale, 1f * Scale), _world.Vector("TestRootSize"),
+                "the root is the standard 2x2x1 box at the player's scale");
             Assert.AreEqual(true, _world.Attribute("TestRootHidden"), "and invisible");
             Assert.AreEqual(true, _world.Attribute("TestHairHeld"), "the hair is the mod's own, held and never colliding");
             _world.AssertHealthy(Mod);
@@ -183,7 +190,7 @@ workspace:SetAttribute('TestHairHeld', body.Hair.Anchored and not body.Hair.CanC
 
             RbxVector3 at = TobinStands();
             float moved = new RbxVector3(at.X - 18f, 0f, at.Z + 2f).Magnitude;
-            Assert.AreEqual(9d, at.Y, 0.01d, "Tobin's root rests on the level ground (top face 8), not in the pit (4)");
+            Assert.AreEqual(StandingY, at.Y, 0.01d, "Tobin's root rests on the level ground (top face 8), not in the pit (4)");
             Assert.That(moved, Is.InRange(4f, 12f), "the new home is the nearest level spot, within two cells of the plan");
             _world.AssertHealthy(Mod);
         }
@@ -194,7 +201,7 @@ workspace:SetAttribute('TestHairHeld', body.Hair.Anchored and not body.Hair.CanC
             StartOnGround(pitUnderTobin: false);
 
             RbxVector3 at = TobinStands();
-            Assert.AreEqual(9d, at.Y, 0.01d, "Tobin's root rests on the ground");
+            Assert.AreEqual(StandingY, at.Y, 0.01d, "Tobin's root rests on the ground");
             Assert.AreEqual(18d, at.X, 0.01d, "on level ground the planned spot is kept");
             Assert.AreEqual(-2d, at.Z, 0.01d, "on level ground the planned spot is kept");
             _world.AssertHealthy(Mod);
@@ -229,7 +236,7 @@ workspace:SetAttribute('TestHairHeld', body.Hair.Anchored and not body.Hair.CanC
 
             Assert.AreEqual(false, RootHeld(), "once the land under his home is made, Tobin is let go");
             RbxVector3 standing = TobinAt();
-            Assert.AreEqual(9d, standing.Y, 0.01d, "and stands on its top (top face 8, root centre one stud up), held at "
+            Assert.AreEqual(StandingY, standing.Y, 0.01d, "and stands on its top (top face 8, the root's centre half its height up), held at "
                                                      + held);
             _world.AssertHealthy(Mod);
         }
@@ -246,7 +253,7 @@ workspace:SetAttribute('TestHairHeld', body.Hair.Anchored and not body.Hair.CanC
             _world.Frame(30);
 
             RbxVector3 at = TobinAt();
-            Assert.AreEqual(9d, at.Y, 0.01d, "Tobin stands on the top of the land again");
+            Assert.AreEqual(StandingY, at.Y, 0.01d, "Tobin stands on the top of the land again");
             Assert.AreEqual(18d, at.X, 0.01d, "on his own column (or at home when the land under him is not made)");
             Assert.AreEqual(1d, System.Convert.ToDouble(_world.Attribute("TestTobinRescues")), "one rescue");
             _world.AssertHealthy(Mod);
@@ -260,7 +267,7 @@ workspace:SetAttribute('TestHairHeld', body.Hair.Anchored and not body.Hair.CanC
 
             _world.Frame(60);
 
-            Assert.AreEqual(9d, TobinAt().Y, 0.01d);
+            Assert.AreEqual(StandingY, TobinAt().Y, 0.01d);
             Assert.IsNull(_world.Attribute("TestTobinRescues"), "nobody moved Tobin");
             _world.AssertHealthy(Mod);
         }
@@ -284,7 +291,7 @@ workspace:SetAttribute('TestHairHeld', body.Hair.Anchored and not body.Hair.CanC
         {
             _world.LoadSource(probeId, "local body = workspace.Mira "
                                        + "workspace:SetAttribute('TestHairGap', (body.Hair.Position - "
-                                       + "(body.Head.CFrame * CFrame.new(0, 0.7, 0)).Position).Magnitude)");
+                                       + "(body.Head.CFrame * CFrame.new(0, 0.7 * body:GetScale(), 0)).Position).Magnitude)");
             return _world.Number("TestHairGap");
         }
 

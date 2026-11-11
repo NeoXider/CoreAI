@@ -118,8 +118,35 @@ namespace CoreAI.Composition
 
             CoreAiModSelfRepairSettings effective = settings ?? new CoreAiModSelfRepairSettings();
             builder.RegisterInstance(effective);
-            builder.RegisterEntryPoint(c => new CoreAiModSelfRepairEntryPoint(c, effective), Lifetime.Singleton)
-                .AsSelf();
+            // WHY the loop is not an entry point itself: entry points are constructed while the container is built,
+            // in the scope's Awake, and the loop resolves the mod runtime, which builds the world and its network
+            // bridge. A scope must not build a transport in Awake (see CoreAiModsLifetimeScope.Configure), so the
+            // pump resolves the loop on its first tick, and anyone who asks for the loop earlier gets it then.
+            builder.Register(c => new CoreAiModSelfRepairEntryPoint(c, effective), Lifetime.Singleton).AsSelf();
+            builder.RegisterEntryPoint(c => new CoreAiModSelfRepairPump(c), Lifetime.Singleton).AsSelf();
+        }
+    }
+
+    /// <summary>
+    /// Ticks the self-repair loop and builds it on the first tick, so that nothing of the mod world is built while
+    /// the scope's container is.
+    /// </summary>
+    public sealed class CoreAiModSelfRepairPump : ITickable
+    {
+        private readonly IObjectResolver _container;
+        private CoreAiModSelfRepairEntryPoint _loop;
+
+        /// <summary>Keeps <paramref name="container"/> to resolve the loop from on the first tick.</summary>
+        public CoreAiModSelfRepairPump(IObjectResolver container)
+        {
+            _container = container ?? throw new ArgumentNullException(nameof(container));
+        }
+
+        /// <inheritdoc />
+        public void Tick()
+        {
+            _loop ??= _container.Resolve<CoreAiModSelfRepairEntryPoint>();
+            _loop.Tick();
         }
     }
 
