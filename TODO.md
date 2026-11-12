@@ -771,13 +771,17 @@ Owner's questions and decisions on the Block World (2026-11-11):
         `swift-1.5`, `tools/G11Proxy/session_view.py`):** 11 steps in 20 min and no pig: 4 skill reads (both
         cores, terrain, loops, datatypes) and 6 `execute_lua` surveys mapping the terrain around `BuildHereCell`,
         3 of them wrong by its own mistakes (`tostring(m).sub`, `pairs(Enum.Material)`, an EnumItem compared with
-        `.Value`). Fixes on our side: (1) the World State block / building section should say that a prop or a
-        creature goes at `BuildHereCell` (an empty cell on the ground in front of the player) and needs no survey;
-        (2) `print(enumItem)` prints `userdata: <n>` where Roblox prints `Enum.Material.Grass` (`tostring` is
-        right), seen on `RaycastResult.Material`; (3) the turn was cut by `llmResponseWaitTimeoutSeconds` (180 s
-        with no byte) while the model read a 59 KB context - a slow local model needs a longer wait before the
-        first byte; (4) the context grows by every skill read (59 KB at step 11). The pig was never made, so the
-        kept-world hang with an AI-made moving mod is still reproduced only over MCP.
+        `.Value`). Owner's decisions (2026-11-13): (1) improve the skill, not the World State block - the Rbx API
+        building/terrain sections should say that a prop or a creature goes at `BuildHereCell` (an empty cell on
+        the ground in front of the player) with no survey, and show reading `ReadVoxels` results right (EnumItems,
+        not `.Value`; `GetEnumItems`, not `pairs(Enum.Material)`); regenerate the skill text and the token table;
+        (2) fix `print(enumItem)`: it prints `userdata: <n>` where Roblox prints `Enum.Material.Grass` (`tostring`
+        is right), seen on `RaycastResult.Material`; (3) done: the bundled settings assets wait 900 s for the
+        first byte (`llmResponseWaitTimeoutSeconds`; it was 180 s and cut a turn while a local model prefilled a
+        59 KB context); (4) check the whole context path, "any model grows like this, what matters is that
+        auto-compaction works and tool calls do not flood the context": that compaction runs on a long turn,
+        that skill reads and big tool results are cut or summarized, and measure it on a captured session. The pig
+        was never made, so the kept-world hang with an AI-made moving mod is still reproduced only over MCP.
       - **Block World: the player's position is not kept** - `blockworld_world` puts the character at
         `BlockWorldSpawn` at every start (owner: "местоположение тоже сбрасывается"). A Lua fix: keep the last
         position in the world (an attribute written when the player stops, not every frame, so it does not keep the

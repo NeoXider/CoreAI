@@ -63,5 +63,6 @@ MonoBehaviour:
   logToolCallResults: 1
   logMeaiToolCallingSteps: 1
   llmRequestTimeoutSeconds: 0
+  llmResponseWaitTimeoutSeconds: 900
   maxConcurrentOrchestrations: 2
   logOrchestrationMetrics: 1
