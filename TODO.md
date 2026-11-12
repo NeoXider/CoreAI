@@ -583,6 +583,14 @@ Owner's questions and decisions on the Block World (2026-11-11):
       buffer (0.15 s), a slope limit, a frictionless material, swimming on the surface and under water and
       climbing out onto a ledge. It is a Unity component of another game, not read in detail yet: what to take
       is the rules and the numbers, into CoreAI's engine-free character body, not the component itself.
+- [ ] **Hub in a play world (F2): the scroll bar is unstyled and no FPS is shown** (owner, a screenshot of the
+      Graphics page, 2026-11-12: "плохо выглядит скролл бар, а так же fps не пишется"). The page's vertical
+      scroll bar is UI Toolkit's default (a light grey track with white arrow buttons and a grey thumb) on the
+      Hub's dark teal panel; style it with the Hub's theme (track, thumb, no arrow buttons or themed ones) and
+      check every Hub page that scrolls (Mods, World Loads, Statistics, AI Settings). No frame rate is shown on
+      the Graphics page, where a player changes the preset, the render scale and the shadows and wants to see
+      what it costs: show the current FPS and frame time there, updated live. Not checked: whether the
+      Statistics page has a frame rate, and whether a small on-screen counter for the game itself is wanted.
 - [ ] **Block World: chunks load badly** (the same play: "под водой да и в целом чанки плохо грузятся"). Land
       comes in slowly and with holes: a bay with nothing past its near shore, a flat sea floor with no further
       terrain. Not measured. To measure in a WebGL player in a foreground tab: the time to fill the view radius
