@@ -790,6 +790,12 @@ Owner's questions and decisions on the Block World (2026-11-11):
         boxes ("Bridge address", "Port", "Allow mod management...", "Remember on this device...") are dark text on
         the dark panel, unreadable; a villager's speech bubble ("Tobin ...") stays on screen; hovering an NPC shows
         its collider box (the block outline drawn around a character).
+      - **Animals done the Roblox way (owner on a test pig of anchored Parts moved each frame: "это плохо
+        выглядит и сделано"):** a `blockworld_animals` Lua mod like the villagers - a Model with a Humanoid and a
+        HumanoidRootPart, parts joined by Motor6D, walking with `Humanoid:MoveTo` (gravity, stepping onto blocks,
+        collisions), a walk cycle on the joints, idle and wander, later a sound and a reaction to a hit; and a
+        "creatures" section in the Rbx API skill with a quadruped template, so the AI builds a pig the same way
+        instead of boxes on a sine.
       - **A refused pointer lock kills the WebGL player:** `requestPointerLock` rejected with "WrongDocumentError:
         The root document of this element is not valid for pointer lock" (an automated lock in a background tab)
         reached Unity's error handler, which stops the content with an alert. Catch the rejection in the template /
