@@ -767,6 +767,14 @@ Owner's questions and decisions on the Block World (2026-11-11):
         world mutation gate held by the load's after-mutation record (`RefreshStartupSelectionAsync` /
         `DigestStartupContentAsync`) that never ends; not yet read further. Also not journaled: a hand-placed block
         in land the last record lacks, so a record that never ends loses those too.
+        Reproduced again in the owner's Chrome (build 11, 2026-11-13): `manage_mods reload` of `test_pig` (a Model
+        with an unanchored HumanoidRootPart, a Humanoid walking with MoveTo, and anchored body parts moved every
+        Heartbeat) ran the new mod (its print and "loaded" are in the mod log, game log `[44] manage_mods:
+        action=reload`) but never returned; from then on every gated call waits (the bridge shows one call in
+        flight) while the game runs at 79 FPS and ungated reads answer. It is intermittent: the same kind of mod
+        loaded and reloaded fine twice before in that page. Start by logging each await of
+        `ConfirmedWorldMutationGate` (the mutation itself, `NotifyAfterMutationAsync`, the backup) and of
+        `RefreshStartupSelectionAsync` (`_startupSelectionGate`, the frame-budget digest) in a WebGL player.
       - **What a captured session showed (2026-11-12, "a pink pig of blocks that slowly walks", owner's local
         `swift-1.5`, `tools/G11Proxy/session_view.py`):** 11 steps in 20 min and no pig: 4 skill reads (both
         cores, terrain, loops, datatypes) and 6 `execute_lua` surveys mapping the terrain around `BuildHereCell`,
