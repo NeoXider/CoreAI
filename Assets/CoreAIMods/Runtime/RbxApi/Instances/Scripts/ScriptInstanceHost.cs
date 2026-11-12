@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CoreAI.Mods.Rbx.Instances.Replication;
 
 namespace CoreAI.Mods.Rbx.Instances.Scripts
 {
@@ -23,7 +24,9 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
         private readonly Action<string> _log;
         private readonly Dictionary<string, RbxLuaSourceContainer> _bound = new(StringComparer.Ordinal);
         private readonly HashSet<string> _loggedDuplicates = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _runInputChanges = new(StringComparer.Ordinal);
         private bool _indexStale = true;
+        private bool _ancestryChanged;
         private bool _disposed;
 
         public ScriptInstanceHost(InstanceRegistry registry, RbxDataModel game, Action<string> log = null)
@@ -33,6 +36,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
             _log = log;
             _registry.Registered += OnRegistered;
             _registry.Unregistered += OnUnregistered;
+            _registry.ParentChanged += OnParentChanged;
+            _registry.RevisionAdvanced += OnRevisionAdvanced;
         }
 
         /// <inheritdoc />
@@ -262,8 +267,31 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
             _disposed = true;
             _registry.Registered -= OnRegistered;
             _registry.Unregistered -= OnUnregistered;
+            _registry.ParentChanged -= OnParentChanged;
+            _registry.RevisionAdvanced -= OnRevisionAdvanced;
             _bound.Clear();
+            _runInputChanges.Clear();
             ScriptInstanceChanged = null;
+        }
+
+        /// <inheritdoc />
+        public bool TakeRunInputChanges(ICollection<string> changedSources, out bool ancestryChanged)
+        {
+            if (changedSources == null)
+            {
+                throw new ArgumentNullException(nameof(changedSources));
+            }
+
+            ancestryChanged = _ancestryChanged;
+            _ancestryChanged = false;
+            bool any = ancestryChanged || _runInputChanges.Count > 0;
+            foreach (string sourceId in _runInputChanges)
+            {
+                changedSources.Add(sourceId);
+            }
+
+            _runInputChanges.Clear();
+            return any;
         }
 
         private ScriptInstancePlacement Create(string sourceId, ScriptPlacementPlan plan, string ownerActorId,
@@ -817,7 +845,33 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
             }
 
             _bound.Remove(container.SourceId);
+            _runInputChanges.Add(container.SourceId);
             Raise(container.SourceId, ScriptInstanceChange.Destroyed);
+        }
+
+        /// <summary>
+        /// Marks that something was reparented. WHY a flag for every reparent in the world: moving any ancestor changes a
+        /// script's container, and finding which bound scripts sit under the moved instance would cost a walk per
+        /// reparent; the runtime re-evaluates its few durable scripts once instead, at its next frame.
+        /// </summary>
+        private void OnParentChanged(RbxInstance instance)
+        {
+            _ancestryChanged = true;
+        }
+
+        private void OnRevisionAdvanced(InstanceId id, long revision, string member)
+        {
+            if (!string.Equals(member, ReplicationMembers.Enabled, StringComparison.Ordinal)
+                && !string.Equals(member, ReplicationMembers.RunContext, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (_registry.TryGetRecord(id, out InstanceRecord record)
+                && record.Instance is RbxLuaSourceContainer container && container.IsBound)
+            {
+                _runInputChanges.Add(container.SourceId);
+            }
         }
 
         private void Raise(string sourceId, ScriptInstanceChange change)

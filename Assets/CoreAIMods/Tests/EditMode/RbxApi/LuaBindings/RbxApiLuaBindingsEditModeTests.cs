@@ -2729,7 +2729,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 { "Camera.ViewportSize", "read-only; follows the host viewport" },
                 { "Players.LocalPlayer", "fixed for the reading mod context" },
                 { "Tween.Instance", "fixed by TweenService:Create" },
-                { "Tween.TweenInfo", "fixed by TweenService:Create" }
+                { "Tween.TweenInfo", "fixed by TweenService:Create" },
+                { "BaseScript.RunContext", "written only by the elevated console, which restarts the script (SC-4)" },
+                { "Script.Source", "a view over the mod store, written only by the elevated console as a reload (SC-2)" },
+                { "ModuleScript.Source", "a view over the mod store, written only by the elevated console as a reload (SC-2)" }
             };
 
         private const string AnchoredPartLua =
@@ -2879,6 +2882,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 ("Light.Enabled", "Instance.new('PointLight')", "t.Enabled = false; t.Enabled = false", 1),
                 ("Light.Shadows", "Instance.new('PointLight')", "t.Shadows = true; t.Shadows = true", 1),
                 ("PointLight.Range", "Instance.new('PointLight')", "t.Range = 12; t.Range = 12", 1),
+                ("BaseScript.Enabled", "Instance.new('Script')", "t.Enabled = false; t.Enabled = false", 1),
+                ("BaseScript.Disabled", "Instance.new('Script')", "t.Disabled = true; t.Disabled = true", 1),
                 ("ValueBase.Value", "Instance.new('IntValue')", "t.Value = 5; t.Value = 5", 1),
                 ("Tween.PlaybackState",
                     "game:GetService('TweenService'):Create(" + AnchoredPartLua

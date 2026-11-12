@@ -56,9 +56,26 @@ tags: movement, camera
   load with `BAD_ARGUMENT: @coreai context 'clinet' is not server, client or shared`. `shared` makes a
   ModuleScript: it loads and is listed, but its code runs only when a script requires it, and `require`
   arrives with MVP4 step C4, so until then nothing runs it. Without the key the mod is a legacy script and
-  runs exactly as before. The context decides where the script starts (below); what it changes while the
-  script runs (`CONTEXT_VIOLATION` checks) arrives with a later MVP4 step
-  (`dev-docs/MVP4_SCRIPT_CONTEXTS_DESIGN.md`, SC-5, SC-9, SC-13).
+  runs exactly as before. The context decides where the script starts (below) and which side it runs as
+  (`dev-docs/MVP4_SCRIPT_CONTEXTS_DESIGN.md`, SC-5, SC-9, SC-13, SC-14):
+  - a `server` script is the server whoever wrote it: `RunService:IsServer()` is true,
+    `Players.LocalPlayer` is nil, and it may use the server members (`FireClient`, `FireAllClients`,
+    `OnServerEvent`, `OnServerInvoke`, `ServerStorage`, `ServerScriptService`, `store_set`, `store_get`);
+  - a `client` script is the client: `RunService:IsClient()` is true, `Players.LocalPlayer` is the player at
+    this screen (for a script the host wrote; another author's script acts as its author), its remotes are
+    sent as that player, and it may use the client members (`FireServer`, `OnClientEvent`, `InvokeServer`,
+    `OnClientInvoke`, `UserInputService`, `RunService.RenderStepped`/`PreRender`, camera writes,
+    `camera_follow`, `camera_set_cframe`). It starts only once that player exists (`run_state`
+    `waiting-for-local-player` until then);
+  - using a member of the other side raises `CONTEXT_VIOLATION`, naming the rule and the fix, for example
+    `CONTEXT_VIOLATION: UserInputService.IsKeyDown is client-only (§3.2; UserInputService.yaml) and this
+    script runs as server | fix: move this code into a client script (context: client) and send the result
+    to the server with a RemoteEvent`; so does `mods_call`/`mods_get` into a mod of the other side (a mod
+    that declares nothing counts as the server side) — scripts of the two sides talk through remotes only;
+  - a legacy script keeps every pre-MVP4 rule: its side comes from the machine and the actor's grant, and a
+    wrong-side remote member raises `NOT_AUTHORITY` as before.
+  TODO: `logic_define`, `logic_reset`, `events_emit` across sides and `FindFirstChild` on `game` are not
+  checked yet (design note, C3 entry).
 - `parent` — optional, the `/`-separated instance path from `game` where the mod's script lives, such
   as `Workspace/Door` (a leading `@game/` is accepted). The path must exist when the mod loads and must not
   lie inside an instance a mod made; otherwise the load fails with `BAD_ARGUMENT` naming the missing
@@ -103,9 +120,25 @@ Where `script` lives:
   a pure client. In single-player and on a host (one machine that is both server and client) both start,
   each once. A mod that declares nothing keeps the pre-MVP4 rule and starts on every machine it started on
   before. A script that does not start stays loaded: it is listed with the reason as its `run_state`, keeps
-  its instance, source and versions, and starts when a reload lets it (a reload that moves it where it runs,
-  for example). TODO: MVP4 step C2 also starts and stops a running script when its `Enabled`, its place in
-  the tree or its instance changes; today only a load or reload decides.
+  its instance, source and versions, and starts when a reload or a change of its instance lets it.
+- The same rules follow the instance while the world runs (MVP4 SC-3, SC-9), checked at the start of the next
+  frame: setting `script.Enabled = false` (or the deprecated `Disabled = true`), moving the script into a
+  container where it does not run, or destroying it (or a parent) stops it — its threads, connections, timers
+  and tweens end, what it made stays, and it stays loaded, listed with the reason (`disabled`,
+  `container-does-not-run`, `detached`). Setting `Enabled = true` again, or moving it back, starts its main
+  chunk afresh and keeps what the earlier run made. A script parented to nil while running keeps running. None
+  of this writes the mod store or a revision. A quarantined script is never restarted by `Enabled`; reload it.
+  A script that disables itself stops at the next frame, not at its next line.
+- Script members in Lua: `Enabled`, `Disabled` and `RunContext` (an `Enum.RunContext` item) are readable by
+  every script. `Source` (the mod's current text; `""` for a script no mod is bound to) is readable only with
+  the host's unrestricted authority. Writing `Source` or `RunContext` is for the host's console
+  (`execute_lua`) only; a mod gets `NOT_AUTHORITY`. A `Source` write reloads the mod with the new text (a new
+  revision, like `manage_mods reload`); a `RunContext` write restarts the script under the new context and
+  records it in the stored manifest, and is refused for a mod whose header declares `context:` (edit the
+  header) or declares nothing (its script is rebuilt at every start). TODO: writing `Source` on a script no
+  mod is bound to fails with `NOT_IMPLEMENTED` until a later MVP4 step; load the code as a mod with a
+  `parent:` header instead. A copy made by `Clone()` never runs (it is bound to no mod); the cloning mod is
+  told once.
 
 Parsing rules:
 - The block form must be the first thing in the file: the source starts with `--[[@coreai` and the

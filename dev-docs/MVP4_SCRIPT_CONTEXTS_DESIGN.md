@@ -1,11 +1,13 @@
 # MVP4 — Script contexts and the client runtime: design note
 
-Status (2026-11-12): **steps A1–A3, B1, B2 and C1 (C1-1 to C1-6) written; C2–C6 not started.**
+Status (2026-11-12): **steps A1–A3, B1, B2, C1 (C1-1 to C1-6), C2 and C3 written; C4–C6 not started.**
+C3 left a few SC-13 rows unbound (listed in its entry). Next: C4 (`require`).
 A1–A3 are green in Unity 6000.6 EditMode; B1 (the script instance classes and `Enum.RunContext`), B2 (the package v2
-reader) and C1 (declared mods get durable bound script instances, saved in format version 2; C1-6 registers sources
-without a run and gates a start by the SC-9 predicate, see the C1 entry) have passed their portable tests only. The
-declared context decides placement, the load refusals and whether a script starts on this process; it does not yet
-change what a running script may call (C3), and nothing re-evaluates a running script when its inputs change (C2).
+reader), C1 (declared mods get durable bound script instances, saved in format version 2; C1-6 registers sources
+without a run and gates a start by the SC-9 predicate), C2 (`Enabled`, `Disabled`, `RunContext`, `Source` in Lua; a
+running script stops and starts as its instance changes) and C3 (the side a script runs as comes from its context;
+CONTEXT_VIOLATION for side-only members; no Player minting on a replica; client scripts wait for the local player)
+have passed their portable tests only; see their entries in §5.
 Written 2026-11-11 for the rung "MVP4 — Script contexts & client
 runtime" (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md:929-977`) and the open item "Design note for plan
 decision D1 (c) before any code" (`TODO.md:557-561`). Plan decision D1 (c) — "instances are views over
@@ -1011,7 +1013,59 @@ The original entry, kept for its file list:
   (`ReadPackage_HandWrittenLiteralPackage_RestoresLiteralIdsParentsRevisionsAndPartState`, `:2140`) must
   pass unchanged.
 
-### C2 (M) — Script members in Lua
+### C2 (M) — Script members in Lua — done 2026-11-12 (one item left, below)
+
+**Built** (portable tests: the C2 rows of `ScriptRunGateLuaEditModeTests` and `ScriptSessionEditModeTests`, the
+`BoundProperties_*` drift guards; `BoundProperties_EveryEntryReadsThroughLua_*` in `Mvp1AcceptanceGateEditModeTests` is
+Unity-only):
+
+- **Lua members** (`LuaCsRbxInstanceBindings.TryReadScript`/`TryWriteScript`, `BoundProperties` rows `BaseScript`
+  Enabled/Disabled/RunContext, `Script` and `ModuleScript` Source; the catalog keeps only `LinkedSource` as a stub):
+  `Enabled` and `Disabled` (deprecated, noted once per mod) are read by anyone and written under the ordinary world-edit
+  gate; `RunContext` reads as its `Enum.RunContext` item; `Source` is read with the unrestricted tier only (a host mod or
+  the host console; an unbound instance reads `""`), and `Source` and `RunContext` are written only by the unrestricted
+  console (no owning mod) — a mod gets NOT_AUTHORITY "only the console (execute_lua) writes".
+- **The seam** is `ILuaCsScriptSourceHost` (internal, `Scripting/LuaCs/`), implemented explicitly by `LuaCsModRuntime`,
+  which installs itself as `LuaCsRbxApiBindings.ScriptSourceHost` when built over the bindings.
+- **Live re-evaluation** is a pull: `ScriptInstanceHost` records sources whose instance changed `Enabled` or `RunContext`
+  (the registry's `RevisionAdvanced`) or was destroyed, and a flag for any reparent in the world
+  (`IScriptInstanceHost.TakeRunInputChanges`, new seam member). At the start of `Tick`, after the disconnect release,
+  the runtime re-evaluates every durable script with a changed input (all of them after a reparent) and acts only when
+  the predicate's answer changes (`Mod.Gate`): a running script it no longer allows stops, a script loaded without a run
+  that it now allows starts. So a failed restart is not retried until the inputs say stop and then run again.
+- **Stop** (`StopRun`): the run is swapped for a record without one (`Runs = false`, listed with the reason), torn down
+  with the new `LuaModTeardownReason.ScriptStopped` — the factory's default teardown treats it like a quarantine
+  (every thread, connection, timer and tween of the mod ends, instances stay) — and the bindings' actor record is put
+  back, as after a quarantine (M2-24). Its startup objects stay tracked; the store is not written; a quarantine is kept.
+- **Start** (`StartStoppedRun`): `ReloadModCore(..., KeepObjects, recordSource: false)` — the reload of
+  `ReloadMod` without a revision, a store write or `ModSourceLoaded`, because the source did not change. A quarantined
+  record never starts this way (a warning, also in `get_mod_logs`), so a script that trips its budget every run cannot
+  be restarted by toggling it; a reload by hand still clears it.
+- **`Source` write** of a bound, loaded source is `ReloadMod` in the default mode (revision, store, gate as any reload);
+  of an unloaded one, BAD_ARGUMENT "load it first".
+- **`RunContext` write** is refused on a legacy mod's synthetic script and when the header declares `context:`
+  ("edit the header"); otherwise it sets the instance, restarts a loaded source in `KeepObjects` (R1.9; Roblox keeps
+  what the script made), puts the old value back if the restart fails, and writes the stored manifest's `Context` so the
+  package's manifest and instance agree (the only store write besides a reload, inside the console's gate).
+- **Clones (SC-17):** a copy never carries a binding (already true since B1); cloning something that holds a bound
+  Script or LocalScript logs the SC-17 note once per mod.
+
+**Where C2 differs from the plan:**
+
+- **Stops and starts happen at the next frame**, not inside the change, so no mod's code ever runs inside another's
+  write. A script that disables itself therefore finishes its current resume and stops before its next frame, where
+  R1.10 says "before its next line"; it also cannot re-enable itself only once that frame has passed. Kept by the
+  owner: roadmap DEV-125.
+- **A start is a restart in `KeepObjects` for both `Enabled` and `RunContext`**; the plan gave `RunContext` the reload's
+  default mode.
+- **Not built: a `Source` write on an unbound instance** (an `Instance.new("Script")` from the console) — the load that
+  creates its store entry must go through the world session facade's admission and undo, which the bindings cannot
+  reach; it raises NOT_IMPLEMENTED "a later MVP4 step" with the fix "load it with manage_mods load and a `parent:`
+  header". Moved to C6.
+- **Known gap for C3:** a source registered without a run at its load (C1-6) never had a Lua context, so the bindings
+  hold no actor record for it, and a restricted actor's disconnect does not unload it (a stopped run keeps its record).
+
+The original entry:
 
 - `LuaCsRbxInstanceBindings`: `TryReadScript`/`TryWriteScript` for `Enabled`, `Disabled`, `RunContext`,
   `Source`; `BoundProperties` rows for `BaseScript` and `LuaSourceContainer` (`:2005-2033`).
@@ -1020,7 +1074,47 @@ The original entry, kept for its file list:
   `ScriptInstanceChanged`; the quarantine and suspension guard of SC-3; console `Source` writes (SC-2).
 - `RbxBaseScript.CopyCustomStateTo`: unbound clones and the once-per-mod note (SC-17).
 
-### C3 (M) — Contexts in the bindings
+### C3 (M) — Contexts in the bindings — done 2026-11-12 (items left listed below)
+
+**Built** (portable tests: the C3 rows of `ScriptRunGateLuaEditModeTests`):
+
+- **The context reaches the Lua context**: the runtime calls `LuaCsRbxApiBindings.SetModScriptContext(modId, context)`
+  right before it registers a build's bindings, and `RegisterCore` sets `LuaCsRbxModContext.Context` from it (the
+  console and legacy mods stay `Legacy`). The rule table is `LuaCsRbxApiBindings.ContextRules`, the frozen
+  `ScriptContextRuleTable.CreateDefault()`.
+- **SC-14**: `IsNetworkServer` is true for `server`, false for `client`, today's rule for legacy and the console;
+  `RunService:IsServer/IsClient` answer per declared context (legacy keeps the topology's answer); `Players.LocalPlayer`
+  is nil for a server script, this screen's player (lookup, no minting) for the host's client script, the author's
+  player for another author's (minted on demand on an authoritative world, as today; a replica only looks up);
+  `LuaCsRbxModContext.NetworkActorId` (the local player's actor for the host's client script, the script's own actor
+  otherwise) keys `FireServer`, `InvokeServer`, `OnClientEvent` and the client callbacks.
+- **SC-13 rows bound**: the remote side checks (`RequireNetworkSide`) raise CONTEXT_VIOLATION for declared contexts and
+  keep NOT_AUTHORITY for legacy; `LuaCsRbxModContext.RequireContext(member)` at `UserInputService` (every member
+  read and write), `RunService.RenderStepped`/`PreRender`, `Camera` writes, `camera_follow`/`camera_set_cframe`,
+  `ServerStorage`/`ServerScriptService` reached through `GetService`, `FindService` or `game.X`; in the runtime,
+  `store_set`/`store_get` (server-only) and `mods_call`/`mods_get` across the boundary (a legacy target is on the
+  server side).
+- **SC-15**: `EnsureNetworkActor` (and with it `ConnectActor`) refuses to mint on a replica; `RegisterCore` mints no
+  Player for the host's client script.
+- **SC-9 item 6**: a client script starts only when `HasPlayerFor` answers — this screen's player
+  (`ResolveClickingPlayer`) for the host's, the author's player or an authoritative world for another author's; it is
+  listed `waiting-for-local-player` and starts at the frame after the player arrives (the arrival is a reparent, which
+  C2's re-evaluation sees). Q7 settled: production connects the local player (`CoreAiLocalPlayer.Connect`).
+- **C2's gap closed**: a source registered without a run by a restricted actor records its actor
+  (`RecordRegisteredModActor`), so that actor's disconnect unloads it (M2-24).
+- `RbxRuntimeTopology` comments now say per-context answers live on the script context.
+
+**Not in C3** (each a TODO for the next agent; C6 at the latest): `logic_define`/`logic_reset` rows (registered in
+`LuaCsLogicSlots`, which knows no script context), `events_emit` delivering to same-side runs only, `HttpService`
+requests (no request member is bound today), `FindFirstChild*`/`WaitForChild` on `game` reaching a server container,
+`BindToRenderStep` (not bound), and P2/P18 rows (their packages add them before the table is frozen; a hook to add rows
+before `ContextRules` freezes does not exist yet).
+
+**Deliberately changed tests**: client scripts in `ScriptPlacementLuaEditModeTests`, `ScriptRunGateLuaEditModeTests`
+and `ScriptSessionEditModeTests` now report through `script:SetAttribute` (the store is server-only) and connect a
+local player first (`World.ConnectLocalPlayer`).
+
+The original entry:
 
 - `LuaCsRbxModContext` (`LuaCsRbxInstanceBindings.cs:23-257`): `Context`, `NetworkActorId`,
   `IsNetworkServer` (`:214-215`), `RequireNetworkSide` (`:217-234`: `CONTEXT_VIOLATION` for declared
@@ -1035,6 +1129,24 @@ The original entry, kept for its file list:
 - Legacy tests asserting `NOT_AUTHORITY` stay green by construction.
 
 ### C4 (M) — `require`
+
+**Start here (hand-over, 2026-11-12).** What C1–C3 left for this step, verified in the tree:
+
+- A `context: shared` source is a loaded `Mod` record with `Runs = false`, `StartState = Module`, `Context = Shared`,
+  its text in `Mod.Source` (`LuaCsModRuntime.TryGetModSource`), and its ModuleScript bound through
+  `LuaCsRbxApiBindings.ScriptInstances.TryGetBoundScript(id)`; an `RbxLuaSourceContainer` names its source by
+  `SourceId`. A module never has a Lua state of its own; compile it per requiring state (SC-11).
+- The requirer's side is `LuaCsRbxModContext.Context` (C3); module code runs with that context, so
+  `RequireContext`/`RequireNetworkSide` already check it correctly once it runs on the requirer's state.
+- The SC-10 location check needs a module's container: `LuaCsRbxApiBindings.DescribeScriptLocation(instance, out
+  container, out scope)` and `ScriptContainers.IsServerOnly(container)`. The trust check is
+  `ModuleRequirePolicy.CheckTrust` (owner actor of the module's `Mod` against the requirer's).
+- SC-18 dependents restart through `ReloadModCore(dependentId, dependent.Source, mode, recordSource: false)` — the
+  same no-revision restart C2 uses — inside the module reload, after the module's own swap.
+- A module reload is already a reload of a record without a run (C1-6); a class change to or from `shared` replaces
+  the instance (SC-4), so a dependent's cached copy must be invalidated by module id, not by instance id alone.
+- `require` is still removed by the sandbox (`LuaCsSecureEnvironment`), so calling it is "attempt to call a nil value";
+  install the per-environment `require` through the scheduler bridge as planned below.
 
 - `LuaCsRbxSchedulerAdapter`: the bridge (`:94-119`) captures `task._requireResolve` and
   `task._requireAwait` and defines `require` per environment; `CaptureChunk` (`:497-510`) takes a chunk
@@ -1059,6 +1171,9 @@ The original entry, kept for its file list:
   `Mvp4_ClientComposition_RefusesAPayloadWithAServerSource`.
 
 ### C6 (S) — Fits, skill, docs, acceptance
+
+- Carried over from C2: a console `Source` write on an unbound instance (SC-2's "creates a store entry"), through the
+  session facade's admission and undo; today it is NOT_IMPLEMENTED.
 
 - P1's script `context: client` and version bump; the `@coreai` keys, contexts, `require` and the
   `CONTEXT_VIOLATION` rows in `BuiltInRbxApiSkillText.cs` and

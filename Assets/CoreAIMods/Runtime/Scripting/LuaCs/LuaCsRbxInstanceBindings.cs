@@ -9,6 +9,7 @@ using CoreAI.Mods.Rbx.Instances;
 using RegistryWorldAclAuthorizer = CoreAI.Mods.Rbx.Instances.WorldAclAuthorizer;
 using RegistryWorldAclDecision = CoreAI.Mods.Rbx.Instances.WorldAclDecision;
 using CoreAI.Mods.Rbx.Instances.Networking;
+using CoreAI.Mods.Rbx.Instances.Scripts;
 using Lua;
 using Lua.Runtime;
 using static CoreAI.Ai.LuaCs.LuaCsRbxLua;
@@ -209,10 +210,65 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>tick() legacy deprecation note fires once per mod.</summary>
         public bool HasLoggedTickDeprecation { get; set; }
 
+        /// <summary>BaseScript.Disabled deprecation note fires once per mod.</summary>
+        public bool HasLoggedDisabledDeprecation { get; set; }
+
+        /// <summary>The cloned-script note (SC-17) fires once per mod.</summary>
+        public bool HasLoggedClonedScriptNote { get; set; }
+
         public bool CanWorldEdit => (Capabilities & LuaCapabilities.WorldEdit) != 0;
 
-        public bool IsNetworkServer => Bindings.NetworkBridge.Topology != RbxNetworkTopology.Client
-                                       && IsHost;
+        /// <summary>
+        /// The script context this mod's code runs in (MVP4 SC-14, step C3): the context its run was planned with, or
+        /// <see cref="ScriptContext.Legacy"/> for a mod that declares none and for the one-off console, which keep the
+        /// pre-MVP4 rules.
+        /// </summary>
+        public ScriptContext Context { get; internal set; } = ScriptContext.Legacy;
+
+        /// <summary>True for a <c>server</c> or <c>client</c> script, whose side the context decides (SC-14).</summary>
+        public bool HasDeclaredSide => Context == ScriptContext.Server || Context == ScriptContext.Client;
+
+        /// <summary>
+        /// The actor this code's remotes are sent as, and whose client events and callbacks it holds (SC-14): for a
+        /// client script the host wrote, this process's local player's actor; otherwise the script's own actor, so a
+        /// restricted author's client script never sends as the host's player.
+        /// </summary>
+        public string NetworkActorId => Context == ScriptContext.Client && IsHost
+            ? Bindings.LocalPlayerNetworkActorId() ?? ActorContext.ActorId
+            : ActorContext.ActorId;
+
+        /// <summary>
+        /// Whether this code runs as the server (SC-14): a server script always, a client script never, and a legacy
+        /// script or the console as before contexts, from the topology and the actor's grant.
+        /// </summary>
+        public bool IsNetworkServer => Context == ScriptContext.Server
+                                       || (Context != ScriptContext.Client
+                                           && Bindings.NetworkBridge.Topology != RbxNetworkTopology.Client
+                                           && IsHost);
+
+        /// <summary>
+        /// Raises CONTEXT_VIOLATION when a server or client script uses a member of the other side (decision SC-13);
+        /// legacy scripts and the console are never checked. <paramref name="member"/> is the rule key
+        /// (<c>UserInputService.InputBegan</c>, <c>camera_follow</c>).
+        /// </summary>
+        public void RequireContext(string member)
+        {
+            if (!HasDeclaredSide)
+            {
+                return;
+            }
+
+            RbxError violation = Bindings.ContextRules.Check(member, Context);
+            if (violation != null)
+            {
+                throw WithMod(violation);
+            }
+        }
+
+        private RbxError WithMod(RbxError error)
+        {
+            return new RbxError(error.Code, error.RawMessage, error.Fix, OwnerModId);
+        }
 
         public void RequireNetworkSide(string member, bool serverOnly)
         {
@@ -220,6 +276,23 @@ namespace CoreAI.Ai.LuaCs
             if (actualServer == serverOnly)
             {
                 return;
+            }
+
+            if (HasDeclaredSide)
+            {
+                // WHY CONTEXT_VIOLATION only here: a declared script's side is its context, so using the other side's
+                // member is a context mistake (SC-13); a legacy script keeps today's NOT_AUTHORITY, whose side comes
+                // from the actor's grant.
+                string key = member.Replace(':', '.');
+                ScriptSide side = serverOnly ? ScriptSide.Server : ScriptSide.Client;
+                ScriptContextRule rule = Bindings.ContextRules.TryGet(key, out ScriptContextRule found)
+                                         && found.Side == side
+                    ? found
+                    : new ScriptContextRule(key, side, "§3.2",
+                        serverOnly
+                            ? "move this code into a server script (context: server)"
+                            : "move this code into a client script (context: client)");
+                throw WithMod(ScriptContextRuleTable.Violation(key, rule, Context));
             }
 
             string requiredSide = serverOnly ? "server" : "client";
@@ -817,6 +890,11 @@ namespace CoreAI.Ai.LuaCs
                     return lightValue;
                 }
 
+                if (TryReadScript(context, self, key, out LuaValue scriptValue))
+                {
+                    return scriptValue;
+                }
+
                 if (TryReadValue(context, self, key, out LuaValue valueResult))
                 {
                     return valueResult;
@@ -852,7 +930,7 @@ namespace CoreAI.Ai.LuaCs
                 RbxInstance child = self.FindFirstChild(key);
                 if (child != null)
                 {
-                    return context.WrapInstance(child);
+                    return context.WrapInstance(self is RbxDataModel ? RequireServiceSide(context, child) : child);
                 }
 
                 throw RbxError.BadArgument(
@@ -975,6 +1053,11 @@ namespace CoreAI.Ai.LuaCs
             }
 
             if (TryWriteLight(context, self, key, value))
+            {
+                return LuaValue.Nil;
+            }
+
+            if (TryWriteScript(context, self, key, value))
             {
                 return LuaValue.Nil;
             }
@@ -1198,7 +1281,7 @@ namespace CoreAI.Ai.LuaCs
                         context.RequireNetworkSide(
                             remoteEvent.ClassName + ".OnClientEvent", false);
                         value = LuaCsRbxDatatypeBindings.Wrap(
-                            remoteEvent.GetOnClientEvent(context.ActorContext.ActorId), context);
+                            remoteEvent.GetOnClientEvent(context.NetworkActorId), context);
                         return true;
                 }
             }
@@ -1564,6 +1647,7 @@ namespace CoreAI.Ai.LuaCs
                     context.Bindings.Registry.SetAccessControl(copy, context.OwnerActorId,
                         InstanceAccessScope.Owned, true);
                     CopyPartSinkState(context.PartSink, self, copy);
+                    NoteClonedScripts(context, self);
                     return context.WrapInstance(copy);
                 }
                 catch
@@ -1945,13 +2029,13 @@ namespace CoreAI.Ai.LuaCs
                 "Model");
 
             // ---- ServiceProvider (DataModel) ----
-            Method("GetService", (ctx, self) => context.WrapInstance(
+            Method("GetService", (ctx, self) => context.WrapInstance(RequireServiceSide(context,
                     RequireDataModel(self, "GetService").GetService(
-                        ReadString(ctx, 1, "game:GetService", 1))),
+                        ReadString(ctx, 1, "game:GetService", 1)))),
                 "ServiceProvider");
-            Method("FindService", (ctx, self) => context.WrapInstance(
+            Method("FindService", (ctx, self) => context.WrapInstance(RequireServiceSide(context,
                     RequireDataModel(self, "FindService").FindService(
-                        ReadString(ctx, 1, "game:FindService", 1))),
+                        ReadString(ctx, 1, "game:FindService", 1)))),
                 "ServiceProvider");
             Method("BindToClose", (ctx, self) =>
             {
@@ -2163,8 +2247,14 @@ namespace CoreAI.Ai.LuaCs
 
             // WHY: topology answers come from the instance's IRbxRuntimeTopology (solo by default),
             // never from literals here, so the host/client slice swaps the source, not the binding.
-            Method("IsServer", (_, self) => ((RbxRunService)self).Topology.IsServer, "RunService");
-            Method("IsClient", (_, self) => ((RbxRunService)self).Topology.IsClient, "RunService");
+            // WHY a declared script answers from its context: RunService.yaml makes IsServer/IsClient per execution
+            // context, so a server and a client script in one solo process answer differently (SC-14).
+            Method("IsServer", (_, self) => context.HasDeclaredSide
+                ? context.Context == ScriptContext.Server
+                : ((RbxRunService)self).Topology.IsServer, "RunService");
+            Method("IsClient", (_, self) => context.HasDeclaredSide
+                ? context.Context == ScriptContext.Client
+                : ((RbxRunService)self).Topology.IsClient, "RunService");
             Method("IsStudio", (_, self) => ((RbxRunService)self).Topology.IsStudio, "RunService");
             Method("IsRunning", (_, self) => ((RbxRunService)self).Topology.IsRunning, "RunService");
 
@@ -2306,6 +2396,9 @@ namespace CoreAI.Ai.LuaCs
                 "FogColor")),
             ("Light", Names("Brightness", "Color", "Enabled", "Shadows")),
             ("PointLight", Names("Range")),
+            ("BaseScript", Names("Enabled", "Disabled", "RunContext")),
+            ("Script", Names("Source")),
+            ("ModuleScript", Names("Source")),
             ("ValueBase", Names("Value")),
             ("Tween", Names("Instance", "TweenInfo", "PlaybackState"))
         };
@@ -2339,8 +2432,10 @@ namespace CoreAI.Ai.LuaCs
         /// properties. The method table covers the rest of the methods, so GetPropertyChangedSignal
         /// refuses every name here by the exact name, on any class.
         /// </summary>
+        // WHY "workspace": game.workspace is a read alias of game.Workspace, not a property of its own; a signal
+        // asked for it would never fire, so the name is refused like an event's.
         private static readonly HashSet<string> BoundNonProperties = Names(
-            "ChildAdded", "ChildRemoved", "DescendantAdded", "DescendantRemoving", "Destroying",
+            "workspace", "ChildAdded", "ChildRemoved", "DescendantAdded", "DescendantRemoving", "Destroying",
             "AncestryChanged", "AttributeChanged", "Changed", "TagAdded", "TagRemoved", "WaitForChild",
             "LoadCharacterAsync", "LoadCharacter", "Loaded", "PlayerAdded", "PlayerRemoving", "Died",
             "HealthChanged", "MoveToFinished", "Running", "Jumping", "FreeFalling", "StateChanged",
@@ -3673,6 +3768,7 @@ namespace CoreAI.Ai.LuaCs
                 return false;
             }
 
+            context.RequireContext("UserInputService." + key);
             switch (key)
             {
                 case "InputBegan":
@@ -3773,6 +3869,7 @@ namespace CoreAI.Ai.LuaCs
                 return false;
             }
 
+            context.RequireContext("UserInputService." + key);
             context.RequireWorldEditForWrite(self, key);
             if (key == "MouseDeltaSensitivity")
             {
@@ -3887,6 +3984,7 @@ namespace CoreAI.Ai.LuaCs
                     value = LuaCsRbxDatatypeBindings.Wrap(runService.Stepped, context);
                     return true;
                 case "RenderStepped":
+                    context.RequireContext("RunService.RenderStepped");
                     value = LuaCsRbxDatatypeBindings.Wrap(runService.RenderStepped, context);
                     return true;
                 case "PreAnimation":
@@ -3899,6 +3997,7 @@ namespace CoreAI.Ai.LuaCs
                     value = LuaCsRbxDatatypeBindings.Wrap(runService.PostSimulation, context);
                     return true;
                 case "PreRender":
+                    context.RequireContext("RunService.PreRender");
                     value = LuaCsRbxDatatypeBindings.Wrap(runService.PreRender, context);
                     return true;
                 default:
@@ -4245,6 +4344,224 @@ namespace CoreAI.Ai.LuaCs
             return true;
         }
 
+        // ---- script instances (MVP4 step C2) -------------------------------------------------
+
+        /// <summary>
+        /// <c>BaseScript.Enabled</c>, its deprecated inverse <c>Disabled</c> (noted once per mod) and <c>RunContext</c>
+        /// as its <c>Enum.RunContext</c> item, readable by every script as in Roblox; and <c>Source</c>, the current text
+        /// of the source the instance is bound to (empty when unbound), readable only with the host's unrestricted
+        /// authority (SC-2: Roblox gives it to plugins and Open Cloud only).
+        /// </summary>
+        private static bool TryReadScript(LuaCsRbxModContext context, RbxInstance self, string key,
+            out LuaValue value)
+        {
+            value = LuaValue.Nil;
+            if (!(self is RbxLuaSourceContainer container))
+            {
+                return false;
+            }
+
+            if (key == "Source")
+            {
+                context.RequireUnrestricted(self.ClassName + ".Source");
+                ILuaCsScriptSourceHost host = context.Bindings.ScriptSourceHost;
+                value = container.IsBound && host != null
+                                          && host.TryReadScriptSource(container.SourceId, out string source)
+                    ? source
+                    : string.Empty;
+                return true;
+            }
+
+            if (!(self is RbxBaseScript script))
+            {
+                return false;
+            }
+
+            switch (key)
+            {
+                case "Enabled":
+                    value = script.Enabled;
+                    return true;
+                case "Disabled":
+                    NoteDisabledDeprecation(context);
+                    value = script.Disabled;
+                    return true;
+                case "RunContext":
+                    value = context.Bindings.Enums.Get("RunContext").TryGetItemByValue(script.RunContext,
+                        out RbxEnumItem item)
+                        ? LuaCsRbxDatatypeBindings.Wrap(item)
+                        : LuaValue.Nil;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// <c>Enabled</c> and <c>Disabled</c> writes, under the world-edit gate of every property write: the instance
+        /// changes at once, and the mod runtime stops or starts the script at its next frame (SC-3, SC-9). Nothing is
+        /// written to the store.
+        /// </summary>
+        private static bool TryWriteScript(LuaCsRbxModContext context, RbxInstance self, string key,
+            LuaValue value)
+        {
+            if (!(self is RbxLuaSourceContainer container))
+            {
+                return false;
+            }
+
+            if (key == "Source")
+            {
+                RequireScriptConsole(context, self, key);
+                string text = ReadAssignedString(value, self.ClassName, key);
+                if (!container.IsBound)
+                {
+                    throw RbxError.NotImplemented(
+                        self.ClassName + ".Source on an instance no mod is bound to", "a later MVP4 step",
+                        "load the code as a mod with manage_mods load, with an @coreai parent: header naming where its "
+                        + "script goes");
+                }
+
+                RequireScriptSourceHost(context, self, key)
+                    .WriteScriptSource(context.ActorContext, container.SourceId, text);
+                return true;
+            }
+
+            if (key == "RunContext" && self is RbxBaseScript runScript)
+            {
+                RequireScriptConsole(context, self, key);
+                RbxEnumItem item = ReadAssignedEnumItem(value, context.Bindings.Enums, "RunContext", self.ClassName,
+                    key);
+                if (!runScript.IsBound)
+                {
+                    runScript.RunContext = item.Value;
+                    context.RecordMutation(self);
+                    return true;
+                }
+
+                RequireScriptSourceHost(context, self, key)
+                    .WriteScriptRunContext(context.ActorContext, runScript, item.Value);
+                return true;
+            }
+
+            if (!(self is RbxBaseScript script))
+            {
+                return false;
+            }
+
+            switch (key)
+            {
+                case "Enabled":
+                    context.RequireWorldEditForWrite(self, key);
+                    script.Enabled = ReadAssignedBoolean(value, self.ClassName, key);
+                    break;
+                case "Disabled":
+                    NoteDisabledDeprecation(context);
+                    context.RequireWorldEditForWrite(self, key);
+                    script.Disabled = ReadAssignedBoolean(value, self.ClassName, key);
+                    break;
+                default:
+                    return false;
+            }
+
+            context.RecordMutation(self);
+            return true;
+        }
+
+        /// <summary>
+        /// SC-13: a client script reaching ServerStorage or ServerScriptService from the DataModel raises
+        /// CONTEXT_VIOLATION, because a client never receives them (R2.1); in single-player it would only work because
+        /// the one registry is shared. An instance reached by reference is not checked.
+        /// </summary>
+        private static RbxInstance RequireServiceSide(LuaCsRbxModContext context, RbxInstance service)
+        {
+            if (service != null && (service.ClassName == "ServerStorage" || service.ClassName == "ServerScriptService"))
+            {
+                context.RequireContext(service.ClassName);
+            }
+
+            return service;
+        }
+
+        /// <summary>
+        /// SC-2 and SC-4: <c>Source</c> and <c>RunContext</c> are written only by the host's unrestricted console (a
+        /// one-shot <c>execute_lua</c> chunk, which owns no mod and runs inside the confirmed-world gate); a mod gets
+        /// NOT_AUTHORITY, so a script can never rewrite scripts outside that gate and the version-write grants.
+        /// </summary>
+        private static void RequireScriptConsole(LuaCsRbxModContext context, RbxInstance self, string key)
+        {
+            string member = self.ClassName + "." + key;
+            context.RequireUnrestricted(member);
+            if (!string.IsNullOrEmpty(context.OwnerModId))
+            {
+                throw new RbxError(
+                    RbxErrorCode.NotAuthority,
+                    "mod '" + context.OwnerModId + "' cannot write " + member + ": only the console (execute_lua) "
+                    + "writes a script's " + key,
+                    "change the mod with manage_mods (reload or edit), or write " + member + " from execute_lua",
+                    context.OwnerModId);
+            }
+        }
+
+        private static ILuaCsScriptSourceHost RequireScriptSourceHost(LuaCsRbxModContext context, RbxInstance self,
+            string key)
+        {
+            return context.Bindings.ScriptSourceHost
+                   ?? throw RbxError.NotImplemented(self.ClassName + "." + key + " without a mod runtime",
+                       "a composition that builds a mod runtime over these bindings",
+                       "write it from execute_lua in a world that runs mods");
+        }
+
+        /// <summary>
+        /// SC-17: a copy never carries a binding, so a cloned script runs nothing. When the original (or anything inside
+        /// it) is a bound Script or LocalScript, the cloning mod is told once that the copy does not run yet.
+        /// </summary>
+        private static void NoteClonedScripts(LuaCsRbxModContext context, RbxInstance original)
+        {
+            if (context.HasLoggedClonedScriptNote || !HoldsBoundRunnableScript(original))
+            {
+                return;
+            }
+
+            context.HasLoggedClonedScriptNote = true;
+            context.Bindings.LogSink?.Invoke(
+                "[RbxApi] NOT_IMPLEMENTED: a cloned Script does not run yet (roadmap MVP13: script templates) | fix: "
+                + "clone the part without the script and handle all copies from one script with CollectionService "
+                + "tags. (Logged once per mod.)");
+        }
+
+        private static bool HoldsBoundRunnableScript(RbxInstance root)
+        {
+            if (root is RbxBaseScript script && script.IsBound)
+            {
+                return true;
+            }
+
+            IReadOnlyList<RbxInstance> children = root.GetChildren();
+            for (int index = 0; index < children.Count; index++)
+            {
+                if (HoldsBoundRunnableScript(children[index]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static void NoteDisabledDeprecation(LuaCsRbxModContext context)
+        {
+            if (context.HasLoggedDisabledDeprecation)
+            {
+                return;
+            }
+
+            context.HasLoggedDisabledDeprecation = true;
+            context.Bindings.LogSink?.Invoke(
+                "[RbxApi] BaseScript.Disabled is deprecated by Roblox; use Enabled (the inverse) instead. "
+                + "(Logged once per mod.)");
+        }
+
         // ---- ValueBase (Value + Changed over the engine-free value classes) -----------------
 
         /// <summary>Value reads (Changed is dispatched with every other Instance signal). Reads
@@ -4579,6 +4896,8 @@ namespace CoreAI.Ai.LuaCs
             {
                 return false;
             }
+
+            context.RequireContext("Camera." + key);
 
             // WHY the camera notifies here: its state lives on the rig and the bindings, not on
             // the Camera instance, so no setter of the instance could fire Changed for it.

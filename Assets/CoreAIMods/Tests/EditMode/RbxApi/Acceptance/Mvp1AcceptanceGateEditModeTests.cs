@@ -1038,6 +1038,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }),
             ("Light", new[] { "Brightness", "Color", "Enabled", "Shadows" }),
             ("PointLight", new[] { "Range" }),
+            ("BaseScript", new[] { "Enabled", "Disabled", "RunContext" }),
+            ("Script", new[] { "Source" }),
+            ("ModuleScript", new[] { "Source" }),
             ("ValueBase", new[] { "Value" }),
             ("Tween", new[] { "Instance", "TweenInfo", "PlaybackState" })
         };
@@ -1046,8 +1049,11 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         /// The members the read dispatch answers that are events, methods or callbacks: not
         /// properties, so they stay out of BoundProperties.
         /// </summary>
+        // WHY "workspace" is here: game.workspace is the lowercase read alias Roblox keeps for game.Workspace. It
+        // answers a read and nothing else (no change signal, no write), so it is not a row of BoundProperties.
         private static readonly string[] ReadDispatchNonProperties =
         {
+            "workspace",
             "ChildAdded", "ChildRemoved", "DescendantAdded", "DescendantRemoving", "Destroying",
             "AncestryChanged", "AttributeChanged", "Changed", "TagAdded", "TagRemoved", "WaitForChild",
             "LoadCharacterAsync", "LoadCharacter", "Loaded", "PlayerAdded", "PlayerRemoving", "Died",
@@ -1066,7 +1072,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         {
             "Part", "Model", "Workspace", "Camera", "Humanoid", "Player", "Players",
             "UserInputService", "StarterPlayer", "ClickDetector", "MaterialVariant", "Lighting",
-            "PointLight", "IntValue", "Tween"
+            "PointLight", "Script", "ModuleScript", "IntValue", "Tween"
         };
 
         /// <summary>
@@ -1293,6 +1299,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                     MaterialVariant = Instance.new('MaterialVariant'),
                     Lighting = game:GetService('Lighting'),
                     PointLight = Instance.new('PointLight'),
+                    Script = Instance.new('Script'),
+                    ModuleScript = Instance.new('ModuleScript'),
                     IntValue = Instance.new('IntValue'),
                     Tween = game:GetService('TweenService'):Create(
                         part, TweenInfo.new(1), {Transparency = 1}),

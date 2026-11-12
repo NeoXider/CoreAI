@@ -183,22 +183,29 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scripts
             Assert.IsFalse(runContext.TryGetItem("Studio", out RbxEnumItem _), "twin: no item beyond the mirror's");
         }
 
-        [TestCase("Script", "Enabled", RbxKnownUnimplementedMemberStatus.Planned)]
-        [TestCase("LocalScript", "RunContext", RbxKnownUnimplementedMemberStatus.Planned)]
-        [TestCase("Script", "Source", RbxKnownUnimplementedMemberStatus.Planned)]
-        [TestCase("ModuleScript", "Source", RbxKnownUnimplementedMemberStatus.Planned)]
-        [TestCase("Script", "LinkedSource", RbxKnownUnimplementedMemberStatus.Unsupported)]
-        public void B1_TheScriptMembers_StayLoudStubsForLua_UntilStepC2(string className, string member,
-            RbxKnownUnimplementedMemberStatus status)
+        [TestCase("Script", "Enabled")]
+        [TestCase("Script", "Disabled")]
+        [TestCase("LocalScript", "RunContext")]
+        [TestCase("Script", "Source")]
+        [TestCase("ModuleScript", "Source")]
+        public void C2_TheScriptMembers_AreNoLongerStubs(string className, string member)
         {
             ClassCatalog catalog = ClassCatalog.CreateMvp1();
 
-            Assert.IsTrue(catalog.TryGetKnownUnimplementedMember(className, member,
+            Assert.IsFalse(catalog.TryGetKnownUnimplementedMember(className, member,
+                    RbxKnownUnimplementedMemberAccess.Read, out string _, out RbxKnownUnimplementedMemberDescriptor _),
+                "MVP4 step C2 binds " + className + "." + member + " in Lua");
+        }
+
+        [TestCase("Script")]
+        [TestCase("ModuleScript")]
+        public void C2_Negative_LinkedSource_StaysAnUnsupportedStub(string className)
+        {
+            ClassCatalog catalog = ClassCatalog.CreateMvp1();
+
+            Assert.IsTrue(catalog.TryGetKnownUnimplementedMember(className, "LinkedSource",
                 RbxKnownUnimplementedMemberAccess.Read, out string _, out RbxKnownUnimplementedMemberDescriptor stub));
-            Assert.AreEqual(status, stub.Status);
-            Assert.IsFalse(catalog.TryGetKnownUnimplementedMember("ModuleScript", "Enabled",
-                RbxKnownUnimplementedMemberAccess.Read, out string _, out RbxKnownUnimplementedMemberDescriptor _),
-                "twin: ModuleScript has no Enabled at all");
+            Assert.AreEqual(RbxKnownUnimplementedMemberStatus.Unsupported, stub.Status);
         }
     }
 }

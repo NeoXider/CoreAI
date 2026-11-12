@@ -764,6 +764,55 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         internal IScriptInstanceHost ScriptInstances => _scriptInstances;
 
+        /// <summary>
+        /// The mod runtime behind the script members (MVP4 step C2): <c>Source</c> reads and writes and <c>RunContext</c>
+        /// writes reach it here. Null until a runtime is built over these bindings; the members then refuse loudly.
+        /// </summary>
+        internal ILuaCsScriptSourceHost ScriptSourceHost { get; set; }
+
+        /// <summary>
+        /// The side-only members (MVP4 SC-13) every server and client script is checked against; frozen, the defaults
+        /// of <see cref="ScriptContextRuleTable.CreateDefault"/>.
+        /// </summary>
+        internal ScriptContextRuleTable ContextRules { get; } = CreateFrozenContextRules();
+
+        private static ScriptContextRuleTable CreateFrozenContextRules()
+        {
+            ScriptContextRuleTable rules = ScriptContextRuleTable.CreateDefault();
+            rules.Freeze();
+            return rules;
+        }
+
+        private readonly Dictionary<string, ScriptContext> _scriptContextByMod = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Records the script context the next build of <paramref name="ownerModId"/> runs with (MVP4 step C3); the mod
+        /// runtime calls it before it registers the build's bindings, and the build's Lua context takes it.
+        /// </summary>
+        internal void SetModScriptContext(string ownerModId, ScriptContext context)
+        {
+            if (string.IsNullOrWhiteSpace(ownerModId))
+            {
+                return;
+            }
+
+            if (context == ScriptContext.Legacy)
+            {
+                _scriptContextByMod.Remove(ownerModId);
+                return;
+            }
+
+            _scriptContextByMod[ownerModId] = context;
+        }
+
+        private ScriptContext ScriptContextOf(string ownerModId)
+        {
+            return !string.IsNullOrWhiteSpace(ownerModId)
+                   && _scriptContextByMod.TryGetValue(ownerModId, out ScriptContext context)
+                ? context
+                : ScriptContext.Legacy;
+        }
+
         /// <summary>The shared enum registry exposed as the <c>Enum</c> global.</summary>
         public RbxEnumRegistry Enums => _enums;
 
@@ -1668,6 +1717,22 @@ namespace CoreAI.Ai.LuaCs
             _chatFactory = chatFactory;
         }
 
+        /// <summary>
+        /// Records the actor a source registered without a run belongs to (MVP4 step C3): such a source never builds a
+        /// Lua context, so without this its actor's disconnect would not list it and it would stay loaded for good, the
+        /// M2-24 shape. A host-authority source is not recorded; it is never unloaded by a disconnect.
+        /// </summary>
+        internal void RecordRegisteredModActor(string ownerModId, string ownerActorId)
+        {
+            if (string.IsNullOrWhiteSpace(ownerModId) || string.IsNullOrWhiteSpace(ownerActorId))
+            {
+                return;
+            }
+
+            _actorContextsByOwnerModId[ownerModId] =
+                ModActorLedger.CreateAttributedContext(ownerActorId.Trim(), _registry.WorldId);
+        }
+
         /// <summary>Admits a trusted actor to the loopback bridge and creates its Player once.</summary>
         public RbxPlayer ConnectActor(ActorContext actorContext)
         {
@@ -2341,7 +2406,55 @@ namespace CoreAI.Ai.LuaCs
                 return null;
             }
 
+            // WHY a lookup for a client script: a replica admits players only through replication, and the host's
+            // client script is this screen's player, which the composition connects (SC-15).
+            if (context.Context == ScriptContext.Client)
+            {
+                if (context.IsHost)
+                {
+                    return ResolveClickingPlayer();
+                }
+
+                if (_players.TryGetByActorId(context.NetworkActorId, out RbxPlayer author) && !author.IsDestroyed)
+                {
+                    return author;
+                }
+
+                return _registry.Authority == RegistryAuthority.Replica
+                    ? null
+                    : EnsureNetworkActor(context.NetworkActorId);
+            }
+
             return EnsureNetworkActor(context.ActorContext.ActorId);
+        }
+
+        /// <summary>The network actor of this screen's player (<see cref="ResolveClickingPlayer"/>), or null without one.</summary>
+        internal string LocalPlayerNetworkActorId()
+        {
+            RbxPlayer player = _players == null ? null : ResolveClickingPlayer();
+            return string.IsNullOrEmpty(player?.NetworkActorId) ? null : player.NetworkActorId;
+        }
+
+        /// <summary>
+        /// Whether a client script can start now (MVP4 SC-9 item 6, SC-15): for the host's own client script
+        /// (<paramref name="authorActorId"/> null), this screen's player exists; for another author's, that author's
+        /// player exists, or this authoritative world admits it on demand as it always has. A replica waits for
+        /// replication.
+        /// </summary>
+        internal bool HasPlayerFor(string authorActorId)
+        {
+            if (_players == null)
+            {
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(authorActorId))
+            {
+                return ResolveClickingPlayer() != null;
+            }
+
+            return _registry.Authority != RegistryAuthority.Replica
+                   || (_players.TryGetByActorId(authorActorId, out RbxPlayer author) && !author.IsDestroyed);
         }
 
         internal void FireRemoteServer(LuaCsRbxModContext context,
@@ -2349,7 +2462,7 @@ namespace CoreAI.Ai.LuaCs
         {
             byte[] payload = _networkCodec.EncodeArguments(
                 ReadRemoteArguments(ctx, 1));
-            remote.FireServer(_networkBridge, context.ActorContext.ActorId, payload);
+            remote.FireServer(_networkBridge, context.NetworkActorId, payload);
         }
 
         internal void FireRemoteClient(RbxRemoteEvent remote, RbxPlayer player,
@@ -2380,7 +2493,7 @@ namespace CoreAI.Ai.LuaCs
                     : LuaValue.Nil;
             }
 
-            string actorId = context.ActorContext.ActorId;
+            string actorId = context.NetworkActorId;
             if (_clientRemoteCallbacks.TryGetValue(remote.Id,
                     out Dictionary<string, RemoteFunctionCallbackRegistration> callbacks)
                 && callbacks.TryGetValue(actorId, out registration)
@@ -2408,11 +2521,11 @@ namespace CoreAI.Ai.LuaCs
                 }
                 else if (_clientRemoteCallbacks.TryGetValue(remote.Id,
                              out Dictionary<string, RemoteFunctionCallbackRegistration> callbacks)
-                         && callbacks.TryGetValue(context.ActorContext.ActorId,
+                         && callbacks.TryGetValue(context.NetworkActorId,
                              out RemoteFunctionCallbackRegistration cleared))
                 {
                     cleared.DisplacedBy = context;
-                    callbacks.Remove(context.ActorContext.ActorId);
+                    callbacks.Remove(context.NetworkActorId);
                     if (callbacks.Count == 0)
                     {
                         _clientRemoteCallbacks.Remove(remote.Id);
@@ -2463,13 +2576,13 @@ namespace CoreAI.Ai.LuaCs
                 _clientRemoteCallbacks.Add(remote.Id, clientCallbacks);
             }
 
-            if (clientCallbacks.TryGetValue(context.ActorContext.ActorId,
+            if (clientCallbacks.TryGetValue(context.NetworkActorId,
                     out RemoteFunctionCallbackRegistration replacedClient))
             {
                 replacedClient.DisplacedBy = context;
             }
 
-            clientCallbacks[context.ActorContext.ActorId] = registration;
+            clientCallbacks[context.NetworkActorId] = registration;
         }
 
         /// <summary>
@@ -2746,6 +2859,15 @@ namespace CoreAI.Ai.LuaCs
             bool hadPlayer = _players.TryGetByActorId(actorId, out RbxPlayer player);
             if (!hadPlayer)
             {
+                // WHY (SC-15): a replica's players arrive with the server's world; one minted here would be a second,
+                // diverged Player the server never admitted, the protocol violation TODO.md "Left on MVP2.5" names.
+                if (_registry.Authority == RegistryAuthority.Replica)
+                {
+                    throw new InvalidOperationException(
+                        "a replica admits players only through replication; actor '" + actorId
+                        + "' has no replicated Player yet");
+                }
+
                 player = _players.EnsureActor(_registry, actorId);
             }
 
@@ -4266,7 +4388,11 @@ namespace CoreAI.Ai.LuaCs
                 context = new LuaCsRbxModContext(
                     this, capabilities, ownerModId, originTag);
             }
-            if (!context.IsNetworkServer)
+
+            context.Context = ScriptContextOf(ownerModId);
+            // WHY no Player for a host-authored client script: it acts as this process's local player (SC-14), which
+            // the composition connects; minting one for the host's actor would add a second player (SC-15).
+            if (!context.IsNetworkServer && !(context.Context == ScriptContext.Client && context.IsHost))
             {
                 EnsureNetworkActor(context.ActorContext.ActorId);
             }
@@ -4815,6 +4941,7 @@ namespace CoreAI.Ai.LuaCs
         {
             return Fn("camera_set_cframe", ctx =>
             {
+                context.RequireContext("camera_set_cframe");
                 RbxInstance camera = RequireWorldCamera("camera_set_cframe");
                 context.RequireWorldEditForWrite(camera, "CFrame");
                 RbxCFrame cframe = ReadCFrame(ctx, 0, "camera_set_cframe");
@@ -4830,6 +4957,7 @@ namespace CoreAI.Ai.LuaCs
         {
             return Fn("camera_follow", ctx =>
             {
+                context.RequireContext("camera_follow");
                 RbxInstance camera = RequireWorldCamera("camera_follow");
                 context.RequireWorldEditForWrite(camera, "CameraSubject");
                 LuaValue target = Arg(ctx, 0);
@@ -5453,7 +5581,7 @@ namespace CoreAI.Ai.LuaCs
 
                 long generation = luaThread.AdvanceRemoteFunctionWaitGeneration();
                 _remoteFunctionWaitGenerations[caller] = generation;
-                string actorId = context.ActorContext.ActorId;
+                string actorId = context.NetworkActorId;
                 string remoteFullName = remote.GetFullName();
                 string respondingClientActorId = null;
 
@@ -5490,7 +5618,7 @@ namespace CoreAI.Ai.LuaCs
                         byte[] payload = _networkCodec.EncodeArguments(
                             ReadRemoteArguments(ctx, 1));
                         remote.InvokeServer(_networkBridge,
-                            context.ActorContext.ActorId, payload, receiveResponse);
+                            context.NetworkActorId, payload, receiveResponse);
                     }
                     else
                     {

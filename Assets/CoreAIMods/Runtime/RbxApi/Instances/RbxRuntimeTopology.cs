@@ -39,9 +39,9 @@ namespace CoreAI.Mods.Rbx.Instances
         public static readonly RbxSoloRuntimeTopology Shared = new RbxSoloRuntimeTopology();
 
         // WHY: per the Roblox reference mirror, IsClient is true only inside a client execution
-        // context (a LocalScript, a ModuleScript required by one, or a RunContext.Client Script)
-        // and false in all other cases; the solo runtime has no client context, so it answers
-        // false here while IsServer answers true.
+        // context (a LocalScript, a ModuleScript required by one, or a RunContext.Client Script);
+        // a declared client script gets that answer from its script context (MVP4 SC-14), and this
+        // per-process answer, false, is what legacy scripts receive, while IsServer answers true.
         public bool IsServer => true;
 
         public bool IsClient => false;
@@ -81,9 +81,10 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <inheritdoc />
         /// <remarks>
         /// WHY only a pure client answers true, even on a host: in Roblox IsClient is true inside a
-        /// CLIENT execution context, and CoreAI does not yet let a mod declare which context it runs
-        /// in. Answering true on a host would tell server-side Lua it is a client, which is worse
-        /// than the conservative answer — it is a wrong one that a script would branch on.
+        /// CLIENT execution context. A script that declares its context gets the per-context answer
+        /// from its script context (MVP4 SC-14, LuaCsRbxInstanceBindings); this per-process answer is
+        /// what a legacy script, which declares none, still receives, and on a host telling its
+        /// server-side code it is a client would be a wrong answer a script would branch on.
         /// </remarks>
         public bool IsClient => _bridge.Topology == Networking.RbxNetworkTopology.Client;
 

@@ -457,6 +457,7 @@ Conscious deviations (running list — additions require an entry here):
 | DEV-122 | Humanoids push each other through physics | characters block each other and never push: a walker stops against another character or slides along it | one character must never shove another into a block or off a ledge, and the result must be the same every time |
 | DEV-123 | a `MoveTo` walker pushes through others or times out after 8 s | a `MoveTo` blocked by another character ends after 1 s with `MoveToFinished(false)` | characters block each other, so the script needs the choice back quickly |
 | DEV-124 | `UserInputService.TextBoxFocused` fires only for a TextBox | it also fires, with nil, while a host screen holds the keyboard (the Hub opened over the world), and `TextBoxFocusReleased(nil)` when it lets go | the world must ignore keys behind a host screen, and scripts learn about it through the event they already have for lost keyboard input |
+| DEV-125 | a script that sets its own `Enabled` to false stops at its threads' next resumption point (R1.10) | it finishes its current resume and stops before the next frame; any stop or start a change of `Enabled`, `RunContext`, parent or destruction causes is applied at the start of the next frame (MVP4 step C2; pinned by `R1_10_AScriptThatDisablesItself_StopsByTheNextFrame`) | no mod's code ever runs inside another script's property write, and a stop never tears down the thread that is running; the difference is only "before the next frame" against "at the next yield" |
 
 ---
 
@@ -1056,9 +1057,16 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
     and `run_state`, a `context: shared` source loads as a ModuleScript that never runs on its own, a class
     change replaces the instance (SC-4), and a start is gated by the SC-9 predicate (a client script never
     starts on a dedicated server, a server script never on a pure client, nothing in `ServerStorage`, a
-    disabled script not at all; legacy mods keep today's rule). Not started: C2 (script members in Lua,
-    re-evaluating a running script), C3 (`CONTEXT_VIOLATION`, `IsNetworkServer` by context, no Player
-    minting on a replica), C4 (`require`), C5 (the client composition), C6 (skill, P1, acceptance).
+    disabled script not at all; legacy mods keep today's rule), and C2 — `Enabled`, `Disabled`,
+    `RunContext` and `Source` are real Lua members (`Source` readable at the unrestricted tier, `Source` and
+    `RunContext` writable from the host console only), and a running script stops or starts at the next
+    frame when its instance is disabled, moved or destroyed, and C3 — a declared script's side comes from
+    its context (`IsNetworkServer`, `RunService:IsServer/IsClient`, `Players.LocalPlayer`, the remote sender),
+    so a restricted author's server script runs as the server on a host; server- or client-only members
+    used from the other side raise `CONTEXT_VIOLATION` (remotes, `UserInputService`, render signals, the
+    camera, server containers, `store_*`, cross-side `mods_call`/`mods_get`); a replica mints no Player;
+    a client script waits for the local player. Legacy mods keep every pre-MVP4 rule. Not started: C4
+    (`require`), C5 (the client composition), C6 (skill, P1, acceptance, the SC-13 rows C3 left).
   - *The survey this package started from (release 7.56.0); the lines above supersede it where they
     differ:*
   - `RbxNetworkTopology {Solo, Host, DedicatedServer, Client}` (`RbxApi/Instances/Networking/INetworkBridge.cs`)

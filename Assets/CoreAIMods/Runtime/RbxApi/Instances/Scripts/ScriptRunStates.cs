@@ -48,6 +48,11 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
         {
             if (facts.IsLoaded && facts.IsRegisteredWithoutRun)
             {
+                if (facts.IsQuarantined)
+                {
+                    return ScriptRunState.Quarantined;
+                }
+
                 return facts.HasBoundInstance ? facts.NotRunningState : ScriptRunState.Detached;
             }
 

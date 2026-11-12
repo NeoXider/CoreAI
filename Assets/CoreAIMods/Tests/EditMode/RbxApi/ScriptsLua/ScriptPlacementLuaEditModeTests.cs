@@ -152,14 +152,15 @@ error('boom')"));
         [Test]
         public void C1_FailedReload_KeepsTheInstance_WhereItWasAndWithItsRunContext()
         {
+            _world.ConnectLocalPlayer();
             _world.Load("door", ServerHeader + "store_set('run', 'server')");
             RbxBaseScript script = BoundScript("door");
 
             Assert.Catch(() => _world.Stack.Runtime.ReloadMod("door", ClientHeader + @"
-store_set('saw', script.Parent.Name)
+script:SetAttribute('saw', script.Parent.Name)
 error('boom')"));
 
-            Assert.AreEqual("ReplicatedStorage", _world.Get("door", "saw"),
+            Assert.AreEqual("ReplicatedStorage", _world.Seen("door", "saw"),
                 "the new chunk ran at the client placement it asked for");
             Assert.AreSame(script, BoundScript("door"), "a failed reload keeps the instance");
             Assert.AreSame(Service("ServerScriptService"), script.Parent, "and puts it back where it was");
@@ -318,12 +319,13 @@ store_set('part', tostring(ok) .. '|' .. tostring(err))", "alice");
         public void SC_5_ARestoreStartsAHeaderlessSourceWithItsStoredContext()
         {
             _world.Dispose();
-            _world = new World(sources: new MemorySourceStore().With("hud", "store_set('parent', script.Parent.Name)",
-                "client"));
+            _world = new World(sources: new MemorySourceStore().With("hud",
+                "script:SetAttribute('parent', script.Parent.Name)", "client"));
+            _world.ConnectLocalPlayer();
 
             Assert.AreEqual(1, _world.Stack.Runtime.RehydrateFromStore(LuaCapabilities.All));
 
-            Assert.AreEqual("ReplicatedStorage", _world.Get("hud", "parent"));
+            Assert.AreEqual("ReplicatedStorage", _world.Seen("hud", "parent"));
             Assert.AreEqual(RunContextValues.Client, BoundScript("hud").RunContext);
         }
 
@@ -360,9 +362,10 @@ store_set('part', tostring(ok) .. '|' .. tostring(err))", "alice");
         [Test]
         public void C1_Load_DeclaredClient_CreatesAClientScriptInReplicatedStorage()
         {
-            _world.Load("hud", ClientHeader + "store_set('parent', script.Parent.Name)");
+            _world.ConnectLocalPlayer();
+            _world.Load("hud", ClientHeader + "script:SetAttribute('parent', script.Parent.Name)");
 
-            Assert.AreEqual("ReplicatedStorage", _world.Get("hud", "parent"));
+            Assert.AreEqual("ReplicatedStorage", _world.Seen("hud", "parent"));
             Assert.AreEqual(RunContextValues.Client, BoundScript("hud").RunContext);
         }
 
@@ -371,14 +374,14 @@ store_set('part', tostring(ok) .. '|' .. tostring(err))", "alice");
         {
             Assert.AreEqual(CoreAI.Mods.Rbx.Instances.Networking.RbxNetworkTopology.Solo,
                 _world.Roblox.NetworkBridge.Topology, "precondition: a world without a network is single-player");
+            _world.ConnectLocalPlayer();
 
             _world.Load("hud", ClientHeader + @"
-local runs = (tonumber(store_get('runs')) or 0) + 1
-store_set('runs', tostring(runs))");
+script:SetAttribute('runs', (script:GetAttribute('runs') or 0) + 1)");
             _world.Roblox.Scheduler.Advance(0d);
             _world.Roblox.Scheduler.Advance(0d);
 
-            Assert.AreEqual("1", _world.Get("hud", "runs"),
+            Assert.AreEqual("1", _world.Seen("hud", "runs"),
                 "one machine is both sides, so the client script runs there once, like every other mod");
         }
 
@@ -433,14 +436,15 @@ store_set('runs', tostring(runs))");
         [Test]
         public void C1_Reload_ServerToClient_KeepsTheInstance_MovesItAndSetsItsRunContext()
         {
+            _world.ConnectLocalPlayer();
             _world.Load("door", ServerHeader + "store_set('ok', 'yes')");
             RbxBaseScript script = BoundScript("door");
 
-            _world.Stack.Runtime.ReloadMod("door", ClientHeader + "store_set('parent', script.Parent.Name)");
+            _world.Stack.Runtime.ReloadMod("door", ClientHeader + "script:SetAttribute('parent', script.Parent.Name)");
 
             Assert.AreSame(script, BoundScript("door"));
             Assert.AreEqual(RunContextValues.Client, script.RunContext);
-            Assert.AreEqual("ReplicatedStorage", _world.Get("door", "parent"));
+            Assert.AreEqual("ReplicatedStorage", _world.Seen("door", "parent"));
         }
 
         [Test]
@@ -461,12 +465,13 @@ store_set('runs', tostring(runs))");
         [Test]
         public void C1_Reload_WithoutAContextKey_KeepsTheContextOfTheBoundInstance()
         {
-            _world.Load("door", ClientHeader + "store_set('ok', 'yes')");
+            _world.ConnectLocalPlayer();
+            _world.Load("door", ClientHeader + "local value = 1");
             RbxBaseScript script = BoundScript("door");
 
-            _world.Stack.Runtime.ReloadMod("door", "store_set('parent', script.Parent.Name)");
+            _world.Stack.Runtime.ReloadMod("door", "script:SetAttribute('parent', script.Parent.Name)");
 
-            Assert.AreEqual("ReplicatedStorage", _world.Get("door", "parent"),
+            Assert.AreEqual("ReplicatedStorage", _world.Seen("door", "parent"),
                 "SC-5: without a header context the bound instance decides, so the script stays a client script");
             Assert.AreEqual(RunContextValues.Client, script.RunContext);
             Assert.IsNull(Service("ServerScriptService").FindFirstChild("door"), "no synthetic placement appears");
@@ -656,6 +661,24 @@ made.Parent = script.Parent");
             public string Get(string modId, string key)
             {
                 return Store.Get(modId, key);
+            }
+
+            /// <summary>
+            /// An attribute the mod's script set on itself: how a client script reports, since the mod store is
+            /// server-side state it may not use (SC-13).
+            /// </summary>
+            public string Seen(string modId, string key)
+            {
+                return Roblox.TryGetExecutingScript(modId, out RbxInstance script)
+                    ? System.Convert.ToString(script.GetAttribute(key), System.Globalization.CultureInfo.InvariantCulture)
+                      ?? ""
+                    : "";
+            }
+
+            /// <summary>Admits this screen's player, which a client script waits for (SC-9 item 6).</summary>
+            public void ConnectLocalPlayer()
+            {
+                Roblox.Players.EnsureActor(Roblox.Registry, "screen-player");
             }
 
             public void Dispose()

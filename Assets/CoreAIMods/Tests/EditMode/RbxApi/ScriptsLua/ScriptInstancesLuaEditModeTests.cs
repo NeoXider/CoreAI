@@ -61,7 +61,7 @@ store_set('ran', 'yes')");
         }
 
         [Test]
-        public void SC_8_Negative_LuaSeesNoScriptMembersYet_AndAnInstanceNewScriptRunsNothing()
+        public void SC_8_Negative_ALegacyScriptReadsItsEnabled_AndAnInstanceNewScriptRunsNothing()
         {
             _world.Load("probe", @"
 local ok, err = pcall(function() return script.Enabled end)
@@ -76,10 +76,8 @@ module.Parent = made
 store_set('made', made.ClassName .. '|' .. module.ClassName .. '|' .. tostring(module:IsA('BaseScript')))");
             _world.Frame();
 
-            StringAssert.StartsWith("false|", _world.Get("probe", "enabled"));
-            StringAssert.Contains("NOT_IMPLEMENTED", _world.Get("probe", "enabled"));
-            StringAssert.Contains("MVP4", _world.Get("probe", "enabled"));
-            StringAssert.Contains("NOT_IMPLEMENTED", _world.Get("probe", "source"));
+            Assert.AreEqual("true|true", _world.Get("probe", "enabled"), "MVP4 step C2 binds BaseScript.Enabled");
+            StringAssert.StartsWith("false|", _world.Get("probe", "source"), "a mod never writes a Source (SC-2)");
             Assert.AreEqual("Script|ModuleScript|false", _world.Get("probe", "made"));
             RbxBaseScript made = _world.Roblox.Game.FindFirstChildOfClass("Workspace").FindFirstChild("Authored")
                 as RbxBaseScript;

@@ -723,11 +723,6 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.Register(new ClassDescriptor("PointLight", "Light", false, true, false,
                 descriptor => new RbxPointLight(descriptor)));
 
-            // WHY the script members are stubs although RbxBaseScript holds Enabled and RunContext: the Lua surface of
-            // script instances is MVP4 step C2 (with Source as a view over the store), and until then Lua keeps
-            // seeing exactly what it saw before step B1.
-            const string scriptMembers =
-                "a script's Enabled, RunContext and Source reach Lua with MVP4; manage the mod with manage_mods meanwhile";
             const string chatMessages =
                 "the messaging half of TextChatService (channels, MessageReceived, bubbles) lands with P2; "
                 + "TextChatCommand works now, and a mod reaches the player through UxmlService or a ScreenGui";
@@ -745,17 +740,11 @@ namespace CoreAI.Mods.Rbx.Instances
                 RbxKnownUnimplementedMemberDescriptor.PlannedMethod("GetChatGroupsAsync", "P2", chatMessages),
                 RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("ChatTranslationEnabled",
                     "CoreAI's chat does not translate"));
+            // WHY only LinkedSource: Enabled, Disabled, RunContext and Source are bound (MVP4 step C2, LuaCsRbxInstanceBindings).
             catalog.RegisterKnownUnimplementedMembers("BaseScript",
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("Enabled", "MVP4", scriptMembers),
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("Disabled", "MVP4", scriptMembers),
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("RunContext", "MVP4", scriptMembers),
                 RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("LinkedSource",
                     "deprecated in Roblox (BaseScript.yaml); keep the source in the mod itself"));
-            catalog.RegisterKnownUnimplementedMembers("Script",
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("Source", "MVP4", scriptMembers));
             catalog.RegisterKnownUnimplementedMembers("ModuleScript",
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("Source", "MVP4",
-                    "require and ModuleScript sources arrive with MVP4; share code with mods_export/mods_call meanwhile"),
                 RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("LinkedSource",
                     "deprecated in Roblox (ModuleScript.yaml); keep the source in the mod itself"));
 

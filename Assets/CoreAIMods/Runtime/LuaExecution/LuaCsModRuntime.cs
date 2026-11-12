@@ -119,7 +119,14 @@ namespace CoreAI.Ai.LuaCs
         Reload,
 
         /// <summary>The mod hit its consecutive-error threshold and enters quarantine (kept loaded, dispatch suspended).</summary>
-        Quarantine
+        Quarantine,
+
+        /// <summary>
+        /// The mod's script stopped while it stays loaded (MVP4 SC-3, SC-9): its instance was disabled, moved where it
+        /// does not run, or destroyed. Threads, connections, timers and tweens end; the instances it made stay, and the
+        /// store is not written.
+        /// </summary>
+        ScriptStopped
     }
 
     /// <summary>
@@ -167,7 +174,7 @@ namespace CoreAI.Ai.LuaCs
     /// host that wires neither keeps the prior in-memory-only behaviour.
     /// </summary>
     public sealed class LuaCsModRuntime : ILuaModRuntime, IBudgetedLuaModRuntime, ILuaModSourceRetitler,
-        ILuaModScriptInstanceReleaser
+        ILuaModScriptInstanceReleaser, ILuaCsScriptSourceHost
     {
         // WHY: ~10 s matches Luau's script watchdog so a mod handler is not cut sooner than a Roblox one.
         public const int DefaultHandlerTimeoutMs = 10_000;
@@ -586,6 +593,12 @@ namespace CoreAI.Ai.LuaCs
 
             /// <summary>What <see cref="ScriptRunRules.Evaluate"/> answered when this record was built; Running when it runs.</summary>
             public ScriptRunState StartState = ScriptRunState.Running;
+
+            /// <summary>
+            /// The run predicate's last answer for a durable script (MVP4 step C2): a change of its inputs acts only when
+            /// the answer changes, so a start that failed is not retried until the inputs say stop and then run again.
+            /// </summary>
+            public ScriptRunState Gate = ScriptRunState.Running;
         }
 
         /// <summary>
@@ -689,6 +702,7 @@ namespace CoreAI.Ai.LuaCs
             return new ExecutionBudget(timeoutMs, maxSteps, _scriptExecutionBudget.MaxAllocatedBytes);
         }
         private readonly List<Mod> _tickScratch = new();
+        private readonly HashSet<string> _runInputScratch = new(StringComparer.Ordinal);
         private int _timerStart;
         private int _eventStart;
         private readonly object _instanceQuotaGate = new();
@@ -947,6 +961,10 @@ namespace CoreAI.Ai.LuaCs
             _sourceStore = sourceStore ?? NullLuaModSourceStore.Instance;
             _versionStore = versionStore ?? new NullLuaScriptVersionStore();
             _autoPersistMods = autoPersistMods;
+            if (rbxApi != null)
+            {
+                rbxApi.ScriptSourceHost = this;
+            }
             _transactionScope = transactionScope;
             MaxMods = Math.Max(1, maxMods);
             MaxSchedulerThreadsPerActor = Math.Max(1, maxSchedulerThreadsPerActor);
@@ -1559,6 +1577,7 @@ namespace CoreAI.Ai.LuaCs
                     {
                         IsLoaded = true,
                         IsActive = true,
+                        IsQuarantined = info.Quarantined,
                         HasBoundInstance = hasScript,
                         IsRegisteredWithoutRun = true,
                         NotRunningState = notRunning[index]
@@ -2303,6 +2322,7 @@ namespace CoreAI.Ai.LuaCs
                 {
                     RegisterDetached(mod, modId, luaCode, scriptSeed);
                     commit(mod);
+                    RecordRegisteredOwner(mod);
                     return mod;
                 }
 
@@ -2333,15 +2353,18 @@ namespace CoreAI.Ai.LuaCs
                 // WHY after the placement: where the instance landed decides whether it runs (SC-9 item 4). A source
                 // the predicate does not start is still registered, with its instance, its source and its versions,
                 // so it is listed and a reload or a change of its inputs can start it; it gets no Lua state.
-                mod.StartState = EvaluateStartGate(mod.Context, scriptPlacement?.Script);
+                mod.StartState = EvaluateStartGate(mod, scriptPlacement?.Script);
+                mod.Gate = mod.StartState;
                 if (mod.StartState != ScriptRunState.Running)
                 {
                     mod.Runs = false;
                     commit(mod);
                     CompleteScriptPlacement(modId, scriptPlacement);
+                    RecordRegisteredOwner(mod);
                     return mod;
                 }
 
+                _rbxApi?.SetModScriptContext(modId, mod.Context);
                 IScriptFunctionRegistry registry = _engine.CreateFunctionRegistry();
                 RegisterGameplayBindings(registry, capabilities, modId);
                 RegisterModApis(registry, mod);
@@ -2480,6 +2503,7 @@ namespace CoreAI.Ai.LuaCs
             mod.Placement = ScriptPlacementKind.Durable;
             mod.Runs = false;
             mod.StartState = ScriptRunState.Detached;
+            mod.Gate = ScriptRunState.Detached;
         }
 
         /// <summary>
@@ -2488,8 +2512,10 @@ namespace CoreAI.Ai.LuaCs
         /// (a client script never starts on a dedicated server, a server script never on a pure client). The synthetic
         /// legacy placement always runs, as before MVP4.
         /// </summary>
-        private ScriptRunState EvaluateStartGate(ScriptContext context, RbxLuaSourceContainer script)
+        /// <param name="wasRunning">The script runs now; a running script survives a detach to nil (R1.12).</param>
+        private ScriptRunState EvaluateStartGate(Mod mod, RbxLuaSourceContainer script, bool wasRunning = false)
         {
+            ScriptContext context = mod.Context;
             if (_rbxApi == null || script == null || script.IsDestroyed)
             {
                 return ScriptRunState.Running;
@@ -2507,16 +2533,227 @@ namespace CoreAI.Ai.LuaCs
                 Enabled = baseScript == null || baseScript.Enabled,
                 Container = container,
                 PlayerScope = playerScope,
+                WasRunning = wasRunning,
                 // WHY a legacy script is asked as in single-player: SC-8 keeps today's per-process rule for it, so it
                 // starts on every topology it starts on today; the client composition (step C5) is what keeps legacy
                 // sources off a client.
                 Topology = context == ScriptContext.Legacy
                     ? global::CoreAI.Mods.Rbx.Instances.Networking.RbxNetworkTopology.Solo
                     : _rbxApi.NetworkBridge.Topology,
-                // TODO: MVP4 step C3 makes a client script wait for this process's local player (SC-9 item 6, SC-15).
-                HasLocalPlayer = true
+                HasLocalPlayer = context != ScriptContext.Client
+                                 || _rbxApi.HasPlayerFor(mod.OwnerHasHostAuthority ? null : mod.OwnerActorId)
             };
             return ScriptRunRules.Evaluate(in inputs);
+        }
+
+        /// <summary>
+        /// Re-evaluates the run predicate of every durable script whose inputs may have changed since the last frame
+        /// (MVP4 SC-9, step C2): its instance's <c>Enabled</c> or <c>RunContext</c>, its place in the tree, its
+        /// destruction. A running script the predicate no longer allows stops (<see cref="StopRun"/>); a script loaded
+        /// without a run that the predicate now allows starts afresh in <see cref="ModReloadMode.KeepObjects"/>. Runs at
+        /// the start of <see cref="Tick"/>, outside any mod's code, so a stop or a start never happens inside a running
+        /// chunk.
+        /// </summary>
+        private void ApplyScriptRunInputChanges()
+        {
+            if (_rbxApi == null)
+            {
+                return;
+            }
+
+            _runInputScratch.Clear();
+            if (!_rbxApi.ScriptInstances.TakeRunInputChanges(_runInputScratch, out bool ancestryChanged))
+            {
+                return;
+            }
+
+            List<Mod> candidates = null;
+            lock (_gate)
+            {
+                foreach (Mod mod in _modsInLoadOrder)
+                {
+                    if (mod.Placement == ScriptPlacementKind.Durable && !mod.Removed
+                                                                     && (ancestryChanged
+                                                                         || _runInputScratch.Contains(mod.Id)))
+                    {
+                        (candidates ??= new List<Mod>()).Add(mod);
+                    }
+                }
+            }
+
+            if (candidates == null)
+            {
+                return;
+            }
+
+            for (int index = 0; index < candidates.Count; index++)
+            {
+                try
+                {
+                    ReevaluateRun(candidates[index]);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Error($"[LuaCsModRuntime] Re-evaluating whether mod '{candidates[index].Id}' runs failed: {ex}");
+                }
+            }
+        }
+
+        private void ReevaluateRun(Mod mod)
+        {
+            ScriptRunState gate = _rbxApi.ScriptInstances.TryGetBoundScript(mod.Id, out RbxLuaSourceContainer script)
+                ? EvaluateStartGate(mod, script, mod.Runs)
+                : ScriptRunState.Detached;
+            if (gate == mod.Gate)
+            {
+                return;
+            }
+
+            mod.Gate = gate;
+            if (mod.Runs && gate != ScriptRunState.Running)
+            {
+                StopRun(mod, gate);
+            }
+            else if (!mod.Runs && gate == ScriptRunState.Running)
+            {
+                StartStoppedRun(mod);
+            }
+        }
+
+        /// <summary>
+        /// Stops a run while its mod stays loaded (MVP4 SC-3, SC-9): the run is replaced by a record without one, listed
+        /// with <paramref name="reason"/>, and its threads, connections, timers and tweens end
+        /// (<see cref="LuaModTeardownReason.ScriptStopped"/>). The instances it made stay and stay tracked as its startup
+        /// objects; the store is not written; a quarantine is kept, so only a reload by hand clears it.
+        /// </summary>
+        private void StopRun(Mod existing, ScriptRunState reason)
+        {
+            string modId = existing.Id;
+            lock (_gate)
+            {
+                if (!_mods.TryGetValue(modId, out Mod live) || !ReferenceEquals(live, existing) || !existing.Runs
+                    || (_buildDepthByModId.Count != 0 && _buildDepthByModId.ContainsKey(modId)))
+                {
+                    return;
+                }
+
+                SwapInReplacementLocked(existing, new Mod
+                {
+                    Id = modId,
+                    OwnerActorId = existing.OwnerActorId,
+                    OwnerHasHostAuthority = existing.OwnerHasHostAuthority,
+                    Source = existing.Source,
+                    Caps = existing.Caps,
+                    LogReports = existing.LogReports,
+                    LoadedAtUtc = existing.LoadedAtUtc,
+                    ErrorCount = existing.ErrorCount,
+                    Quarantined = existing.Quarantined,
+                    StartupObjects = existing.StartupObjects,
+                    Context = existing.Context,
+                    Placement = existing.Placement,
+                    Runs = false,
+                    StartState = reason,
+                    Gate = reason
+                });
+            }
+
+            // WHY the actor record is put back after the teardown, as a quarantine does (M2-24): the mod stays loaded
+            // for its actor, so that actor's disconnect must still find and unload it.
+            LuaCsRbxApiBindings.ModActorRecord actorRecord = _rbxApi?.CaptureModActorRecord(modId);
+            TeardownModEffects(modId, LuaModTeardownReason.ScriptStopped);
+            if (actorRecord != null)
+            {
+                _rbxApi.RestoreModActorRecord(actorRecord);
+            }
+
+            _log?.Info($"[LuaCsModRuntime] Mod '{modId}' stopped ({ScriptRunRules.ToWireName(reason)}); it stays loaded.");
+        }
+
+        /// <summary>
+        /// Starts a script loaded without a run once the predicate allows it (MVP4 SC-3): a fresh run of the same source
+        /// in <see cref="ModReloadMode.KeepObjects"/>. A quarantined record never restarts this way; only a reload by hand
+        /// clears a quarantine or a budget suspension, so a script that trips its budget every run cannot be restarted by
+        /// toggling it. A start that fails keeps the record as it was and is logged.
+        /// </summary>
+        private void StartStoppedRun(Mod registration)
+        {
+            if (registration.Quarantined)
+            {
+                _log?.Warn($"[LuaCsModRuntime] Mod '{registration.Id}' is quarantined, so enabling its script does not start it; reload it by hand (manage_mods reload).");
+                AppendLog(registration.Id, LuaLogLevel.Warn,
+                    "the script is quarantined, so enabling it does not start it; reload it by hand (manage_mods reload)");
+                return;
+            }
+
+            try
+            {
+                ReloadModCore(registration.Id, registration.Source, ModReloadMode.KeepObjects, false);
+            }
+            catch (Exception ex)
+            {
+                _log?.Warn($"[LuaCsModRuntime] Starting mod '{registration.Id}' again failed; it stays stopped: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Lets a restricted actor's disconnect find a source registered without a run (MVP4 step C3), as it finds a
+        /// running mod: the bindings list an actor's mods from the actors their Lua contexts recorded, and such a source
+        /// has none.
+        /// </summary>
+        private void RecordRegisteredOwner(Mod mod)
+        {
+            if (_rbxApi != null && !mod.OwnerHasHostAuthority)
+            {
+                _rbxApi.RecordRegisteredModActor(mod.Id, mod.OwnerActorId);
+            }
+        }
+
+        private static readonly ScriptContextRuleTable DefaultContextRules = CreateFrozenContextRules();
+
+        private static ScriptContextRuleTable CreateFrozenContextRules()
+        {
+            ScriptContextRuleTable rules = ScriptContextRuleTable.CreateDefault();
+            rules.Freeze();
+            return rules;
+        }
+
+        /// <summary>
+        /// SC-13 for the runtime's own globals (<c>store_set</c>, <c>store_get</c>): a server or client script using one
+        /// of the other side raises CONTEXT_VIOLATION; legacy scripts keep today's rules.
+        /// </summary>
+        private void RequireModContext(Mod mod, string member)
+        {
+            if (mod.Context != ScriptContext.Server && mod.Context != ScriptContext.Client)
+            {
+                return;
+            }
+
+            RbxError violation = (_rbxApi?.ContextRules ?? DefaultContextRules).Check(member, mod.Context);
+            if (violation != null)
+            {
+                throw new RbxError(violation.Code, violation.RawMessage, violation.Fix, mod.Id);
+            }
+        }
+
+        /// <summary>
+        /// SC-13 and DoD row 2: no direct call crosses the client-server boundary. A server or client script may call
+        /// into (<c>mods_call</c>) or read (<c>mods_get</c>) only a mod on its own side; a legacy mod is on the server side,
+        /// and a legacy caller is never checked.
+        /// </summary>
+        private static void RequireSameSide(Mod caller, Mod target, string member)
+        {
+            if ((caller.Context != ScriptContext.Server && caller.Context != ScriptContext.Client) || target == null
+                || target.Context == ScriptContext.Shared || ScriptContexts.SameSide(caller.Context, target.Context))
+            {
+                return;
+            }
+
+            throw new RbxError(RbxErrorCode.ContextViolation,
+                member + " into mod '" + target.Id + "' crosses the client-server boundary: this script runs as "
+                + ScriptContexts.ToDisplayName(caller.Context) + " and '" + target.Id + "' as "
+                + ScriptContexts.ToDisplayName(target.Context) + " (SC-13)",
+                "send it through a RemoteEvent: FireServer from a client script, FireClient from a server script",
+                caller.Id);
         }
 
         /// <summary>
@@ -2943,6 +3180,17 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         internal ModReloadReport ReloadMod(string id, string luaCode, ModReloadMode mode)
         {
+            return ReloadModCore(id, luaCode, mode, true);
+        }
+
+        /// <summary>
+        /// The reload of <see cref="ReloadMod(string, string, ModReloadMode)"/>. With <paramref name="recordSource"/>
+        /// false it is a restart of the same source (MVP4 SC-3: a script enabled again, or moved back where it runs):
+        /// no revision is recorded, the store is not written and <see cref="ModSourceLoaded"/> is not raised, because
+        /// nothing about the source changed.
+        /// </summary>
+        private ModReloadReport ReloadModCore(string id, string luaCode, ModReloadMode mode, bool recordSource)
+        {
             string modId = Normalize(id);
             if (string.IsNullOrWhiteSpace(luaCode))
             {
@@ -3054,6 +3302,12 @@ namespace CoreAI.Ai.LuaCs
                 && replacement.Placement == ScriptPlacementKind.Durable)
             {
                 RetireSyntheticScript(modId, mode);
+            }
+
+            if (!recordSource)
+            {
+                _log?.Info($"[LuaCsModRuntime] Mod '{modId}' restarted (caps={caps}); {report.Describe()}.");
+                return report;
             }
 
             _log?.Info($"[LuaCsModRuntime] Mod '{modId}' reloaded (caps={caps}); {report.Describe()}.");
@@ -3796,6 +4050,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             ReleaseDisconnectedActorMods();
+            ApplyScriptRunInputChanges();
             lock (_gate)
             {
                 if (_mods.Count == 0)
@@ -5298,7 +5553,8 @@ namespace CoreAI.Ai.LuaCs
             {
                 string targetId = call.GetString(0);
                 string name = call.GetString(1);
-                object export = FindExport(targetId, name, out Mod _);
+                object export = FindExport(targetId, name, out Mod getTarget);
+                RequireSameSide(mod, getTarget, "mods_get");
                 if (_marshaller.GetKind(export) == ScriptValueKind.Function)
                 {
                     throw new ArgumentException(
@@ -5317,6 +5573,7 @@ namespace CoreAI.Ai.LuaCs
                 string targetId = call.GetString(0);
                 string name = call.GetString(1);
                 object export = FindExport(targetId, name, out Mod target);
+                RequireSameSide(mod, target, "mods_call");
                 if (_marshaller.GetKind(export) != ScriptValueKind.Function)
                 {
                     throw new ArgumentException(
@@ -5403,6 +5660,7 @@ namespace CoreAI.Ai.LuaCs
             {
                 registry.Register("store_set", new Action<string, string>((key, value) =>
                 {
+                    RequireModContext(mod, "store_set");
                     string k = Normalize(key);
                     if (k.Length == 0)
                     {
@@ -5413,7 +5671,10 @@ namespace CoreAI.Ai.LuaCs
                 }));
 
                 registry.Register("store_get", new Func<string, string>(key =>
-                    _store.Get(mod.Id, Normalize(key)) ?? ""));
+                {
+                    RequireModContext(mod, "store_get");
+                    return _store.Get(mod.Id, Normalize(key)) ?? "";
+                }));
             }
 
             registry.Register("report", new Action<string>(message =>
@@ -5717,6 +5978,137 @@ namespace CoreAI.Ai.LuaCs
 
             ReleaseBoundScript(modId, source);
             return true;
+        }
+
+        /// <inheritdoc />
+        bool ILuaCsScriptSourceHost.TryReadScriptSource(string sourceId, out string source)
+        {
+            string modId = Normalize(sourceId);
+            if (TryGetModSource(modId, out source))
+            {
+                return true;
+            }
+
+            try
+            {
+                if (_sourceStore.TryLoad(modId, out source, out _) && source != null)
+                {
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Warn($"[LuaCsModRuntime] Reading the stored source of '{modId}' for Source failed: {ex.Message}");
+            }
+
+            source = "";
+            return false;
+        }
+
+        /// <inheritdoc />
+        void ILuaCsScriptSourceHost.WriteScriptSource(ActorContext caller, string sourceId, string source)
+        {
+            string modId = Normalize(sourceId);
+            DemandModAccess(caller, "reload", modId);
+            if (!IsLoaded(modId))
+            {
+                throw RbxError.BadArgument(
+                    "mod '" + modId + "' is unloaded, so writing its Source has nothing to reload",
+                    "load it first (manage_mods load), then write its Source");
+            }
+
+            ReloadMod(modId, source, ModReloadMode.CleanStartupObjects);
+        }
+
+        /// <inheritdoc />
+        void ILuaCsScriptSourceHost.WriteScriptRunContext(ActorContext caller, RbxBaseScript script, int runContext)
+        {
+            string modId = Normalize(script.SourceId);
+            DemandModAccess(caller, "reload", modId);
+            if (_rbxApi == null || !_rbxApi.ScriptInstances.TryGetBoundScript(modId, out RbxLuaSourceContainer bound)
+                                || !ReferenceEquals(bound, script))
+            {
+                throw RbxError.BadArgument(
+                    "mod '" + modId + "' declares no context, so its script is rebuilt at every start and keeps no "
+                    + "RunContext of its own",
+                    "add context: server or context: client to its @coreai header and reload it");
+            }
+
+            string source = null;
+            bool loaded;
+            lock (_gate)
+            {
+                loaded = _mods.TryGetValue(modId, out Mod mod);
+                if (loaded)
+                {
+                    source = mod.Source;
+                }
+            }
+
+            if (source == null)
+            {
+                ((ILuaCsScriptSourceHost)this).TryReadScriptSource(modId, out source);
+            }
+
+            LuaModHeader header = LuaModHeader.Parse(source ?? "", modId);
+            if (!string.IsNullOrWhiteSpace(header.Context))
+            {
+                throw RbxError.BadArgument(
+                    script.ClassName + ".RunContext of mod '" + modId + "' is set by its @coreai header (context: "
+                    + header.Context.Trim() + "), which the next reload applies again",
+                    "edit the header's context: line and reload the mod instead");
+            }
+
+            int previous = script.RunContext;
+            if (previous == runContext)
+            {
+                return;
+            }
+
+            script.RunContext = runContext;
+            if (loaded)
+            {
+                try
+                {
+                    // WHY KeepObjects: a Roblox RunContext change restarts the script (R1.9) and keeps what it made, as
+                    // an Enabled toggle does.
+                    ReloadModCore(modId, source, ModReloadMode.KeepObjects, false);
+                }
+                catch
+                {
+                    script.RunContext = previous;
+                    throw;
+                }
+            }
+
+            PersistStoredContext(modId, script);
+        }
+
+        /// <summary>
+        /// Writes the context a console <c>RunContext</c> write gave a headerless source into its stored manifest
+        /// (SC-4), so the world package's manifest and its bound instance agree; the header has none to keep it.
+        /// </summary>
+        private void PersistStoredContext(string modId, RbxBaseScript script)
+        {
+            if (!_autoPersistMods
+                || !ScriptContexts.TryGetEffective(script.ClassName, script.RunContext, ScriptContext.Legacy,
+                    out ScriptContext context, out string _))
+            {
+                return;
+            }
+
+            try
+            {
+                if (_sourceStore.TryLoad(modId, out string stored, out LuaModManifest manifest) && manifest != null)
+                {
+                    manifest.Context = ScriptContexts.ToDeclaredName(context);
+                    _sourceStore.Save(modId, stored, manifest);
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[LuaCsModRuntime] Recording the new context of '{modId}' in its stored manifest failed: {ex}");
+            }
         }
 
         /// <summary>

@@ -266,6 +266,107 @@ namespace CoreAI.Tests.EditMode.RbxApi.ScriptsLua
             Assert.AreEqual(1, CountNamed(session.Controller.CurrentRbxApi.Registry.WorldRoot, "DoorStart"));
         }
 
+        // ---- C2: Source and RunContext from the console (execute_lua) -------------------------------
+
+        private static ActorContext Host()
+        {
+            return CoreAI.Composition.CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                .GetActorContext(BuiltInAgentRoleIds.Programmer);
+        }
+
+        [Test]
+        public async Task SC_2_SourceRead_FromTheElevatedConsole_ReturnsTheCurrentRevision()
+        {
+            using P3HeadlessSession session = new(new P3MemoryPackageStore(), new P3MemorySourceStore());
+            ActorContext host = Host();
+            Load(session, host, "door", ServerHeader + "local marker = 'v1'");
+
+            LuaTool.LuaResult read = await session.ExecuteAsAsync(host,
+                "print(game:GetService('ServerScriptService').door.Source)");
+
+            Assert.IsTrue(read.Success, read.Error);
+            StringAssert.Contains("local marker = 'v1'", read.Printed);
+        }
+
+        [Test]
+        public async Task SC_2_SourceRead_FromARestrictedConsole_IsNotAuthority()
+        {
+            using P3HeadlessSession session = new(new P3MemoryPackageStore(), new P3MemorySourceStore());
+            Load(session, Host(), "door", ServerHeader + "local marker = 'v1'");
+            ActorContext visitor = Actor(new LocalActorIdentityProvider("visitor"));
+
+            LuaTool.LuaResult read = await session.ExecuteAsAsync(visitor,
+                "print(game:GetService('ServerScriptService').door.Source)");
+
+            Assert.IsFalse(read.Success);
+            StringAssert.Contains("NOT_AUTHORITY", read.Error);
+        }
+
+        [Test]
+        public async Task SC_2_SourceWrite_FromTheConsole_ReloadsTheBoundScript_AsANewRevision()
+        {
+            using P3HeadlessSession session = new(new P3MemoryPackageStore(), new P3MemorySourceStore());
+            ActorContext host = Host();
+            Load(session, host, "door", ServerHeader + "local marker = 'v1'");
+            Assert.IsTrue(TryBound(session, "door", out RbxLuaSourceContainer script));
+
+            LuaTool.LuaResult written = await session.ExecuteAsAsync(host,
+                "game:GetService('ServerScriptService').door.Source = "
+                + "'-- @coreai context: server\\nlocal f = Instance.new(\"Folder\") f.Name = \"Rewritten\" f.Parent = workspace'");
+
+            Assert.IsTrue(written.Success, written.Error);
+            Assert.IsNotNull(session.Controller.CurrentRbxApi.Registry.WorldRoot.FindFirstChild("Rewritten"),
+                "the write is a reload: the new text ran");
+            Assert.IsTrue(TryBound(session, "door", out RbxLuaSourceContainer after));
+            Assert.AreSame(script, after, "the instance is the same; only its source changed");
+            Assert.IsTrue(session.Controller.SourceStore.TryLoad("door", out string stored, out _));
+            StringAssert.Contains("Rewritten", stored);
+            await session.Gate.WaitForPendingBackupAsync();
+        }
+
+        [Test]
+        public async Task SC_4_RunContextWrite_FromTheConsole_RestartsUnderTheNewContext_AndTheManifestFollows()
+        {
+            using P3HeadlessSession session = new(new P3MemoryPackageStore(), new P3MemorySourceStore());
+            ActorContext host = Host();
+            Assert.IsTrue((await session.ExecuteAsAsync(host,
+                "local g = Instance.new('Part') g.Name = 'Gate' g.Anchored = true g.Parent = workspace")).Success);
+            Load(session, host, "door",
+                "-- @coreai parent: Workspace/Gate\nscript:SetAttribute('ctx', tostring(script.RunContext))");
+            Assert.IsTrue(TryBound(session, "door", out RbxLuaSourceContainer script));
+            LuaCsRbxApiBindings api = session.Controller.CurrentRbxApi;
+            api.Players.EnsureActor(api.Registry, "screen-player");
+
+            LuaTool.LuaResult written = await session.ExecuteAsAsync(host,
+                "workspace.Gate.door.RunContext = Enum.RunContext.Client");
+
+            Assert.IsTrue(written.Success, written.Error);
+            Assert.AreEqual(RunContextValues.Client, ((RbxBaseScript)script).RunContext);
+            Assert.AreEqual("running", RunStateOf(session, host, "door"), "a Client script runs in Workspace");
+            Assert.AreEqual("Enum.RunContext.Client", script.GetAttribute("ctx"), "the restart ran under the new context");
+            Assert.IsTrue(session.Controller.SourceStore.TryLoad("door", out _, out LuaModManifest manifest));
+            Assert.AreEqual("client", manifest.Context, "the stored manifest agrees with the instance");
+            RbxWorldPackagePayload saved = session.Controller.CaptureCurrent();
+            Assert.AreEqual(2, saved.FormatVersion, "and the world still saves");
+            await session.Gate.WaitForPendingBackupAsync();
+        }
+
+        [Test]
+        public async Task SC_4_RunContextWrite_OnAScriptWhoseHeaderDeclaresAContext_IsRefused()
+        {
+            using P3HeadlessSession session = new(new P3MemoryPackageStore(), new P3MemorySourceStore());
+            ActorContext host = Host();
+            Load(session, host, "door", ServerHeader + "local marker = 'v1'");
+
+            LuaTool.LuaResult written = await session.ExecuteAsAsync(host,
+                "game:GetService('ServerScriptService').door.RunContext = Enum.RunContext.Client");
+
+            Assert.IsFalse(written.Success);
+            StringAssert.Contains("set by its @coreai header", written.Error);
+            Assert.IsTrue(TryBound(session, "door", out RbxLuaSourceContainer script));
+            Assert.AreEqual(RunContextValues.Server, ((RbxBaseScript)script).RunContext);
+        }
+
         // ---- C1-5: manage_mods list -------------------------------------------------------------
 
         [Test]

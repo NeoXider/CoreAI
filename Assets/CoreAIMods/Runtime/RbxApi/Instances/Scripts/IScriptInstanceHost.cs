@@ -149,6 +149,14 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
         bool MoveFromDefaultPlacement(string sourceId, IReadOnlyList<string> fromDefaultPath,
             IReadOnlyList<string> toDefaultPath);
 
+        /// <summary>
+        /// Takes what may have changed a bound script's run inputs since the last call (MVP4 SC-9, step C2): the sources
+        /// whose instance changed <c>Enabled</c> or <c>RunContext</c> or was destroyed, into
+        /// <paramref name="changedSources"/>, and whether anything in the world was reparented
+        /// (<paramref name="ancestryChanged"/>: any bound script's container may have changed). False when neither.
+        /// </summary>
+        bool TakeRunInputChanges(ICollection<string> changedSources, out bool ancestryChanged);
+
         /// <summary>Raised after each change of a binding: (source id, change). Subscribers are isolated.</summary>
         event Action<string, ScriptInstanceChange> ScriptInstanceChanged;
     }
