@@ -793,7 +793,8 @@ Owner's questions and decisions on the Block World (2026-11-11):
         by itself and answered the game time meanwhile; a second message and `/agents` went through at once while
         the sub-agent worked; the status line showed "scripter-1 working (5 steps)"; the sub-agent built the
         stone shell (101 Rock cells) and the agent got its news. Left: `SubAgentDefinition.DefaultDeadline` (5
-        min for a whole sub-agent run) cancelled the sub-agent in the middle of a streaming answer - too short
+        min for a whole sub-agent run) or the G11 proxy's `--upstream-timeout` (300 s by default; the log shows
+        `wallMs=300043 chunks=0`, so no byte came for 300 s) cancelled the sub-agent in the middle of an answer - too short
         for a local model, and against the rule that a model already streaming is never cut (raise it or make it
         an idle limit); `continue` and `stop` not tried live; the built-in `/stop` should also stop background
         sub-agents when no turn is active (`/agents stop` does it today).

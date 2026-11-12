@@ -198,6 +198,27 @@ log to the G11 run record next to the browser console and Network trace.
 
 ---
 
+## Look at an agent's session
+
+A stopgap until CoreAI exports its own sessions (`TODO.md`, "MCP beyond parity"). Every chat request a player
+sends carries the whole conversation so far: the system prompt, the context blocks, the player's message, the
+model's answers and tool calls, and the tool results. Start the proxy with `--capture-dir`, play, then print the
+newest request of the turn:
+
+```
+python tools/G11Proxy/g11_proxy.py --port 1234 --upstream http://<model server>/v1 --capture-dir artifacts/session-capture --upstream-timeout 3600
+python tools/G11Proxy/session_view.py artifacts/session-capture              (the newest request, texts cut at 600 chars)
+python tools/G11Proxy/session_view.py artifacts/session-capture --chars 0     (nothing cut)
+python tools/G11Proxy/session_view.py artifacts/session-capture --list        (every request: time, messages, size)
+```
+
+What it shows: where the model spends its steps, which tool calls fail and with what error, and which part of
+the prompt or a skill misled it. The capture holds everything the player sent, the API key header excepted, so
+keep it local. With a slow local model raise `--upstream-timeout`: at the default 300 s a model that thinks or
+writes for five minutes without a byte is cut off.
+
+---
+
 ## The §6.5 sequence
 
 Start the proxy, build and serve the player with `apiBaseUrl: http://127.0.0.1:8811/v1`, then keep
