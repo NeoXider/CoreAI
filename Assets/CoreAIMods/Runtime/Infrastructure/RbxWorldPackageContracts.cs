@@ -1421,6 +1421,7 @@ namespace CoreAI.Mods.WorldPackages
         {
             private readonly InMemoryCameraRig _staged = new();
             private IRbxCameraRig _published;
+            private bool _stagedLensSet;
 
             public PublishableCameraRig(RbxCFrame initialCFrame)
             {
@@ -1447,10 +1448,39 @@ namespace CoreAI.Mods.WorldPackages
                 (_published ?? _staged).StopFollowing();
             }
 
+            // WHY forwarded: without these the interface's defaults answered "no lens" for every world that opens
+            // through a package (a kept world included), so Camera.FieldOfView could not be set in a player at all.
+            public double GetFieldOfView()
+            {
+                return (_published ?? _staged).GetFieldOfView();
+            }
+
+            public bool TrySetFieldOfView(double degrees)
+            {
+                if (_published != null)
+                {
+                    return _published.TrySetFieldOfView(degrees);
+                }
+
+                _stagedLensSet = true;
+                return _staged.TrySetFieldOfView(degrees);
+            }
+
+            public RbxVector2 GetViewportSize()
+            {
+                return (_published ?? _staged).GetViewportSize();
+            }
+
             public void Publish(IRbxCameraRig live)
             {
                 RbxCFrame cframe = _staged.GetCFrame();
                 live.SetCFrame(in cframe);
+                // WHY only when staged: a lens nobody set keeps the live camera's own field of view.
+                if (_stagedLensSet)
+                {
+                    live.TrySetFieldOfView(_staged.GetFieldOfView());
+                }
+
                 InstanceId? followTarget = _staged.FollowTarget;
                 if (followTarget.HasValue && !live.Follow(followTarget.Value))
                 {

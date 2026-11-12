@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ships inside the com.neoxider.coreaimcp package, so a WebGL, Android or iOS player keeps the MCP server whole
+     without a link.xml of the consumer's own. -->
+<linker>
+    <!-- WebGL/IL2CPP with Managed Stripping >= Medium: the tools build their answers from anonymous objects and DTOs
+         that Newtonsoft reads by reflection only, so the stripper removed their getters and a player answered "{}"
+         (coreai_tools list in build 10). The assembly is small; keep all of it. -->
+    <assembly fullname="CoreAI.Mcp" preserve="all"/>
+</linker>

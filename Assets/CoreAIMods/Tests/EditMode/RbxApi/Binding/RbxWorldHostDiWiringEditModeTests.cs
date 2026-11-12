@@ -432,6 +432,76 @@ namespace CoreAI.Tests.EditMode.RbxApi.Binding
             }
         }
 
+        /// <summary>
+        /// A world opened from a package (a kept world included) keeps the camera's lens: a mod that sets
+        /// Camera.FieldOfView while the world is staged reaches the Unity camera when it is published, and a write in
+        /// the published world reaches it at once. Both used to refuse with "this world's host camera has no lens".
+        /// </summary>
+        [Test]
+        public void PackageLoad_KeepsTheCameraLens_StagedAndPublished()
+        {
+            CoreAiPrefabRegistryAsset registry = ScriptableObject.CreateInstance<CoreAiPrefabRegistryAsset>();
+            GameObject hostGo = new("RbxWorldHost");
+            RbxWorldHost host = hostGo.AddComponent<RbxWorldHost>();
+            GameObject cameraGo = new("LensCamera");
+            Camera unityCamera = cameraGo.AddComponent<Camera>();
+            unityCamera.fieldOfView = 60f;
+            typeof(RbxWorldHost).GetField("_camera", BindingFlags.Instance | BindingFlags.NonPublic)
+                .SetValue(host, unityCamera);
+            host.Initialize();
+            MemoryPackageStore packageStore = new();
+            ContainerBuilder builder = new();
+            RegisterMinimalModStack(
+                builder,
+                registry,
+                modStoreId: "lens-" + System.Guid.NewGuid().ToString("N"),
+                worldSessionSourceStore: new TransactionalMemorySourceStore(),
+                worldPackageStore: packageStore);
+            builder.RegisterInstance(host);
+            IObjectResolver container = builder.Build();
+            try
+            {
+                IRbxWorldRuntimeService service = container.Resolve<IRbxWorldRuntimeService>();
+                RbxWorldPackagePayload captured = service.CaptureCurrent();
+                RbxWorldModSource lens = new(
+                    new LuaModManifest
+                    {
+                        Id = "staged-lens",
+                        Name = "staged-lens",
+                        Capabilities = LuaCapabilities.All.ToString(),
+                        Active = true
+                    },
+                    "workspace.CurrentCamera.FieldOfView = 85");
+                RbxWorldPackagePayload package = new(
+                    captured.CapturedAtUtc,
+                    captured.Settings,
+                    captured.Tree,
+                    captured.Parts,
+                    captured.CameraCFrame,
+                    new[] { lens });
+
+                RbxWorldLoadResult loaded = service.LoadConfirmedAsync(package).GetAwaiter().GetResult();
+
+                Assert.IsTrue(loaded.Success, loaded.Error);
+                Assert.AreEqual(85f, unityCamera.fieldOfView, Epsilon, "the staged lens reaches the camera");
+                ActorContext trustedHost = CoreServicesInstaller.DefaultLocalHostIdentityProvider
+                    .GetActorContext(BuiltInAgentRoleIds.Programmer);
+                Assert.DoesNotThrow(() => container.Resolve<ILuaModRuntime>().LoadMod(
+                    trustedHost,
+                    "published-lens",
+                    "workspace.CurrentCamera.FieldOfView = 95",
+                    persistToStore: false));
+                Assert.AreEqual(95f, unityCamera.fieldOfView, Epsilon, "a write in the published world");
+            }
+            finally
+            {
+                container.Dispose();
+                Object.DestroyImmediate(registry);
+                Object.DestroyImmediate(cameraGo);
+                Object.DestroyImmediate(hostGo);
+            }
+        }
+
         [Test]
         public void ConfirmedPackageLoad_SwapsEveryFacadeAndRestartsOnlyActiveModsOnce()
         {

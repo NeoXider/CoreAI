@@ -196,6 +196,8 @@
 
 ### Fixed
 
+- A world opened from a package (a kept world included) keeps the camera's lens: `Camera.FieldOfView` could not be set there ("this world's host camera has no lens"), so in a player the Block World's field-of-view setting and the sprint's wider view did nothing. A value a mod sets while the world is staged reaches the camera when it is published.
+- MCP in a WebGL, Android or iOS player: `coreai_tools`, `read_skill` and the other answers built from anonymous objects came back as `{}`, because managed stripping removed their getters; the MCP package now ships a `link.xml` that keeps `CoreAI.Mcp`.
 - A saved world that cannot be opened at a start is no longer deleted by the first change of the fallback world; it stays until the player types `/save` or clears the selection. `/save` no longer answers "Saved" when the same refusal repeats.
 - The Enter or Escape that closed the chat overlay no longer reaches the world's `InputBegan` unprocessed in the same frame (`IChatOverlayKeyboardHold`, `ChatOverlayController.HoldKeyboardThroughNextTick()`).
 - Mods: a `TextChatCommand` parented into `TextChatService.TextChatCommands` is a chat command.

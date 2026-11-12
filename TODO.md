@@ -758,6 +758,10 @@ Owner's questions and decisions on the Block World (2026-11-11):
         download in WebGL, a Hub "Sessions" page) and a harness skill for the MCP link
         (`skills/coreai-game-mcp/`, not started). Today turns are traced only when a host registers
         `InMemoryAgentTurnTraceSink`, and the only viewer is the editor's Agent Session Inspector.
+      - **MCP `screenshot screen:true` never answers in a WebGL player** (seen in build 10 in a headless Chrome;
+        `screen` without it, the camera render, works and so does every other tool). Nothing is logged: neither
+        the end-of-frame capture nor its 5 s deadline coroutine finishes. Also: the main-thread queue's own deadline
+        (`CoreAiMcpServer.FailOnTimeoutAsync`) is a `Task.Delay`, which never fires in a WebGL player.
       - **The Block World on the Lua chat by default.** `coreai_chat` is installed and can be turned on from
         the Hub's Mods page (`useLuaChat` on `BlockWorldDemoModule` turns it on at the start). What still
         differs from the C# overlay is listed in `dev-docs/CHAT_AS_LUA_MOD_DESIGN.md` 5.1 (a host turn's
