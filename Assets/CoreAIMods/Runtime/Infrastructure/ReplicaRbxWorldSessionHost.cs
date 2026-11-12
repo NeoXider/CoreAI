@@ -11,9 +11,9 @@ namespace CoreAI.Mods.WorldPackages
     /// commits exactly like <see cref="HeadlessRbxWorldSessionHost"/>.
     /// </summary>
     /// <remarks>
-    /// The source checks of SC-16 (a payload that holds a server or legacy script, or anything under
-    /// ServerScriptService or ServerStorage, is refused) arrive with step B2, which gives the package its script
-    /// instances; until then the payload is staged as the server captured it.
+    /// Before anything is restored, <see cref="Stage"/> refuses a payload a client must never hold (SC-16, step C5;
+    /// <see cref="RbxClientJoinPayload.RefuseServerContent"/>): a server or legacy source, a script bound to one, or
+    /// anything under ServerScriptService or ServerStorage.
     /// </remarks>
     public sealed class ReplicaRbxWorldSessionHost : IRbxWorldSessionHost
     {
@@ -58,7 +58,10 @@ namespace CoreAI.Mods.WorldPackages
 
         public IRbxPhysicsPort PhysicsPort => _host.PhysicsPort;
 
-        /// <summary>Restores <paramref name="payload"/> into a fresh replica registry, unpublished until its commit.</summary>
+        /// <summary>
+        /// Restores <paramref name="payload"/> into a fresh replica registry, unpublished until its commit. A payload that
+        /// holds server content is refused with <see cref="RbxWorldPackageException"/> before anything is restored.
+        /// </summary>
         public IRbxWorldSessionCandidate Stage(RbxWorldPackagePayload payload)
         {
             if (payload == null)
@@ -66,6 +69,7 @@ namespace CoreAI.Mods.WorldPackages
                 throw new ArgumentNullException(nameof(payload));
             }
 
+            RbxClientJoinPayload.RefuseServerContent(payload);
             return _host.Stage(payload);
         }
     }

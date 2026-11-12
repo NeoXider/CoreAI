@@ -1,14 +1,14 @@
 # MVP4 — Script contexts and the client runtime: design note
 
-Status (2026-11-12): **steps A1–A3, B1, B2, C1 (C1-1 to C1-6), C2, C3 and C4 written; C5–C6 not started.**
-C3 left a few SC-13 rows unbound (listed in its entry, moved to C6). Next: C5 (the client composition).
+Status (2026-11-12): **steps A1–A3, B1, B2, C1 (C1-1 to C1-6), C2, C3, C4 and C5 written; C6 not started.**
+C3 left a few SC-13 rows unbound (listed in its entry, moved to C6). Next: C6 (fits, skill, docs, acceptance).
 A1–A3 are green in Unity 6000.6 EditMode; B1 (the script instance classes and `Enum.RunContext`), B2 (the package v2
 reader), C1 (declared mods get durable bound script instances, saved in format version 2; C1-6 registers sources
 without a run and gates a start by the SC-9 predicate), C2 (`Enabled`, `Disabled`, `RunContext`, `Source` in Lua; a
 running script stops and starts as its instance changes) and C3 (the side a script runs as comes from its context;
 CONTEXT_VIOLATION for side-only members; no Player minting on a replica; client scripts wait for the local player)
-have passed their portable tests only, and so has C4 (`require`, dependents restarting, `mod:<id>` chunk names and
-attribution); see their entries in §5.
+have passed their portable tests only, and so have C4 (`require`, dependents restarting, `mod:<id>` chunk names and
+attribution) and C5 (the join payload and the client composition); see their entries in §5.
 Written 2026-11-11 for the rung "MVP4 — Script contexts & client
 runtime" (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md:929-977`) and the open item "Design note for plan
 decision D1 (c) before any code" (`TODO.md:557-561`). Plan decision D1 (c) — "instances are views over
@@ -1215,7 +1215,40 @@ The hand-over C4 started from (kept for reference):
 - `LuaCsRbxValues.WithProductionContext` (`:144-175`): attribution by chunk name; main chunks named
   `mod:<id>`.
 
-### C5 (M) — Client composition
+### C5 (M) — Client composition — done 2026-11-12
+
+**Built** (portable Lua tier: `Tests/EditMode/RbxApi/ScriptsLua/ClientCompositionEditModeTests.cs`; Unity EditMode not
+run):
+
+- `Infrastructure/RbxClientJoinPayload.cs` (new): `CaptureForRecipient(context, recipientActorId, filter)` and
+  `RefuseServerContent(payload)`, described in `Docs/CoreAIMods/WORLD_PACKAGE.md`, "The join payload". A source's
+  context is its header's, else its manifest's (SC-5).
+- `ReplicaRbxWorldSessionHost.Stage` runs `RefuseServerContent` before anything is restored: a legacy or `server`
+  `Mods/` entry, a `Script` bound with `RunContext` Legacy or Server, or anything under `ServerScriptService` or
+  `ServerStorage` is a `RbxWorldPackageException` naming it. Pinned by
+  `Mvp4_ClientComposition_RefusesAPayloadWithAServerSource`, `..._WithALegacySource` (the SC-9 amendment's rule) and
+  `..._WithAnInstanceInServerStorage`, with the twin that a world of client and shared sources is accepted.
+- `Infrastructure/RbxClientWorldComposition.cs` (new): `Join(payload, RbxClientWorldCompositionOptions)` stages into a
+  fresh replica registry, builds `LuaCsRbxApiBindings` over it with the options' bridge (its topology must be Client)
+  and `LocalPlayerActorId`, a mod stack over an in-memory copy of `payload.Mods` with `AutoPersistMods = false` and no
+  world-mutation gate, and starts it through `RehydrateExactOrThrow(hostGrant, false, legacyScriptPlacement: false)`.
+  Modules register; client scripts list `waiting-for-local-player` and start at the frame after the replica holds the
+  local player (C3's gate), with `RunService:IsClient()` true and the shared module required on this side.
+
+**Where C5 differs from the plan:**
+
+- **`CaptureForRecipient` lives in `RbxClientJoinPayload`**, not on `RbxWorldPackageSerializer`: it filters a finished
+  capture and needs nothing private of the serializer, whose files another agent is editing.
+- **Service shells stay.** The DataModel's direct children are kept even when the filter hides them (`ServerStorage`,
+  `ServerScriptService`), empty, because a client's DataModel has them too; what they hold is what is filtered.
+- **References to hidden instances read as nil** (`PrimaryPart`, `ObjectValue`), so the payload never dangles.
+- **No frame driver**: the host calls `Stack.Runtime.Tick` (and the scheduler) as on the server; the composition is
+  proven in process only, and the local `Player` comes from replication (a package never holds players), which the
+  tests simulate inside `BeginReplicationApply`.
+- **Not in C5**: stripping owner and ACL metadata from the join payload (MVP5, MP-20 remainder); another author's
+  client script on a pure client still acts as its author (SC-14), whose player the client may not have (MVP11).
+
+The plan entry:
 
 - `ReplicaRbxWorldSessionHost` source checks; new `Infrastructure/RbxClientWorldComposition.cs`;
   `RbxWorldPackageSerializer.CaptureForRecipient`. Cuttable to the start of MVP5 if the rung runs long;

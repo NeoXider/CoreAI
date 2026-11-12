@@ -1078,8 +1078,13 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
     (R3.8); asset ids are refused (DEV-127), so are another actor's modules (`NOT_AUTHORITY`) and server-only
     modules from a client script (`CONTEXT_VIOLATION`); a module reload or revert restarts the scripts that
     required it (SC-18); every mod chunk is named `mod:<id>` and errors are attributed to the chunk that raised
-    them (SC-19); the console may require modules. Not started: C5 (the client composition), C6 (skill, P1,
-    acceptance, the SC-13 rows C3 left).
+    them (SC-19); the console may require modules. C5 (portable tests only so far) — the join payload
+    (`RbxClientJoinPayload.CaptureForRecipient`: the capture filtered by the replication filter for one recipient,
+    only `client`/`shared` sources bound to a visible instance, a visible server script unbound) and the client
+    composition (`RbxClientWorldComposition`: stages into a replica registry, refuses a payload holding a server or
+    legacy source or anything under ServerScriptService/ServerStorage, mints no Player, starts client scripts once
+    the replicated local player exists), proven in process. Not started: C6 (skill, P1, acceptance, the SC-13 rows
+    C3 left).
   - *The survey this package started from (release 7.56.0); the lines above supersede it where they
     differ:*
   - `RbxNetworkTopology {Solo, Host, DedicatedServer, Client}` (`RbxApi/Instances/Networking/INetworkBridge.cs`)

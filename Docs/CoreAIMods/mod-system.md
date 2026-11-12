@@ -119,7 +119,8 @@ Where `script` lives:
   machine has: a `context: client` script never on a dedicated server, a `context: server` script never on
   a pure client. In single-player and on a host (one machine that is both server and client) both start,
   each once. A mod that declares nothing keeps the pre-MVP4 rule and starts on every machine it started on
-  before. A script that does not start stays loaded: it is listed with the reason as its `run_state`, keeps
+  before; a joining client never receives one, because the world a client is sent carries only `client` and
+  `shared` sources and refuses any other (`Docs/CoreAIMods/WORLD_PACKAGE.md`, "The join payload"). A script that does not start stays loaded: it is listed with the reason as its `run_state`, keeps
   its instance, source and versions, and starts when a reload or a change of its instance lets it.
 - The same rules follow the instance while the world runs (MVP4 SC-3, SC-9), checked at the start of the next
   frame: setting `script.Enabled = false` (or the deprecated `Disabled = true`), moving the script into a
