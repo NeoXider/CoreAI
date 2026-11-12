@@ -183,8 +183,8 @@ namespace CoreAI.PerfBench
 
         /// <summary>
         /// A payload the size of a Block World at view radius 8: 213 columns of 16 x 32 x 16 cells (two Terrain chunks
-        /// each) with hills, sea, sand, snow, caves and ore, and the nine bundled Block World mods read from the
-        /// checkout. The real seed-1337 world (379 chunks, a 342,334-byte Terrain entry) is of the same order.
+        /// each) with hills, sea, sand, snow, caves and ore, and nine bundled Block World mods (all of them but
+        /// blockworld_graphics) read from the checkout. The real seed-1337 world (379 chunks, a 342,334-byte Terrain entry) is of the same order.
         /// </summary>
         private static PayloadHolder BlockWorldPayload()
         {

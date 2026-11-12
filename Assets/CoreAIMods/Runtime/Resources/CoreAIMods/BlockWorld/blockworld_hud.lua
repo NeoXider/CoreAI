@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_hud
 name: Block World 3 - HUD and hotbar
-version: 1.2.3
+version: 1.2.4
 active: false
 capabilities: All
 category: Samples/Block World
@@ -54,6 +54,7 @@ local LEGEND = {
     { "WASD, Space", "walk, jump" }, { "Ctrl, W twice", "sprint" }, { "Space twice", "fly" },
     { "T", "talk to the AI" }, { "F2", "AI settings" },
     { "E", "talk to a villager" }, { "P", "autopilot" }, { "L", "time of day" }, { "G", "creative or survival" },
+    { "O", "graphics" },
 }
 
 local legendMarkup = {}

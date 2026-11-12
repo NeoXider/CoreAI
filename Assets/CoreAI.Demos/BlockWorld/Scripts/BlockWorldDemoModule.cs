@@ -16,7 +16,7 @@ namespace CoreAI.Demos.BlockWorld
     /// <summary>
     /// The Block World scene's own play world module: it turns the framework setting that lets mods create agents
     /// (<c>CoreAiLuaAiOptions.AllowAgentsFromLua</c>) on for this scene's mods scope only, and switches the bundled
-    /// <c>Samples/Block World</c> mod folder on in this scene's mods store, so the eight mods run in the published
+    /// <c>Samples/Block World</c> mod folder on in this scene's mods store, so the folder's mods run in the published
     /// world and every later start rehydrates them, and it tells the Programmer on every turn where "here" is (the
     /// crosshair cell the build mod publishes), in the turn's world state. The game itself is the Lua in that folder;
     /// this module holds no rule of it.
@@ -25,7 +25,8 @@ namespace CoreAI.Demos.BlockWorld
     /// WHY after the first world frame: the mods scope seeds the bundled mods and rehydrates the active ones in its
     /// startup sequence, and the session's store takes writes only once that world is published. The first frame of
     /// the published world is the earliest point both are true; on a fresh store the folder is then switched on and
-    /// loaded at once, on every later start the rehydrate has already loaded it and this finds nothing to do.
+    /// loaded at once, on every later start the rehydrate has already loaded it and this finds nothing to do, but for
+    /// a mod the folder gained since the world was kept, which it installs and loads.
     /// </remarks>
     [DisallowMultipleComponent]
     public sealed class BlockWorldDemoModule : MonoBehaviour, ICoreAiPlayWorldModule
@@ -61,10 +62,17 @@ namespace CoreAI.Demos.BlockWorld
         private bool keepWorldBetweenStarts = true;
 
         [Tooltip("Columns (64 studs each) the world streams around the player in a WebGL player; 0 keeps the mod's "
-                 + "own default. Set before the world mod loads, as the workspace attribute BlockWorldViewRadius.")]
+                 + "own default. Set as the workspace attribute BlockWorldViewRadius when the world has none (a kept "
+                 + "world keeps the player's own choice from the graphics settings).")]
         [SerializeField]
-        [Range(0, 8)]
+        [Range(0, 16)]
         private int webGlViewRadius = 6;
+
+        [Tooltip("The longest view radius a WebGL player may pick in the graphics settings, in columns; 0 keeps the "
+                 + "world mod's own limit (16). Set as the workspace attribute BlockWorldMaxViewRadius.")]
+        [SerializeField]
+        [Range(0, 16)]
+        private int webGlMaxViewRadius = 12;
 
         private readonly List<string> _switchedOn = new();
         private readonly HereContextProvider _here = new();
@@ -145,6 +153,8 @@ namespace CoreAI.Demos.BlockWorld
             }
 
             _handledWorld = world;
+            // WHY again: a restored world is a new one, and the world mod follows the radius attributes while it runs.
+            ApplyViewRadius(world);
             // WHY contained: a store that refuses a write must not throw out of Update every frame; the reason is
             // said once and the world plays on without the folder.
             try
@@ -164,14 +174,24 @@ namespace CoreAI.Demos.BlockWorld
         {
             _switchedOn.Clear();
             string folder = ModFolder;
-            List<string> unstored = new();
-            foreach (BundledMod mod in new ResourcesBundledModSource().Load())
+            ResourcesBundledModSource resources = new();
+            List<BundledMod> folderMods = new();
+            foreach (BundledMod mod in resources.Load())
             {
-                if (!IsInFolder(LuaModHeader.Parse(mod.Source ?? "", mod.Id).Category, folder))
+                if (IsInFolder(LuaModHeader.Parse(mod.Source ?? "", mod.Id).Category, folder))
                 {
-                    continue;
+                    folderMods.Add(mod);
                 }
+            }
 
+            // WHY seeded here as well as at the start: a world kept between starts restores its own exact set of mods,
+            // so a mod the folder gained in a later build is not in it; the seeder installs what is missing and keeps
+            // its own rule for the rest (a newer version replaces, an equal one is left alone).
+            new BundledModSeeder(store, new IBundledModSource[] { new ListedBundledModSource(resources.Origin, folderMods) })
+                .Seed();
+            List<string> unstored = new();
+            foreach (BundledMod mod in folderMods)
+            {
                 if (!store.TryLoad(mod.Id, out _, out LuaModManifest manifest) || manifest == null)
                 {
                     unstored.Add(mod.Id);
@@ -206,17 +226,47 @@ namespace CoreAI.Demos.BlockWorld
             return listed.Count + " mods: " + string.Join(", ", listed);
         }
 
+        /// <remarks>
+        /// WHY a limit in WebGL: the world mod allows 16 columns, about 3.8 million cells, and a WebGL player's
+        /// Terrain holds 4.2 million (<c>TerrainLimits.WebGl</c>), so a walk at that radius would soon fill it.
+        /// </remarks>
         private void ApplyViewRadius(LuaCsRbxApiBindings world)
         {
-            if (webGlViewRadius <= 0 || Application.platform != RuntimePlatform.WebGLPlayer)
+            RbxInstance workspace = world?.Game?.FindFirstChildOfClass("Workspace");
+            if (workspace == null || Application.platform != RuntimePlatform.WebGLPlayer)
             {
                 return;
             }
 
-            RbxInstance workspace = world?.Game?.FindFirstChildOfClass("Workspace");
-            if (workspace != null && workspace.GetAttribute("BlockWorldViewRadius") == null)
+            if (webGlMaxViewRadius > 0)
+            {
+                workspace.SetAttribute("BlockWorldMaxViewRadius", (double)webGlMaxViewRadius);
+            }
+
+            if (webGlViewRadius > 0 && workspace.GetAttribute("BlockWorldViewRadius") == null)
             {
                 workspace.SetAttribute("BlockWorldViewRadius", (double)webGlViewRadius);
+            }
+        }
+
+        /// <summary>The folder's bundled mods, already read, under the origin of the source they came from.</summary>
+        private sealed class ListedBundledModSource : IBundledModSource
+        {
+            private readonly IReadOnlyList<BundledMod> _mods;
+
+            public ListedBundledModSource(string origin, IReadOnlyList<BundledMod> mods)
+            {
+                Origin = origin;
+                _mods = mods;
+            }
+
+            /// <inheritdoc />
+            public string Origin { get; }
+
+            /// <inheritdoc />
+            public IReadOnlyList<BundledMod> Load()
+            {
+                return _mods;
             }
         }
 

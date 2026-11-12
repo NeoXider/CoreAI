@@ -10,7 +10,7 @@ using NUnit.Framework;
 namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
 {
     /// <summary>
-    /// P6, the whole Block World: the nine mods of the <c>Samples/Block World</c> folder load together with the
+    /// P6, the whole Block World: the ten mods of the <c>Samples/Block World</c> folder load together with the
     /// headers the seeder needs, run side by side without an error or a budget trip, and work through each other's
     /// attributes (the hotbar chooses, the crosshair targets, the build mod places); and the "build here" recipe the
     /// skill text teaches writes cells only inside its box at the crosshair.
@@ -22,7 +22,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         public static readonly string[] Mods =
         {
             "blockworld_world", "blockworld_build", "blockworld_hud", "blockworld_daynight", "blockworld_torches",
-            "blockworld_villagers", "blockworld_autopilot", "blockworld_survival", "blockworld_falling"
+            "blockworld_villagers", "blockworld_autopilot", "blockworld_survival", "blockworld_falling",
+            "blockworld_graphics"
         };
 
         /// <summary>
@@ -79,7 +80,7 @@ end";
         }
 
         [Test]
-        public void P6_Demo_TheNineMods_RunTogether_WithoutAnErrorOrABudgetTrip()
+        public void P6_Demo_TheTenMods_RunTogether_WithoutAnErrorOrABudgetTrip()
         {
             using BlockWorldTestWorld world = new(new BlockWorldTestOptions
             {

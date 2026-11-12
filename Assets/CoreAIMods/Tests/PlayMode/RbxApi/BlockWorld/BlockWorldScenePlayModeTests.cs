@@ -68,7 +68,8 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
         private static readonly string[] BlockWorldMods =
         {
             "blockworld_world", "blockworld_build", "blockworld_hud", "blockworld_daynight", "blockworld_torches",
-            "blockworld_villagers", "blockworld_autopilot", "blockworld_survival", "blockworld_falling"
+            "blockworld_villagers", "blockworld_autopilot", "blockworld_survival", "blockworld_falling",
+            "blockworld_graphics"
         };
 
         private const string AimSource = @"

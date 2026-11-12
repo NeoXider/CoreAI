@@ -1,12 +1,12 @@
 --[[@coreai
 id: blockworld_world
 name: Block World 1 - World
-version: 1.5.1
+version: 1.6.0
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo (the nine mods of the Samples/Block World folder; turn the whole folder on). Generates a seeded voxel world in workspace.Terrain - islands and coasts with sandy beaches, grass lowlands, hills, rocky ridges and snowy peaks, lakes, woods and single trees of three shapes, winding caves with chambers and mouths that open onto hillsides (flooded below the sea level at the shore), and an unbreakable bedrock floor - and streams it around the player in budgeted steps: the spawn's column first, then what the camera faces. The spawn and the first heading are chosen so the first view shows a peak, water and a wood. The same seed always gives the same world; set the workspace attribute BlockWorldSeed before the mod loads to pick another. Generation only fills empty cells, so a saved build is never overwritten. Each character gets a block game's body: 1.8 blocks tall, a jump of 1.25 blocks and a walk of 4.3 blocks a second.
+description: Part of the Block World demo (the ten mods of the Samples/Block World folder; turn the whole folder on). Generates a seeded voxel world in workspace.Terrain - islands and coasts with sandy beaches, grass lowlands, hills, rocky ridges and snowy peaks, lakes, woods and single trees of three shapes, winding caves with chambers and mouths that open onto hillsides (flooded below the sea level at the shore), and an unbreakable bedrock floor - and streams it around the player in budgeted steps: the spawn's column first, then what the camera faces. The view distance is the workspace attribute BlockWorldViewRadius (1 to 16 columns of 16 blocks, 8 when it is not set; a host may allow less with BlockWorldMaxViewRadius) and is followed while the world runs: a longer one streams the new ring of land, a shorter one stops streaming past it and keeps the land already made. The spawn and the first heading are chosen so the first view shows a peak, water and a wood. The same seed always gives the same world; set the workspace attribute BlockWorldSeed before the mod loads to pick another. Generation only fills empty cells, so a saved build is never overwritten. Each character gets a block game's body: 1.8 blocks tall, a jump of 1.25 blocks and a walk of 4.3 blocks a second.
 ]]
 
 -- How it works. The world is cut into columns of 16 x 32 x 16 cells (one Terrain chunk wide, two
@@ -26,8 +26,14 @@ description: Part of the Block World demo (the nine mods of the Samples/Block Wo
 --   BlockWorldOpened (false while a new player waits for the first view), BlockWorldOpeningColumns (how many
 --   columns that view needs), BlockWorldSpawn (Vector3, studs), BlockWorldColumns (columns generated),
 --   BlockWorldViewStuds (how far the streamed land is sure to reach from anywhere in the player's column, in
---   studs: the fog hides the world's edge there),
---   BlockWorldNotice (text).
+--   studs: the fog hides the world's edge there), BlockWorldStreamRadius (the view radius in use, in columns),
+--   BlockWorldViewRadiusLimit (the longest view radius this host allows), BlockWorldNotice (text).
+--
+-- The view radius is read from BlockWorldViewRadius (held to 1 .. BlockWorldMaxViewRadius, a host's limit, and never
+-- past MAX_VIEW_RADIUS) when the mod loads and again whenever either changes. A longer radius streams its new rings
+-- nearest first, and BlockWorldViewStuds (which the fog follows) moves out as they become whole. A shorter one keeps
+-- every column already made: the land is the world's (a build on it is saved with it), and the fog comes nearer at
+-- once, so the host stops drawing what lies past it.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -47,6 +53,15 @@ local STEEP = 3                 -- rows to the lowest neighbour that make a surf
 local WATER = -2                -- top row of the sea
 local SHORE = WATER + 1         -- pillars this low get sand instead of grass
 local VIEW_RADIUS = 8           -- columns streamed around the player (512 studs); the demo module sets 6 in WebGL
+-- WHY 16: the fog is whole at 939 studs, inside the scene camera's far plane (600 m, 2,143 studs); the 805 columns
+-- hold about 3.8 million cells, a quarter of a desktop Terrain's budget but nearly all of a WebGL one's (4.2 million),
+-- so a WebGL host sets a lower BlockWorldMaxViewRadius.
+local MAX_VIEW_RADIUS = 16
+-- WHY a share of a step: at radius 16 the outer rings hold 128 columns each, and reading two or three of them in one
+-- step costs more than a step may; a search spends this many reads a step (a column found made is one, a missing one
+-- three) and the next step goes on where it stopped. Measured under the resume guard, such a step costs 2,500 to
+-- 3,000 instructions, less than the costliest generation step.
+local SCAN_BUDGET = 120
 local HEIGHT_BUDGET = 32        -- surface heights one frame may sample (each reads five noises)
 -- WHY 220: a cell costs about 16 instructions, so the fullest frame stays near 4,000 of the 5,000 (half the default
 -- resume budget) the tests hold every streaming step to.
@@ -55,7 +70,7 @@ local PILLAR_WORK = 12          -- a pillar's own cost, in cells: its materials,
 local CAVE_WORK = 24            -- the most a pillar's caves cost, in cells: up to thirteen rows of 3D noise
 local OPENING_COLUMNS = 4       -- columns made before a new player is let go: the spawn's and the three it faces
 local OPENING_SECONDS = 6       -- the longest a new player waits for them
-local PROBE_BUDGET = 1          -- "is this column already generated?" reads per frame (each scans the radius)
+local PROBE_BUDGET = 1          -- "is this column already generated?" reads a step (each after the scan that chose it)
 local LOOK_PULL = 0.5           -- columns a column straight ahead of the camera counts as nearer
 -- WHY several steps a frame, each in a handler of its own: every Heartbeat handler runs in its own resume with its own
 -- instruction budget, so a step stays the size the budget tests hold it to while a quick machine runs more of them.
@@ -102,9 +117,25 @@ end
 seed = math.floor(seed)
 workspace:SetAttribute("BlockWorldSeed", seed)
 
--- WHY a knob: a WebGL or low-end host streams a smaller world (each column is two Terrain chunks).
-local viewRadius = workspace:GetAttribute("BlockWorldViewRadius")
-viewRadius = type(viewRadius) == "number" and math.clamp(math.floor(viewRadius), 1, 8) or VIEW_RADIUS
+-- WHY a knob: a WebGL or low-end host streams a smaller world (each column is two Terrain chunks), and a player picks
+-- the view distance in the graphics settings (blockworld_graphics). WHY a host limit (BlockWorldMaxViewRadius): a
+-- WebGL player's Terrain holds fewer cells, so its host allows less than MAX_VIEW_RADIUS.
+local function viewRadiusLimit()
+    local limit = workspace:GetAttribute("BlockWorldMaxViewRadius")
+    if type(limit) ~= "number" or limit ~= limit then
+        return MAX_VIEW_RADIUS
+    end
+    return math.clamp(math.floor(limit), 1, MAX_VIEW_RADIUS)
+end
+
+local function wantedViewRadius()
+    local wanted = workspace:GetAttribute("BlockWorldViewRadius")
+    if type(wanted) ~= "number" or wanted ~= wanted then
+        wanted = VIEW_RADIUS
+    end
+    return math.clamp(math.floor(wanted), 1, viewRadiusLimit())
+end
+local viewRadius = wantedViewRadius()
 
 local seedRandom = Random.new(seed)
 local OFFSET_X = seedRandom:NextNumber() * 4096 + 0.5
@@ -519,20 +550,37 @@ workspace:SetAttribute("BlockWorldOpeningColumns", OPENING_COLUMNS)
 -- WHY the nearest column left out, measured from the worst place in the player's column: the view radius is a
 -- circle of columns, so the land reaches less far along a diagonal and from a column's corner than straight ahead
 -- (4 columns: 181 studs, not 256). Past this distance a player may see where the world ends.
-local function landReach()
+-- WHY one quadrant and the first column left out on each line: the rule is symmetric, and along a line farther
+-- columns are only farther, so the answer is found in radius + 2 steps (a change of the radius is handled inside a
+-- signal's budget).
+local function landReach(radius)
+    local limit = radius * radius + 1
     local nearest = math.huge
-    for dx = -viewRadius - 1, viewRadius + 1 do
-        for dz = -viewRadius - 1, viewRadius + 1 do
-            if dx * dx + dz * dz > viewRadius * viewRadius + 1 then
-                local gx = math.max(math.abs(dx) - 1, 0)
-                local gz = math.max(math.abs(dz) - 1, 0)
-                nearest = math.min(nearest, math.sqrt(gx * gx + gz * gz))
-            end
+    for dx = 0, radius + 1 do
+        local dz = math.floor(math.sqrt(math.max(limit - dx * dx, 0)))
+        while dx * dx + dz * dz <= limit do
+            dz = dz + 1
         end
+        while dz > 0 and dx * dx + (dz - 1) * (dz - 1) > limit do
+            dz = dz - 1
+        end
+        local gx, gz = math.max(dx - 1, 0), math.max(dz - 1, 0)
+        nearest = math.min(nearest, math.sqrt(gx * gx + gz * gz))
     end
     return nearest * CHUNK * CELL
 end
-workspace:SetAttribute("BlockWorldViewStuds", landReach())
+
+-- The radius BlockWorldViewStuds is published for: the view radius, except while a longer one streams in, when it is
+-- the rings already whole around the player. WHY: the new rings take a while, and a fog moved out at once would show
+-- where the land ends.
+local fogRadius = viewRadius
+
+local function publishViewRadius()
+    workspace:SetAttribute("BlockWorldStreamRadius", viewRadius)
+    workspace:SetAttribute("BlockWorldViewRadiusLimit", viewRadiusLimit())
+    workspace:SetAttribute("BlockWorldViewStuds", landReach(fogRadius))
+end
+publishViewRadius()
 
 local function finishColumn(finished)
     generated[columnKey(finished.cx, finished.cz)] = true
@@ -564,9 +612,11 @@ end
 -- column in front of the camera counts as up to LOOK_PULL columns nearer, so the view fills in before what is
 -- behind the player (ties: lowest dx, then dz).
 local sqrt = math.sqrt
--- WHY a ring scan with a memory: at radius 8 a scan of every column costs more than a step may; the rings are read
--- outward from the first one still missing a column, and the scan stops once no farther ring can beat the best.
+-- WHY a ring scan with a memory, spread over steps: at radius 8 a scan of every column costs more than a step may;
+-- the rings are read outward from the first one still missing a column, at most SCAN_BUDGET columns a step, and the
+-- scan stops once no farther ring can beat the best.
 local scanCentre, scanFrom = nil, 0
+local scan = nil                -- the scan in progress: its ring, the next column of it, the best so far
 
 -- The direction that pulls columns nearer: the way the player walks when it walks, else the way the camera looks.
 local function pullDirection()
@@ -593,6 +643,9 @@ local function pullDirection()
     return 0, 0
 end
 
+-- Returns the column's cx, cz; nil, nil when every column inside the radius is made; nil, nil, true when the scan
+-- needs another step. A ring is read in pairs, in this order: (dx, -ring) and (dx, ring) for dx from -ring up, then
+-- (-ring, dz) and (ring, dz) for dz from -ring + 1 up.
 local function nextMissing(center)
     local fx = center.X / (CHUNK * CELL)
     local fz = center.Z / (CHUNK * CELL)
@@ -600,53 +653,97 @@ local function nextMissing(center)
     fx, fz = fx - ccx, fz - ccz
     local centreKey = columnKey(ccx, ccz)
     if centreKey ~= scanCentre then
-        scanCentre, scanFrom = centreKey, 1
+        scanCentre, scanFrom, scan = centreKey, 1, nil
     end
     if not generated[centreKey] then
         return ccx, ccz
     end
-    local lookX, lookZ = pullDirection()
-    local bestX, bestZ, bestScore = nil, nil, math.huge
+    if scan == nil then
+        local lookX, lookZ = pullDirection()
+        scan = { ring = scanFrom, pair = 0, lookX = lookX, lookZ = lookZ, bestScore = math.huge,
+            ringScore = math.huge }
+    end
+    local s = scan
+    local lookX, lookZ = s.lookX, s.lookZ
+    local bestX, bestZ, bestScore = s.bestX, s.bestZ, s.bestScore
     local limit = viewRadius * viewRadius + 1
-    local firstMissing = nil
-    local function consider(dx, dz)
-        if dx * dx + dz * dz > limit or generated[columnKey(ccx + dx, ccz + dz)] then
-            return
-        end
+    -- WHY charged in reads: a column found made costs one, a missing one is also scored, which costs two more.
+    local budget = SCAN_BUDGET
+    local function score(dx, dz)
         local ex = dx - fx
         if ex < 0 then
-            ex = math.max(fx - dx - 1, 0)
+            ex = fx - dx - 1
+            ex = ex > 0 and ex or 0
         end
         local ez = dz - fz
         if ez < 0 then
-            ez = math.max(fz - dz - 1, 0)
+            ez = fz - dz - 1
+            ez = ez > 0 and ez or 0
         end
         local tx, tz = dx + 0.5 - fx, dz + 0.5 - fz
-        local score = ex + ez - (tx * lookX + tz * lookZ) / sqrt(tx * tx + tz * tz)
-        if score < bestScore then
-            bestX, bestZ, bestScore = ccx + dx, ccz + dz, score
+        local value = ex + ez - (tx * lookX + tz * lookZ) / sqrt(tx * tx + tz * tz)
+        if value < bestScore then
+            bestX, bestZ, bestScore = ccx + dx, ccz + dz, value
         end
+        budget = budget - 2
     end
-    for ring = scanFrom, viewRadius do
+    local ring, pair = s.ring, s.pair
+    while ring <= viewRadius do
         if bestScore < ring - 1 - LOOK_PULL then
             break
         end
-        local before = bestScore
-        for dx = -ring, ring do
-            consider(dx, -ring)
-            consider(dx, ring)
+        local across = 2 * ring
+        local pairCount = 4 * ring
+        while pair < pairCount do
+            if budget <= 0 then
+                s.ring, s.pair, s.bestX, s.bestZ, s.bestScore = ring, pair, bestX, bestZ, bestScore
+                return nil, nil, true
+            end
+            budget = budget - 2
+            local ax, az, bx, bz
+            if pair <= across then
+                ax, az, bx, bz = pair - ring, -ring, pair - ring, ring
+            else
+                ax, az, bx, bz = -ring, pair - 3 * ring, ring, pair - 3 * ring
+            end
+            pair = pair + 1
+            if ax * ax + az * az <= limit and not generated[centreKey + ax * 65536 + az] then
+                score(ax, az)
+            end
+            if bx * bx + bz * bz <= limit and not generated[centreKey + bx * 65536 + bz] then
+                score(bx, bz)
+            end
         end
-        for dz = -ring + 1, ring - 1 do
-            consider(-ring, dz)
-            consider(ring, dz)
+        if s.firstMissing == nil and bestScore ~= s.ringScore then
+            s.firstMissing = ring
         end
-        if firstMissing == nil and bestScore ~= before then
-            firstMissing = ring
-        end
+        ring, pair, s.ringScore = ring + 1, 0, bestScore
     end
-    scanFrom = firstMissing or (viewRadius + 1)
-    return bestX, bestZ
+    scan = nil
+    s.bestX, s.bestZ = bestX, bestZ
+    scanFrom = s.firstMissing or (viewRadius + 1)
+    -- WHY whole up to the ring before the first one missing a column: a ring is a square, and the circle of a radius
+    -- lies inside the square of the same size.
+    local whole = math.min(s.firstMissing and s.firstMissing - 1 or viewRadius, viewRadius)
+    if whole > fogRadius then
+        fogRadius = whole
+        workspace:SetAttribute("BlockWorldViewStuds", landReach(fogRadius))
+    end
+    return s.bestX, s.bestZ
 end
+
+-- The view radius follows its attributes while the world runs; the next scan starts again from the first ring.
+local function followViewRadius()
+    local wanted = wantedViewRadius()
+    if wanted ~= viewRadius then
+        viewRadius = wanted
+        fogRadius = math.min(fogRadius, wanted)
+        scanCentre, scan = nil, nil
+    end
+    publishViewRadius()
+end
+workspace:GetAttributeChangedSignal("BlockWorldViewRadius"):Connect(followViewRadius)
+workspace:GetAttributeChangedSignal("BlockWorldMaxViewRadius"):Connect(followViewRadius)
 
 local opened = false
 local heldRoot = nil
@@ -907,8 +1004,10 @@ local function streamStep()
     if job == nil then
         local center = streamCenter()
         for _ = 1, PROBE_BUDGET do
-            local cx, cz = nextMissing(center)
-            if cx == nil then
+            local cx, cz, scanning = nextMissing(center)
+            if scanning then
+                break
+            elseif cx == nil then
                 becomeOpened()
                 break
             end

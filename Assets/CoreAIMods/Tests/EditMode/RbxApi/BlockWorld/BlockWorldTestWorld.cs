@@ -56,6 +56,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         public const int KeyE = 101;
         public const int KeyG = 103;
         public const int KeyL = 108;
+        public const int KeyO = 111;
         public const int KeyP = 112;
         public const int KeyW = 119;
 
@@ -120,7 +121,7 @@ end)";
             });
             Ui = new FakeRbxUiBackend();
             Surface = new RuntimeUiLuaSurface(Ui);
-            Surface.AttachTo(Roblox);
+            UiWorld = Surface.AttachTo(Roblox);
         }
 
         public InputFocusState Focus { get; }
@@ -145,6 +146,9 @@ end)";
         public FakeRbxUiBackend Ui { get; }
 
         public RuntimeUiLuaSurface Surface { get; }
+
+        /// <summary>The UI world of the surface: its GUI presenter draws the Roblox GUI objects through <see cref="Ui"/>.</summary>
+        public CoreAI.Mods.Rbx.Instances.RuntimeUi.RbxUiWorld UiWorld { get; }
 
         public IAiOrchestrationService Npc { get; }
 

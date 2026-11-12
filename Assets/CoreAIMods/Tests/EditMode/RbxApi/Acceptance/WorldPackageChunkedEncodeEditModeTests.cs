@@ -36,7 +36,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
         /// <summary>
         /// One unit per step and all units in one step, under the format's limits and the 7.56.0 entry limit, for every
-        /// payload the writer tests build (a Block World-like one with Terrain, the HUD and the nine bundled mods
+        /// payload the writer tests build (a Block World-like one with Terrain, the HUD and nine bundled mods
         /// included): the bytes of <c>WritePackage</c>; the entries of the one-block writer before the encoder, and its
         /// bytes too where deflate ignores how its input is split (Mono, which the editor and Mono players run); and a
         /// payload the one-block writer refuses is refused with its exception.
@@ -1122,8 +1122,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
         /// <summary>
         /// A world like a Block World's: Terrain columns of 16 x 32 x 16 cells (two chunks each) with hills, sea, sand,
-        /// snow, caves and ore, the world-owned HUD, the torch list in a Workspace attribute and the nine bundled Block
-        /// World mods.
+        /// snow, caves and ore, the world-owned HUD, the torch list in a Workspace attribute and nine bundled Block
+        /// World mods (all of them but blockworld_graphics).
         /// </summary>
         internal static RbxWorldPackagePayload BlockWorldLikePayload()
         {
