@@ -11,7 +11,8 @@ namespace CoreAI.Ai.LuaCs
     /// command of the chat's registry (a host command such as <c>/undo</c>, or a world's <c>TextChatCommand</c>), a
     /// delivered line is offered to the overlay's pre-send hooks (villagers, the self-repair recorder), every line
     /// posted to the overlay's feed by other code (NPC speech, a command result that arrives later, notices) is
-    /// posted into the world's chat, and a world that switches the default chat off claims the overlay's surface.
+    /// posted into the world's chat (and, while a world holds the chat, the finished answers of the overlay's host
+    /// turns), and a world that switches the default chat off claims the overlay's surface.
     /// One instance serves every world of a composition; each world subscribes and unsubscribes itself. Runs on
     /// the main thread.
     /// </summary>
@@ -25,6 +26,9 @@ namespace CoreAI.Ai.LuaCs
         private readonly ChatOverlayOptions _options;
         private readonly ILog _log;
         private readonly Action<ChatFeedLine> _onLineAdded;
+        private readonly Action<ChatFeedLine> _onLineChanged;
+        private readonly Action<ChatFeedLine> _onLineRemoved;
+        private readonly HashSet<long> _forwarded = new();
         private readonly Action _onRegistryChanged;
         private bool _disposed;
 
@@ -51,11 +55,15 @@ namespace CoreAI.Ai.LuaCs
             _options = options ?? new ChatOverlayOptions();
             _log = log ?? NullLog.Instance;
             _onLineAdded = OnLineAdded;
+            _onLineChanged = OnLineChanged;
+            _onLineRemoved = line => _forwarded.Remove(line.Id);
             _onRegistryChanged = () => HostCommandsChanged?.Invoke();
             _registry.Changed += _onRegistryChanged;
             if (_feed != null)
             {
                 _feed.LineAdded += _onLineAdded;
+                _feed.LineChanged += _onLineChanged;
+                _feed.LineRemoved += _onLineRemoved;
             }
         }
 
@@ -155,7 +163,11 @@ namespace CoreAI.Ai.LuaCs
             if (_feed != null)
             {
                 _feed.LineAdded -= _onLineAdded;
+                _feed.LineChanged -= _onLineChanged;
+                _feed.LineRemoved -= _onLineRemoved;
             }
+
+            _forwarded.Clear();
         }
 
         /// <summary>The <c>Metadata</c> a feed line of <paramref name="kind"/> gets in the world's chat.</summary>
@@ -167,6 +179,8 @@ namespace CoreAI.Ai.LuaCs
                     return RbxTextChatMetadata.Command;
                 case ChatFeedLineKind.Error:
                     return RbxTextChatMetadata.Error;
+                case ChatFeedLineKind.Assistant:
+                    return RbxTextChatMetadata.Assistant;
                 default:
                     return RbxTextChatMetadata.System;
             }
@@ -174,14 +188,37 @@ namespace CoreAI.Ai.LuaCs
 
         private void OnLineAdded(ChatFeedLine line)
         {
-            // WHY only these kinds: the player's own lines and the agent's answers in the overlay's feed belong to
-            // the overlay's turns; a script's chat makes its own.
-            if (_disposed || line == null || line.Kind == ChatFeedLineKind.Player
-                || line.Kind == ChatFeedLineKind.Assistant || string.IsNullOrEmpty(line.Text))
+            if (_disposed || line == null || line.Kind == ChatFeedLineKind.Player || string.IsNullOrEmpty(line.Text))
             {
                 return;
             }
 
+            if (line.Kind == ChatFeedLineKind.Assistant)
+            {
+                OnLineChanged(line);
+                return;
+            }
+
+            Post(line);
+        }
+
+        // WHY an answer only once it is complete and only while a world holds the chat: with the overlay hidden its
+        // feed's answers are the host turns' (wakes), which the world's chat shows; with the overlay shown they are the
+        // overlay's own, which it draws itself.
+        private void OnLineChanged(ChatFeedLine line)
+        {
+            if (_disposed || line == null || line.Kind != ChatFeedLineKind.Assistant || line.IsStreaming
+                || string.IsNullOrEmpty(line.Text) || _surface == null || _surface.IsDefaultSurfaceShown
+                || !_forwarded.Add(line.Id))
+            {
+                return;
+            }
+
+            Post(line);
+        }
+
+        private void Post(ChatFeedLine line)
+        {
             try
             {
                 LinePosted?.Invoke(new RbxChatHostLine(line.Speaker, line.Text, MetadataFor(line.Kind)));

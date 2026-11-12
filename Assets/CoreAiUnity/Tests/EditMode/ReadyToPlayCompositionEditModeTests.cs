@@ -136,6 +136,39 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void Composed_TheEnterThatClosedTheOverlay_StaysTheChatsThroughTheFramesWorldInputStep()
+        {
+            using IObjectResolver container = BuildOverlayContainer(out FakeKeyboard keyboard);
+            ICoreAiUiFocus focus = container.Resolve<ICoreAiUiFocus>();
+            FakeChatOverlayView view = (FakeChatOverlayView)container.Resolve<IChatOverlayView>();
+            CoreAiChatOverlayEntryPoint entryPoint = CreateEntryPoint(container, keyboard);
+            keyboard.Pressed.Add(KeyCode.Return);
+            entryPoint.Tick();
+            keyboard.Pressed.Clear();
+            Assert.IsTrue(focus.HasTextFocus);
+
+            view.RaiseSubmitted("");
+            entryPoint.Tick();
+            Assert.IsTrue(focus.HasTextFocus,
+                "the overlay ticks ahead of the world's Update: the closing Enter is still the chat's this frame");
+
+            entryPoint.Tick();
+            Assert.IsFalse(focus.HasTextFocus, "released on the next frame's tick");
+
+            keyboard.Pressed.Add(KeyCode.Return);
+            entryPoint.Tick();
+            keyboard.Pressed.Clear();
+            keyboard.Pressed.Add(KeyCode.Escape);
+            entryPoint.Tick();
+            Assert.IsTrue(focus.HasTextFocus, "twin: an Escape read by the same tick is held the same way");
+            keyboard.Pressed.Clear();
+            entryPoint.Tick();
+            Assert.IsFalse(focus.HasTextFocus);
+
+            entryPoint.Dispose();
+        }
+
+        [Test]
         public void Installer_KeepsAFocusServiceAndAGateRegisteredBeforeIt()
         {
             CoreAiUiFocus ownFocus = new();

@@ -567,7 +567,8 @@ namespace CoreAI.Infrastructure.Llm
         [Min(1)]
         private int maxConcurrentOrchestrations = 2;
 
-        [Tooltip("Orchestrator mode: a lead agent plans and hands tasks to sub-agents. Off registers nothing.")]
+        [Tooltip("Orchestrator mode: the chat agent may hand big jobs to background sub-agents and keeps talking " +
+                 "meanwhile. Off registers nothing.")]
         [SerializeField]
         private bool enableOrchestratorMode;
 
@@ -1076,8 +1077,9 @@ namespace CoreAI.Infrastructure.Llm
         public int MaxConcurrentOrchestrations => maxConcurrentOrchestrations < 1 ? 2 : maxConcurrentOrchestrations;
 
         /// <summary>
-        /// Whether <c>CoreAILifetimeScope</c> registers orchestrator mode (a lead agent that plans and hands tasks to
-        /// sub-agents). Off by default; off registers nothing.
+        /// Whether <c>CoreAILifetimeScope</c> registers orchestrator mode (the chat agent may hand big jobs to
+        /// background sub-agents). Off by default; off registers nothing. A scope's own
+        /// <c>CoreAILifetimeScope.OrchestratorMode</c> options take precedence.
         /// </summary>
         public bool EnableOrchestratorMode => enableOrchestratorMode;
 

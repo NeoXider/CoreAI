@@ -614,10 +614,13 @@ Deviations (each a DEV candidate):
   not copied (a CoreAI script is a mod). `SetCoreGuiEnabled`/`GetCoreGuiEnabled` are recorded per
   `Enum.CoreGuiType`; of the core GUI only `PlayerList` is drawn (the leaderstats list,
   [below](#datastoreservice-and-leaderstats)), and there is no top bar, so the GUI inset is always zero.
-- **Text.** Every font family draws in the host font, bold or italic by the font's name. `TextScaled` estimates
-  the size from the box and the character count, and `AutomaticSize` fits children, not text: text is not
-  measured, so `TextBounds` and `TextFits` raise `NOT_IMPLEMENTED`. `RichText` draws the host's tags
-  (`<b> <i> <u> <s>`), not Roblox's `<font ...>` or `<stroke>`.
+- **Text.** Every font family draws in the host font, bold or italic by the font's name. `TextBounds` is the
+  size of the text as the host measures it (wrapped at the box, less its `UIPadding`, when `TextWrapped`), and
+  `AutomaticSize` grows a text object to its text, so a wrapped label in a `UIListLayout` takes the height of its
+  lines. Where the host has no measurement (a `TextBox`, the first frame of a new text) an estimate stands in, and
+  a new text may change its size once on the next frame (DEV-74). `TextScaled` estimates the size from the box
+  and the character count; `TextFits` raises `NOT_IMPLEMENTED`; `TextService:GetTextSize` is not built.
+  `RichText` draws the host's tags (`<b> <i> <u> <s>`), not Roblox's `<font ...>` or `<stroke>`.
 - **Images.** `Image` is a URL or path the host loads; `rbxassetid://` ids are never downloaded and draw
   nothing. Nine-slice (`SliceCenter`) and `UIGradient` are not drawn; `HoverImage`/`PressedImage` are recorded.
 - **Stacking.** `ZIndexBehavior.Global` is recorded and drawn as `Sibling` (elements nest like the instances).

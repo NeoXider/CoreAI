@@ -37,7 +37,16 @@ namespace CoreAI.Ai.SubAgents
         DeadlineExceeded = 9,
 
         /// <summary>The sub-agent run failed (provider error, exception, rejected output).</summary>
-        SubAgentFailed = 10
+        SubAgentFailed = 10,
+
+        /// <summary>No sub-agent of the conversation has the name the lead gave (Team style).</summary>
+        UnknownAgent = 11,
+
+        /// <summary>The sub-agent already has as many waiting messages as it may hold (Team style).</summary>
+        InboxFull = 12,
+
+        /// <summary>The conversation holds as many working sub-agents as it may remember (Team style).</summary>
+        AgentLimitReached = 13
     }
 
     /// <summary>Stable snake_case names of <see cref="SubAgentErrorCode"/>, as the lead reads them in a tool result.</summary>
@@ -59,6 +68,9 @@ namespace CoreAI.Ai.SubAgents
                 case SubAgentErrorCode.PlanCancelled: return "plan_cancelled";
                 case SubAgentErrorCode.DeadlineExceeded: return "deadline_exceeded";
                 case SubAgentErrorCode.SubAgentFailed: return "subagent_failed";
+                case SubAgentErrorCode.UnknownAgent: return "unknown_agent";
+                case SubAgentErrorCode.InboxFull: return "inbox_full";
+                case SubAgentErrorCode.AgentLimitReached: return "agent_limit_reached";
                 default: return "subagent_failed";
             }
         }

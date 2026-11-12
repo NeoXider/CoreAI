@@ -947,6 +947,12 @@ namespace CoreAI.Mods.WorldPackages
         /// <summary>The resolved startup directory, namespace included; read-only, for composition tests.</summary>
         internal string StartupDirectoryForTests => _startupDirectory;
 
+        /// <summary>
+        /// The startup directory where a kept world's change journal lives next to its entry, or null when this store
+        /// writes through a file system of its own (a test double), which the journal's direct file access would bypass.
+        /// </summary>
+        internal string JournalDirectory => _fileSystem is SystemRbxWorldPackageFileSystem ? _startupDirectory : null;
+
         public UniTask<RbxWorldPackageWriteResult> SelectStartupAsync(
             RbxWorldPackagePayload payload,
             string sourceKind,

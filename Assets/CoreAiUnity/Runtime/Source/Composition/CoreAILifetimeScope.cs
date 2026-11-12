@@ -205,6 +205,26 @@ namespace CoreAI.Composition
         [System.NonSerialized]
         private CoreAiDefaultSubAgents defaultSubAgents;
 
+        [System.NonSerialized]
+        private CoreAI.Ai.SubAgents.OrchestratorModeOptions orchestratorModeOptions;
+
+        /// <summary>
+        /// Orchestrator mode options of this scope. Null, the default, reads
+        /// <c>CoreAISettingsAsset.EnableOrchestratorMode</c> and keeps every other option at its default; options set
+        /// here replace that, so one scene (a demo module, a game's bootstrap) can switch the mode on or off, or choose
+        /// its style and budgets, without the shared settings asset. Set it while the scope GameObject is inactive,
+        /// then activate it.
+        /// </summary>
+        public CoreAI.Ai.SubAgents.OrchestratorModeOptions OrchestratorMode
+        {
+            get => orchestratorModeOptions;
+            set
+            {
+                DemandNotBuilt(nameof(OrchestratorMode));
+                orchestratorModeOptions = value;
+            }
+        }
+
         /// <summary>
         /// The sub-agents orchestrator mode offers (with <c>CoreAISettingsAsset.EnableOrchestratorMode</c> on). Null,
         /// the default, uses <see cref="DefaultSubAgents"/>; a list (even an empty one) replaces them. Set it while
@@ -500,7 +520,7 @@ namespace CoreAI.Composition
             builder.RegisterAgentRoleDefinitions(RoleDefinitions);
             builder.RegisterCore();
             bool orchestratorMode = builder.RegisterOrchestratorMode(
-                new CoreAI.Ai.SubAgents.OrchestratorModeOptions
+                OrchestratorMode ?? new CoreAI.Ai.SubAgents.OrchestratorModeOptions
                 {
                     Enabled = settings != null && settings.EnableOrchestratorMode
                 },

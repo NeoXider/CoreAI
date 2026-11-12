@@ -250,6 +250,44 @@ namespace CoreAI.Tests.EditMode.RbxApi.TextChat
             Assert.AreEqual("/timer", Message(received[0]).Text);
         }
 
+        [Test]
+        public void AScriptsCommand_InTextChatCommands_StaysWhenTheHostsListChanges()
+        {
+            _host.Commands.Add(new RbxChatHostCommand("undo", Array.Empty<string>(), "", "Undo."));
+            RbxTextChatCommand time = (RbxTextChatCommand)_world.Registry.Create("TextChatCommand");
+            time.PrimaryAlias = "/time";
+            time.Parent = _service.TextChatCommands;
+
+            _host.RaiseCommandsChanged();
+            IReadOnlyList<RbxInstance> listed = _service.TextChatCommands.GetChildren();
+
+            Assert.AreEqual(2, listed.Count, "the host's entry is rebuilt, the script's command is kept");
+            Assert.AreSame(time.Parent, _service.TextChatCommands);
+            Assert.IsFalse(time.IsDestroyed);
+        }
+
+        [Test]
+        public void WithoutAHost_ACommandInTextChatCommands_StillTriggers_AndNoHostEntryDoes()
+        {
+            _host.Commands.Add(new RbxChatHostCommand("undo", Array.Empty<string>(), "", "Undo."));
+            RbxInstance folder = _service.TextChatCommands;
+            _service.DetachChatHost();
+            RbxTextChatCommand time = (RbxTextChatCommand)_world.Registry.Create("TextChatCommand");
+            time.PrimaryAlias = "/time";
+            time.Parent = folder;
+            List<object[]> triggered = _world.Listen(time.Triggered);
+            List<object[]> received = _world.Listen(_service.MessageReceived);
+
+            RbxTextChatMessage sent = _service.SendAsync(_service.GeneralChannel, "/time", "");
+            RbxTextChatMessage undo = _service.SendAsync(_service.GeneralChannel, "/undo", "");
+            _world.Frame();
+
+            Assert.AreEqual(RbxTextChatMetadata.Command, sent.Metadata);
+            Assert.AreEqual(1, triggered.Count);
+            Assert.AreEqual("", undo.Metadata, "twin: a left-over host entry is not a command without its host");
+            Assert.AreEqual(1, received.Count);
+        }
+
         private sealed class FakeHost : IRbxChatHost
         {
             public readonly List<string> Offered = new();

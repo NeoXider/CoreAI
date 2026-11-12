@@ -222,6 +222,7 @@ namespace CoreAI.Mods.Rbx.Instances.TextChat
         private RbxChatWindowConfiguration _window;
         private RbxChatInputBarConfiguration _inputBar;
         private RbxInstance _hostCommandsFolder;
+        private readonly List<RbxTextChatCommand> _hostCommandEntries = new();
         private bool _hostCommandsDirty = true;
         private long _messageCounter;
 
@@ -289,7 +290,8 @@ namespace CoreAI.Mods.Rbx.Instances.TextChat
         /// <summary>
         /// The host's own commands as read-only <c>TextChatCommand</c>s in a detached <c>TextChatCommands</c> folder:
         /// <c>PrimaryAlias</c>, <c>SecondaryAlias</c> and the attributes <c>Description</c> and <c>Usage</c>. Writing
-        /// them changes nothing in the host. Empty without an attached host.
+        /// them changes nothing in the host. Empty without an attached host. A script's own <c>TextChatCommand</c>
+        /// parented here is a command of the chat, as in Roblox, and stays when the host's list changes.
         /// </summary>
         public RbxInstance TextChatCommands
         {
@@ -462,19 +464,33 @@ namespace CoreAI.Mods.Rbx.Instances.TextChat
 
             int end = line.IndexOfAny(new[] { ' ', '\t' }, 1);
             string name = end < 0 ? line.Substring(1) : line.Substring(1, end - 1);
-            IReadOnlyList<RbxInstance> descendants = GetDescendants();
-            for (int i = 0; i < descendants.Count; i++)
+            RbxTextChatCommand found = FindWorldCommand(GetDescendants(), name)
+                                       ?? (_hostCommandsFolder != null
+                                           ? FindWorldCommand(_hostCommandsFolder.GetDescendants(), name)
+                                           : null);
+            if (found == null)
             {
-                if (descendants[i] is RbxTextChatCommand command && command.Enabled
+                return RbxChatSendResult.Deliver();
+            }
+
+            found.FireTriggered(source, line);
+            return RbxChatSendResult.Command(string.Empty);
+        }
+
+        private RbxTextChatCommand FindWorldCommand(IReadOnlyList<RbxInstance> candidates, string name)
+        {
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                if (candidates[i] is RbxTextChatCommand command && command.Enabled
+                    && !_hostCommandEntries.Contains(command)
                     && (string.Equals(Normalize(command.PrimaryAlias), name, StringComparison.OrdinalIgnoreCase)
                         || string.Equals(Normalize(command.SecondaryAlias), name, StringComparison.OrdinalIgnoreCase)))
                 {
-                    command.FireTriggered(source, line);
-                    return RbxChatSendResult.Command(string.Empty);
+                    return command;
                 }
             }
 
-            return RbxChatSendResult.Deliver();
+            return null;
         }
 
         private void OnHostLine(RbxChatHostLine line)
@@ -559,11 +575,14 @@ namespace CoreAI.Mods.Rbx.Instances.TextChat
             }
 
             _hostCommandsDirty = false;
-            IReadOnlyList<RbxInstance> old = _hostCommandsFolder.GetChildren();
-            for (int i = 0; i < old.Count; i++)
+            // WHY only the entries made here: a script may put its own TextChatCommand in this folder, the Roblox
+            // place for commands, and it stays a command of the chat (Evaluate counts the folder as inside).
+            for (int i = 0; i < _hostCommandEntries.Count; i++)
             {
-                old[i].Parent = null;
+                _hostCommandEntries[i].Parent = null;
             }
+
+            _hostCommandEntries.Clear();
 
             IReadOnlyList<RbxChatHostCommand> commands = _host?.GetHostCommands();
             if (commands == null)
@@ -580,6 +599,7 @@ namespace CoreAI.Mods.Rbx.Instances.TextChat
                 command.SetAttribute("Description", entry.Description);
                 command.SetAttribute("Usage", entry.Usage);
                 command.Parent = _hostCommandsFolder;
+                _hostCommandEntries.Add(command);
             }
         }
 
@@ -726,7 +746,9 @@ namespace CoreAI.Mods.Rbx.Instances.TextChat
         {
             string name = Normalize(command.PrimaryAlias);
             bool wanted = _sink != null && !IsDestroyed && !command.IsDestroyed && command.Enabled
-                          && name.Length > 0 && command.IsDescendantOf(this);
+                          && name.Length > 0
+                          && (command.IsDescendantOf(this)
+                              || (_hostCommandsFolder != null && command.IsDescendantOf(_hostCommandsFolder)));
             string second = Normalize(command.SecondaryAlias);
             string secondary = wanted && second.Length > 0
                                       && !string.Equals(second, name, StringComparison.OrdinalIgnoreCase)

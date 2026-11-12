@@ -1,12 +1,12 @@
 --[[@coreai
 id: blockworld_graphics
 name: Block World 10 - Graphics
-version: 1.0.0
+version: 1.1.0
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo. O opens the graphics settings, a panel of Roblox GUI objects (ScreenGui, Frame, TextLabel, TextButton) with three settings: the view distance, how many columns of 16 blocks the world streams around you (2 up to the host's limit: 16 on a desktop; the fog follows it, and a longer one fills in as it streams), the field of view (Camera.FieldOfView, 50 to 110 degrees) and the sun's brightness (Lighting.Brightness, 50 to 200 percent). Each choice is a workspace attribute (BlockWorldViewRadius, BlockWorldFieldOfView, BlockWorldBrightness), so a world kept between starts opens with the same settings, and a script or the AI can change one the same way. The panel frees the mouse while it is open; O again, or Done, closes it.
+description: Part of the Block World demo. O opens the graphics settings, a panel of Roblox GUI objects (ScreenGui, Frame, TextLabel, TextButton) with three settings: the view distance, how many columns of 16 blocks the world streams around you (2 up to the host's limit: 16 on a desktop; the fog follows it, and a longer one fills in as it streams), the field of view (Camera.FieldOfView, 50 to 110 degrees) and the sun's brightness (Lighting.Brightness, 50 to 200 percent). Each choice is a workspace attribute (BlockWorldViewRadius, BlockWorldFieldOfView, BlockWorldBrightness), so a world kept between starts opens with the same settings, and a script or the AI can change one the same way. The panel frees the mouse while it is open; O again, or Done, closes it. While you sprint (BlockWorldSprinting, from blockworld_build) the field of view widens by 15 percent over your choice and narrows back when the sprint ends, as in Minecraft.
 ]]
 
 -- The settings are workspace attributes because a world kept between starts keeps the Workspace's attributes, and
@@ -14,17 +14,20 @@ description: Part of the Block World demo. O opens the graphics settings, a pane
 -- applies the other two to Camera.FieldOfView and Lighting.Brightness when it loads and whenever they change. A choice
 -- made in the panel also raises CoreAIWorldEdits, which tells a kept world to record itself, as a placed block does.
 --
--- Reads: BlockWorldStreamRadius and BlockWorldViewRadiusLimit (blockworld_world). Writes: BlockWorldViewRadius,
--- BlockWorldFieldOfView, BlockWorldBrightness, CoreAIWorldEdits.
+-- Reads: BlockWorldStreamRadius and BlockWorldViewRadiusLimit (blockworld_world), BlockWorldSprinting
+-- (blockworld_build). Writes: BlockWorldViewRadius, BlockWorldFieldOfView, BlockWorldBrightness, CoreAIWorldEdits.
 
 local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local TOGGLE_KEY = Enum.KeyCode.O
 local PANEL_WIDTH = 520
 local PANEL_HEIGHT = 352
 local ROW_HEIGHT = 44
+local SPRINT_FIELD = 1.15       -- the field of view while sprinting, as a part of the chosen one
+local SPRINT_EASE = 10          -- how fast the widening comes and goes, per second: most of it in a quarter second
 
 local function number(name)
     local value = workspace:GetAttribute(name)
@@ -36,16 +39,41 @@ end
 
 -- ---- applying a setting ---------------------------------------------------------------------------------------
 
-local function applyFieldOfView()
+-- The lens is the chosen field of view times the sprint's widening (lensFactor, 1 while walking). WHY one owner: the
+-- setting and the sprint both move Camera.FieldOfView, and two mods writing it would undo each other.
+local lensFactor = 1
+local easing = nil               -- the Heartbeat connection that moves the lens, while it moves
+local restingFieldOfView = nil   -- the camera's own field of view when a sprint began, with no setting chosen
+
+local function chosenFieldOfView()
     local value = number("BlockWorldFieldOfView")
+    if value then
+        return value
+    end
+    if easing == nil and lensFactor == 1 then
+        local camera = workspace.CurrentCamera
+        return camera and camera.FieldOfView or 70
+    end
+    return restingFieldOfView or 70
+end
+
+local function writeLens()
     local camera = workspace.CurrentCamera
-    if value and camera then
-        local ok, problem = pcall(function()
-            camera.FieldOfView = value
-        end)
-        if not ok then
-            warn("[blockworld] the field of view stays as it is: " .. tostring(problem))
-        end
+    if not camera then
+        return
+    end
+    local wanted = chosenFieldOfView() * lensFactor
+    local ok, problem = pcall(function()
+        camera.FieldOfView = wanted
+    end)
+    if not ok then
+        warn("[blockworld] the field of view stays as it is: " .. tostring(problem))
+    end
+end
+
+local function applyFieldOfView()
+    if number("BlockWorldFieldOfView") or lensFactor ~= 1 then
+        writeLens()
     end
 end
 
@@ -84,8 +112,7 @@ local SETTINGS = {
             return 110
         end,
         current = function()
-            local camera = workspace.CurrentCamera
-            return camera and math.floor(camera.FieldOfView + 0.5) or 70
+            return math.floor(chosenFieldOfView() + 0.5)
         end,
         describe = function(value)
             return value .. " degrees"
@@ -305,6 +332,31 @@ for _, name in ipairs({ "BlockWorldViewRadius", "BlockWorldStreamRadius", "Block
     workspace:GetAttributeChangedSignal(name):Connect(refresh)
 end
 workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(applyFieldOfView)
+
+-- The sprint's widening, eased in and out; the Heartbeat handler is connected only while the lens moves.
+local lensTarget = 1
+local function followSprint()
+    if easing == nil and lensFactor == 1 then
+        restingFieldOfView = chosenFieldOfView()
+    end
+    lensTarget = workspace:GetAttribute("BlockWorldSprinting") == true and SPRINT_FIELD or 1
+    if easing or lensFactor == lensTarget then
+        return
+    end
+    easing = RunService.Heartbeat:Connect(function(dt)
+        lensFactor = lensFactor + (lensTarget - lensFactor) * math.min(1, dt * SPRINT_EASE)
+        local settled = math.abs(lensTarget - lensFactor) < 0.002
+        if settled then
+            lensFactor = lensTarget
+        end
+        writeLens()
+        if settled then
+            easing:Disconnect()
+            easing = nil
+        end
+    end)
+end
+workspace:GetAttributeChangedSignal("BlockWorldSprinting"):Connect(followSprint)
 Players.PlayerAdded:Connect(attach)
 
 attach()

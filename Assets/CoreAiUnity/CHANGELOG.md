@@ -26,6 +26,8 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Added
 
+- `CoreAILifetimeScope.OrchestratorMode` (set before the scope builds) switches orchestrator mode on or off and picks its style and budgets for one scene; `OrchestratorModeChatPresenter` forwards tool names and outcomes to the sub-agents and runs their wake turns as overlay host turns. Hosts that already enable the mode now get Team style. `ORCHESTRATOR_MODE.md` is rewritten for both styles.
+- WebGL: `CoreAiWebGlPersistence.IsFlushIdle`, `OtherPagesSharingStorage` and `GuardPageLeave` (the kept world's save state and leave guard use them). `RuntimeUiElement.TryMeasureText` measures a text element's text.
 - **Chat overlay: stepping aside.** While another surface claims the chat (`IChatOverlaySurfaceSwitch`), the overlay's view is detached, no keys are read and its built-in commands are given back; the installer registers the switch and `ChatAgentTurns`. `RuntimeUiElement.FocusForTyping` focuses a field for typing and swallows the opening keystroke. `CHAT_OVERLAY.md` has the new section.
 - **Chat overlay: the status line has a `--composing` state.** The view styles `AgentStatusKind.ComposingTool` with the class `coreai-chat-overlay__status--composing`; `CHAT_OVERLAY.md` describes the new status texts and the output count.
 - **Hub Graphics page: the frame rate.** A "Performance" section at the top shows frames per second and the frame time, refreshed twice a second while the page is open, whoever owns rendering (also when the page says the game manages its graphics).

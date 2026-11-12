@@ -95,6 +95,10 @@ namespace CoreAI.Ai.SubAgents
         /// <param name="taskId">Plan task id.</param>
         /// <param name="attempt">1-based attempt of that task, so a retried task gets a new trace and scope.</param>
         /// <param name="delegateToolName">Delegate tool name; removed from the allowlist again as a second guard.</param>
+        /// <param name="guardedToolNames">
+        /// Further tool names the sub-agent may never call (the configured Team-style tool names); removed from
+        /// the allowlist like the delegate tool.
+        /// </param>
         public static AiTaskRequest Create(
             SubAgentDefinition definition,
             string task,
@@ -103,7 +107,8 @@ namespace CoreAI.Ai.SubAgents
             string planId,
             string taskId,
             int attempt,
-            string delegateToolName = DelegateTaskTool.DefaultName)
+            string delegateToolName = DelegateTaskTool.DefaultName,
+            IEnumerable<string> guardedToolNames = null)
         {
             if (definition == null)
             {
@@ -139,22 +144,37 @@ namespace CoreAI.Ai.SubAgents
                 // WHY a scope per run: the queue treats a scope as latest-wins, so a sub-agent sharing the lead's
                 // scope (or a sibling's) would cancel it on admission.
                 CancellationScope = scopeRoot + "/" + (planId ?? "") + "/sub/" + runKey,
-                AllowedToolNames = BuildAllowlist(definition, delegateToolName),
+                AllowedToolNames = BuildAllowlist(definition, delegateToolName, guardedToolNames),
                 MaxOutputTokens = definition.MaxOutputTokens,
                 MaxToolCallRoundtrips = definition.MaxToolCallRoundtrips
             };
         }
 
-        private static string[] BuildAllowlist(SubAgentDefinition definition, string delegateToolName)
+        private static string[] BuildAllowlist(
+            SubAgentDefinition definition,
+            string delegateToolName,
+            IEnumerable<string> guardedToolNames)
         {
-            string guarded = string.IsNullOrWhiteSpace(delegateToolName)
-                ? DelegateTaskTool.DefaultName
-                : delegateToolName.Trim();
+            HashSet<string> guarded = new(StringComparer.OrdinalIgnoreCase)
+            {
+                DelegateTaskTool.DefaultName,
+                string.IsNullOrWhiteSpace(delegateToolName) ? DelegateTaskTool.DefaultName : delegateToolName.Trim()
+            };
+            if (guardedToolNames != null)
+            {
+                foreach (string name in guardedToolNames)
+                {
+                    if (!string.IsNullOrWhiteSpace(name))
+                    {
+                        guarded.Add(name.Trim());
+                    }
+                }
+            }
+
             List<string> names = new(definition.AllowedToolNames.Count);
             foreach (string name in definition.AllowedToolNames)
             {
-                if (!string.Equals(name, guarded, StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(name, DelegateTaskTool.DefaultName, StringComparison.OrdinalIgnoreCase))
+                if (!guarded.Contains(name) && !SubAgentTeamToolNames.IsDefaultName(name))
                 {
                     names.Add(name);
                 }

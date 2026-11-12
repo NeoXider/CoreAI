@@ -689,7 +689,15 @@ namespace CoreAI.Mcp.Server
             // vanish from tools/list for the whole session when the server booted from a bootstrap scene;
             // the source now reports a missing camera per call instead.
             IScreenshotSource screenshot = new MainCameraScreenshotSource(this);
-            IReadOnlyList<IMcpTool> diagnostics = BuildDiagnosticsTools(resolver, modRuntime);
+            List<IMcpTool> diagnostics = new(BuildDiagnosticsTools(resolver, modRuntime));
+            diagnostics.AddRange(BuildWorldTreeTools(resolver));
+            IReadOnlyList<IMcpTool> worldPackageTools = BuildWorldPackageTools(resolver, modActorIdentityProvider);
+            List<IMcpTool> brokered = new(worldPackageTools);
+            brokered.AddRange(BuildInGameTools(resolver, diagnostics, worldPackageTools));
+            // WHY the gate: an MCP load, reload or edit then gets the same backup autosave as the in-game one and is
+            // serialized with every other world change.
+            CoreAI.Mods.WorldPackages.IConfirmedWorldMutationGate modMutationGate =
+                resolver.ResolveOrDefault<CoreAI.Mods.WorldPackages.IConfirmedWorldMutationGate>();
 
             return CoreAiMcpToolProvider.BuildWithModFolders(
                 luaExecutor,
@@ -705,12 +713,95 @@ namespace CoreAI.Mcp.Server
                 null,
                 null,
                 null,
-                BuildWorldPackageTools(resolver, modActorIdentityProvider),
+                brokered,
                 modRateLimiter,
                 modFolderList,
                 diagnostics,
                 // WHY only in WebGL: there Task.Delay never fires, so get_mod_logs' wait needs the frame-driven one.
-                IsWebGlPlayer ? settings?.ToolInvocationMarshaler : null);
+                IsWebGlPlayer ? settings?.ToolInvocationMarshaler : null,
+                modMutationGate);
+        }
+
+        /// <summary>
+        /// <c>world_tree</c> and <c>instance_get</c> over the running world (Roblox Explorer's view, read-only). Native:
+        /// a harness wants them listed. None without a world host in the composition.
+        /// </summary>
+        private static IReadOnlyList<IMcpTool> BuildWorldTreeTools(IObjectResolver resolver)
+        {
+            RbxWorldHost worldHost = null;
+            try
+            {
+                worldHost = resolver.ResolveOrDefault<RbxWorldHost>();
+            }
+            catch (VContainerException)
+            {
+            }
+
+            if (worldHost == null)
+            {
+                return Array.Empty<IMcpTool>();
+            }
+
+            return WorldTreeMcpTools.Create(
+                () => worldHost != null && worldHost.IsInitialized ? worldHost.Game : null,
+                () => worldHost != null ? worldHost.Registry : null);
+        }
+
+        /// <summary>Environment variable that, set to <c>0</c>, keeps the in-game agents' tools off MCP.</summary>
+        public const string InGameToolsEnvironmentVariable = "COREAI_MCP_INGAME_TOOLS";
+
+        /// <summary>
+        /// Offer every tool an in-game agent of this composition has (and its skills' tools) through
+        /// <c>coreai_tools</c>, unchanged (<see cref="McpInGameTools"/>), so an external harness can do whatever an
+        /// in-game agent can. On by default; <see cref="InGameToolsEnvironmentVariable"/>=<c>0</c> turns it off. Tools
+        /// with a dedicated MCP adapter keep that adapter and its authority rules. Read when the catalog is built.
+        /// </summary>
+        public bool ExposeInGameTools { get; set; } = true;
+
+        private IReadOnlyList<IMcpTool> BuildInGameTools(IObjectResolver resolver, IReadOnlyList<IMcpTool> diagnostics,
+            IReadOnlyList<IMcpTool> worldPackageTools)
+        {
+            string switchValue = Environment.GetEnvironmentVariable(InGameToolsEnvironmentVariable);
+            if (!ExposeInGameTools || string.Equals(switchValue?.Trim(), "0", StringComparison.Ordinal))
+            {
+                return Array.Empty<IMcpTool>();
+            }
+
+            AgentMemoryPolicy policy = resolver.ResolveOrDefault<AgentMemoryPolicy>();
+            if (policy == null)
+            {
+                return Array.Empty<IMcpTool>();
+            }
+
+            List<string> taken = new() { CoreAiToolsBrokerMcpTool.ToolName };
+            foreach (IMcpTool tool in diagnostics) taken.Add(tool.Name);
+            foreach (IMcpTool tool in worldPackageTools) taken.Add(tool.Name);
+            return McpInGameTools.Wrap(CollectInGameTools(policy), taken, message => Log.Instance.Warn(message));
+        }
+
+        /// <summary>
+        /// The tools of every role the policy knows, the Programmer's first (its camera and host tools are the ones a
+        /// developer means), each role's skill tools after its own tools.
+        /// </summary>
+        internal static List<ILlmTool> CollectInGameTools(AgentMemoryPolicy policy)
+        {
+            List<string> roles = new() { BuiltInAgentRoleIds.Programmer };
+            foreach (string role in policy.GetKnownRoleIds())
+            {
+                if (!roles.Contains(role)) roles.Add(role);
+            }
+
+            List<ILlmTool> tools = new();
+            foreach (string role in roles)
+            {
+                tools.AddRange(policy.GetToolsForRole(role));
+                foreach (SkillSet skill in policy.GetSkillsForRole(role))
+                {
+                    if (skill?.Tools != null) tools.AddRange(skill.Tools);
+                }
+            }
+
+            return tools;
         }
 
         private IReadOnlyList<IMcpTool> BuildDiagnosticsTools(IObjectResolver resolver, ILuaModRuntime modRuntime)

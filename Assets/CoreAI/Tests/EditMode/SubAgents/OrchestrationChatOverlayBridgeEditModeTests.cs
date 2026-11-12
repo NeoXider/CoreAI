@@ -149,7 +149,7 @@ namespace CoreAI.Core.Tests.EditMode.SubAgents
         private static OrchestratorChatDriver CreateDriver(IAiTaskResultService runner)
         {
             return new OrchestratorChatDriver(new OrchestratorSessionRegistry(
-                new OrchestratorModeOptions { Enabled = true },
+                new OrchestratorModeOptions { Enabled = true, Style = OrchestrationStyle.Plan },
                 new SubAgentRegistry(new[] { SubAgentTestSupport.Builder(), SubAgentTestSupport.Scripter() }),
                 runner));
         }

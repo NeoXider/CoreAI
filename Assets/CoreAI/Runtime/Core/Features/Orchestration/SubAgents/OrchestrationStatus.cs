@@ -17,19 +17,44 @@ namespace CoreAI.Ai.SubAgents
         event Action<OrchestrationStatus> Changed;
     }
 
-    /// <summary>An immutable status of one orchestrator session: the plan, the queue and a revision counter.</summary>
+    /// <summary>
+    /// An immutable status of one orchestrator session: the plan, the queue, the Team-style sub-agents and a
+    /// revision counter.
+    /// </summary>
     public sealed class OrchestrationStatus
     {
         internal OrchestrationStatus(
             string conversationId,
             long revision,
             OrchestrationPlanSnapshot plan,
-            IReadOnlyList<QueuedInstructionSnapshot> queue)
+            IReadOnlyList<QueuedInstructionSnapshot> queue,
+            IReadOnlyList<SubAgentMemberSnapshot> team = null)
         {
             ConversationId = conversationId ?? "";
             Revision = revision;
             Plan = plan;
             Queue = queue ?? Array.Empty<QueuedInstructionSnapshot>();
+            Team = team ?? Array.Empty<SubAgentMemberSnapshot>();
+        }
+
+        /// <summary>The conversation's Team-style sub-agents, in creation order.</summary>
+        public IReadOnlyList<SubAgentMemberSnapshot> Team { get; }
+
+        /// <summary>True while a Team-style sub-agent is queued or working.</summary>
+        public bool HasActiveMembers
+        {
+            get
+            {
+                foreach (SubAgentMemberSnapshot member in Team)
+                {
+                    if (!member.IsIdle)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
         }
 
         /// <summary>Conversation the session belongs to.</summary>
@@ -102,6 +127,83 @@ namespace CoreAI.Ai.SubAgents
             return status.Queue.Count == 1
                 ? "next: " + next
                 : "next: " + next + " (+" + (status.Queue.Count - 1) + ")";
+        }
+
+        /// <summary>
+        /// One status line for the Team-style sub-agents that are busy: <c>builder-1 working (2 steps); scripter-1
+        /// started</c>; empty when none is queued or working.
+        /// </summary>
+        public static string FormatTeamLine(IReadOnlyList<SubAgentMemberSnapshot> team)
+        {
+            if (team == null || team.Count == 0)
+            {
+                return "";
+            }
+
+            List<string> parts = new();
+            foreach (SubAgentMemberSnapshot member in team)
+            {
+                if (member.State == SubAgentMemberState.Working)
+                {
+                    parts.Add(member.Name + " working" + (member.Steps > 0
+                        ? " (" + member.Steps + (member.Steps == 1 ? " step)" : " steps)")
+                        : ""));
+                }
+                else if (member.State == SubAgentMemberState.Queued)
+                {
+                    parts.Add(member.Name + (member.Turns == 0 ? " started" : " queued"));
+                }
+            }
+
+            return string.Join("; ", parts);
+        }
+
+        /// <summary>
+        /// One line per Team-style sub-agent for a chat reply: <c>builder-1 (builder): working on Build a tower</c>,
+        /// <c>finished, waits for a message: ...</c>; "No sub-agents." when there are none.
+        /// </summary>
+        public static string FormatTeamList(IReadOnlyList<SubAgentMemberSnapshot> team)
+        {
+            if (team == null || team.Count == 0)
+            {
+                return "No sub-agents.";
+            }
+
+            List<string> lines = new(team.Count);
+            foreach (SubAgentMemberSnapshot member in team)
+            {
+                lines.Add(member.Name + " (" + member.SubAgentId + "): " + DescribeMember(member));
+            }
+
+            return string.Join("\n", lines);
+        }
+
+        /// <summary>What <paramref name="member"/> is doing, in the player's words.</summary>
+        public static string DescribeMember(SubAgentMemberSnapshot member)
+        {
+            if (member == null)
+            {
+                return "";
+            }
+
+            switch (member.State)
+            {
+                case SubAgentMemberState.Queued:
+                    return (member.Turns == 0 ? "started, waiting for its turn: " : "queued: ") + member.Label;
+                case SubAgentMemberState.Working:
+                    return "working on " + member.Label + (member.PendingMessages > 0
+                        ? " (" + member.PendingMessages + " message" + (member.PendingMessages == 1 ? "" : "s") +
+                          " waiting)"
+                        : "");
+                case SubAgentMemberState.Finished:
+                    return "finished, waits for a message: " +
+                           OrchestrationPlan.ClipLine(member.LastAnswer, OrchestrationPlan.MaxSummaryChars);
+                case SubAgentMemberState.Failed:
+                    return "failed, waits for a message: " +
+                           OrchestrationPlan.ClipLine(member.LastError, OrchestrationPlan.MaxSummaryChars);
+                default:
+                    return "stopped, waits for a message: " + member.Label;
+            }
         }
 
         private static PlanTaskSnapshot FindActive(OrchestrationPlanSnapshot plan)

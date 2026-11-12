@@ -72,6 +72,17 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void PageProbes_OffWebGl_AreIdleAloneAndUnguarded()
+        {
+            CoreAiWebGlPersistence.GuardPageLeave(true);
+            CoreAiWebGlPersistence.GuardPageLeave(false);
+
+            Assert.IsTrue(CoreAiWebGlPersistence.IsFlushIdle, "Off WebGL a completed write has nothing left to store.");
+            Assert.AreEqual(0, CoreAiWebGlPersistence.OtherPagesSharingStorage,
+                "Only browser pages of one origin share a storage copy.");
+        }
+
+        [Test]
         public void SyncAsync_CancellationIsNotReportedAsDurability()
         {
             using CancellationTokenSource cancellation = new();

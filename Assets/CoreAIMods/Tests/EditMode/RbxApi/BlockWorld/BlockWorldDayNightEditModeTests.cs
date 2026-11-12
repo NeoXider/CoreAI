@@ -145,6 +145,74 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
             _world.AssertHealthy(Mod);
         }
 
+        // WHY these bounds: a step of the fog colour under one 8-bit level, and of the sky's light under 1 %, is below
+        // what a screen shows; the sun turns every frame because at a low sun a shadow's tip moves a block for a tenth
+        // of a degree.
+        [TestCase("17:00")]
+        [TestCase("4:30")]
+        public void P6_DayNight_ADuskOrADawn_ChangesFrameByFrame_WithoutAVisibleStep(string from)
+        {
+            SetTime(from);
+            RbxLightingState state = Lighting.CaptureState();
+            float lastSky = SkyLight();
+            RbxColor3 lastFog = Lighting.FogColor;
+            RbxVector3 lastSun = state.SunDirection;
+            double fogStep = 0d;
+            double skyStep = 0d;
+            int sunStill = 0;
+            int frames = 60 * 60;
+            for (int frame = 0; frame < frames; frame++)
+            {
+                _world.Frame();
+                float sky = SkyLight();
+                RbxColor3 fog = Lighting.FogColor;
+                RbxVector3 sun = Lighting.CaptureState().SunDirection;
+                fogStep = System.Math.Max(fogStep, 255d * System.Math.Max(System.Math.Abs(fog.R - lastFog.R),
+                    System.Math.Max(System.Math.Abs(fog.G - lastFog.G), System.Math.Abs(fog.B - lastFog.B))));
+                skyStep = System.Math.Max(skyStep, System.Math.Abs(sky - lastSky) / System.Math.Max(lastSky, 1e-4f));
+                sunStill += sun == lastSun ? 1 : 0;
+                lastSky = sky;
+                lastFog = fog;
+                lastSun = sun;
+            }
+
+            TestContext.WriteLine(from + " and the next three hours at 60 frames a second: the largest step of the fog "
+                                  + fogStep.ToString("0.00") + " of 255, of the sky's light "
+                                  + (skyStep * 100d).ToString("0.00") + " %, frames with the sun still " + sunStill
+                                  + " of " + frames);
+            Assert.Less(fogStep, 1d, "the fog's colour changes by less than one 8-bit level a frame");
+            Assert.Less(skyStep, 0.01d, "the sky's light changes by less than 1 % a frame");
+            Assert.AreEqual(0, sunStill, "the sun turns every frame");
+            _world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_DayNight_AtNoonAndAtMidnight_NothingButTheClockIsWritten_NegativeTwin()
+        {
+            Lighting.AttachSink(new IdleSink());
+            foreach (string time in new[] { "noon", "midnight" })
+            {
+                SetTime(time);
+                _world.Frame(5);
+                int before = Lighting.SinkApplyCount;
+                _world.Frame(60);
+
+                // WHY a push is the measure: the host redraws the sun and the ambient once per real change of a
+                // Lighting property, so a still sky must cost one push a frame, the clock's.
+                TestContext.WriteLine(time + ": " + (Lighting.SinkApplyCount - before) + " pushes in 60 frames");
+                Assert.LessOrEqual(Lighting.SinkApplyCount - before, 60, "at " + time + " only ClockTime moves");
+            }
+
+            _world.AssertHealthy(Mod);
+        }
+
+        private sealed class IdleSink : IRbxLightingSink
+        {
+            public void Apply(in RbxLightingState state)
+            {
+            }
+        }
+
         [Test]
         public void P6_DayNight_WhereTheSkyDoesNotReach_ItIsAsDarkAtNoonAsAtMidnight()
         {

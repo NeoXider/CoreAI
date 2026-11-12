@@ -171,9 +171,13 @@ thread shows up on the next frame. A posted line never reaches the model.
 
 ## Keeping game controls out of the typing
 
-`IChatOverlayInputState.IsInputOpen` is true from the moment the input opens until the frame after it
-closed, so the Enter or Escape that closed it never reaches the game in the same frame;
-`InputOpenChanged` reports every change. A game (or the CoreAI focus bridge) reads it to stop movement
+`IChatOverlayInputState.IsInputOpen` is true from the moment the input opens until the next chat tick after it
+closed; `InputOpenChanged` reports every change. The UI focus the world reads follows
+`IChatOverlayKeyboardHold.HoldsKeyboard`, which the entry point keeps one tick longer
+(`ChatOverlayController.HoldKeyboardThroughNextTick()` in the tick that sees the input closed): that tick runs
+ahead of `MonoBehaviour.Update`, so the Enter or Escape that closed the input is still the chat's when the world
+reads it in that frame. A chat drawn in Lua shares the overlay's turn slot (`AttachExternalTurns`):
+`IsTurnActive`, `ActiveTraceId` and `StopActiveTurn` include its turn, and host turns wait for it. A game (or the CoreAI focus bridge) reads it to stop movement
 and other controls while the player types. `IChatOverlayOpenGate` is the opposite direction: register one
 that returns false while another text field has the keyboard (a Hub page, the chat panel) and the open
 keys do nothing. `CoreAILifetimeScope` registers both through `RegisterCoreAiUiFocus`: the gate answers

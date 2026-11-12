@@ -15,8 +15,8 @@ namespace CoreAI.ChatOverlay
     /// A plain line the player types is offered to the pre-send hooks (<see cref="AddPreSendHook"/>) first; only a
     /// line no hook takes reaches the agent.
     /// </summary>
-    public sealed class ChatOverlayController : IChatOverlayInputState, IChatOverlayMessages, IChatTurnControl,
-        IChatOverlayPreSendHooks, IChatOverlayPlayerLineRouter, IDisposable
+    public sealed class ChatOverlayController : IChatOverlayInputState, IChatOverlayKeyboardHold, IChatOverlayMessages,
+        IChatTurnControl, IChatOverlayPreSendHooks, IChatOverlayPlayerLineRouter, IDisposable
     {
         private readonly ChatOverlayOptions _options;
         private readonly IChatOverlayView _view;
@@ -44,6 +44,9 @@ namespace CoreAI.ChatOverlay
         private string _pushedStatusText = "";
         private TurnState _turn;
         private bool _disposed;
+        private IChatExternalTurnSlot _external;
+        private int _holdTicks;
+        private bool _publishedHold;
 
         /// <summary>Creates the controller and subscribes to the view and the tool events.</summary>
         public ChatOverlayController(
@@ -85,6 +88,12 @@ namespace CoreAI.ChatOverlay
         /// <inheritdoc />
         public event Action<bool> InputOpenChanged;
 
+        /// <inheritdoc />
+        public event Action<bool> KeyboardHoldChanged;
+
+        /// <inheritdoc />
+        public bool HoldsKeyboard => !_disposed && (_inputOpen || _holdTicks > 0);
+
         /// <summary>The lines of the chat.</summary>
         public ChatFeed Feed { get; }
 
@@ -107,10 +116,28 @@ namespace CoreAI.ChatOverlay
         public bool IsInputVisible => _inputOpen;
 
         /// <inheritdoc />
-        public bool IsTurnActive => _turn != null;
+        public bool IsTurnActive => _turn != null || (_external?.IsTurnActive ?? false);
+
+        /// <summary>True while a turn of this controller runs (a player's line typed here, or a host turn).</summary>
+        public bool IsOwnTurnActive => _turn != null;
 
         /// <summary>Trace id of the running turn; empty when idle.</summary>
-        public string ActiveTraceId => _turn?.TraceId ?? "";
+        public string ActiveTraceId => _turn?.TraceId
+                                       ?? (_external != null && _external.IsTurnActive ? _external.ActiveTraceId ?? "" : "");
+
+        /// <summary>
+        /// Shares this chat's turn slot with a chat drawn elsewhere (a Lua mod's, through <see cref="ChatAgentTurns"/>):
+        /// while its turn runs, <see cref="IsTurnActive"/> and <see cref="ActiveTraceId"/> report it, a host turn and a
+        /// line typed here are refused as busy, and <see cref="StopActiveTurn"/> stops it, so host turns (a mod's
+        /// self-repair, an orchestrator wake) never overlap it. Null detaches.
+        /// </summary>
+        public void AttachExternalTurns(IChatExternalTurnSlot slot)
+        {
+            _external = slot;
+        }
+
+        /// <summary>The slot attached with <see cref="AttachExternalTurns"/>, or null.</summary>
+        public IChatExternalTurnSlot ExternalTurns => _external;
 
         /// <summary>Opens the input with <paramref name="prefill"/> in it; reopening replaces the text.</summary>
         public void OpenInput(string prefill = "")
@@ -122,9 +149,11 @@ namespace CoreAI.ChatOverlay
 
             _inputOpen = true;
             _closeReleasePending = false;
+            _holdTicks = 0;
             _view.SetInputOpen(true, prefill ?? "");
             RefreshVisibility(_clock.NowSeconds);
             PublishInputState();
+            PublishKeyboardHold();
         }
 
         /// <summary>Opens the input with the command prefix already typed.</summary>
@@ -143,8 +172,23 @@ namespace CoreAI.ChatOverlay
 
             _inputOpen = false;
             _closeReleasePending = true;
+            _holdTicks = 1;
             _view.SetInputOpen(false, "");
             RefreshVisibility(_clock.NowSeconds);
+        }
+
+        /// <summary>
+        /// Keeps <see cref="HoldsKeyboard"/> through one more <see cref="Tick"/> after a close. A ticker that runs before
+        /// the game's input step calls it in the frame the input closed, so the key that closed the chat (Enter,
+        /// Escape) is still the chat's when the game reads it later in that frame. Does nothing while the input is
+        /// open or once the hold has ended.
+        /// </summary>
+        public void HoldKeyboardThroughNextTick()
+        {
+            if (!_disposed && !_inputOpen && _holdTicks > 0)
+            {
+                _holdTicks = 2;
+            }
         }
 
         /// <summary>
@@ -255,7 +299,7 @@ namespace CoreAI.ChatOverlay
             TurnState turn = _turn;
             if (turn == null)
             {
-                return false;
+                return _external != null && _external.IsTurnActive && _external.StopActiveTurn();
             }
 
             turn.Stop();
@@ -270,7 +314,7 @@ namespace CoreAI.ChatOverlay
         /// </summary>
         public bool TryStartHostTurn(ChatOverlayHostTurnRequest request)
         {
-            if (_disposed || request == null || string.IsNullOrWhiteSpace(request.Text) || _turn != null ||
+            if (_disposed || request == null || string.IsNullOrWhiteSpace(request.Text) || IsTurnActive ||
                 !_sender.IsAvailable)
             {
                 return false;
@@ -363,6 +407,12 @@ namespace CoreAI.ChatOverlay
                 _closeReleasePending = false;
                 PublishInputState();
             }
+
+            if (!_inputOpen && _holdTicks > 0)
+            {
+                _holdTicks--;
+                PublishKeyboardHold();
+            }
         }
 
         /// <summary>Cancels the running turn without a feed line and detaches from the view and events.</summary>
@@ -391,8 +441,10 @@ namespace CoreAI.ChatOverlay
 
             _inputOpen = false;
             _closeReleasePending = false;
+            _holdTicks = 0;
             _preSendHooks.Clear();
             PublishInputState();
+            PublishKeyboardHold();
         }
 
         private bool OfferToPreSendHooks(ChatOverlayPlayerLine line)
@@ -438,7 +490,7 @@ namespace CoreAI.ChatOverlay
                 return;
             }
 
-            if (_turn != null)
+            if (IsTurnActive)
             {
                 Feed.Add(ChatFeedLineKind.Error, "", _options.WithPrefix(_options.BusyText), now);
                 return;
@@ -577,6 +629,25 @@ namespace CoreAI.ChatOverlay
 
             _pushedStatusText = text;
             _view.SetStatus(Status.Kind, text);
+        }
+
+        private void PublishKeyboardHold()
+        {
+            bool holds = HoldsKeyboard;
+            if (holds == _publishedHold)
+            {
+                return;
+            }
+
+            _publishedHold = holds;
+            try
+            {
+                KeyboardHoldChanged?.Invoke(holds);
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"[ChatOverlay] KeyboardHoldChanged handler threw: {ex}", LogTag.Core);
+            }
         }
 
         private void PublishInputState()
@@ -932,6 +1003,9 @@ namespace CoreAI.ChatOverlay
                     return;
                 }
 
+                // WHY first: a tool's completion is queued until the tick, and the chunk after it (the next
+                // response composing a tool call) must not be read against a tool that has already finished.
+                _owner.DrainToolEvents();
                 if (IsFailureChunk(chunk))
                 {
                     AppendVisible(_think.Flush(), false);

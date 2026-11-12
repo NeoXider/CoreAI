@@ -32,6 +32,22 @@ namespace CoreAI.ChatOverlay
         event Action<bool> InputOpenChanged;
     }
 
+    /// <summary>
+    /// Whether the in-world chat still holds the keyboard for the game. Like <see cref="IChatOverlayInputState.IsInputOpen"/>,
+    /// but a ticker that runs before the world's input step keeps it one chat tick longer
+    /// (<see cref="ChatOverlayController.HoldKeyboardThroughNextTick"/>), so the key that closed the input (Enter,
+    /// Escape) is still the chat's when the world reads it in that frame. A focus reporter prefers it to
+    /// <see cref="IChatOverlayInputState.IsInputOpen"/>.
+    /// </summary>
+    public interface IChatOverlayKeyboardHold
+    {
+        /// <summary>True while the input is open and until the hold after a close ends.</summary>
+        bool HoldsKeyboard { get; }
+
+        /// <summary>Raised with the new value whenever <see cref="HoldsKeyboard"/> changes.</summary>
+        event Action<bool> KeyboardHoldChanged;
+    }
+
     /// <summary>Control over the chat's running agent turn.</summary>
     public interface IChatTurnControl
     {
@@ -39,6 +55,22 @@ namespace CoreAI.ChatOverlay
         bool IsTurnActive { get; }
 
         /// <summary>Stops the running turn; false when nothing was running.</summary>
+        bool StopActiveTurn();
+    }
+
+    /// <summary>
+    /// The turn of a chat drawn outside the overlay (<see cref="ChatAgentTurns"/>) as the overlay's controller sees it,
+    /// so the two share one turn slot (<see cref="ChatOverlayController.AttachExternalTurns"/>).
+    /// </summary>
+    public interface IChatExternalTurnSlot
+    {
+        /// <summary>True while that chat's turn runs.</summary>
+        bool IsTurnActive { get; }
+
+        /// <summary>The trace id of that turn; empty when none runs.</summary>
+        string ActiveTraceId { get; }
+
+        /// <summary>Stops that turn; false when none runs.</summary>
         bool StopActiveTurn();
     }
 

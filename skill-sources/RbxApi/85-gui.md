@@ -19,9 +19,10 @@ their UDim2, Color3 and number properties. Where CoreAI differs:
   are never copied. Of the core-GUI switches (`SetCoreGuiEnabled`) only `PlayerList` draws something (the
   leaderstats list, section data); the others are recorded, and there is no top bar (`IgnoreGuiInset`
   changes nothing).
-- Every font draws in the host font, bold or italic by the font's name. `TextScaled` estimates the size and
-  `AutomaticSize` fits children, not text (text is not measured; `TextBounds`/`TextFits` raise
-  NOT_IMPLEMENTED). `RichText` draws `<b> <i> <u> <s>`, not Roblox's `<font ...>` or `<stroke>`.
+- Every font draws in the host font, bold or italic by the font's name. `TextBounds` is the measured text
+  size and `AutomaticSize` grows a text object to its text (wrapped at the box when `TextWrapped`); a new
+  text may settle a frame later. `TextScaled` is estimated, `TextFits` raises NOT_IMPLEMENTED. `RichText`
+  draws `<b> <i> <u> <s>`, not Roblox's `<font ...>` or `<stroke>`.
 - `Image` must be a URL or path the host can load: `rbxassetid://` ids are never downloaded and draw
   nothing. Nine-slice, `UIGradient`, `HoverImage`/`PressedImage` and `ZIndexBehavior.Global` (drawn as
   Sibling) are not drawn as in Roblox.

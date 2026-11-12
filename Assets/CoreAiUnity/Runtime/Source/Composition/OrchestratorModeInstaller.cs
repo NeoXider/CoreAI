@@ -12,13 +12,14 @@ using VContainer.Unity;
 namespace CoreAI.Composition
 {
     /// <summary>
-    /// Registers orchestrator mode (a lead agent that plans and hands tasks to sub-agents) in a lifetime scope.
+    /// Registers orchestrator mode (the chat agent hands big jobs to background sub-agents, or, in Plan style, a
+    /// lead plans and delegates every message) in a lifetime scope.
     /// Off unless <see cref="OrchestratorModeOptions.Enabled"/>: with the mode off this registers nothing, so no
     /// session, tool or option exists and a single-agent turn is exactly what it was.
     /// <para>
-    /// Sub-agents run through the <see cref="AiOrchestrator"/> itself, below the admission queue: the lead's turn
-    /// holds a queue slot while it waits for a delegation's result, so a sub-agent queued behind it could wait
-    /// for a slot the lead never frees. Deadlines use the Unity frame-driven marshaler, which also exists in the
+    /// Sub-agents run through the <see cref="AiOrchestrator"/> itself, below the admission queue: a Plan-style lead's
+    /// turn holds a queue slot while it waits for a delegation's result, so a sub-agent queued behind it could wait
+    /// for a slot the lead never frees; Team-style sub-agents are bounded by the mode's own parallelism. Deadlines use the Unity frame-driven marshaler, which also exists in the
     /// WebGL player. Call it after <c>RegisterCore</c>, which registers the orchestrator and the log.
     /// </para>
     /// <para>

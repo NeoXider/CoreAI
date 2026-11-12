@@ -31,8 +31,12 @@ Enter on an empty line only closes, Escape closes without sending. The key that 
 field, on any keyboard layout. The answer streams into one line; the status line shows thinking, writing a script,
 running a tool, answering or retrying, with the elapsed time and the output tokens from the first second
 (`writing a script · 12s · ~1.1k tokens`). Villagers' speech, command results and notices land in the same feed.
-Lines fade after ten seconds and come back while the input is open. While the input is closed nothing of the chat
-takes the pointer, so the camera captures it again.
+A long line wraps and its box grows to the text. Turns the game starts itself (a failing mod's self-repair, the
+orchestrator waking up for a finished sub-agent) show on the same status line, their answer lands in the feed once
+complete, `/stop` stops them, and a line typed meanwhile is refused as busy. While no turn runs, the status line
+shows the work going on in the background (the busy sub-agents). Lines fade after ten seconds and come back while
+the input is open. While the input is closed nothing of the chat takes the pointer, so the camera captures it
+again.
 
 ## The API it is built on
 
@@ -41,13 +45,15 @@ takes the pointer, so the camera captures it again.
 | Typing | a `TextBox` in a `ScreenGui`: `CaptureFocus()`, `FocusLost(enterPressed)`, `ReleaseFocus(false)` |
 | Keys | `UserInputService.InputBegan(input, gameProcessed)`; the key that released a focused TextBox is processed |
 | Sending a line | `TextChatService.TextChannels.RBXGeneral:SendAsync(text)`: a command of the chat (`/undo`, `/fly`, a mod's `TextChatCommand`) runs instead of sending; any other line is shown and offered to the villagers; the returned message's `Metadata` is `CoreAI.Command` or `CoreAI.Taken` when it should not reach the AI |
-| Other lines | `TextChatService.MessageReceived(message)`: `message.TextSource` for a player's line, else `PrefixText` (speaker) and `Metadata` (`CoreAI.System`, `CoreAI.Command`, `CoreAI.Error`) |
-| The game's commands | `TextChatService.TextChatCommands:GetChildren()`: read-only `TextChatCommand`s with the attributes `Description` and `Usage` |
-| The AI | `AIService:GetAssistant()`: `Send(text, {Role = ...})` returns a turn with `TextAdded(delta, startsNewMessage)`, `StatusChanged(status)`, `Ended(result)` and `Cancel()`; `IsAvailable`, `IsBusy`, `Role`, `GetRoles`, `SetRole`, `GetModels`, `GetModel`, `SetModel`, `CanSwitchModels`, `Stop` |
+| Other lines | `TextChatService.MessageReceived(message)`: `message.TextSource` for a player's line, else `PrefixText` (speaker) and `Metadata` (`CoreAI.System`, `CoreAI.Command`, `CoreAI.Error`, `CoreAI.Assistant` for the answer of a turn the game started) |
+| The game's commands | `TextChatService.TextChatCommands:GetChildren()`: read-only `TextChatCommand`s with the attributes `Description` and `Usage`; a script's own `TextChatCommand` parented there is a chat command too |
+| Line sizes | a wrapped `TextLabel` with `AutomaticSize = Enum.AutomaticSize.Y` grows to its text; `TextBounds` is the text's size |
+| The AI | `AIService:GetAssistant()`: `Send(text, {Role = ...})` returns a turn with `TextAdded(delta, startsNewMessage)`, `StatusChanged(status)`, `Ended(result)` and `Cancel()`; `StatusChanged(status)` and `Status` on the assistant itself follow every turn, the game's own included; `IsAvailable`, `IsBusy`, `Role`, `GetRoles`, `SetRole`, `GetModels`, `GetModel`, `SetModel`, `CanSwitchModels`, `Stop` |
 
 `status` fields: `State` (`Thinking`, `ComposingTool`, `RunningTool`, `Answering`, `Retrying`, `Idle`), `Tool`,
 `Characters` (the tool call's arguments written so far), `Tokens` (output tokens so far, an estimate), `Attempt`,
-`MaxAttempts`, `Step` (tool calls started), `Detail` (the orchestrator's plan line). `result` fields: `Outcome`
+`MaxAttempts`, `Step` (tool calls started), `Detail` (the orchestrator's plan line), `Host` (true for a turn the
+game started), `Background` (work going on while no turn runs). `result` fields: `Outcome`
 (`Completed`, `Failed`, `TimedOut`, `Cancelled`), `Message` (the readable failure sentence), `ErrorCode`,
 `ToolOnly` (`""`, `Done`, `Failed`: the turn was tool calls alone), `ToolSummary`, `AnyText`.
 
@@ -61,9 +67,9 @@ overlay steps aside for any mod that switches the two configurations off.
 
 ## Limits
 
-- The host measures no text for scripts yet (`TextBounds`, `AutomaticSize` of a wrapped label), so the mod
-  estimates the height of a wrapped line from its length; a line can show a little air below it.
-- Turns the host starts itself (the self-repair of a failing mod) still run on the C# overlay's turn slot: with the
-  Lua chat on they show no status line and can run next to a player's turn.
+- The answer of a turn the game started appears when complete, not streamed.
+- No Markdown in answers, no animated fade, no command autocomplete; the AI's lines are signed "AI".
+- A new long line may change its height once on the next frame, when the host's measurement of the styled text
+  arrives; a `TextBox` is sized by an estimate. `TextService:GetTextSize` is not available.
 - One turn at a time; the chat has the two default channels of one machine; no bubbles, filtering or
   `OnIncomingMessage`.

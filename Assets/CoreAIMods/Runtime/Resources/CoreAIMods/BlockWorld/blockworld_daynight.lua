@@ -1,15 +1,15 @@
 --[[@coreai
 id: blockworld_daynight
 name: Block World 4 - Day and night
-version: 1.4.1
+version: 1.4.2
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo. A day lasts eight minutes and a fresh world starts at 10:00 - the mod advances Lighting.ClockTime and sets the sky's light (Lighting.OutdoorAmbient): bright by day, warm and still readable at dusk, a dim blue moonlight at night, while Lighting.Ambient, the light a surface the sky does not reach gets, stays low all day, so torches matter after dusk and in caves at any hour. The fog (Lighting.FogColor, FogStart, FogEnd) takes the sky's colour - pale blue by day, warm at dawn and dusk, dark at night - and is whole where the streamed land ends, so nobody sees its edge. Set the time with /time noon, /time 18:30, /time stop or /time go where the host offers chat commands, with the L key (noon, dusk, midnight, dawn), or from any script or the AI by setting the workspace attribute BlockWorldTime to the same words. A ClockTime written by someone else is kept: the clock carries on from it.
+description: Part of the Block World demo. A day lasts eight minutes and a fresh world starts at 10:00 - the mod advances Lighting.ClockTime and sets the sky's light (Lighting.OutdoorAmbient): bright by day, warm and still readable at dusk, a dim blue moonlight at night, while Lighting.Ambient, the light a surface the sky does not reach gets, stays low all day, so torches matter after dusk and in caves at any hour. The fog (Lighting.FogColor, FogStart, FogEnd) takes the sky's colour - pale blue by day, warm at dawn and dusk, dark at night - and is whole where the streamed land ends, so nobody sees its edge. Set the time with /time noon, /time 18:30, /time stop or /time go where the host offers chat commands, with the L key (noon, dusk, midnight, dawn), or from any script or the AI by setting the workspace attribute BlockWorldTime to the same words. A ClockTime written by someone else is kept: the clock carries on from it. The sun, the light and the fog change a little every frame, so a dusk falls without a visible step.
 ]]
 
--- The clock reads Lighting.ClockTime back before every step, so a time set by the AI, another mod or a saved
+-- The clock reads Lighting.ClockTime back before every frame's step, so a time set by the AI, another mod or a saved
 -- world is adopted rather than overwritten. The sun follows ClockTime by itself; what this mod adds is the
 -- ambient light, with Roblox's two roles: OutdoorAmbient is the sky's light on every surface under open sky (a
 -- hillside in shadow included), lowered at night as Roblox games do; Ambient is what a surface the sky does not
@@ -24,7 +24,12 @@ local UserInputService = game:GetService("UserInputService")
 local DAY_SECONDS = 480          -- one whole day, in real seconds
 local START_HOURS = 10           -- where a fresh world's clock starts: a mid-morning sun, high enough to light the
                                  -- hills and low enough to give them shadows
-local STEP_SECONDS = 0.1         -- how often the clock is written
+-- WHY the clock moves every frame: at a low sun a shadow's tip moves about a block for a tenth of a degree, and the
+-- sun turns that far in a tenth of a second, so a clock written ten times a second makes the shadows jump.
+-- WHY a colour is written only once it moved by this much (a quarter of an 8-bit level): a smaller change cannot be
+-- seen, and a still sky (all day, all night) then writes nothing but the clock.
+local COLOUR_STEP = 0.25 / 255
+local SHARE_STEP = 0.001         -- the same for the host's twilight share, as a part of itself
 local NAMED = {
     dawn = 6, morning = 8, day = 9, noon = 12, afternoon = 15,
     dusk = 18.5, evening = 19.5, night = 21, midnight = 0,
@@ -116,21 +121,31 @@ local function hostSkyShare()
         + (1 - HOST_NIGHT_SHARE) * smoothstep(-HOST_TWILIGHT_DEGREES, HOST_TWILIGHT_DEGREES, elevation)
 end
 
-local shownDaylight = -1
+local function moved(colour, shown)
+    return shown == nil or math.abs(colour.R - shown.R) >= COLOUR_STEP or math.abs(colour.G - shown.G) >= COLOUR_STEP
+        or math.abs(colour.B - shown.B) >= COLOUR_STEP
+end
+
+-- WHY the sky's light is checked with the host's share: the host draws OutdoorAmbient times that share, which
+-- changes with the sun's height on its own, so an OutdoorAmbient left as it was would drift and then jump back.
+local shownSky, shownShare, shownFog = nil, nil, nil
 local function applyAmbient(hours)
     local light = daylight(hours)
-    if math.abs(light - shownDaylight) < 0.01 then
-        return
-    end
-    shownDaylight = light
     -- WHY dusk peaks half way through the light's fall (18:45, and 6:15 at dawn): the warm colours are reached there.
     local dusk = 1 - math.abs(light * 2 - 1)
     local sky = NIGHT_SKY:Lerp(DAY_SKY, light):Lerp(DUSK_SKY, dusk)
     local share = hostSkyShare()
-    Lighting.OutdoorAmbient = Color3.new(sky.R / share, sky.G / share, sky.B / share)
+    if moved(sky, shownSky) or math.abs(share - shownShare) > shownShare * SHARE_STEP then
+        shownSky, shownShare = sky, share
+        Lighting.OutdoorAmbient = Color3.new(sky.R / share, sky.G / share, sky.B / share)
+    end
     Lighting.Ambient = AMBIENT
     -- WHY the day's share squared: the unlit fog must darken faster than the lit land as the light falls.
-    Lighting.FogColor = NIGHT_FOG:Lerp(DAY_FOG, light * light):Lerp(DUSK_FOG, dusk)
+    local fog = NIGHT_FOG:Lerp(DAY_FOG, light * light):Lerp(DUSK_FOG, dusk)
+    if moved(fog, shownFog) then
+        shownFog = fog
+        Lighting.FogColor = fog
+    end
 end
 
 local function twoDigits(value)
@@ -197,18 +212,12 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     runTimeCommand(CYCLE[cycleIndex])
 end)
 
-local pending = 0
 RunService.Heartbeat:Connect(function(dt)
-    pending = pending + dt
-    if pending < STEP_SECONDS then
-        return
-    end
     local hours = Lighting.ClockTime
     if not paused then
-        hours = (hours + pending * 24 / DAY_SECONDS) % 24
+        hours = (hours + dt * 24 / DAY_SECONDS) % 24
         Lighting.ClockTime = hours
     end
-    pending = 0
     applyAmbient(hours)
 end)
 

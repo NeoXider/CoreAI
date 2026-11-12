@@ -51,6 +51,17 @@ namespace CoreAI.Tests.EditMode.RbxApi.TextChat
         }
 
         [Test]
+        public void ACommandInTheTextChatCommandsFolder_IsAChatCommand_AndMovingItOutRemovesIt()
+        {
+            RbxTextChatCommand command = Command("/time", parent: _service.TextChatCommands);
+
+            Assert.IsTrue(_sink.Has("time"), "the Roblox place for commands");
+
+            command.Parent = _registry.WorldRoot;
+            Assert.IsFalse(_sink.Has("time"), "twin: moved out of the folder");
+        }
+
+        [Test]
         public void Negative_ACommandOutsideTheService_OrWithoutAnAlias_IsNoChatCommand()
         {
             Command("/time", parent: _registry.WorldRoot);

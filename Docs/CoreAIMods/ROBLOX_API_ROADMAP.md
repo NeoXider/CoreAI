@@ -406,7 +406,7 @@ Conscious deviations (running list — additions require an entry here):
 | DEV-71 | on each spawn (`ResetOnSpawn`) `PlayerGui` is refilled with copies of `StarterGui`, LocalScripts included | a respawn replaces only the copies; a child added to `StarterGui` after the spawn is copied on the next frame; destroying an original removes its copies; scripts are never copied | a mod loads into a running session and does not re-run on respawn |
 | DEV-72 | `StarterGui:SetCoreGuiEnabled` switches the built-in chat, player list, backpack and top bar | the switches are recorded; of the core GUI only the player list is drawn (the `leaderstats` list, MVP16, DEV-104), the others draw nothing | CoreAI has its own chat and Hub and no top bar |
 | DEV-73 | every `Font`/`FontFace` family draws in its own typeface | every family draws in the host font; `Font` gives bold and italic | first slice |
-| DEV-74 | text is measured: `TextScaled` fits the box, `AutomaticSize` grows to the text, `TextBounds` and `TextFits` report the measurement | text is not measured: `TextScaled` is an estimate, `AutomaticSize` fits children only, and `TextBounds`/`TextFits` raise `NOT_IMPLEMENTED` | first slice; the engine-free layout does not measure text |
+| DEV-74 | text is measured: `TextScaled` fits the box, `AutomaticSize` grows to the text, `TextBounds` and `TextFits` report the measurement | `TextBounds` and `AutomaticSize` of a text object use the host's measurement of the text element (UI Toolkit `MeasureTextSize`), and an estimate where there is none (the engine-free layout, a `TextBox`, the first frame of a new text: half an em a character, word wrap); a new host measurement is taken once more on the next frame, so a new text can change its size once; a text object is measured only while `AutomaticSize` grows it or after a script read its `TextBounds`; `TextScaled` is an estimate, `TextFits` raises `NOT_IMPLEMENTED` and `TextService:GetTextSize` is not built (pinned by `RbxGuiTextBoundsEditModeTests`) | the element's style resolves a frame after it is created; a wrapped chat line needs its height, not a fitted size |
 | DEV-75 | `RichText` supports font, size, colour, stroke, line breaks and more | `RichText` draws `<b>`, `<i>`, `<u>` and `<s>` only | first slice |
 | DEV-76 | `rbxassetid://` images load, and nine-slice (`SliceCenter`), `UIGradient` and `HoverImage`/`PressedImage` draw | `rbxassetid://` images draw nothing; nine-slice, `UIGradient` and the hover and pressed images are not drawn | there is no Roblox asset service; first slice |
 | DEV-77 | `ZIndexBehavior.Global` orders every element of a `ScreenGui` by `ZIndex` | `Global` draws as `Sibling` | first slice |
@@ -2183,6 +2183,16 @@ Mirror test ran), nothing ran in a WebGL player, and nothing was released.
     the touched fixtures, Lua tier 3189 passed / 2 failed (neither touched) / 42 not executed.
     Not built: text measuring (`TextBounds`, `AutomaticSize` of wrapped text; the mod estimates line
     heights), bubbles, `OnIncomingMessage`, filtering, host turns (self-repair) on the Lua chat's status line.
+  - **2026-11-12, second slice, written, not run in Unity:** text measuring (`TextBounds`, `AutomaticSize` of a
+    text object over the host's measurement, DEV-74 updated), so `coreai_chat.lua` sizes wrapped lines with
+    `AutomaticSize = Y` instead of an estimate. One turn slot: `ChatAgentTurns` attaches to the overlay's
+    controller and shares its status tracker, so host turns (self-repair, orchestrator wakes) never overlap a
+    Lua turn and show on the Lua chat's status line (`assistant.StatusChanged`, `Status.Host`), `/stop` stops
+    them, their answer arrives as a `CoreAI.Assistant` message, and the orchestrator's `Detail` and background
+    team line reach it. Both tickers drain tool events at each stream chunk. A script's `TextChatCommand` in
+    `TextChatService.TextChatCommands` registers. The C# overlay's closing Enter or Escape no longer reaches
+    the world in the same frame (`IChatOverlayKeyboardHold`). Not built: streamed host-turn answers,
+    `TextService:GetTextSize`, `TextFits`, bubbles, `OnIncomingMessage`, filtering.
   - *The survey this package started from (release 7.56.0); the lines above supersede it where they
     differ:*
   - `Assets/CoreAiUnity/Runtime/Source/Features/Chat/CoreAiChatPanel.cs`: the UI Toolkit chat panel (open

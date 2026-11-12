@@ -226,7 +226,7 @@ namespace CoreAI.Core.Tests.EditMode.SubAgents
         {
             TaskCompletionSource<string> hold = new();
             OrchestratorChatDriver driver = CreateDriver(new ScriptedSubAgentRunner(),
-                new OrchestratorModeOptions { Enabled = true, MaxQueuedInstructions = 1 });
+                new OrchestratorModeOptions { Enabled = true, Style = OrchestrationStyle.Plan, MaxQueuedInstructions = 1 });
             Func<AiTaskRequest, CancellationToken, Task<string>> runLead = (lead, token) => hold.Task;
             Task<string> first = driver.RunAsync(ChatTurn("first"), runLead, CancellationToken.None);
             Task<string> second = driver.RunAsync(ChatTurn("second"), runLead, CancellationToken.None);
@@ -476,7 +476,7 @@ namespace CoreAI.Core.Tests.EditMode.SubAgents
         private static OrchestratorChatDriver CreateDriver(IAiTaskResultService runner,
             OrchestratorModeOptions options = null)
         {
-            OrchestratorModeOptions resolved = options ?? new OrchestratorModeOptions { Enabled = true };
+            OrchestratorModeOptions resolved = options ?? new OrchestratorModeOptions { Enabled = true, Style = OrchestrationStyle.Plan };
             return new OrchestratorChatDriver(new OrchestratorSessionRegistry(resolved,
                 new SubAgentRegistry(new[] { SubAgentTestSupport.Builder(), SubAgentTestSupport.Scripter() }),
                 runner));

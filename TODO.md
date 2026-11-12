@@ -565,7 +565,7 @@ Owner's questions and decisions on the Block World (2026-11-11):
       the view is left on after the player comes out; what the horizon dome and the water's underside draw
       against that fog. Needs captured frames from the sea floor at noon and from a beach, in a player, before
       any fix.
-- [ ] **Block World (WebGL): a player's build was gone after a restart** (owner, WebGL build 8, 2026-11-12:
+- [x] **Block World (WebGL): a player's build was gone after a restart** (owner, WebGL build 8, 2026-11-12:
       "я построил постройку, перезапустил, и её не оказалось в игре"). The scene keeps the world between
       starts (`keepWorldBetweenStarts: 1`), and the editor tests of it pass, so this is the browser side. Not
       reproduced: in the lead's browser pane a click cannot break or place a block (no pointer lock), so the
@@ -577,6 +577,12 @@ Owner's questions and decisions on the Block World (2026-11-11):
       placed in land that streamed in after the start. To do: reproduce with the bridge (place blocks by a
       script, wait, reload, read the log and the world), then fix; show the player a short "world saved"
       mark so that a reload is known to be safe. Until then `/save` records the world at once.
+      Done 2026-11-12, to be seen in a browser: cause was the record starting 3 s after the LAST change (or 60 s
+      after the first of a burst) with nothing run on a page unload. Now: a change journal next to the kept
+      world (a block in recorded land is appended in its own frame and replayed at the next start), records
+      2 s / 15 s, the state on Workspace (`CoreAIWorldSaveState`, `CoreAIWorldSaveNote`) shown by the HUD, a
+      chat line on a failed record, a browser "Leave site?" guard while unsaved, and an unopenable save is no
+      longer pruned. Left: see the kept-world follow-ups below.
 - [ ] **Block World: land far behind the player is never unloaded** (the Block World agent's note,
       2026-11-12). Columns made stay for good at any view radius; a long walk in a WebGL player will
       fill the Terrain's 4.2 million cells. With a view radius up to 16 this comes sooner. Needs a rule in
@@ -587,7 +593,7 @@ Owner's questions and decisions on the Block World (2026-11-11):
       a later build adds to its folder is missing there. Worked around in the Block World demo module (it
       seeds the folder's missing mods); the generic place is the restore code,
       `RbxWorldPackageContracts.WithNewerBundledMods`.
-- [ ] **Block World: the sun or the sky moves in jumps** (owner, WebGL play, 2026-11-12: "солнце не плавно, а
+- [x] **Block World: the sun or the sky moves in jumps** (owner, WebGL play, 2026-11-12: "солнце не плавно, а
       скачками двигается или небо скачками меняется", and "потемнение скачками, а не плавно"). Not investigated.
       The darkening is the mod's own part: `applyAmbient` sets the light of the sky by the hour - check
       whether it interpolates or switches between a few levels. Read from the code: the day and
@@ -598,6 +604,9 @@ Owner's questions and decisions on the Block World (2026-11-11):
       watch a fast day (`/time` with a short day) in a build and name what jumps - the sun's disc, the sky's
       colour, the light on the ground or the shadows - then fix that part; the mod's own step can go to every
       frame if it turns out to matter.
+      Done 2026-11-12 in `blockworld_daynight` 1.4.2: the clock moves every frame and the light and fog every
+      quarter of an 8-bit level (they had jumped by up to 15% and 7 levels at once). Left: the sky reflections
+      never follow the time of day (engine side, `RenderSettingsLookApplier`).
 - [ ] **Block World: villagers cannot be hit or pushed, and neither will mobs** (owner, WebGL play,
       2026-11-12: "бить и толкать жителей (как и мобов вероятно) не могу"). Not investigated. To find out: whether
       a character's body collides with another character's (the player walks through a villager or is
@@ -701,7 +710,7 @@ Owner's questions and decisions on the Block World (2026-11-11):
       `InputBegan(Return, gameProcessed=false)` when the chat ticks before the world's input pump. Check with
       a one-line mod that warns on Return; if it leaks, keep the input counted as open until the world has
       run one input step after the close. To see in a build: the pointer is captured again after the close.
-- [ ] **Chat status: show what the agent is doing, not only "thinking"** (owner, 2026-11-12, after a turn
+- [x] **Chat status: show what the agent is doing, not only "thinking"** (owner, 2026-11-12, after a turn
       that built a pig and showed "thinking" for 140 s: "так и оставим или будем отображать состояния").
       Decided: show them. Tools run in milliseconds, and almost all the time the model is composing a tool
       call's arguments (the script), which today counts as thinking. States: thinking; writing a script, with
@@ -713,6 +722,8 @@ Owner's questions and decisions on the Block World (2026-11-11):
       status line carries the count of output tokens next to the elapsed time (an estimate while the stream
       runs, the server's own number once it reports usage), and the states stay few: thinking, writing a
       script, answering.
+      Done 2026-11-12 (918ba382, 0d69b614): `writing a script` while a tool call is composed, and the output
+      token estimate after the elapsed time. Not seen with a live model yet.
 - [ ] **Other caps that end a model's turn by total time** (found 2026-11-12 while lifting the request caps
       for the owner: "если модель уже первый токен отправила ... нужно огромный лимит"). The request itself
       now has no total cap in the bundled settings, only the idle wait (180 s without a model delta). Two
@@ -730,6 +741,44 @@ Owner's questions and decisions on the Block World (2026-11-11):
       faster interpreter path, compiled hot loops, or library functions that do the loop natively). The
       Block World stays a set of Lua mods written as a Roblox creator would write them (his rule the same
       day: "смысл чтобы майн был на модах, как в роблоксе бы делался").
+- [ ] **Cut from the 2026-11-12 sprint for the weekly limit (owner: "можем на todo оставить")** - each has a
+      design and, where noted, written code kept outside the tree:
+      - **Chunk streaming speed, the full version.** In the tree: up to 24 generation steps a frame while frames
+        are fast (`blockworld_world` 1.6.1; CoreCLR 0.73 -> 12.2 columns/s at radius 4, Unity's Mono 0.72 -> 1.1).
+        Parked with a bench tool in `D:\Temp\coreai-agents\blockworld\step2-parked\` (tested: radius 8 in 65 s
+        against 300 s on Mono): generation takes 40% of the device's own frame, a step runs only when it fits,
+        the pace halves after a missed frame. Also found: `TerrainFrameBudget` uses fixed 12 and 16.7 ms
+        thresholds, so a 60 Hz WebGL player builds one chunk a frame; and on Mono the Lua guard hook is the hard
+        limit (1,820 instructions per ms with window 4 against about 16,000 without; window 16 is about 3.6
+        times faster but weakens the concat-bomb guard - an owner decision). The generator stays a Lua mod.
+      - **MCP beyond parity** (sources in `D:\Temp\coreai-agents\mcp-part4-shelved\`): a turn of the in-game
+        agent from outside (`agent_turn_start` / `agent_turn_read`), `input` (keys and mouse for automated play
+        checks; needs `Unity.InputSystem` in the MCP assembly), sessions (an `AgentSessionRecorder` as the default
+        trace sink with redaction and caps, `list_sessions` / `read_session` / `export_session`, a browser
+        download in WebGL, a Hub "Sessions" page) and a harness skill for the MCP link
+        (`skills/coreai-game-mcp/`, not started). Today turns are traced only when a host registers
+        `InMemoryAgentTurnTraceSink`, and the only viewer is the editor's Agent Session Inspector.
+      - **The Block World on the Lua chat by default.** `coreai_chat` is installed and can be turned on from
+        the Hub's Mods page (`useLuaChat` on `BlockWorldDemoModule` turns it on at the start). What still
+        differs from the C# overlay is listed in `dev-docs/CHAT_AS_LUA_MOD_DESIGN.md` 5.1 (a host turn's
+        answer is not streamed, no Markdown, no fade animation, the speaker is always "AI", no command
+        autocomplete). Needs a played comparison before the switch.
+      - **Kept world follow-ups:** two tabs of the game overwrite each other's saves (only warned now; a
+        single-writer lock is the fix); a hidden tab runs no frames, so an unjournaled change waits there; the
+        journal covers Terrain in recorded land only (a snapshot of Workspace attributes on each
+        `CoreAIWorldEdits` bump would add torches and settings); `DataStoreService` is implemented, so the Block
+        World could keep its own edit list per column the Roblox way, which would also make unloading far
+        columns safe.
+      - **Orchestrator mode, Team style:** on in the Block World, never run with a live model (the script is in
+        `dev-docs/ORCHESTRATION_SUBAGENT_CONTROL_DESIGN.md` and the agent's report: start a house, ask something
+        else meanwhile, continue, stop); the built-in `/stop` should also stop background sub-agents when no turn
+        is active (`/agents stop` does it today).
+      - **Sneaking on Shift:** a slower walk and a HUD mark are small; a lower eye needs `Humanoid.CameraOffset`
+        (not supported yet); not walking off ledges needs a hook in `coreai_player_controls`.
+      - **Tests red on a clean HEAD in the portable tier, not caused by the sprint:**
+        `CountedPcallAndXpcall_AllocateNoMoreThanTheNativeOnes`,
+        `NativeStack_EveryChannelStaysWithinItsWeight_AtTheCap`, `N10_PartMemberWrite_AllocatesNothing`,
+        `Lint_NoScaleArithmeticOutsideRobloxSpace` (`UnityRbxParticleBackend.cs`).
 - [ ] **Hub in a play world (F2): the scroll bar is unstyled and no FPS is shown** (owner, a screenshot of the
       Graphics page, 2026-11-12: "плохо выглядит скролл бар, а так же fps не пишется"). The page's vertical
       scroll bar is UI Toolkit's default (a light grey track with white arrow buttons and a grey thumb) on the

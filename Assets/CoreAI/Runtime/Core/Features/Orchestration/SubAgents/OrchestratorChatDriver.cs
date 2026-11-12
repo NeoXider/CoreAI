@@ -14,8 +14,14 @@ namespace CoreAI.Ai.SubAgents
         /// <summary>The mode does not apply to this turn; it runs as an ordinary single-agent turn.</summary>
         PassThrough = 0,
 
-        /// <summary>The turn is the lead turn of a plan.</summary>
-        Lead = 1
+        /// <summary>The turn is the lead turn of a plan (Plan style).</summary>
+        Lead = 1,
+
+        /// <summary>
+        /// The turn is the chat agent's own turn with the sub-agent controls (Team style): a player message, or a
+        /// wake turn a sub-agent's completion asked for (<see cref="LeadTurn.IsWake"/>).
+        /// </summary>
+        Team = 2
     }
 
     /// <summary>
@@ -51,8 +57,14 @@ namespace CoreAI.Ai.SubAgents
         /// <summary>The conversation's session; <c>null</c> for a pass-through turn.</summary>
         public OrchestratorSession Session { get; }
 
-        /// <summary>The plan this lead turn runs; <c>null</c> for a pass-through turn.</summary>
+        /// <summary>The plan this lead turn runs; <c>null</c> for a pass-through or Team-style turn.</summary>
         public OrchestrationPlan Plan { get; }
+
+        /// <summary>True for a Team-style wake turn (started by a sub-agent's completion, not by the player).</summary>
+        public bool IsWake { get; internal set; }
+
+        /// <summary>The trace the turn runs under (Team style); empty otherwise.</summary>
+        public string TraceId { get; internal set; } = "";
 
         /// <summary>The token to run <see cref="Request"/> with: the caller's, linked to the plan's scope.</summary>
         public CancellationToken Token { get; }
@@ -77,10 +89,22 @@ namespace CoreAI.Ai.SubAgents
 
     /// <summary>
     /// The chat side of orchestrator mode, shared by every chat surface (the chat panel and the in-world overlay
-    /// both send through the chat service, which hands each turn to this driver). A chat turn becomes the lead
-    /// turn of a plan; an instruction that arrives while its conversation runs a plan waits in that
-    /// conversation's queue and runs, in its own caller's flow, when the plan before it ends; Stop ends the plan,
-    /// clears the queue and cancels every waiting turn.
+    /// both send through the chat service, which hands each turn to this driver).
+    /// <para>
+    /// Team style (<see cref="OrchestratorModeOptions.Style"/>, the default): a chat turn stays the chat agent's own
+    /// turn with the four sub-agent controls added; each player message opens a fresh budget window and gets the
+    /// waiting completion notices folded in; nothing waits behind sub-agents. When a notice waits and no lead turn
+    /// runs, <see cref="WakeDue"/> is raised and the surface takes a wake turn (<see cref="TryTakeWake"/>) and runs
+    /// it through its own chat pipeline; a player turn that arrives during a wake waits for that one turn.
+    /// </para>
+    /// <para>
+    /// Plan style: a chat turn becomes the lead turn of a plan; an instruction that arrives while its conversation
+    /// runs a plan waits in that conversation's queue and runs, in its own caller's flow, when the plan before it
+    /// ends.
+    /// </para>
+    /// <para>
+    /// Stop ends everything of the agent in both styles: the plan or the sub-agents, the queue, every waiting turn.
+    /// </para>
     /// <para>
     /// Conversations are keyed like <see cref="OrchestratorSessionRegistry.ResolveConversationKey"/>: the request's
     /// <see cref="AiTaskRequest.ConversationId"/>, else the actor's session plus the role. Nothing here blocks or
@@ -94,6 +118,10 @@ namespace CoreAI.Ai.SubAgents
         private readonly ILog _log;
         private readonly Dictionary<string, SessionOwner> _owners = new(StringComparer.Ordinal);
         private readonly List<Waiter> _waiters = new();
+        private readonly Dictionary<string, PendingWake> _pendingWakes = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, TeamTurnEntry> _teamTraces = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _leadRoles = new(StringComparer.Ordinal);
+        private readonly HashSet<OrchestratorSession> _observed = new();
         private bool _active;
         private bool _disposed;
 
@@ -107,6 +135,16 @@ namespace CoreAI.Ai.SubAgents
 
         /// <summary>The sessions this driver plans in.</summary>
         public OrchestratorSessionRegistry Sessions => _sessions;
+
+        /// <summary>The style chat turns are run in (<see cref="OrchestratorModeOptions.Style"/>).</summary>
+        public OrchestrationStyle Style => _sessions.Options.Style;
+
+        /// <summary>
+        /// Raised with a conversation key when a sub-agent's completion waits and no lead turn of that conversation
+        /// runs (Team style): call <see cref="TryTakeWake"/> and run the wake. Raised on the thread that changed the
+        /// state; a surface marshals to its own thread first.
+        /// </summary>
+        public event Action<string> WakeDue;
 
         /// <summary>
         /// The player's switch. Off: every chat turn runs as an ordinary single-agent turn (a running plan is not
@@ -155,6 +193,7 @@ namespace CoreAI.Ai.SubAgents
         {
             if (!Applies(request))
             {
+                ReturnPendingWake(request?.TraceId);
                 return new LeadTurn(LeadTurnDisposition.PassThrough, request, null, null, null, cancellationToken);
             }
 
@@ -171,6 +210,11 @@ namespace CoreAI.Ai.SubAgents
             OrchestratorSession session = _sessions.GetOrCreate(key);
             SubAgentParentContext parent = new(role, host.TraceId, host.CancellationScope, host.ActorContext,
                 host.Priority);
+
+            if (Style == OrchestrationStyle.Team)
+            {
+                return await BeginTeamTurnAsync(host, key, role, session, parent, cancellationToken);
+            }
 
             OrchestrationPlan plan;
             Waiter waiter = null;
@@ -220,6 +264,12 @@ namespace CoreAI.Ai.SubAgents
         {
             if (turn == null)
             {
+                return;
+            }
+
+            if (turn.Disposition == LeadTurnDisposition.Team)
+            {
+                EndTeamTurn(turn);
                 return;
             }
 
@@ -402,6 +452,17 @@ namespace CoreAI.Ai.SubAgents
         /// </summary>
         public int RecordActivity(string traceId)
         {
+            return RecordToolActivity(traceId, "", null);
+        }
+
+        /// <summary>
+        /// Forwards one tool-call event to the running plans (as <see cref="RecordActivity"/>) and to the Team-style
+        /// sub-agents: <paramref name="succeeded"/> null for a started call (it re-arms the sub-agent's idle deadline),
+        /// true or false for a finished one, which also lands in its transcript as a step <c>agent_read</c> shows.
+        /// Returns how many plans and sub-agents took it.
+        /// </summary>
+        public int RecordToolActivity(string traceId, string toolName, bool? succeeded)
+        {
             if (string.IsNullOrWhiteSpace(traceId))
             {
                 return 0;
@@ -414,9 +475,240 @@ namespace CoreAI.Ai.SubAgents
                 {
                     recorded++;
                 }
+
+                if (session.Team.TryRecordActivity(traceId, toolName, succeeded))
+                {
+                    recorded++;
+                }
             }
 
             return recorded;
+        }
+
+        /// <summary>
+        /// Takes the wake turn conversation <paramref name="conversationKey"/> is due (Team style): its waiting notices
+        /// leave the team and travel in <paramref name="wake"/>. Run <see cref="LeadWake.Text"/> as a chat turn of
+        /// <see cref="LeadWake.RoleId"/> with <see cref="LeadWake.TraceId"/> through the surface's chat pipeline (it
+        /// reaches <see cref="BeginTurnAsync"/>, which recognises it); a surface that cannot run it now hands it back
+        /// with <see cref="ReturnWake"/>. False when no wake is due (no notice, a lead turn runs, the player message's
+        /// wakes are spent, the mode is off).
+        /// </summary>
+        public bool TryTakeWake(string conversationKey, out LeadWake wake)
+        {
+            wake = null;
+            if (!IsActive || Style != OrchestrationStyle.Team ||
+                !_sessions.TryGet(conversationKey, out OrchestratorSession session) ||
+                !session.Team.TryBeginWake(out IReadOnlyList<SubAgentNotice> notices))
+            {
+                return false;
+            }
+
+            string trace = Guid.NewGuid().ToString("N");
+            string role;
+            lock (_lock)
+            {
+                _leadRoles.TryGetValue(session.ConversationId, out role);
+            }
+
+            wake = new LeadWake(session.ConversationId, role ?? "", trace, SubAgentTeam.FormatWakeText(notices),
+                notices);
+            lock (_lock)
+            {
+                _pendingWakes[trace] = new PendingWake(session, wake);
+            }
+
+            return true;
+        }
+
+        /// <summary>Hands back a wake taken with <see cref="TryTakeWake"/> that the surface could not run; its notices wait again.</summary>
+        public void ReturnWake(LeadWake wake)
+        {
+            if (wake != null)
+            {
+                ReturnPendingWake(wake.TraceId);
+            }
+        }
+
+        /// <summary>
+        /// The session whose Team-style lead turn (player or wake) runs under <paramref name="leadTraceId"/> now;
+        /// <paramref name="isWake"/> tells which.
+        /// </summary>
+        public bool TryGetTeamSessionForLeadTrace(string leadTraceId, out OrchestratorSession session, out bool isWake)
+        {
+            session = null;
+            isWake = false;
+            if (string.IsNullOrWhiteSpace(leadTraceId))
+            {
+                return false;
+            }
+
+            lock (_lock)
+            {
+                if (!_teamTraces.TryGetValue(leadTraceId.Trim(), out TeamTurnEntry entry))
+                {
+                    return false;
+                }
+
+                session = entry.Session;
+                isWake = entry.IsWake;
+                return true;
+            }
+        }
+
+        private async Task<LeadTurn> BeginTeamTurnAsync(
+            AiTaskRequest host,
+            string key,
+            string role,
+            OrchestratorSession session,
+            SubAgentParentContext parent,
+            CancellationToken cancellationToken)
+        {
+            bool wake;
+            lock (_lock)
+            {
+                _owners[key] = new SessionOwner(session, host.ActorContext, role);
+                _leadRoles[key] = role;
+                wake = _pendingWakes.TryGetValue(host.TraceId, out PendingWake pending) &&
+                       ReferenceEquals(pending.Session, session);
+                if (wake)
+                {
+                    _pendingWakes.Remove(host.TraceId);
+                }
+
+                if (_observed.Add(session))
+                {
+                    session.Team.NoticeQueued += _ => RaiseWakeDueIfDue(session);
+                }
+            }
+
+            ReturnPendingWake(host.TraceId);
+            SubAgentTeam team = session.Team;
+            string news = "";
+            if (wake)
+            {
+                team.MarkWakeStarted();
+            }
+            else
+            {
+                // WHY: a player message never waits behind sub-agents; it waits only for a wake turn already
+                // running in this conversation, so two lead turns do not interleave one history.
+                await team.EnterLeadTurnAsync(cancellationToken);
+            }
+
+            try
+            {
+                if (!wake)
+                {
+                    team.BeginInstructionWindow();
+                }
+
+                // WHY also for a wake: a completion that arrived after the wake was taken joins it instead of
+                // asking for a wake of its own.
+                news = SubAgentTeam.FormatNews(team.TakeNotices());
+
+                team.SetLeadContext(parent);
+                AiTaskRequest lead = session.CreateTeamLeadRequest(host, news);
+                CancellationTokenSource linked =
+                    CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, team.LeadToken);
+                lock (_lock)
+                {
+                    _teamTraces[host.TraceId] = new TeamTurnEntry(session, wake);
+                }
+
+                return new LeadTurn(LeadTurnDisposition.Team, lead, session, null, linked, linked.Token)
+                {
+                    IsWake = wake,
+                    TraceId = host.TraceId
+                };
+            }
+            catch
+            {
+                if (wake)
+                {
+                    team.EndWake();
+                }
+                else
+                {
+                    team.ExitLeadTurn();
+                }
+
+                throw;
+            }
+        }
+
+        private void EndTeamTurn(LeadTurn turn)
+        {
+            if (!turn.Ended)
+            {
+                turn.Ended = true;
+                lock (_lock)
+                {
+                    _teamTraces.Remove(turn.TraceId);
+                }
+
+                if (turn.IsWake)
+                {
+                    turn.Session.Team.EndWake();
+                }
+                else
+                {
+                    turn.Session.Team.ExitLeadTurn();
+                }
+
+                RaiseWakeDueIfDue(turn.Session);
+            }
+
+            turn.Dispose();
+        }
+
+        private void ReturnPendingWake(string traceId)
+        {
+            if (string.IsNullOrWhiteSpace(traceId))
+            {
+                return;
+            }
+
+            PendingWake pending;
+            lock (_lock)
+            {
+                string trace = traceId.Trim();
+                if (!_pendingWakes.TryGetValue(trace, out pending))
+                {
+                    return;
+                }
+
+                _pendingWakes.Remove(trace);
+            }
+
+            // WHY: a wake that reached a turn the mode does not take (switched off meanwhile, another conversation)
+            // would otherwise hold the wake slot forever and lose its notices.
+            pending.Session.Team.CancelWake(pending.Wake.Notices);
+        }
+
+        private void RaiseWakeDueIfDue(OrchestratorSession session)
+        {
+            if (!IsActive || !session.Team.IsWakeDue)
+            {
+                return;
+            }
+
+            Action<string> handlers = WakeDue;
+            if (handlers == null)
+            {
+                return;
+            }
+
+            foreach (Delegate handler in handlers.GetInvocationList())
+            {
+                try
+                {
+                    ((Action<string>)handler)(session.ConversationId);
+                }
+                catch (Exception ex)
+                {
+                    _log.Warn($"[OrchestratorChatDriver] wake observer failed: {ex.Message}", LogTag.Llm);
+                }
+            }
         }
 
         /// <summary>
@@ -499,6 +791,7 @@ namespace CoreAI.Ai.SubAgents
                 {
                     stopped |= session.Queue.CancelAll().Count > 0;
                     TakeWaitersLocked(session, cancelled);
+                    DropPendingWakesLocked(session);
                 }
             }
 
@@ -631,6 +924,49 @@ namespace CoreAI.Ai.SubAgents
             {
                 waiter.Started.TrySetCanceled();
             }
+        }
+
+        private void DropPendingWakesLocked(OrchestratorSession session)
+        {
+            List<string> traces = new();
+            foreach (KeyValuePair<string, PendingWake> pending in _pendingWakes)
+            {
+                if (ReferenceEquals(pending.Value.Session, session))
+                {
+                    traces.Add(pending.Key);
+                }
+            }
+
+            foreach (string trace in traces)
+            {
+                _pendingWakes.Remove(trace);
+            }
+        }
+
+        private sealed class PendingWake
+        {
+            public PendingWake(OrchestratorSession session, LeadWake wake)
+            {
+                Session = session;
+                Wake = wake;
+            }
+
+            public OrchestratorSession Session { get; }
+
+            public LeadWake Wake { get; }
+        }
+
+        private sealed class TeamTurnEntry
+        {
+            public TeamTurnEntry(OrchestratorSession session, bool isWake)
+            {
+                Session = session;
+                IsWake = isWake;
+            }
+
+            public OrchestratorSession Session { get; }
+
+            public bool IsWake { get; }
         }
 
         private sealed class Waiter

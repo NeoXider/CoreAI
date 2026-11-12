@@ -248,6 +248,18 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
         /// <summary>Takes keyboard focus away from the element.</summary>
         bool Blur();
 
+        /// <summary>
+        /// Measures <paramref name="text"/> as this text element draws it at <paramref name="fontSize"/> pixels;
+        /// <paramref name="maxWidth"/> above 0 wraps it at that width. False when the host cannot measure (the layout then
+        /// estimates, <see cref="RbxTextMetrics"/>).
+        /// </summary>
+        bool TryMeasureText(string text, float fontSize, float maxWidth, out float width, out float height)
+        {
+            width = 0f;
+            height = 0f;
+            return false;
+        }
+
         /// <summary>The first authored descendant matching a selector, or null.</summary>
         IRbxUiElement Query(string selector);
 

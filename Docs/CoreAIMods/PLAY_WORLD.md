@@ -65,7 +65,7 @@ default; a command your game registered first under the same name is kept):
 | `/undo` | Takes back your latest AI change to the world. With nothing to undo, or after something else changed the world since, it says why and changes nothing. A change the AI's self-repair fixed is taken back together with its repair. |
 | `/redo` | Puts back the change `/undo` took back, under the same rule. |
 | `/fly` | Toggles flight of your character (Space rises, Left Shift descends). |
-| `/save` | Only in a world kept between starts (below): records the world now and says what it saved. |
+| `/save` | Only in a world kept between starts (below): records the world now and says what it saved. After a start whose saved world could not be opened, it keeps this world instead and replaces that one. |
 
 An AI change is anything one AI call changed that a saved world keeps: world-owned instances and their properties,
 Terrain cells, mod sources, and the settings without a revision of their own (the Lighting day cycle, StarterPlayer
@@ -94,14 +94,33 @@ after a page reload unless the player once loaded a save. **Keep World Between S
 on) keeps it:
 
 - The default world becomes the world that opens on the next start, recorded as a whole world package (tree, Terrain
-  cells, the exact mod sources) once it stopped changing: 3 s after the last change
-  (`RbxWorldRuntimeSessionController.KeptWorldQuietTime`), and at the latest 60 s after the first change of a burst
+  cells, the exact mod sources) once it stopped changing: 2 s after the last change
+  (`RbxWorldRuntimeSessionController.KeptWorldQuietTime`), and at the latest 15 s after the first change of a burst
   (`KeptWorldRefreshInterval`) for a player who never stops. A change is a Terrain write, an AI change, a mod source
   change, an instance of the world added or removed outside the AI's calls, or a change of the Workspace number
   `CoreAIWorldEdits` (a mod raises it for what it keeps itself, such as the Block World's torch list). Nothing is
   recorded while nothing changes. A record captures the world in one frame (about 20 ms at a Block World's radius 8,
-  most of it reading the mod sources back) and encodes it a few milliseconds per frame over the frames that follow
-  (in a hidden browser tab, at once); `/save` records at once. See WORLD_PACKAGE.md, "Encoding a frame at a time".
+  most of it reading the mod sources back) and encodes it a few milliseconds per frame over the frames that follow;
+  `/save` records at once. See WORLD_PACKAGE.md, "Encoding a frame at a time".
+- A player's Terrain change in land the last record holds (a placed or broken block) is also written at once, in its
+  own frame, to the change journal next to that record, and the next start replays it: such a block survives a
+  reload made right after it. Everything else waits for the record above. See WORLD_PACKAGE.md, "The change journal
+  of a kept world".
+- The world says how its record stands on the Workspace, every frame, for a HUD:
+  `CoreAIWorldSaveState` is `"saved"` (everything is stored), `"pending"` (a change waits for the record: a reload now
+  loses it), `"saving"` (a record or a journal write is being written, or the browser still stores it) or `"failed"`
+  (the latest change was not recorded, or the saved world could not be opened), and `CoreAIWorldSaveNote` says why
+  for `"failed"`, or warns that another page of the game is open in the browser (the two pages overwrite each
+  other's saves); it is empty otherwise. Both are absent while the world is not kept, and no record, backup or save
+  holds them. From C#: `KeptWorldSaveState`, `KeptWorldSaveNote` and `KeptWorldSaveStateChanged` on the session
+  controller. The in-world chat says "The world is not saved: ..." once per reason, and "The world is saved again."
+  after it.
+- In a browser, the page asks before a reload or a close ("Leave site?", the browser's own words) while the state is
+  `"pending"` or `"saving"`; `GuardPageLeaveWhileUnsaved = false` on the session controller turns that off.
+- A saved world that cannot be opened at a start (a damaged file, a mod the restore refuses) is kept: the default
+  world opens, the state is `"failed"` with the reason, and nothing of this start is recorded until the player
+  types `/save`, which keeps this world instead and replaces the saved one, or chooses "Start with the default world
+  next time" on the Hub's World Loads page.
 - A world generator marks its own Terrain writes by setting the workspace attribute `CoreAITerrainGenerating` to
   true around them: cells made from a seed come back from it, so streaming alone records nothing. A Terrain write
   made while it is false (a player's block, a falling block) marks the world for its next record.
@@ -113,7 +132,7 @@ on) keeps it:
   true). A mod that throws while the kept world restores stays stopped and is reported; the rest of the world
   opens.
 - `/save` records the world now. In a browser the page stores it a moment later: Unity persists the storage on its
-  own since 6.3 and gives no completion signal.
+  own since 6.3 and gives no completion signal; the save state reads `"saving"` until the page's storage is idle again.
 - A restored world takes a strictly newer version of a bundled sample, by the seeder's rule (a bundle whose
   `version:` is higher than the one the copy was seeded at replaces it, a mod the player wrote under the same id is
   never touched); the replaced source stays in the mod's revision history.

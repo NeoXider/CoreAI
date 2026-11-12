@@ -278,7 +278,9 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
                    + " s of wall time after the last change; the record after the player's blocks: "
                    + Session().LastKeptWorldRecord + "; slowest frame of the 8 s " + Slowest(frames) + "; on disk "
                    + LargestStoredFiles());
-            Expect(recordedAfter >= 2.5f && recordedAfter < 6f, "a kept world is recorded a few seconds after the player stops");
+            float quiet = (float)RbxWorldRuntimeSessionController.KeptWorldQuietTime.TotalSeconds;
+            Expect(recordedAfter >= quiet - 0.5f && recordedAfter < quiet + 3f,
+                "a kept world is recorded a few seconds after the player stops");
 
             ModStore().TryLoad(EditedMod, out _, out LuaModManifest editedManifest);
             Record("before the stop: " + EditedMod + " stored with origin '" + editedManifest?.Origin + "', seeded version "

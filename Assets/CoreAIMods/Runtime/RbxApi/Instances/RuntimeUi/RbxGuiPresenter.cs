@@ -353,7 +353,9 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
             if (root.Gui.Observer is RbxGuiScreen screen)
             {
                 screen.HasDirty = true;
-                if ((change & (RbxGuiChange.Layout | RbxGuiChange.Visibility)) != 0)
+                // WHY Text only for some: a text object's AutomaticSize and read TextBounds follow its text.
+                if ((change & (RbxGuiChange.Layout | RbxGuiChange.Visibility)) != 0
+                    || ((change & RbxGuiChange.Text) != 0 && RbxGuiLayout.MeasuresText(node)))
                 {
                     screen.LayoutDirty = true;
                 }

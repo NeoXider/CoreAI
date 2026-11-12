@@ -183,10 +183,11 @@ namespace CoreAI.Ai.SubAgents
                 }
 
                 string trimmed = name.Trim();
-                if (string.Equals(trimmed, DelegateTaskTool.DefaultName, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(trimmed, DelegateTaskTool.DefaultName, StringComparison.OrdinalIgnoreCase) ||
+                    SubAgentTeamToolNames.IsDefaultName(trimmed))
                 {
                     throw new ArgumentException(
-                        $"Sub-agent '{id}' may never be given the delegate tool '{DelegateTaskTool.DefaultName}': " +
+                        $"Sub-agent '{id}' may never be given the sub-agent tool '{trimmed}': " +
                         "sub-agents do not delegate further.", nameof(allowedToolNames));
                 }
 

@@ -30,17 +30,16 @@ namespace CoreAI.Ai.SubAgents
         private readonly IAiTaskResultService _runner;
         private readonly ILlmAsyncMarshaler _asyncMarshaler;
 
-        // WHY an instance AsyncLocal: it flows from this body into the sub-agent turn it starts and into any
-        // tool that turn invokes, so a sub-agent reaching this body by any route (a skill proxy, a host that
-        // registered the tool on the sub-agent's role) is recognised and refused. Siblings started by the tool
-        // policy run in their own execution contexts and do not see each other's mark.
-        private readonly AsyncLocal<int> _depth = new();
+        // WHY shared with the session's team: a sub-agent of either style reaching this body by any route is
+        // recognised and refused (see SubAgentRunMarker).
+        private readonly SubAgentRunMarker _marker;
 
         internal SubAgentDelegator(
             OrchestratorSession session,
             ISubAgentRegistry registry,
             IAiTaskResultService runner,
-            ILlmAsyncMarshaler asyncMarshaler)
+            ILlmAsyncMarshaler asyncMarshaler,
+            SubAgentRunMarker marker = null)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
             _registry = registry ?? throw new ArgumentNullException(nameof(registry));
@@ -48,10 +47,11 @@ namespace CoreAI.Ai.SubAgents
             // WHY: the portable default delays on Task.Delay, which never fires in a WebGL player; a Unity host
             // passes its frame-driven marshaler so the deadline exists there.
             _asyncMarshaler = asyncMarshaler ?? PassThroughLlmAsyncMarshaler.Instance;
+            _marker = marker ?? new SubAgentRunMarker();
         }
 
-        /// <summary>True while the current execution context is inside a sub-agent run started here.</summary>
-        public bool IsInsideSubAgentRun => _depth.Value > 0;
+        /// <summary>True while the current execution context is inside a sub-agent run of this session.</summary>
+        public bool IsInsideSubAgentRun => _marker.IsInside;
 
         /// <summary>Runs one delegation; see the class summary for its order and cancellation rules.</summary>
         /// <param name="request">What the lead asked for.</param>
@@ -60,7 +60,7 @@ namespace CoreAI.Ai.SubAgents
             SubAgentDelegationRequest request,
             CancellationToken cancellationToken = default)
         {
-            if (_depth.Value > 0)
+            if (_marker.IsInside)
             {
                 return Task.FromResult(SubAgentDelegationResult.Refused(
                     SubAgentErrorCode.NestedDelegation,
@@ -169,7 +169,7 @@ namespace CoreAI.Ai.SubAgents
             CancellationTokenSource run =
                 CancellationTokenSource.CreateLinkedTokenSource(plan.Scope.Token, invocationToken, deadline.Token);
             _ = ArmDeadlineAsync(definition.Deadline, deadline, deadlineStop.Token);
-            _depth.Value = _depth.Value + 1;
+            _marker.Enter();
 
             LlmCompletionResult result = null;
             Exception failure = null;

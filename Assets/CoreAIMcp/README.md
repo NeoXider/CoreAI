@@ -6,8 +6,11 @@ game over a standard protocol instead of editing files and restarting.
 
 It is the in-game Command Bar surfaced over MCP: `execute_lua`, `get_mod_logs`, `read_skill`,
 `world_command`, `screenshot`, the debug tools `game_status`, `get_unity_logs` and `get_performance`, the
-world save/load tools (`list_autosaves`, `load_world`, `load_autosave`, reached through `coreai_tools`)
-and, with host-admin configuration, `manage_mods` and `save_world`. Each tool is registered only when
+world tree tools `world_tree` and `instance_get`, the
+world save/load tools (`list_autosaves`, `load_world`, `load_autosave`, reached through `coreai_tools`),
+every other tool the game's in-game agents have (also through `coreai_tools`, see
+[Parity with the in-game agents](#parity-with-the-in-game-agents)) and, with host-admin configuration,
+`manage_mods` and `save_world`. Each tool is registered only when
 the current composition provides its backing service (see [Tools](#tools)).
 
 To debug a game without touching a scene, start it with `-coreaiMcp` (or tick
@@ -351,10 +354,16 @@ clients still connect to `http://127.0.0.1:8590/mcp`.
 - Endpoint: **`POST http://127.0.0.1:<port>/mcp`**, JSON-RPC 2.0, MCP streamable HTTP.
 - Methods: `initialize`, `notifications/initialized` (no-op), `notifications/cancelled`, `tools/list`,
   `tools/call`, `ping`.
-- `initialize` returns `instructions`: short guidance for the client's model (read the API skill
-  first, reach hidden tools through `coreai_tools`, verify with `screenshot` and `get_mod_logs`).
-  Replace it with `CoreAiMcpServer.Instructions` (or `McpRpcDispatcher.Instructions`) before start;
-  null or blank omits the field.
+- `initialize` returns `instructions`: the working rules the in-game Programmer follows, in about 290
+  tokens (1,166 characters; the whole `initialize` result is about 330, counted with
+  `PromptTokenCostMeter`): start with `game_status`; `read_skill` 'Lua Modding' for mods and 'Rbx API' for
+  anything visible, then only the sections the task needs; build Roblox-style; never invent APIs; no
+  io/os/load/debug; `execute_lua` is one-off and lasting behaviour is a mod; change a mod with
+  `get_source` then `edit` (`reload` replaces the whole mod); after a change `get_mod_logs` with
+  `since_reload` and `wait_seconds`, then `screenshot`; everything else, the in-game agents' tools
+  included, through `coreai_tools`. The full references stay in the skills, which `read_skill` returns
+  exactly as the in-game agent reads them. Replace the text with `CoreAiMcpServer.Instructions` (or
+  `McpRpcDispatcher.Instructions`) before start; null or blank omits the field.
 - **Cancellation.** `notifications/cancelled` with the `requestId` of a `tools/call` from the same
   session (or, for sessionless clients, from another sessionless request) cancels that call. A call
   still waiting for the game thread is withdrawn at once and never runs; its slot is freed. A body that
@@ -603,11 +612,14 @@ Tools are registered **only when their backing service resolves** in the current
 | `get_performance` | an `IRuntimePerformanceSource` resolves (the CoreAI scope registers the monitor) | Frame rate over `window_seconds` (default 5, at most 60): `fps_avg`, `fps_min` (the slowest frame), `frame_ms_avg`/`p95`/`max`, `slow_frames` (over 50 ms); with `counters` (default true) the engine counters the build provides, and `unavailable` naming the ones it does not. See [Engine counters per build and platform](#engine-counters-per-build-and-platform). |
 | `read_skill` | the Programmer role has skills | Returns a registered skill by `name` (e.g. `Lua Modding`, `Rbx API`) — the same reference the on-board agent reads. A multi-document skill returns its entry document and a section index; `section` reads one document, `all: true` reads all of them. |
 | `world_command` | a world-command executor resolves | Spawn / move / edit scene objects (meters; Euler degrees). |
+| `world_tree` | a world host (`RbxWorldHost`) resolves | The running world's instances as Roblox Explorer shows them, read-only: `path` (the `GetFullName` name), `class`, `name`, `depth`, `children` count and a few key `props` (Position, Size, Anchored, Transparency, Enabled, Text, Value, Health...), depth-first from `root` (default `game`, or `id:<n>`) down to `depth` (3, at most 32). Filters: `class` (IsA), `name` (contains, any case). Pages of `max` rows (100, at most 500): pass `next_cursor` back as `cursor`; `-1` means the end. One call walks at most 50,000 instances. |
+| `instance_get` | a world host resolves | One instance by `path` or `id:<n>`: class, id, parent, child count and the first 50 children, its readable properties (at most 80, values cut to 300 characters; `properties` names a subset), attributes, tags, and the mod that owns it. Read-only: change it with `execute_lua` or a mod. Properties are read by reflection, so an IL2CPP build with high managed stripping may list fewer. |
 | `screenshot` | always | Captures the main camera — or the active camera named in `camera` — to a PNG (base64), downscaled to `max_resolution` (default 1024, `0` = no cap). An unknown camera name fails and lists the active cameras; it never falls back to another camera. Missing camera / capture failure is reported per call, with the real reason. A camera render has no screen-space UI; **`screen: true`** captures the displayed frame as the player sees it, UI Toolkit panels and overlay canvases included (see [Screen capture](#screen-capture-with-the-ui)). |
 | `list_autosaves` | an `IRbxWorldRuntimeService` and an actor identity resolve; **brokered** | Lists the autosave ring (name, trigger, UTC timestamp, size). Read-only. |
 | `load_world` / `load_autosave` | as above; **brokered** | Requests loading a manual slot / a listed autosave. Nothing is applied until the player confirms in the game UI: a staged request is `isError: false` with status `player_confirmation_required` and a `request_id`; a missing or unreadable package is `isError: true`. |
 | `save_world` | as above **and** host-admin authority; **brokered** — **absent by default** | Saves the live world to a new create-once manual slot that survives a restart. |
 | `coreai_tools` | always (see [Tool residency](#tool-residency-what-the-model-pays-for)) | Broker over Dynamic tools: `list`, `describe`, `call`. |
+| **the in-game agents' tools** | a role of the composition has them; **brokered** | Every function an in-game agent role can call, and every tool of its skills, under its in-game name, schema and result (`LlmFunctionMcpTool`): the Programmer's `camera_capture`, `camera_look`, `camera_orbit`, `camera_list`; the Merchant's `get_inventory`; whatever a host gave a role (`game_state`, `game_config`, `component_command`, `scene_tool`'s functions, its own C# tools). Images come back as image content. See [Parity with the in-game agents](#parity-with-the-in-game-agents). |
 
 ### Engine counters per build and platform
 
@@ -672,6 +684,40 @@ actions and executor refusals therefore return `isError: true`, directly and thr
 An `OperationCanceledException` reaching the dispatcher remains a protocol error (`-32603`) without
 a tool-result payload; ordinary tool failures keep their normal content.
 
+### Parity with the in-game agents
+
+Whatever an in-game CoreAI agent can do, a client holding the token can do as well. Every function any
+role of the composition can call (`AgentMemoryPolicy.GetToolsForRole` for every known role, the
+Programmer first, and the tools of each role's skills) is offered over MCP: through its dedicated adapter
+(`execute_lua`, `manage_mods`, `get_mod_logs`, `world_command`, `read_skill`, `screenshot`, the world
+save/load tools), or unchanged behind `coreai_tools`. Tools a host adds to a role at run time appear at the
+next catalog build (a scene load). The dedicated adapters keep their own rules: `manage_mods` and
+`save_world` stay behind host-admin admission even though the in-game Programmer holds them, and the
+in-game copies are never wrapped.
+
+Not exposed, and why (`McpInGameTools.NotExposed`):
+
+| In-game tool | Why not |
+|---|---|
+| `memory` | the in-game model's own notebook between its turns; a harness keeps its own memory |
+| `wait` | pauses the in-game model's own turn; a harness waits on its side, and `get_mod_logs` `wait_seconds` waits for the game |
+| `call_skill_tool` | the in-game model's door to its skills' tools; MCP offers each skill tool under its own name |
+| `manage_skills` | writes the skills of the in-game agent that authors them; a harness has its own skills |
+| `declare_tasks`, `delegate_task`, `agent_start`, `agent_send`, `agent_read`, `agent_stop` | steer the in-game orchestrator's own sub-agent team; a harness runs its own sub-agents |
+
+`McpInGameToolParityEditModeTests` composes a CoreAI + mods scope and fails when any role's function is
+neither reachable over MCP nor in that table, so a tool added later cannot silently stay out of reach.
+
+**Which camera tool.** `screenshot` (MCP) looks through the main camera or a named one, or captures the
+screen with its UI (`screen: true`); it moves nothing and is not rate limited, so use it to check a result.
+`camera_capture`, `camera_look`, `camera_orbit` and `camera_list` (the in-game agent's, through
+`coreai_tools`) drive the agent's own camera: aim or orbit it around a build without touching the player's
+camera, then capture through it; they are rate limited like the in-game agent's captures.
+
+**Turning it off.** `CoreAiMcpServer.ExposeInGameTools = false`, or `COREAI_MCP_INGAME_TOOLS=0`, keeps the
+in-game agents' tools off MCP (the dedicated adapters stay). Every tool a host gives an in-game agent is
+callable by whoever holds the MCP token; a host tool that should not be is a reason to turn this off.
+
 ### `manage_mods`, `save_world` and host-admin authority
 
 `manage_mods` writes mods that survive a restart, and `save_world` writes a world slot that does, so
@@ -700,6 +746,11 @@ actor is restricted gets no `manage_mods`.
 
 Turning it on logs a warning at start, and the warning is the accurate description of the risk:
 **every client holding the MCP bearer token receives this authority.**
+
+An MCP `load`, `reload` or `edit` goes through the composition's world mutation gate
+(`IConfirmedWorldMutationGate`), like the in-game `manage_mods`: the world is backed up to the autosave
+ring first and the change is serialized with every other world change, so it is as undoable as the
+in-game agent's.
 
 ### Tool residency: what the model pays for
 
@@ -843,6 +894,7 @@ particular varies between client versions — check yours if the connection retu
 | WebGL refuses the listener with an actionable reason | `McpHttpServerPlatformEditModeTests`, `CoreAiMcpServerWebGlEditModeTests` |
 | World tools: honest `isError`, `save_world` only with host-admin authority | `WorldPackageMcpToolsEditModeTests` |
 | `screenshot` captures a named camera exactly or fails listing the cameras; no error log outside play mode | `ScreenshotMcpToolEditModeTests`, `MainCameraScreenshotSourceEditModeTests` |
+| `world_tree` pages, filters, paths and ids; `instance_get` properties, attributes, tags and owner | `WorldTreeMcpToolsEditModeTests` (engine-free) |
 | `get_unity_logs`, `get_performance`, `game_status` and the request counters | `McpDiagnosticsToolsEditModeTests` (engine-free), `RuntimeDiagnosticsEditModeTests` (the log ring, formatter and frame window, CoreAI Core) |
 | The debug switches, their precedence, the key from the fragment only, the batch-mode rule | `CoreAiMcpDebugOptionsEditModeTests` |
 | Listening before a scope exists, host admin from the composition, the token kept out of the captured log | `CoreAiMcpDebugStartEditModeTests` |
@@ -852,6 +904,8 @@ particular varies between client versions — check yours if the connection retu
 | The Hub tab: token masked, copy, switch, bridge fields, remember | `HubMcpPageEditModeTests` (`CoreAI.Mcp.Hub.Tests`) |
 | `screenshot screen=true` | `ScreenshotScreenModeEditModeTests` |
 | The masked command | `McpConnectCommandEditModeTests` |
+| Every in-game agent function is reachable over MCP or listed with a reason; the host-admin tools stay gated | `McpInGameToolParityEditModeTests` (composed scope) |
+| The in-game tool adapter: schema, binding, results, images, isError, the wrapping rules; the `initialize` rules | `McpInGameToolsEditModeTests` |
 
 ## Worked example session
 
@@ -897,7 +951,8 @@ assemblies; this section is the recorded justification that
 for skipping a layer. Instead the protocol + routing core (`Protocol/*`, `McpToolRegistry`,
 `McpArguments`, `McpRpcDispatcher`, `McpSessionStore`, `McpRequestGuard`, `IMainThreadDispatcher`, and
 the `IMcpTool` / `IScreenshotSource` interfaces), the debug tools (`GetUnityLogsMcpTool`,
-`GetPerformanceMcpTool`, `GameStatusMcpTool`, `McpDiagnosticsTools`), the debug switches
+`GetPerformanceMcpTool`, `GameStatusMcpTool`, `McpDiagnosticsTools`), the in-game tool adapter
+(`LlmFunctionMcpTool`, `McpInGameTools`), the debug switches
 (`CoreAiMcpDebugOptions`), the link-control contract (`IMcpLinkControl`) and the bridge link
 (`McpBridgeLink`, `McpBridgeTransport`, `McpTransportRules`) are kept **engine-free** and unit-tested
 without Unity; only the adapters (`McpHttpServer`, `MainCameraScreenshotSource`, `CoreAiMcpServer`,

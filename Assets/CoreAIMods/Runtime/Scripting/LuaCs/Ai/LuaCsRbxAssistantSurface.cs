@@ -15,8 +15,10 @@ namespace CoreAI.Ai.LuaCs
     /// talks to, for a chat made in Lua. <c>assistant:Send(text, {Role = ...})</c> starts a turn through
     /// <see cref="ChatAgentTurns"/> and returns a turn whose <c>TextAdded(delta, startsNewMessage)</c>,
     /// <c>StatusChanged(status)</c> and <c>Ended(result)</c> fire on the scheduler, and whose <c>Cancel()</c> stops it.
-    /// Read-only members: <c>IsAvailable</c>, <c>IsBusy</c>, <c>Role</c>, <c>CanSwitchModels</c>; methods:
-    /// <c>GetRoles</c>, <c>SetRole</c>, <c>GetModels</c>, <c>GetModel</c>, <c>SetModel</c>, <c>Stop</c>. Refused unless
+    /// Read-only members: <c>IsAvailable</c>, <c>IsBusy</c>, <c>Role</c>, <c>CanSwitchModels</c>, <c>Status</c>; the
+    /// signal <c>StatusChanged(status)</c> reports every status change, also of host turns (a mod's self-repair, an
+    /// orchestrator wake) and of background work; methods: <c>GetRoles</c>, <c>SetRole</c>, <c>GetModels</c>,
+    /// <c>GetModel</c>, <c>SetModel</c>, <c>Stop</c>. Refused unless
     /// the host turned on <see cref="CoreAiLuaAiOptions.AllowPlayerAssistantFromLua"/>.
     /// </summary>
     internal sealed class LuaCsRbxAssistantSurface : IDisposable
@@ -56,7 +58,11 @@ namespace CoreAI.Ai.LuaCs
 
                 if (!_records.TryGetValue(context, out ContextRecord record))
                 {
-                    record = new ContextRecord(BuildAssistant(context, capabilities), Lifetime(context));
+                    RbxScriptSignal statusChanged = new("Assistant.StatusChanged");
+                    statusChanged.BindScheduler(_bindings.Scheduler);
+                    record = new ContextRecord(BuildAssistant(context, capabilities, statusChanged), Lifetime(context),
+                        status => statusChanged.Fire(new LuaValue(StatusTable(status))));
+                    _turns.StatusChanged += record.OnStatus;
                     _records[context] = record;
                 }
 
@@ -73,6 +79,14 @@ namespace CoreAI.Ai.LuaCs
 
             _disposed = true;
             _bindings.Scheduler.PhaseReached -= _onPhase;
+            foreach (ContextRecord record in _records.Values)
+            {
+                if (_turns != null)
+                {
+                    _turns.StatusChanged -= record.OnStatus;
+                }
+            }
+
             _records.Clear();
         }
 
@@ -101,12 +115,13 @@ namespace CoreAI.Ai.LuaCs
             {
                 // WHY a turn of an unloaded mod is stopped: nothing shows it any more, and a reloaded chat must be able
                 // to send at once instead of waiting for an answer nobody will see.
-                ChatAgentTurn orphan = _records[_dead[i]].LastTurn;
-                if (orphan != null && orphan.IsActive)
+                ContextRecord gone = _records[_dead[i]];
+                if (gone.LastTurn != null && gone.LastTurn.IsActive)
                 {
-                    orphan.Cancel();
+                    gone.LastTurn.Cancel();
                 }
 
+                _turns.StatusChanged -= gone.OnStatus;
                 _records.Remove(_dead[i]);
             }
 
@@ -143,8 +158,10 @@ namespace CoreAI.Ai.LuaCs
             }
         }
 
-        private LuaTable BuildAssistant(LuaCsRbxModContext context, LuaCapabilities capabilities)
+        private LuaTable BuildAssistant(LuaCsRbxModContext context, LuaCapabilities capabilities,
+            RbxScriptSignal statusChanged)
         {
+            LuaValue statusSignal = LuaCsRbxDatatypeBindings.Wrap(statusChanged, context);
             LuaTable methods = new();
             methods["Send"] = Fn("Assistant.Send", ctx =>
             {
@@ -253,6 +270,10 @@ namespace CoreAI.Ai.LuaCs
                         return _turns.ActiveRoleId;
                     case "CanSwitchModels":
                         return _turns.Models != null && _turns.Models.IsAvailable;
+                    case "StatusChanged":
+                        return statusSignal;
+                    case "Status":
+                        return new LuaValue(StatusTable(_turns.Status));
                     default:
                         return methods.TryGetValue(key, out LuaValue method) ? method : LuaValue.Nil;
                 }
@@ -325,6 +346,8 @@ namespace CoreAI.Ai.LuaCs
             table["MaxAttempts"] = status.MaxAttempts;
             table["Step"] = status.Step;
             table["Detail"] = status.Detail;
+            table["Host"] = status.Host;
+            table["Background"] = status.Background;
             return table;
         }
 
@@ -399,13 +422,16 @@ namespace CoreAI.Ai.LuaCs
 
         private sealed class ContextRecord
         {
-            public ContextRecord(LuaTable handle, RbxScriptConnection lifetime)
+            public ContextRecord(LuaTable handle, RbxScriptConnection lifetime, Action<ChatAgentStatus> onStatus)
             {
                 Handle = handle;
                 Lifetime = lifetime;
+                OnStatus = onStatus;
             }
 
             public LuaTable Handle { get; }
+
+            public Action<ChatAgentStatus> OnStatus { get; }
 
             public RbxScriptConnection Lifetime { get; }
 

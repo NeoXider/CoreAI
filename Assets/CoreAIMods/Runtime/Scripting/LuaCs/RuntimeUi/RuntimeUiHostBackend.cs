@@ -657,6 +657,11 @@ namespace CoreAI.Ai.LuaCs
                 return Handle.FocusForTyping(heldKeyCodes);
             }
 
+            public bool TryMeasureText(string text, float fontSize, float maxWidth, out float width, out float height)
+            {
+                return Handle.TryMeasureText(text, fontSize, maxWidth, out width, out height);
+            }
+
             public bool Blur()
             {
                 return Handle.Blur();

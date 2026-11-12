@@ -126,7 +126,7 @@ namespace CoreAI.Tests.PlayMode
                     Identity);
                 QueuedAiOrchestrator queue = new(orchestrator, new AiOrchestrationQueueOptions { MaxConcurrent = 2 });
                 Driver = new OrchestratorChatDriver(new OrchestratorSessionRegistry(
-                    new OrchestratorModeOptions { Enabled = true },
+                    new OrchestratorModeOptions { Enabled = true, Style = OrchestrationStyle.Plan },
                     new SubAgentRegistry(new[]
                     {
                         new SubAgentDefinition("builder", BuiltInAgentRoleIds.Builder, "Builds structures.", null),

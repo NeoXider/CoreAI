@@ -59,6 +59,8 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
 
         public bool LayoutDirty { get; set; }
 
+        private bool _settlePending;
+
         public bool HasDirty { get; set; }
 
         public bool IsClosed { get; private set; }
@@ -108,6 +110,12 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
 
             float width = Port.Width;
             float height = Port.Height;
+            if (push && _settlePending)
+            {
+                _settlePending = false;
+                LayoutDirty = true;
+            }
+
             if (!width.Equals(_viewportW) || !height.Equals(_viewportH))
             {
                 _viewportW = width;
@@ -119,6 +127,7 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
             {
                 LayoutDirty = false;
                 RbxGuiLayout.LayoutScreen(Root, width, height);
+                _settlePending |= RbxGuiLayout.TakeUnsettled();
                 _boxesStale = true;
                 HasDirty = true;
             }

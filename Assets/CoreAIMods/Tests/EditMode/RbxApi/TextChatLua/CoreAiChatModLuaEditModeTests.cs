@@ -51,9 +51,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.TextChatLua
             SynchronizationContext.SetSynchronizationContext(_savedContext);
         }
 
-        private ChatModWorld Load(bool allowAssistant = true, bool attachAi = true)
+        private ChatModWorld Load(bool allowAssistant = true, bool attachAi = true, bool withOverlay = false)
         {
-            _world = new ChatModWorld(allowAssistant, attachAi);
+            _world = new ChatModWorld(allowAssistant, attachAi, withOverlay);
             _world.Stack.Runtime.LoadMod(ModId, ChatSource());
             _world.Frames(2);
             return _world;
@@ -384,6 +384,24 @@ namespace CoreAI.Tests.EditMode.RbxApi.TextChatLua
         }
 
         [Test]
+        public void ALongLine_GrowsToItsWrappedText_AndTheNextLineStartsBelowIt()
+        {
+            Load();
+            _world.HostFeed.Add(ChatFeedLineKind.System, "", new string('x', 40) + " " + string.Join(" ",
+                Enumerable.Repeat("word", 40)), 0d);
+            _world.HostFeed.Add(ChatFeedLineKind.System, "", "short", 0d);
+            _world.Frames(2);
+
+            List<RbxTextLabel> labels = _world.FeedLabels();
+            RbxTextLabel tall = labels[labels.Count - 2];
+            RbxTextLabel shortLine = labels[labels.Count - 1];
+            Assert.Greater(tall.AbsoluteSize.Y, shortLine.AbsoluteSize.Y * 2f, "the wrapped line grows to its text");
+            Assert.GreaterOrEqual(shortLine.AbsolutePosition.Y, tall.AbsolutePosition.Y + tall.AbsoluteSize.Y,
+                "lines never overlap");
+            Assert.LessOrEqual(tall.TextState.TextBounds.X, tall.AbsoluteSize.X);
+        }
+
+        [Test]
         public void AToolOnlyTurn_Says_Done()
         {
             Load();
@@ -423,6 +441,72 @@ namespace CoreAI.Tests.EditMode.RbxApi.TextChatLua
         }
 
         [Test]
+        public void AHostTurn_ShowsItsStatusAndAnswerInTheLuaChat_AndHoldsTheSlot()
+        {
+            Load(withOverlay: true);
+
+            Assert.IsTrue(_world.Overlay.TryStartHostTurn(new ChatOverlayHostTurnRequest
+            {
+                Text = "notices from the team", Announcement = "builder-1 finished.", ShowAnswer = true
+            }));
+            _world.Frames(2);
+            StringAssert.StartsWith("thinking", _world.StatusText(), "a turn the host runs shows in the Lua chat");
+            CollectionAssert.Contains(_world.FeedTexts(), "builder-1 finished.");
+
+            _world.Say("hello");
+            Assert.AreEqual(1, _world.Sender.Requests.Count, "the player's line waits for the host turn");
+            CollectionAssert.Contains(_world.FeedTexts(), "The AI is still answering. Type /stop to cancel it.");
+
+            _world.Sender.Stream("The walls are up.");
+            _world.Sender.Complete();
+            _world.Frames(2);
+
+            CollectionAssert.Contains(_world.FeedTexts(), "AI: The walls are up.", "a wake's answer lands in the feed");
+            Assert.AreEqual("", _world.StatusText());
+            Assert.IsFalse(_world.Turns.IsBusy);
+        }
+
+        [Test]
+        public void ThePlayersTurn_KeepsAHostTurnWaiting()
+        {
+            Load(withOverlay: true);
+            _world.Say("build a tower");
+
+            Assert.IsTrue(_world.Overlay.IsTurnActive);
+            Assert.IsFalse(_world.Overlay.TryStartHostTurn(new ChatOverlayHostTurnRequest { Text = "repair" }));
+            Assert.AreEqual(_world.Turns.Current.TraceId, _world.Overlay.ActiveTraceId);
+        }
+
+        [Test]
+        public void Stop_StopsAHostTurn()
+        {
+            Load(withOverlay: true);
+            _world.Overlay.TryStartHostTurn(new ChatOverlayHostTurnRequest { Text = "repair the mod" });
+            _world.Frames(1);
+
+            _world.Say("/stop");
+
+            Assert.IsFalse(_world.Overlay.IsTurnActive);
+            Assert.AreEqual(1, _world.Sender.LastTurn.CancelCalls);
+        }
+
+        [Test]
+        public void BackgroundWork_ShowsOnTheStatusLineWhileNoTurnRuns()
+        {
+            Load(withOverlay: true);
+
+            _world.Overlay.Status.SetBackgroundDetail("builder-1 working (2 steps)");
+            _world.Frames(2);
+
+            Assert.AreEqual("builder-1 working (2 steps)", _world.StatusText());
+            Assert.IsTrue(((RbxGuiObject)_world.Gui("Status")).Visible);
+
+            _world.Overlay.Status.SetBackgroundDetail("");
+            _world.Frames(2);
+            Assert.AreEqual("", _world.StatusText());
+        }
+
+        [Test]
         public void TheRunningTurnOfAnUnloadedChat_IsStopped()
         {
             Load();
@@ -437,7 +521,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.TextChatLua
 
         private sealed class ChatModWorld : IDisposable
         {
-            public ChatModWorld(bool allowAssistant, bool attachAi)
+            public ChatModWorld(bool allowAssistant, bool attachAi, bool withOverlay)
             {
                 Keys = new InMemoryInputSource { FocusState = new InputFocusState() };
                 Clock = new ManualClock();
@@ -448,15 +532,28 @@ namespace CoreAI.Tests.EditMode.RbxApi.TextChatLua
                 Commands = new ChatCommandRegistry();
                 Roblox.AttachChatCommands(new ChatCommandRegistrySink(Commands));
                 SurfaceSwitch = new ChatOverlaySurfaceSwitch();
-                HostFeed = new ChatFeed();
                 Router = new FakeRouter();
-                Host = new ChatOverlayWorldChatHost(Commands, Router, HostFeed, SurfaceSwitch);
-                Roblox.AttachChatHost(Host);
                 Sender = new FakeSender();
                 Tools = new FakeTools();
                 Agents = new ChatAgentSelector(BuiltInAgentRoleIds.Programmer,
                     () => new[] { BuiltInAgentRoleIds.Programmer, BuiltInAgentRoleIds.SmartChat });
-                Turns = new ChatAgentTurns(Sender, Agents, null, Tools);
+                if (withOverlay)
+                {
+                    Overlay = new ChatOverlayController(new ChatOverlayOptions(), new NoView(), Sender, Commands, Agents,
+                        new OverlayClock(Clock), Tools);
+                    HostFeed = Overlay.Feed;
+                    Host = new ChatOverlayWorldChatHost(Commands, Overlay, HostFeed, SurfaceSwitch, Overlay);
+                    Turns = new ChatAgentTurns(Sender, Agents, null, Tools, null, null,
+                        () => Clock.ProcessTimeSeconds, Overlay);
+                }
+                else
+                {
+                    HostFeed = new ChatFeed();
+                    Host = new ChatOverlayWorldChatHost(Commands, Router, HostFeed, SurfaceSwitch);
+                    Turns = new ChatAgentTurns(Sender, Agents, null, Tools);
+                }
+
+                Roblox.AttachChatHost(Host);
                 Action<LuaCsApiRegistry, LuaCapabilities> ai = CoreAiLuaAiBindings.Attach(Roblox,
                     new CoreAiLuaAiOptions { AllowPlayerAssistantFromLua = allowAssistant }, null, null, null, null,
                     null, null, null, null, Turns);
@@ -498,6 +595,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.TextChatLua
 
             public ChatAgentTurns Turns { get; }
 
+            public ChatOverlayController Overlay { get; }
+
             public UxmlServiceTestWorld.MemoryStore Store { get; }
 
             public LuaCsModStack Stack { get; }
@@ -512,6 +611,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.TextChatLua
             {
                 for (int i = 0; i < count; i++)
                 {
+                    Overlay?.Tick();
                     Roblox.Scheduler.Advance(1d / 60d);
                 }
             }
@@ -588,9 +688,61 @@ namespace CoreAI.Tests.EditMode.RbxApi.TextChatLua
             public void Dispose()
             {
                 Turns.Dispose();
+                Overlay?.Dispose();
                 Host.Dispose();
                 Surface.Dispose();
                 Roblox.Dispose();
+            }
+        }
+
+        private sealed class OverlayClock : IChatOverlayClock
+        {
+            private readonly ManualClock _clock;
+
+            public OverlayClock(ManualClock clock)
+            {
+                _clock = clock;
+            }
+
+            public double NowSeconds => _clock.ProcessTimeSeconds;
+        }
+
+        private sealed class NoView : IChatOverlayView
+        {
+            public event Action<string> Submitted
+            {
+                add { }
+                remove { }
+            }
+
+            public event Action CloseRequested
+            {
+                add { }
+                remove { }
+            }
+
+            public void SetInputOpen(bool open, string prefill)
+            {
+            }
+
+            public void AddLine(ChatFeedLine line)
+            {
+            }
+
+            public void UpdateLine(ChatFeedLine line)
+            {
+            }
+
+            public void RemoveLine(ChatFeedLine line)
+            {
+            }
+
+            public void SetLineVisible(ChatFeedLine line, bool visible)
+            {
+            }
+
+            public void SetStatus(AgentStatusKind kind, string text)
+            {
             }
         }
 

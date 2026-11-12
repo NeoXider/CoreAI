@@ -141,6 +141,9 @@ namespace CoreAI.Mods.Rbx.Instances.TextChat
         /// <summary>A failure the player should read.</summary>
         public const string Error = "CoreAI.Error";
 
+        /// <summary>The answer of a turn the host ran (an orchestrator wake), with the agent as <c>PrefixText</c>.</summary>
+        public const string Assistant = "CoreAI.Assistant";
+
         /// <summary>The returned message of <c>SendAsync</c> for a line a listener of the host took.</summary>
         public const string Taken = "CoreAI.Taken";
     }

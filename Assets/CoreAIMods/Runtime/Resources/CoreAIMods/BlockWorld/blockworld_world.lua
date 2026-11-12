@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_world
 name: Block World 1 - World
-version: 1.6.0
+version: 1.6.1
 active: false
 capabilities: All
 category: Samples/Block World
@@ -74,9 +74,15 @@ local PROBE_BUDGET = 1          -- "is this column already generated?" reads a s
 local LOOK_PULL = 0.5           -- columns a column straight ahead of the camera counts as nearer
 -- WHY several steps a frame, each in a handler of its own: every Heartbeat handler runs in its own resume with its own
 -- instruction budget, so a step stays the size the budget tests hold it to while a quick machine runs more of them.
-local MAX_WORKERS = 8           -- generation steps a frame at most
+local MAX_WORKERS = 24          -- generation steps a frame at most, while frames are quick (QUICK_FRAME)
+local SLOW_WORKERS = 8          -- the most once a frame is slow (SLOW_FRAME), until frames are quick again
 local LUA_MS_TARGET = 3         -- milliseconds of generation a frame may spend while frames are quick
-local FRAME_MS_LIMIT = 12       -- frames slower than this make the generation back off to one step a frame
+-- WHY a 60 Hz frame counts as quick: a player that waits for its display (every WebGL player, a desktop one with
+-- vsync) has 16.7 ms frames however little it does, and a limit under that read the wait as load and held the
+-- generation to one step a frame, about a column a second.
+local QUICK_FRAME = 1 / 45      -- seconds: a Heartbeat dt under this lets the steps grow up to MAX_WORKERS
+local SLOW_FRAME = 1 / 30       -- and one over this holds them to SLOW_WORKERS
+local FRAME_MS_LIMIT = 1000 / 45   -- frames slower than this on average make the generation back off a step a frame
 local SPAWN_SEARCH = 24         -- rings of pillars searched for land around the middle of the first column
 -- WHY the middle: a player standing there sees a whole column of ground around them at once, while the columns
 -- beyond it are still being made.
@@ -993,6 +999,7 @@ end
 local fallCheck = 0
 local openingWait = 0
 local workers = 1
+local workerLimit = MAX_WORKERS
 local frameMs, generationMs, lastFrameAt = 0, 0, nil
 
 -- One step of streaming: choosing the next column (a step of its own), or one budgeted phase of the column in hand.
@@ -1058,13 +1065,19 @@ RunService.Heartbeat:Connect(function(dt)
     -- WHY the workers adapt here, once a frame: the frame's own length is measured between two Heartbeats, and
     -- the generation's share of it is what the steps of the last frame spent.
     local now = os.clock()
+    if dt < QUICK_FRAME then
+        workerLimit = MAX_WORKERS
+    elseif dt > SLOW_FRAME then
+        workerLimit = SLOW_WORKERS
+    end
     if lastFrameAt then
         frameMs = frameMs * 0.8 + (now - lastFrameAt) * 1000 * 0.2
         if frameMs > FRAME_MS_LIMIT or generationMs > LUA_MS_TARGET then
             workers = math.max(1, workers - 1)
         elseif generationMs < LUA_MS_TARGET * 0.7 then
-            workers = math.min(MAX_WORKERS, workers + 1)
+            workers = math.min(workerLimit, workers + 1)
         end
+        workers = math.min(workers, workerLimit)
     end
     lastFrameAt = now
     generationMs = 0

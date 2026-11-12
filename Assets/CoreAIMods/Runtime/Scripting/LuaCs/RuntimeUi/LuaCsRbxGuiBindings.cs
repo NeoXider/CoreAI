@@ -874,6 +874,7 @@ namespace CoreAI.Ai.LuaCs
         private static void DeclareText(string c)
         {
             Text(c, "Text", s => T(s).Text, (s, v) => T(s).SetText(v));
+            Vector2(c, "TextBounds", s => T(s).TextBounds, null);
             Text(c, "ContentText", s => T(s).ContentText, null);
             Color(c, "TextColor3", s => T(s).TextColor3, (s, v) => T(s).SetTextColor3(v));
             Number(c, "TextSize", s => T(s).TextSize, (s, v) => T(s).SetTextSize(v));

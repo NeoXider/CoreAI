@@ -231,7 +231,9 @@ namespace CoreAI.Composition
         /// <summary>
         /// Adds <c>/undo</c>, <c>/redo</c> and <c>/fly</c> to the chat command registry of this scope or its parent,
         /// once the scope built; nothing when there is no registry (the overlay is switched off). The commands act
-        /// as the chat's actor (<see cref="IActorIdentityProvider"/>), whose AI changes the undo history records.
+        /// as the chat's actor (<see cref="IActorIdentityProvider"/>), whose AI changes the undo history records. In a
+        /// world kept between starts it also adds <c>/save</c> and the chat line of a record that failed
+        /// (<see cref="RbxKeptWorldSaveNotices"/>).
         /// </summary>
         public static void RegisterCoreAiWorldChatCommands(this IContainerBuilder builder)
         {
@@ -249,13 +251,15 @@ namespace CoreAI.Composition
                     // WHY only for a kept world: elsewhere the world is not recorded between starts, and the
                     // command list of every other scene stays as it was.
                     bool keep = c.ResolveOrDefault<CoreAiWorldKeepOptions>()?.KeepWorldBetweenStarts == true;
+                    IChatOverlayMessages messages = c.ResolveOrDefault<IChatOverlayMessages>();
                     return new CoreAiWorldChatCommandsHolder(new CoreAiWorldChatCommands(
-                        registry,
-                        c.ResolveOrDefault<IRbxWorldUndoService>(),
-                        () => identity.GetActorContext(BuiltInAgentRoleIds.Programmer),
-                        session != null ? () => CoreAiLocalPlayer.FindHumanoid(session.CurrentRbxApi) : null,
-                        c.ResolveOrDefault<ILog>(),
-                        session != null && keep ? (Func<UniTask<string>>)session.SaveKeptWorldNowAsync : null));
+                            registry,
+                            c.ResolveOrDefault<IRbxWorldUndoService>(),
+                            () => identity.GetActorContext(BuiltInAgentRoleIds.Programmer),
+                            session != null ? () => CoreAiLocalPlayer.FindHumanoid(session.CurrentRbxApi) : null,
+                            c.ResolveOrDefault<ILog>(),
+                            session != null && keep ? (Func<UniTask<string>>)session.SaveKeptWorldNowAsync : null),
+                        session != null && keep && messages != null ? new RbxKeptWorldSaveNotices(session, messages) : null);
                 },
                 Lifetime.Singleton);
             builder.RegisterBuildCallback(container =>
@@ -274,16 +278,21 @@ namespace CoreAI.Composition
         /// <summary>Owns the commands for the container, which disposes it with the scope.</summary>
         internal sealed class CoreAiWorldChatCommandsHolder : IDisposable
         {
-            public CoreAiWorldChatCommandsHolder(CoreAiWorldChatCommands commands)
+            public CoreAiWorldChatCommandsHolder(CoreAiWorldChatCommands commands, RbxKeptWorldSaveNotices saveNotices = null)
             {
                 Commands = commands;
+                SaveNotices = saveNotices;
             }
 
             public CoreAiWorldChatCommands Commands { get; }
 
+            /// <summary>The chat lines of a kept world that stopped being saved; null when the world is not kept.</summary>
+            public RbxKeptWorldSaveNotices SaveNotices { get; }
+
             public void Dispose()
             {
                 Commands?.Dispose();
+                SaveNotices?.Dispose();
             }
         }
     }

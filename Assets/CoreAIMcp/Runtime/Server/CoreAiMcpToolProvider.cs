@@ -92,7 +92,8 @@ namespace CoreAI.Mcp.Server
             LuaGenerationRateLimiter modRateLimiter,
             CoreAI.Mods.Folders.IModFolderListStore modFolderList,
             IReadOnlyList<IMcpTool> nativeTools = null,
-            ILlmAsyncMarshaler logWaitMarshaler = null)
+            ILlmAsyncMarshaler logWaitMarshaler = null,
+            CoreAI.Mods.WorldPackages.IConfirmedWorldMutationGate modMutationGate = null)
         {
             List<IMcpTool> tools = new();
 
@@ -115,7 +116,8 @@ namespace CoreAI.Mcp.Server
                     modCapabilities,
                     modActorIdentityProvider,
                     modRateLimiter,
-                    modFolderList));
+                    modFolderList,
+                    modMutationGate));
             }
 
             if (logService != null)

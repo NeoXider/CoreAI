@@ -265,6 +265,55 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
             _world.AssertHealthy(Mod);
         }
 
+        private const int KeyW = 119;
+
+        [Test]
+        public void P6_Graphics_ASprint_WidensTheChosenFieldOfView_EasedIn_AndNarrowsItBack()
+        {
+            _world.SetAttribute("BlockWorldFieldOfView", 80d);
+            LoadWorld(2d, "blockworld_build");
+            Run("game:GetService('Players'):GetPlayers()[1].Character.Humanoid.WalkSpeed = 17");
+            Assert.AreEqual(80d, FieldOfView(), 0.01d);
+
+            _world.Tap(KeyW);
+            _world.Input.PressKey(KeyW);
+            _world.Frame(5);
+            double easing = FieldOfView();
+            _world.Frame(60);
+            double sprinting = FieldOfView();
+            _world.Tap(BlockWorldTestWorld.KeyO);
+            string shown = Value("FieldOfView");
+            _world.Tap(BlockWorldTestWorld.KeyO);
+            _world.Input.ReleaseKey(KeyW);
+            _world.Frame(60);
+            double walking = FieldOfView();
+
+            Assert.That(easing, Is.GreaterThan(80d).And.LessThan(91.9d), "the widening is eased in, not a jump");
+            Assert.AreEqual(92d, sprinting, 0.05d, "a sprint sees 15 percent wider than the choice");
+            Assert.AreEqual("80 degrees", shown, "while the panel shows the choice itself");
+            Assert.AreEqual(80d, walking, 0.01d, "and the field of view is the choice again after the sprint");
+            Assert.AreEqual(80d, _world.Number("BlockWorldFieldOfView"), "the sprint never touches the setting");
+            _world.AssertHealthy(Mod, "blockworld_build");
+        }
+
+        [Test]
+        public void P6_Graphics_ManySprints_LeaveTheFieldOfViewWhereItWas_NegativeTwin()
+        {
+            LoadWorld(2d, "blockworld_build");
+            Run("game:GetService('Players'):GetPlayers()[1].Character.Humanoid.WalkSpeed = 17");
+            for (int sprint = 0; sprint < 20; sprint++)
+            {
+                _world.Tap(KeyW);
+                _world.Input.PressKey(KeyW);
+                _world.Frame(40);
+                _world.Input.ReleaseKey(KeyW);
+                _world.Frame(40);
+            }
+
+            Assert.AreEqual(70d, FieldOfView(), 0.01d, "with no setting chosen, the camera's own field of view comes back");
+            _world.AssertHealthy(Mod, "blockworld_build");
+        }
+
         [Test]
         public void P6_Graphics_OpeningAndClosingThePanel_ChangesAndRecordsNothing_NegativeTwin()
         {

@@ -43,6 +43,8 @@ namespace CoreAI.Mods.Rbx.Instances
         private float _lineHeight = 1f;
         private int _maxVisibleGraphemes = -1;
         private int _textDirection;
+        private RbxVector2 _textBounds;
+        private bool _boundsWanted;
 
         internal RbxGuiText(RbxGuiObject owner, string defaultText)
         {
@@ -55,6 +57,42 @@ namespace CoreAI.Mods.Rbx.Instances
         public RbxColor3 TextColor3 => _textColor3;
 
         public float TextSize => _textSize;
+
+        /// <summary>
+        /// Mirror <c>TextBounds</c> (read-only): the size of the text as drawn, wrapped at the box's width when
+        /// <c>TextWrapped</c>; the host measures it with the real font, a headless world estimates it
+        /// (<c>RbxTextMetrics</c>). (0, 0) while the object is not shown.
+        /// </summary>
+        public RbxVector2 TextBounds
+        {
+            get
+            {
+                if (!_boundsWanted)
+                {
+                    // WHY measured only from the first read on: a label nobody measures repaints on a new text
+                    // without a layout pass, so a HUD whose text changes every frame costs no layout.
+                    _boundsWanted = true;
+                    _owner.Observer?.AfterWrite(_owner, RbxGuiChange.Layout);
+                }
+
+                _owner.RequestLayout();
+                return _textBounds;
+            }
+        }
+
+        /// <summary>True once a script read <see cref="TextBounds"/>: from then on each layout measures the text.</summary>
+        internal bool BoundsWanted => _boundsWanted;
+
+        internal void ApplyTextBounds(RbxVector2 bounds)
+        {
+            if (_textBounds == bounds)
+            {
+                return;
+            }
+
+            _textBounds = bounds;
+            _owner.NotifyPropertyChanged("TextBounds");
+        }
 
         public float TextTransparency => _textTransparency;
 

@@ -15,8 +15,10 @@ namespace CoreAI.ChatOverlay
     {
         /// <summary>Creates a snapshot; null strings become empty.</summary>
         public ChatAgentStatus(AgentStatusKind state, string tool, int characters, int tokens, int attempt,
-            int maxAttempts, int step, string detail)
+            int maxAttempts, int step, string detail, bool host = false, string background = "")
         {
+            Host = host;
+            Background = background ?? "";
             State = state;
             Tool = tool ?? "";
             Characters = characters;
@@ -52,10 +54,22 @@ namespace CoreAI.ChatOverlay
         public string Detail { get; }
 
         /// <summary>
+        /// True for a turn the host started instead of the player (a mod's self-repair, an orchestrator wake): the chat
+        /// shows its status, and it holds the turn slot like the player's own.
+        /// </summary>
+        public bool Host { get; }
+
+        /// <summary>
+        /// Work going on with no turn running (sub-agents in the background, <see cref="AgentStatusTracker.BackgroundDetail"/>);
+        /// empty when none.
+        /// </summary>
+        public string Background { get; }
+
+        /// <summary>
         /// The one mapping point from the HUD tracker to the snapshot a chat reads: a state the tracker gains reaches
         /// every script chat through this method.
         /// </summary>
-        public static ChatAgentStatus From(AgentStatusTracker tracker, int step)
+        public static ChatAgentStatus From(AgentStatusTracker tracker, int step, bool host = false)
         {
             if (tracker == null)
             {
@@ -63,7 +77,7 @@ namespace CoreAI.ChatOverlay
             }
 
             return new ChatAgentStatus(tracker.Kind, tracker.ToolName, tracker.ComposingCharacters, tracker.OutputTokens,
-                tracker.RetryAttempt, 0, step, tracker.Detail);
+                tracker.RetryAttempt, 0, step, tracker.Detail, host, tracker.BackgroundDetail);
         }
 
         /// <summary>True when every field equals <paramref name="other"/>'s.</summary>
@@ -71,8 +85,10 @@ namespace CoreAI.ChatOverlay
         {
             return State == other.State && Characters == other.Characters && Tokens == other.Tokens
                    && Attempt == other.Attempt && MaxAttempts == other.MaxAttempts && Step == other.Step
+                   && Host == other.Host
                    && string.Equals(Tool, other.Tool, StringComparison.Ordinal)
-                   && string.Equals(Detail, other.Detail, StringComparison.Ordinal);
+                   && string.Equals(Detail, other.Detail, StringComparison.Ordinal)
+                   && string.Equals(Background, other.Background, StringComparison.Ordinal);
         }
     }
 
@@ -230,6 +246,9 @@ namespace CoreAI.ChatOverlay
                 return;
             }
 
+            // WHY first: a tool's completion is queued until the tick, and the chunk after it (the next response
+            // composing a tool call) must not be read against a tool that has already finished.
+            _owner.Tick();
             if (!string.IsNullOrEmpty(chunk.Error) || chunk.ErrorCode != LlmErrorCode.None)
             {
                 AppendVisible(_think.Flush(), false);
@@ -381,7 +400,7 @@ namespace CoreAI.ChatOverlay
     /// events may arrive on any thread; they are applied on <see cref="Tick"/>, which the surface calls once per
     /// frame. Everything else runs on the thread that owns the chat.
     /// </summary>
-    public sealed class ChatAgentTurns : IDisposable
+    public sealed class ChatAgentTurns : IChatExternalTurnSlot, IDisposable
     {
         private readonly IChatOverlayTurnSender _sender;
         private readonly IChatAgentSelector _agents;
@@ -391,14 +410,22 @@ namespace CoreAI.ChatOverlay
         private readonly object _gate = new();
         private readonly List<(int Phase, string TraceId, string Tool)> _pending = new();
         private readonly List<(int Phase, string TraceId, string Tool)> _drained = new();
+        private readonly ChatOverlayController _slot;
         private ChatAgentTurn _current;
+        private ChatAgentStatus _published;
         private bool _disposed;
 
-        /// <summary>Creates the service; <paramref name="models"/>, <paramref name="toolEvents"/> and the rest may be null.</summary>
+        /// <summary>
+        /// Creates the service; everything after <paramref name="agents"/> may be null. With <paramref name="slot"/> (the
+        /// overlay's controller) the two share one turn slot and one status tracker: a host turn of the overlay (a mod's
+        /// self-repair, an orchestrator wake) and a turn of this service never overlap, the orchestrator's lines reach
+        /// this service's status, and <see cref="StatusChanged"/> reports the host turns too.
+        /// </summary>
         public ChatAgentTurns(IChatOverlayTurnSender sender, IChatAgentSelector agents, IChatModelSelector models = null,
             IAgentToolEventSource toolEvents = null, ChatOverlayOptions options = null, ILog log = null,
-            Func<double> clock = null)
+            Func<double> clock = null, ChatOverlayController slot = null)
         {
+            _slot = slot;
             _sender = sender ?? throw new ArgumentNullException(nameof(sender));
             _agents = agents ?? throw new ArgumentNullException(nameof(agents));
             Models = models;
@@ -407,7 +434,8 @@ namespace CoreAI.ChatOverlay
             Log = log ?? NullLog.Instance;
             Stopwatch watch = Stopwatch.StartNew();
             _clock = clock ?? (() => watch.Elapsed.TotalSeconds);
-            Tracker = new AgentStatusTracker(_options);
+            Tracker = slot?.Status ?? new AgentStatusTracker(_options);
+            slot?.AttachExternalTurns(this);
             if (_toolEvents != null)
             {
                 _toolEvents.ToolCallStarted += OnToolStarted;
@@ -419,11 +447,43 @@ namespace CoreAI.ChatOverlay
         /// <summary>Raised when a turn begins.</summary>
         public event Action<ChatAgentTurn> TurnStarted;
 
+        /// <summary>
+        /// Raised on the chat's thread whenever the status a chat shows changes, whoever runs the turn: this service's
+        /// own turn, a host turn of the shared slot (<see cref="ChatAgentStatus.Host"/>), or nothing but background work
+        /// (<see cref="ChatAgentStatus.Background"/> with the state idle).
+        /// </summary>
+        public event Action<ChatAgentStatus> StatusChanged;
+
         /// <summary>False when no AI service is connected.</summary>
         public bool IsAvailable => !_disposed && _sender.IsAvailable;
 
-        /// <summary>True while a turn runs.</summary>
-        public bool IsBusy => _current != null;
+        /// <summary>True while a turn runs: this service's own, or a host turn of the shared slot.</summary>
+        public bool IsBusy => _current != null || IsHostTurnActive;
+
+        /// <summary>True while the shared slot runs a host turn (one this service did not start).</summary>
+        public bool IsHostTurnActive => _slot != null && _slot.IsOwnTurnActive;
+
+        /// <summary>The status a chat shows now (see <see cref="StatusChanged"/>).</summary>
+        public ChatAgentStatus Status => CurrentStatus();
+
+        /// <inheritdoc />
+        bool IChatExternalTurnSlot.IsTurnActive => _current != null;
+
+        /// <inheritdoc />
+        string IChatExternalTurnSlot.ActiveTraceId => _current?.TraceId ?? "";
+
+        /// <inheritdoc />
+        bool IChatExternalTurnSlot.StopActiveTurn()
+        {
+            ChatAgentTurn turn = _current;
+            if (turn == null)
+            {
+                return false;
+            }
+
+            turn.Cancel();
+            return true;
+        }
 
         /// <summary>The running turn, or null.</summary>
         public ChatAgentTurn Current => _current;
@@ -465,7 +525,7 @@ namespace CoreAI.ChatOverlay
                 throw new InvalidOperationException(_options.ServiceUnavailableText);
             }
 
-            if (_current != null)
+            if (IsBusy)
             {
                 throw new InvalidOperationException(_options.WithPrefix(_options.BusyText));
             }
@@ -503,21 +563,30 @@ namespace CoreAI.ChatOverlay
             return turn;
         }
 
-        /// <summary>Stops the running turn; false when none runs.</summary>
+        /// <summary>Stops the running turn, this service's own or a host turn of the shared slot; false when none runs.</summary>
         public bool StopCurrent()
         {
             ChatAgentTurn turn = _current;
             if (turn == null)
             {
-                return false;
+                return IsHostTurnActive && _slot.StopActiveTurn();
             }
 
             turn.Cancel();
             return true;
         }
 
-        /// <summary>Applies queued tool events to the running turn's status; call once per frame on the chat's thread.</summary>
+        /// <summary>
+        /// Applies queued tool events to the running turn's status and reports a changed status (also of a host turn and
+        /// of background work); call once per frame on the chat's thread.
+        /// </summary>
         public void Tick()
+        {
+            DrainToolEvents();
+            PublishOverall();
+        }
+
+        private void DrainToolEvents()
         {
             lock (_gate)
             {
@@ -570,7 +639,15 @@ namespace CoreAI.ChatOverlay
             ChatAgentTurn turn = _current;
             _current = null;
             turn?.Abandon();
-            Tracker.EndTurn();
+            if (turn != null)
+            {
+                Tracker.EndTurn();
+            }
+
+            if (_slot != null && ReferenceEquals(_slot.ExternalTurns, this))
+            {
+                _slot.AttachExternalTurns(null);
+            }
             if (_toolEvents != null)
             {
                 _toolEvents.ToolCallStarted -= OnToolStarted;
@@ -585,6 +662,35 @@ namespace CoreAI.ChatOverlay
             {
                 turn.PublishStatus(ChatAgentStatus.From(Tracker, turn.Step));
             }
+
+            PublishOverall();
+        }
+
+        private ChatAgentStatus CurrentStatus()
+        {
+            if (_current != null)
+            {
+                return ChatAgentStatus.From(Tracker, _current.Step);
+            }
+
+            return ChatAgentStatus.From(Tracker, 0, IsHostTurnActive);
+        }
+
+        private void PublishOverall()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            ChatAgentStatus status = CurrentStatus();
+            if (status.SameAs(_published))
+            {
+                return;
+            }
+
+            _published = status;
+            Raise(StatusChanged, status, "StatusChanged");
         }
 
         internal void OnTurnEnded(ChatAgentTurn turn)
@@ -593,6 +699,7 @@ namespace CoreAI.ChatOverlay
             {
                 _current = null;
                 Tracker.EndTurn();
+                PublishOverall();
             }
         }
 

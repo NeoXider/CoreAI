@@ -47,9 +47,15 @@ namespace CoreAI.Ai.SubAgents
     }
 
     /// <summary>
-    /// Orchestrator mode for one conversation: at most one running plan, the queue of player instructions
-    /// that arrived meanwhile, and the delegate tool bound to this session. It is the
+    /// Orchestrator mode for one conversation: in Plan style at most one running plan, the queue of player
+    /// instructions that arrived meanwhile, and the delegate tool bound to this session; in Team style the
+    /// conversation's background sub-agents (<see cref="Team"/>) and the four tools that control them. It is the
     /// <see cref="IOrchestrationStatusSource"/> the HUD and the chat read.
+    /// <para>
+    /// Team style: build each chat turn's request with <see cref="CreateTeamLeadRequest"/>; the
+    /// <see cref="OrchestratorChatDriver"/> also opens the player message's budget window, folds waiting notices
+    /// in and asks for wake turns. Stop is <see cref="Stop"/> as in Plan style.
+    /// </para>
     /// <para>
     /// The host's loop is: <see cref="Submit"/> a player instruction; on
     /// <see cref="InstructionDisposition.Started"/> run the lead turn built by <see cref="CreateLeadRequest"/>
@@ -64,6 +70,7 @@ namespace CoreAI.Ai.SubAgents
         private readonly object _lock = new();
         private readonly ILog _log;
         private readonly ILeadInstructionsProvider _leadInstructions;
+        private readonly SubAgentRunMarker _marker = new();
         private OrchestrationPlan _activePlan;
         private OrchestrationPlan _lastPlan;
         private long _revision;
@@ -97,11 +104,29 @@ namespace CoreAI.Ai.SubAgents
             _leadInstructions = leadInstructions ?? new DefaultLeadInstructionsProvider();
             Queue = new PlayerInstructionQueue(options.MaxQueuedInstructions);
             Queue.Changed += NotifyChanged;
-            Delegator = new SubAgentDelegator(this, registry, subAgentRunner, asyncMarshaler);
+            Delegator = new SubAgentDelegator(this, registry, subAgentRunner, asyncMarshaler, _marker);
             DelegateTool = new DelegateTaskTool(Delegator, registry, options.DelegateToolName);
             DeclareTool = new DeclareTasksTool(this, registry, options.DeclareToolName);
             LeadTools = new ILlmTool[] { DelegateTool, DeclareTool };
+            Team = new SubAgentTeam(ConversationId, options, registry, subAgentRunner, asyncMarshaler, _log, _marker);
+            Team.Changed += NotifyChanged;
+            TeamTools = new ILlmTool[]
+            {
+                new AgentStartTool(Team, registry, options.StartToolName),
+                new AgentSendTool(Team, options.SendToolName),
+                new AgentReadTool(Team, options.ReadToolName),
+                new AgentStopTool(Team, options.StopToolName)
+            };
         }
+
+        /// <summary>The conversation's background sub-agents (Team style).</summary>
+        public SubAgentTeam Team { get; }
+
+        /// <summary>
+        /// The tools a Team-style chat turn gets as request tools: start, send, read and stop. Offer them on the
+        /// chat agent's request only; they are never registered on a role, so a sub-agent request never carries them.
+        /// </summary>
+        public IReadOnlyList<ILlmTool> TeamTools { get; }
 
         /// <summary>The conversation this session serves.</summary>
         public string ConversationId { get; }
@@ -171,7 +196,8 @@ namespace CoreAI.Ai.SubAgents
 
                 revision = Interlocked.Read(ref _revision);
 
-                return new OrchestrationStatus(ConversationId, revision, plan?.Snapshot(), Queue.Snapshot());
+                return new OrchestrationStatus(ConversationId, revision, plan?.Snapshot(), Queue.Snapshot(),
+                    Team.Snapshot());
             }
         }
 
@@ -277,6 +303,73 @@ namespace CoreAI.Ai.SubAgents
             return request;
         }
 
+        /// <summary>
+        /// A Team-style chat turn's request: a copy of the host's own request (role, hint, actor, history, routing and
+        /// progress stay as they are) with <see cref="TeamTools"/> added to its request tools (and to a host allowlist)
+        /// and the Team-style instructions, followed by <paramref name="news"/> (see
+        /// <see cref="SubAgentTeam.FormatNews"/>), appended to its request system instructions. With no sub-agent
+        /// registered nothing is added, so the turn costs exactly what it cost without the mode.
+        /// </summary>
+        public AiTaskRequest CreateTeamLeadRequest(AiTaskRequest hostRequest, string news = "")
+        {
+            if (hostRequest == null)
+            {
+                throw new ArgumentNullException(nameof(hostRequest));
+            }
+
+            AiTaskRequest request = hostRequest.Clone();
+            if (Registry.Definitions.Count == 0)
+            {
+                return request;
+            }
+
+            List<ILlmTool> tools = new();
+            if (hostRequest.RequestTools != null)
+            {
+                foreach (ILlmTool tool in hostRequest.RequestTools)
+                {
+                    if (tool != null && !IsLeadToolName(tool.Name))
+                    {
+                        tools.Add(tool);
+                    }
+                }
+            }
+
+            tools.AddRange(TeamTools);
+            request.RequestTools = tools;
+            if (hostRequest.AllowedToolNames != null)
+            {
+                // WHY: as for the plan tools, a host that narrowed the chat agent's tools still means it to be able
+                // to hand work off, so the team tools join its list instead of vanishing.
+                List<string> allowed = new(hostRequest.AllowedToolNames);
+                foreach (ILlmTool tool in TeamTools)
+                {
+                    if (!allowed.Contains(tool.Name))
+                    {
+                        allowed.Add(tool.Name);
+                    }
+                }
+
+                request.AllowedToolNames = allowed.ToArray();
+            }
+
+            OrchestrationBudget budget = Options.CreateBudget();
+            string instructions = _leadInstructions.BuildInstructions(new LeadInstructionsContext(
+                Registry.Definitions,
+                DelegateTool.Name,
+                DeclareTool.Name,
+                budget.MaxSubAgentCalls,
+                budget.MaxParallelSubAgents,
+                OrchestrationStyle.Team,
+                TeamTools[0].Name,
+                TeamTools[1].Name,
+                TeamTools[2].Name,
+                TeamTools[3].Name))?.Trim() ?? "";
+            request.RequestSystemInstructions = JoinBlocks(hostRequest.RequestSystemInstructions, instructions,
+                news);
+            return request;
+        }
+
         /// <summary>Starts a plan for <paramref name="goal"/>; throws when one is already running.</summary>
         public OrchestrationPlan BeginPlan(string goal, SubAgentParentContext parent, string planId = null)
         {
@@ -352,7 +445,8 @@ namespace CoreAI.Ai.SubAgents
         /// </summary>
         public bool Stop(bool clearQueue = true)
         {
-            return StopCore(OrchestrationStopReason.PlayerStop, clearQueue);
+            bool stopped = StopCore(OrchestrationStopReason.PlayerStop, clearQueue);
+            return Team.StopAll() || stopped;
         }
 
         /// <summary>Stops everything and detaches the queue observer.</summary>
@@ -369,7 +463,9 @@ namespace CoreAI.Ai.SubAgents
             }
 
             StopCore(OrchestrationStopReason.SessionDisposed, true);
+            Team.Dispose();
             Queue.Changed -= NotifyChanged;
+            Team.Changed -= NotifyChanged;
         }
 
         private bool StopCore(OrchestrationStopReason reason, bool clearQueue)
@@ -428,8 +524,36 @@ namespace CoreAI.Ai.SubAgents
 
         private bool IsLeadToolName(string name)
         {
-            return string.Equals(name, DelegateTool.Name, StringComparison.Ordinal) ||
-                   string.Equals(name, DeclareTool.Name, StringComparison.Ordinal);
+            if (string.Equals(name, DelegateTool.Name, StringComparison.Ordinal) ||
+                string.Equals(name, DeclareTool.Name, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            foreach (ILlmTool tool in TeamTools)
+            {
+                if (string.Equals(name, tool.Name, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static string JoinBlocks(params string[] blocks)
+        {
+            List<string> parts = new(blocks.Length);
+            foreach (string block in blocks)
+            {
+                string trimmed = block?.Trim() ?? "";
+                if (trimmed.Length > 0)
+                {
+                    parts.Add(trimmed);
+                }
+            }
+
+            return string.Join("\n\n", parts);
         }
 
         private OrchestrationPlan DetachActivePlan()

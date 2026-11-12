@@ -32,6 +32,7 @@ namespace CoreAI.ChatOverlay
         private bool _started;
         private bool _disposed;
         private bool _steppedAside;
+        private bool _visibleAtLastTick;
 
         /// <summary>
         /// Creates the entry point; <paramref name="models"/>, <paramref name="gate"/>, <paramref name="logger"/> and
@@ -172,7 +173,15 @@ namespace CoreAI.ChatOverlay
                 PollKeys(Time.frameCount);
             }
 
+            // WHY: this tick runs ahead of MonoBehaviour.Update, where the world reads its input, so the Enter or
+            // Escape that closed the input since the last tick would otherwise reach the game in this same frame.
+            if (_visibleAtLastTick && !_controller.IsInputVisible)
+            {
+                _controller.HoldKeyboardThroughNextTick();
+            }
+
             _controller.Tick();
+            _visibleAtLastTick = _controller.IsInputVisible;
         }
 
         /// <inheritdoc />

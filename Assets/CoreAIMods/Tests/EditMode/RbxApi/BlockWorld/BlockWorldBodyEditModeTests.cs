@@ -123,6 +123,63 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
             _world.AssertHealthy("blockworld_build");
         }
 
+        /// <summary>A press of W as a browser's key repeat would deliver it: a Began with no End before it.</summary>
+        private void RepeatW()
+        {
+            RbxEnumRegistry enums = _world.Roblox.Enums;
+            Assert.IsTrue(enums.TryGet("KeyCode", out RbxEnum keyCodes));
+            Assert.IsTrue(enums.TryGet("UserInputType", out RbxEnum types));
+            Assert.IsTrue(enums.TryGet("UserInputState", out RbxEnum states));
+            Assert.IsTrue(keyCodes.TryGetItemByValue(KeyW, out RbxEnumItem w));
+            Assert.IsTrue(types.TryGetItem("Keyboard", out RbxEnumItem keyboard));
+            Assert.IsTrue(states.TryGetItem("Begin", out RbxEnumItem begin));
+            _world.Roblox.UserInputService.InputBegan.Fire(
+                new RbxInputObject(w, keyboard, begin, RbxVector3.Zero, RbxVector3.Zero), false);
+        }
+
+        [Test]
+        public void P6_Body_ASprintByWTwice_LastsWhileWIsHeld_ThroughKeyRepeats()
+        {
+            StartWalking();
+            _world.Tap(KeyW);
+            _world.Input.PressKey(KeyW);
+            _world.Frame(2);
+            // WHY half a second, then every 33 ms: a browser repeats a held key after about that delay, at about that rate.
+            _world.Frame(30);
+            RepeatW();
+            _world.Frame(1);
+            double afterFirstRepeat = WalkSpeed();
+            for (int repeat = 0; repeat < 60; repeat++)
+            {
+                RepeatW();
+                _world.Frame(2);
+            }
+
+            double afterTwoSeconds = WalkSpeed();
+            object shown = _world.Attribute("BlockWorldSprinting");
+
+            Assert.AreEqual(22d, afterFirstRepeat, 0.01d, "a repeat of the held W is not a new tap and keeps the sprint");
+            Assert.AreEqual(22d, afterTwoSeconds, 0.01d, "the sprint lasts as long as W is held");
+            Assert.AreEqual(true, shown);
+            _world.AssertHealthy("blockworld_build");
+        }
+
+        [TestCase(20, 22d)]
+        [TestCase(36, 17d)]
+        public void P6_Body_WTwice_SprintsWhenTheSecondPressComesWithinFourTenthsOfASecond(int framesBetween, double speed)
+        {
+            StartWalking();
+            _world.Input.PressKey(KeyW);
+            _world.Frame(framesBetween / 2);
+            _world.Input.ReleaseKey(KeyW);
+            _world.Frame(framesBetween - framesBetween / 2);
+            _world.Input.PressKey(KeyW);
+            _world.Frame(2);
+
+            Assert.AreEqual(speed, WalkSpeed(), 0.01d, framesBetween + " frames between the presses at 60 a second");
+            _world.AssertHealthy("blockworld_build");
+        }
+
         [Test]
         public void P6_Body_LeftControlStandingStill_OrInWater_DoesNotSprint_NegativeTwin()
         {

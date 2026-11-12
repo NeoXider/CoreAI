@@ -1,12 +1,12 @@
 --[[@coreai
 id: blockworld_hud
 name: Block World 3 - HUD and hotbar
-version: 1.2.4
+version: 1.2.5
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo. The whole interface, made in this mod from UXML and USS text through UxmlService - a crosshair, a nine-slot hotbar (keys 1-9, the mouse wheel or a click on a slot), a key legend, the clock, creative or survival, your health in survival, a placed and broken counter, the block counts in survival, the autopilot banner, short notices from the other Block World mods and the Building the world veil a new player waits behind while the first view is made. Choosing a slot publishes the workspace attribute BlockWorldSelected, which the build and torch mods read. Hot-reload it to restyle the HUD live.
+description: Part of the Block World demo. The whole interface, made in this mod from UXML and USS text through UxmlService - a crosshair, a nine-slot hotbar (keys 1-9, the mouse wheel or a click on a slot), a key legend, the clock, creative or survival, your health in survival, a placed and broken counter, a Sprinting mark while you sprint, whether a world kept between starts is saved (CoreAIWorldSaveState: Saved, Saving..., or Not saved and why in a warning colour), the block counts in survival, the autopilot banner, short notices from the other Block World mods and the Building the world veil a new player waits behind while the first view is made. Choosing a slot publishes the workspace attribute BlockWorldSelected, which the build and torch mods read. Hot-reload it to restyle the HUD live.
 ]]
 
 -- The hotbar is the single owner of "what is in your hand": a slot is chosen by number key, wheel or click,
@@ -70,8 +70,10 @@ local UXML = [[
   <ui:VisualElement name="status" class="status" picking-mode="Ignore">
     <ui:Label name="clock" class="chip" text="--:--" picking-mode="Ignore" />
     <ui:Label name="mode" class="chip" text="Creative" picking-mode="Ignore" />
+    <ui:Label name="sprint" class="chip sprint is-hidden" text="Sprinting" picking-mode="Ignore" />
     <ui:Label name="health" class="chip health is-hidden" text="" picking-mode="Ignore" />
     <ui:Label name="counter" class="chip" text="Placed 0  Broken 0" picking-mode="Ignore" />
+    <ui:Label name="save" class="chip save is-hidden" text="" picking-mode="Ignore" />
   </ui:VisualElement>
   <ui:Label name="autopilot" class="banner is-hidden" text="" picking-mode="Ignore" />
   <ui:Label name="notice" class="notice is-hidden" text="" picking-mode="Ignore" />
@@ -118,6 +120,10 @@ local USS = [[
 .legend-key { width: 110px; font-size: 16px; color: rgb(255, 214, 120); -unity-font-style: bold; }
 .legend-text { font-size: 16px; color: rgb(240, 240, 240); }
 .health { color: rgb(255, 150, 150); }
+.sprint { background-color: rgba(214, 126, 24, 0.9); color: rgb(255, 255, 255); }
+.save { color: rgba(240, 240, 240, 0.7); -unity-font-style: normal; font-size: 14px; }
+.save.is-failed { background-color: rgba(150, 24, 24, 0.85); color: rgb(255, 255, 255); -unity-font-style: bold; }
+.save.is-warned { background-color: rgba(176, 120, 20, 0.85); color: rgb(255, 255, 255); }
 .health.is-low { background-color: rgba(150, 24, 24, 0.85); color: rgb(255, 255, 255); }
 .veil { position: absolute; left: 0; top: 0; right: 0; bottom: 0; align-items: center; justify-content: center;
   background-color: rgb(184, 206, 207); }
@@ -140,6 +146,8 @@ for index = 1, #ITEMS do
 end
 local clockLabel = hud:GetElement("clock")
 local modeLabel = hud:GetElement("mode")
+local sprintLabel = hud:GetElement("sprint")
+local saveLabel = hud:GetElement("save")
 local healthLabel = hud:GetElement("health")
 local counterLabel = hud:GetElement("counter")
 local noticeLabel = hud:GetElement("notice")
@@ -267,6 +275,48 @@ for _, name in ipairs({ "BlockWorldCreative", "BlockWorldPlaced", "BlockWorldBro
     "BlockWorldMaxHealth" }) do
     workspace:GetAttributeChangedSignal(name):Connect(refreshStatus)
 end
+
+-- WHY a mark: a sprint is 1.3 times the walk, which is easy to miss without one (the field of view widens too).
+local function refreshSprint()
+    if workspace:GetAttribute("BlockWorldSprinting") == true then
+        sprintLabel:RemoveClass("is-hidden")
+    else
+        sprintLabel:AddClass("is-hidden")
+    end
+end
+workspace:GetAttributeChangedSignal("BlockWorldSprinting"):Connect(refreshSprint)
+
+-- Whether leaving is safe: the play world says how far the kept world's record is (CoreAIWorldSaveState, absent
+-- when the world is not kept) and why it is not saved, or what to beware of while it is (CoreAIWorldSaveNote, such
+-- as another tab of the game being open).
+local SAVE_TEXT = { saved = "Saved", pending = "Saving...", saving = "Saving..." }
+local function refreshSave()
+    local state = workspace:GetAttribute("CoreAIWorldSaveState")
+    if type(state) ~= "string" or state == "" then
+        saveLabel:AddClass("is-hidden")
+        return
+    end
+    saveLabel:RemoveClass("is-hidden")
+    local note = workspace:GetAttribute("CoreAIWorldSaveNote")
+    note = type(note) == "string" and note or ""
+    if state == "failed" then
+        setText(saveLabel, "save", note ~= "" and "Not saved: " .. note or "Not saved")
+        saveLabel:AddClass("is-failed")
+        saveLabel:RemoveClass("is-warned")
+        return
+    end
+    local text = SAVE_TEXT[state] or state
+    setText(saveLabel, "save", note ~= "" and text .. " - " .. note or text)
+    saveLabel:RemoveClass("is-failed")
+    if note ~= "" then
+        saveLabel:AddClass("is-warned")
+    else
+        saveLabel:RemoveClass("is-warned")
+    end
+end
+for _, name in ipairs({ "CoreAIWorldSaveState", "CoreAIWorldSaveNote" }) do
+    workspace:GetAttributeChangedSignal(name):Connect(refreshSave)
+end
 for _, item in ipairs(ITEMS) do
     workspace:GetAttributeChangedSignal("BlockWorldCount_" .. item.id):Connect(refreshStatus)
 end
@@ -309,5 +359,7 @@ end)
 
 refreshClock()
 refreshStatus()
+refreshSprint()
+refreshSave()
 refreshAutopilot()
 refreshVeil()

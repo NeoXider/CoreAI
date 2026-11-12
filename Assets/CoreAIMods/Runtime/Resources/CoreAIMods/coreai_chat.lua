@@ -30,10 +30,7 @@ local CONFIG = {
 	TextSize = 17,
 	Margin = 16,
 	LineGap = 4,
-	-- WHY 0.56: the average advance of the host font in em; the line height estimate rounds up, so a line rather
-	-- shows a little air than clips.
-	CharacterWidthEm = 0.56,
-	LineHeightEm = 1.3,
+	LinePadding = 4,
 	DisplayOrder = 90,
 	PlayerName = "You",
 	AssistantName = "AI",
@@ -170,19 +167,8 @@ local lineCounter = 0
 local open = false
 local stickToBottom = true
 
-local function estimateHeight(text)
-	local perLine = math.max(8, math.floor((CONFIG.Width - 12) / (CONFIG.TextSize * CONFIG.CharacterWidthEm)))
-	local rows = 0
-	for paragraph in (text .. "\n"):gmatch("([^\n]*)\n") do
-		rows = rows + math.max(1, math.ceil(#paragraph / perLine))
-	end
-	return math.max(1, rows) * math.ceil(CONFIG.TextSize * CONFIG.LineHeightEm) + 6
-end
-
 local function render(line)
-	local shown = line.speaker ~= "" and (line.speaker .. ": " .. line.text) or line.text
-	line.label.Text = shown
-	line.label.Size = UDim2.fromOffset(CONFIG.Width - 8, estimateHeight(shown))
+	line.label.Text = line.speaker ~= "" and (line.speaker .. ": " .. line.text) or line.text
 end
 
 local function scrollToBottom()
@@ -216,6 +202,15 @@ local function addLine(kind, speaker, text, streaming)
 	label.TextWrapped = true
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.TextYAlignment = Enum.TextYAlignment.Top
+	-- The width is the feed's, the height grows to the wrapped text.
+	label.Size = UDim2.new(1, -8, 0, 0)
+	label.AutomaticSize = Enum.AutomaticSize.Y
+	local padding = Instance.new("UIPadding")
+	padding.PaddingLeft = UDim.new(0, CONFIG.LinePadding)
+	padding.PaddingRight = UDim.new(0, CONFIG.LinePadding)
+	padding.PaddingTop = UDim.new(0, CONFIG.LinePadding / 2)
+	padding.PaddingBottom = UDim.new(0, CONFIG.LinePadding / 2)
+	padding.Parent = label
 	label:SetAttribute("Kind", kind)
 	local line = {
 		kind = kind,
@@ -265,9 +260,16 @@ local function formatTokens(tokens)
 	return tostring(rounded)
 end
 
-local function statusText(state, now)
-	local s = state.status or {}
+-- The status line follows the assistant as a whole, so turns the host runs (a mod's self-repair, an orchestrator
+-- wake) and the sub-agents working in the background show here too, not only the turns this chat sent.
+local liveStatus = assistant.Status
+local statusStarted = os.clock()
+
+local function statusText(s, started, now)
 	local texts = CONFIG.Status
+	if s.State == "Idle" then
+		return s.Background or ""
+	end
 	local tool = s.Tool or ""
 	local kind = s.State or "Thinking"
 	local text
@@ -290,7 +292,7 @@ local function statusText(state, now)
 	else
 		text = texts.Thinking
 	end
-	local elapsed = now - state.started
+	local elapsed = now - started
 	if elapsed >= texts.ShowAfterSeconds then
 		text = text .. texts.Elapsed:format(math.floor(elapsed))
 		if (s.Tokens or 0) > 0 then
@@ -305,7 +307,7 @@ end
 
 local shownStatus = ""
 local function refreshStatus()
-	local text = current and statusText(current, os.clock()) or ""
+	local text = liveStatus and statusText(liveStatus, statusStarted, os.clock()) or ""
 	if text == shownStatus then
 		return
 	end
@@ -317,6 +319,14 @@ end
 local function assistantSpeaker()
 	return CONFIG.AssistantName
 end
+
+assistant.StatusChanged:Connect(function(newStatus)
+	if newStatus.State ~= "Idle" and (liveStatus == nil or liveStatus.State == "Idle") then
+		statusStarted = os.clock()
+	end
+	liveStatus = newStatus
+	refreshStatus()
+end)
 
 local function endTurn(state, result)
 	if current ~= state then
@@ -359,7 +369,7 @@ local function sendToAssistant(text)
 		addLine("error", "", tostring(turn))
 		return
 	end
-	local state = { turn = turn, started = os.clock(), status = turn.Status, line = nil }
+	local state = { turn = turn, line = nil }
 	current = state
 	turn.TextAdded:Connect(function(delta, startsNewMessage)
 		if current ~= state then
@@ -373,12 +383,6 @@ local function sendToAssistant(text)
 			state.line = addLine("assistant", assistantSpeaker(), "", true)
 		end
 		appendToLine(state.line, delta)
-	end)
-	turn.StatusChanged:Connect(function(newStatus)
-		if current == state then
-			state.status = newStatus
-			refreshStatus()
-		end
 	end)
 	turn.Ended:Connect(function(result)
 		endTurn(state, result)
@@ -679,6 +683,7 @@ end)
 local KINDS = {
 	["CoreAI.Command"] = "command",
 	["CoreAI.Error"] = "error",
+	["CoreAI.Assistant"] = "assistant",
 }
 
 TextChatService.MessageReceived:Connect(function(message)

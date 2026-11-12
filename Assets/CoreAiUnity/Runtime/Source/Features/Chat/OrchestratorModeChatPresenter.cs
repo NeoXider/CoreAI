@@ -7,12 +7,13 @@ using VContainer.Unity;
 namespace CoreAI.Chat
 {
     /// <summary>
-    /// The Unity side of orchestrator mode's HUD. It forwards every <c>CoreAi</c> tool-call event to
-    /// <see cref="OrchestratorChatDriver.RecordActivity"/> (a sub-agent's steps are counted for the HUD and re-arm
-    /// its own and its lead's idle deadline), and, when the in-world chat overlay is registered, drives
-    /// <see cref="OrchestrationChatOverlayBridge"/> every frame: the plan line on the overlay's status line, a feed
-    /// line per sub-agent task start and finish, and the <c>/orchestrator</c> command. Event handlers only record;
-    /// the overlay is touched on the main thread in <see cref="Tick"/>.
+    /// The Unity side of orchestrator mode's HUD. It forwards every <c>CoreAi</c> tool-call event, with its tool name
+    /// and outcome, to <see cref="OrchestratorChatDriver.RecordToolActivity"/> (a sub-agent's steps are counted for
+    /// the HUD, land in a Team-style sub-agent's transcript and re-arm its own and its lead's idle deadline), and,
+    /// when the in-world chat overlay is registered, drives <see cref="OrchestrationChatOverlayBridge"/> every frame:
+    /// the plan or sub-agent line on the overlay's status line, a feed line per sub-agent change, the wake turns a
+    /// sub-agent's completion asks for (as overlay host turns), and the <c>/orchestrator</c> and <c>/agents</c>
+    /// commands. Event handlers only record; the overlay is touched on the main thread in <see cref="Tick"/>.
     /// </summary>
     public sealed class OrchestratorModeChatPresenter : IStartable, ITickable, IDisposable
     {
@@ -32,7 +33,7 @@ namespace CoreAI.Chat
             if (overlay != null)
             {
                 _bridge = new OrchestrationChatOverlayBridge(driver, overlay.Status, () => overlay.ActiveTraceId,
-                    overlay);
+                    overlay, overlay.TryStartHostTurn, () => overlay.IsTurnActive);
             }
         }
 
@@ -72,17 +73,17 @@ namespace CoreAI.Chat
 
         private void OnToolStarted(LlmToolCallStarted evt)
         {
-            _driver.RecordActivity(evt.TraceId);
+            _driver.RecordToolActivity(evt.TraceId, evt.ToolName, null);
         }
 
         private void OnToolCompleted(LlmToolCallCompleted evt)
         {
-            _driver.RecordActivity(evt.TraceId);
+            _driver.RecordToolActivity(evt.TraceId, evt.ToolName, true);
         }
 
         private void OnToolFailed(LlmToolCallFailed evt)
         {
-            _driver.RecordActivity(evt.TraceId);
+            _driver.RecordToolActivity(evt.TraceId, evt.ToolName, false);
         }
     }
 }

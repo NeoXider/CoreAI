@@ -214,7 +214,7 @@ frame.BackgroundTransparency = 0.5");
 local function try(key, fn) local ok, err = pcall(fn) store_set(key, tostring(ok) .. '|' .. tostring(err)) end
 try('input', function() return frame.InputBegan end)
 try('tween', function() frame:TweenPosition(UDim2.new(), 'Out', 'Quad', 1) end)
-try('bounds', function() return frame.Score.TextBounds end)
+try('bounds', function() return frame.Score.TextFits end)
 try('setcore', function() game:GetService('StarterGui'):SetCore('SendNotification', {}) end)
 try('gradient', function() Instance.new('UIGradient') end)
 try('readonly', function() frame.AbsoluteSize = Vector2.new(1, 1) end)");

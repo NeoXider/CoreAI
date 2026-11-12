@@ -1,12 +1,12 @@
 --[[@coreai
 id: blockworld_build
 name: Block World 2 - Build
-version: 1.4.0
+version: 1.4.1
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo. Breaking and placing blocks at the crosshair: a thin outline shows the block you look at, left click breaks it, right click places the hotbar block on the face you look at, holding a button repeats, and nothing happens beyond a reach of five blocks. Bedrock cannot be broken and a block is never placed inside you. G switches between creative (endless blocks) and survival (you place what you broke, and a tree trunk gives planks); you start in first person, as in Minecraft, and V switches to third person behind your character and back. Left Control held, or W tapped twice, sprints while you walk forward (1.3 times the walk; twice the flying speed in the air), never while flying down, in water or with the chat open. Publishes the crosshair cell as workspace attributes (CrosshairCell, CrosshairPlaceCell, CrosshairNormal) so the AI and other mods build where you look, and BuildHereCell: the cell "here" is, the crosshair's place cell or, when it points at nothing within reach, the ground three cells ahead.
+description: Part of the Block World demo. Breaking and placing blocks at the crosshair: a thin outline shows the block you look at, left click breaks it, right click places the hotbar block on the face you look at, holding a button repeats, and nothing happens beyond a reach of five blocks. Bedrock cannot be broken and a block is never placed inside you. G switches between creative (endless blocks) and survival (you place what you broke, and a tree trunk gives planks); you start in first person, as in Minecraft, and V switches to third person behind your character and back. Left Control held, or W tapped twice (the second press within 0.4 s of the first; in a browser Ctrl+W closes the tab, so W twice is the sprint there), sprints for as long as W stays held (1.3 times the walk; twice the flying speed in the air), never while flying down, in water or with the chat open; BlockWorldSprinting says when, and the HUD and the field of view show it. Publishes the crosshair cell as workspace attributes (CrosshairCell, CrosshairPlaceCell, CrosshairNormal) so the AI and other mods build where you look, and BuildHereCell: the cell "here" is, the crosshair's place cell or, when it points at nothing within reach, the ground three cells ahead.
 ]]
 
 -- The target is found once per frame: a ray from the camera along its look direction (the crosshair is the
@@ -407,13 +407,18 @@ end)
 -- ---- sprinting --------------------------------------------------------------------------------------------
 -- Left Control held, or W tapped twice, while walking forward: a sprint at 1.3 times the walk, and twice the
 -- flying speed (the host flies at twice WalkSpeed). Not while flying down, in water, or with the chat open (the chat
--- takes the keys, so they never reach here).
+-- takes the keys, so they never reach here). A sprint begun by W twice lasts while W stays held: whether W is held
+-- is read from the keyboard every frame, and a press of W that arrives while W is already held (a key repeat, a
+-- second keyboard) is not a tap.
 
 local SPRINT_FACTOR = 22 / 17   -- 22 studs a second from 17
 local FLY_SPRINT_FACTOR = 2
-local DOUBLE_TAP_SECONDS = 0.3
+-- WHY 0.4: Minecraft takes about 0.35 s between the two presses, and a browser frame or two of delay should not
+-- cost the sprint.
+local DOUBLE_TAP_SECONDS = 0.4
 
 local forwardHeld, sprintKeyHeld, sprintTapped, shiftHeld = false, false, false, false
+local forwardDown = false       -- W (or Up) went down and has not been seen up since
 local lastForwardTap = -math.huge
 local baseSpeed, sprintSpeed, sprintHumanoid = nil, nil, nil
 
@@ -426,6 +431,11 @@ end
 
 -- WHY the walk speed is read, not assumed: the world mod gives the body its walk, and a sprint returns to it.
 local function updateSprint()
+    -- WHY the keyboard's own state: an InputEnded missed while the chat held the keys must not leave W held.
+    forwardHeld = forwardDown and (UserInputService:IsKeyDown(Enum.KeyCode.W) or UserInputService:IsKeyDown(Enum.KeyCode.Up))
+    if not forwardHeld then
+        forwardDown, sprintTapped = false, false
+    end
     local character = localCharacter()
     local humanoid = character and character:FindFirstChildOfClass("Humanoid")
     local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -458,13 +468,13 @@ end
 
 local function onMoveKey(keyCode, down, gameProcessed)
     if keyCode == Enum.KeyCode.W or keyCode == Enum.KeyCode.Up then
-        if down and not gameProcessed then
+        if down and not gameProcessed and not forwardDown then
             local now = time()
             sprintTapped = now - lastForwardTap <= DOUBLE_TAP_SECONDS
             lastForwardTap = now
-            forwardHeld = true
+            forwardDown, forwardHeld = true, true
         elseif not down then
-            forwardHeld = false
+            forwardDown, forwardHeld = false, false
             sprintTapped = false
         end
     elseif keyCode == Enum.KeyCode.LeftControl then

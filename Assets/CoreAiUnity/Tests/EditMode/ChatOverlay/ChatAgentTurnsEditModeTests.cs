@@ -293,6 +293,174 @@ namespace CoreAI.Tests.EditMode.ChatOverlay
             Assert.AreEqual(0, harness.Controller.Feed.Lines.Count, "nor writes into the overlay's feed");
         }
 
+        private static LlmStreamChunk Composing(int characters)
+        {
+            return new LlmStreamChunk
+            {
+                GenerationInProgress = true, ComposingToolName = "execute_lua", ComposingToolCharacters = characters
+            };
+        }
+
+        [Test]
+        public void Overlay_AComposingChunkRightAfterAToolFinished_ShowsComposingAtOnce()
+        {
+            using ChatOverlayHarness harness = new();
+            harness.Controller.Submit("build a tower");
+            string trace = harness.Controller.ActiveTraceId;
+            harness.ToolEvents.Start(trace, "execute_lua");
+            harness.Controller.Tick();
+
+            harness.ToolEvents.Complete(trace, "execute_lua");
+            harness.Sender.Observer.OnChunk(Composing(300));
+            harness.Controller.Tick();
+
+            Assert.AreEqual(AgentStatusKind.ComposingTool, harness.View.StatusKind,
+                "the queued completion is applied before the chunk, so the next call shows as being written");
+        }
+
+        [Test]
+        public void Turns_AComposingChunkRightAfterAToolFinished_ShowsComposingAtOnce()
+        {
+            ChatAgentTurn turn = _turns.Start("build");
+            _tools.Start(turn.TraceId, "execute_lua");
+            _turns.Tick();
+
+            _tools.Complete(turn.TraceId, "execute_lua");
+            _sender.Observer.OnChunk(Composing(300));
+
+            Assert.AreEqual(AgentStatusKind.ComposingTool, turn.Status.State);
+            Assert.AreEqual(1, turn.Status.Step);
+        }
+
+        [Test]
+        public void SharedSlot_AScriptChatsTurn_HoldsTheOverlaysSlot()
+        {
+            using ChatOverlayHarness harness = new();
+            using ChatAgentTurns turns = new(harness.Sender, harness.Agents, null, harness.ToolEvents, null, null,
+                () => harness.Clock.NowSeconds, harness.Controller);
+
+            ChatAgentTurn turn = turns.Start("build a tower");
+
+            Assert.IsTrue(harness.Controller.IsTurnActive, "the overlay sees the script chat's turn");
+            Assert.AreEqual(turn.TraceId, harness.Controller.ActiveTraceId, "orchestration finds the turn by it");
+            Assert.IsFalse(harness.Controller.TryStartHostTurn(new ChatOverlayHostTurnRequest { Text = "repair" }),
+                "a host turn waits for it");
+            harness.Controller.Submit("hello");
+            Assert.AreEqual(1, harness.Sender.Requests.Count, "a line typed in the overlay is refused as busy");
+
+            Assert.IsTrue(harness.Controller.StopActiveTurn(), "the overlay's /stop stops it");
+            Assert.IsFalse(turn.IsActive);
+            Assert.IsFalse(harness.Controller.IsTurnActive);
+        }
+
+        [Test]
+        public void SharedSlot_AHostTurn_HoldsTheSlotForTheScriptChat_AndItsStatusIsReported()
+        {
+            using ChatOverlayHarness harness = new();
+            using ChatAgentTurns turns = new(harness.Sender, harness.Agents, null, harness.ToolEvents, null, null,
+                () => harness.Clock.NowSeconds, harness.Controller);
+            List<ChatAgentStatus> statuses = new();
+            turns.StatusChanged += statuses.Add;
+
+            Assert.IsTrue(harness.Controller.TryStartHostTurn(new ChatOverlayHostTurnRequest
+            {
+                Text = "repair the mod", Announcement = "Repairing a mod."
+            }));
+            turns.Tick();
+
+            Assert.IsTrue(turns.IsBusy);
+            Assert.IsTrue(turns.IsHostTurnActive);
+            Assert.IsTrue(statuses[statuses.Count - 1].Host);
+            Assert.AreEqual(AgentStatusKind.Thinking, statuses[statuses.Count - 1].State);
+            Assert.Throws<InvalidOperationException>(() => turns.Start("hello"), "the player's turn waits for it");
+
+            harness.Sender.Observer.OnChunk(Composing(256));
+            turns.Tick();
+            Assert.AreEqual(AgentStatusKind.ComposingTool, statuses[statuses.Count - 1].State,
+                "the host turn's own progress reaches the script chat");
+
+            Assert.IsTrue(turns.StopCurrent(), "the script chat's /stop stops a host turn too");
+            turns.Tick();
+            Assert.IsFalse(turns.IsBusy);
+            Assert.AreEqual(AgentStatusKind.Idle, statuses[statuses.Count - 1].State);
+        }
+
+        [Test]
+        public void SharedSlot_BackgroundWork_IsReportedWhileIdle()
+        {
+            using ChatOverlayHarness harness = new();
+            using ChatAgentTurns turns = new(harness.Sender, harness.Agents, null, harness.ToolEvents, null, null,
+                () => harness.Clock.NowSeconds, harness.Controller);
+            List<ChatAgentStatus> statuses = new();
+            turns.StatusChanged += statuses.Add;
+
+            harness.Controller.Status.SetBackgroundDetail("builder-1 working (2 steps)");
+            turns.Tick();
+
+            ChatAgentStatus idle = statuses[statuses.Count - 1];
+            Assert.AreEqual(AgentStatusKind.Idle, idle.State);
+            Assert.AreEqual("builder-1 working (2 steps)", idle.Background);
+            Assert.IsFalse(idle.Host);
+
+            int count = statuses.Count;
+            turns.Tick();
+            Assert.AreEqual(count, statuses.Count, "twin: nothing changed, nothing is reported");
+        }
+
+        [Test]
+        public void SharedSlot_TheOrchestratorsDetail_ReachesTheScriptChatsTurn()
+        {
+            using ChatOverlayHarness harness = new();
+            using ChatAgentTurns turns = new(harness.Sender, harness.Agents, null, harness.ToolEvents, null, null,
+                () => harness.Clock.NowSeconds, harness.Controller);
+            ChatAgentTurn turn = turns.Start("build a castle");
+
+            harness.Controller.Status.SetDetail("builder: walls 2/5");
+            turns.Tick();
+
+            Assert.AreEqual("builder: walls 2/5", turns.Status.Detail,
+                "the orchestrator writes into the shared tracker for the slot's active trace");
+            Assert.AreEqual(turn.TraceId, harness.Controller.ActiveTraceId);
+        }
+
+        [Test]
+        public void KeyboardHold_HeldThroughTheNextTick_OutlastsTheOpenInputByOneTick()
+        {
+            using ChatOverlayHarness harness = new();
+            List<bool> holds = new();
+            harness.Controller.KeyboardHoldChanged += holds.Add;
+
+            harness.Controller.OpenInput();
+            Assert.IsTrue(harness.Controller.HoldsKeyboard);
+            harness.Controller.Submit("");
+            harness.Controller.HoldKeyboardThroughNextTick();
+            harness.Controller.Tick();
+
+            Assert.IsFalse(harness.Controller.IsInputOpen, "the input state drops on the first tick, as before");
+            Assert.IsTrue(harness.Controller.HoldsKeyboard,
+                "the keyboard stays held, so the closing Enter is the chat's in the world's input step of this frame");
+
+            harness.Controller.Tick();
+            Assert.IsFalse(harness.Controller.HoldsKeyboard);
+            CollectionAssert.AreEqual(new[] { true, false }, holds);
+        }
+
+        [Test]
+        public void Negative_KeyboardHold_WithoutTheExtension_EndsWithTheInputState_AndAnOpenInputIgnoresIt()
+        {
+            using ChatOverlayHarness harness = new();
+
+            harness.Controller.OpenInput();
+            harness.Controller.HoldKeyboardThroughNextTick();
+            harness.Controller.Submit("");
+            harness.Controller.Tick();
+
+            Assert.IsFalse(harness.Controller.HoldsKeyboard, "an extension asked while open is not kept for the close");
+            harness.Controller.HoldKeyboardThroughNextTick();
+            harness.Controller.Tick();
+            Assert.IsFalse(harness.Controller.HoldsKeyboard, "twin: nor once the hold has ended");
+        }
+
         [Test]
         public void SurfaceSwitch_ClaimsNest_AndChangedFiresOnFlipsOnly()
         {

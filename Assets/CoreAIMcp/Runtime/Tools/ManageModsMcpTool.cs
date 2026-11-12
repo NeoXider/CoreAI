@@ -48,6 +48,19 @@ namespace CoreAI.Mcp.Tools
         public ManageModsMcpTool(ILuaModRuntime runtime, ICoreAISettings settings, ILog logger,
             LuaCapabilities grantedCapabilities, IActorIdentityProvider actorIdentityProvider,
             LuaGenerationRateLimiter rateLimiter, CoreAI.Mods.Folders.IModFolderListStore folderList)
+            : this(runtime, settings, logger, grantedCapabilities, actorIdentityProvider, rateLimiter, folderList, null)
+        {
+        }
+
+        /// <summary>
+        /// The tool behind the same world mutation gate as the in-game <c>manage_mods</c>: a load, reload or edit
+        /// waits for the backup autosave of the world before it runs and is serialized with every other world change,
+        /// so an MCP change is as undoable as the in-game agent's. Null runs ungated (no backup).
+        /// </summary>
+        public ManageModsMcpTool(ILuaModRuntime runtime, ICoreAISettings settings, ILog logger,
+            LuaCapabilities grantedCapabilities, IActorIdentityProvider actorIdentityProvider,
+            LuaGenerationRateLimiter rateLimiter, CoreAI.Mods.Folders.IModFolderListStore folderList,
+            CoreAI.Mods.WorldPackages.IConfirmedWorldMutationGate worldMutationGate)
         {
             if (runtime == null)
             {
@@ -67,7 +80,7 @@ namespace CoreAI.Mcp.Tools
                 allowModManagement: true,
                 actorIdentityProvider: actorIdentityProvider,
                 roleId: BuiltInAgentRoleIds.Programmer,
-                worldMutationGate: null,
+                worldMutationGate: worldMutationGate,
                 rateLimiter: rateLimiter,
                 folderList: folderList);
         }

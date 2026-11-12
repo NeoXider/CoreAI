@@ -79,7 +79,7 @@ namespace CoreAI.Mods.Rbx.Instances
             const string touch = "touch gestures land with the touch slice; use MouseButton1Click or Activated";
             const string tween =
                 "use TweenService:Create(object, TweenInfo.new(time, Enum.EasingStyle.Quad), {Position = goal}):Play()";
-            const string measure = "the host measures no text for scripts yet; size the box yourself or use TextScaled";
+            const string measure = "compare TextBounds with AbsoluteSize, or let AutomaticSize grow the box to its text";
             const string haptics = "haptics are a platform concern CoreAI does not model";
             const string content = "use the Image property with a registered image key";
             catalog.RegisterKnownUnimplementedMembers("GuiBase2d",
@@ -134,7 +134,6 @@ namespace CoreAI.Mods.Rbx.Instances
             for (int i = 0; i < textClasses.Length; i++)
             {
                 catalog.RegisterKnownUnimplementedMembers(textClasses[i],
-                    RbxKnownUnimplementedMemberDescriptor.PlannedProperty("TextBounds", Phase, measure),
                     RbxKnownUnimplementedMemberDescriptor.PlannedProperty("TextFits", Phase, measure),
                     RbxKnownUnimplementedMemberDescriptor.BacklogProperty("FontFace",
                         "set Font = Enum.Font.GothamBold (weight and italic are drawn; the family is the host's)"),

@@ -228,6 +228,92 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         }
 
         [Test]
+        public void P6_Hud_ASprint_ShowsASprintingMark_AndWalkingHidesIt()
+        {
+            FakeRbxUiBackend.FakeElement sprint = Screen.Find("sprint");
+            Assert.IsTrue(sprint.Classes.Contains("is-hidden"), "walking shows no mark");
+
+            _world.SetAttribute("BlockWorldSprinting", true);
+            _world.Frame();
+            Assert.IsFalse(sprint.Classes.Contains("is-hidden"), "a sprint shows it");
+            Assert.AreEqual("Sprinting", sprint.Text);
+
+            _world.SetAttribute("BlockWorldSprinting", false);
+            _world.Frame();
+            Assert.IsTrue(sprint.Classes.Contains("is-hidden"), "and walking hides it again");
+            _world.AssertHealthy(Mod);
+        }
+
+        [TestCase("saved", "Saved", false)]
+        [TestCase("pending", "Saving...", false)]
+        [TestCase("saving", "Saving...", false)]
+        public void P6_Hud_AKeptWorld_ShowsWhetherItIsSaved(string state, string text, bool warning)
+        {
+            FakeRbxUiBackend.FakeElement save = Screen.Find("save");
+
+            _world.SetAttribute("CoreAIWorldSaveState", state);
+            _world.Frame();
+
+            Assert.IsFalse(save.Classes.Contains("is-hidden"));
+            Assert.AreEqual(text, save.Text);
+            Assert.AreEqual(warning, save.Classes.Contains("is-failed"));
+            _world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_Hud_AWorldThatFailedToSave_SaysWhyInAWarningColour_AndASavedOneIsQuietAgain()
+        {
+            FakeRbxUiBackend.FakeElement save = Screen.Find("save");
+            _world.SetAttribute("CoreAIWorldSaveNote", "the browser refused the write");
+            _world.SetAttribute("CoreAIWorldSaveState", "failed");
+            _world.Frame();
+
+            Assert.AreEqual("Not saved: the browser refused the write", save.Text);
+            Assert.IsTrue(save.Classes.Contains("is-failed"), "a failure is shown in the warning colour");
+
+            _world.SetAttribute("CoreAIWorldSaveNote", "");
+            _world.SetAttribute("CoreAIWorldSaveState", "saved");
+            _world.Frame();
+            Assert.AreEqual("Saved", save.Text);
+            Assert.IsFalse(save.Classes.Contains("is-failed"));
+            _world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_Hud_ANoteWhileTheWorldIsSaved_IsShownToo_InAWarningColour()
+        {
+            FakeRbxUiBackend.FakeElement save = Screen.Find("save");
+            _world.SetAttribute("CoreAIWorldSaveState", "saved");
+            _world.SetAttribute("CoreAIWorldSaveNote", "another tab of the game is open");
+            _world.Frame();
+
+            Assert.AreEqual("Saved - another tab of the game is open", save.Text);
+            Assert.IsTrue(save.Classes.Contains("is-warned"));
+            Assert.IsFalse(save.Classes.Contains("is-failed"), "a warning is not a failure");
+
+            _world.SetAttribute("CoreAIWorldSaveNote", "");
+            _world.Frame();
+            Assert.AreEqual("Saved", save.Text);
+            Assert.IsFalse(save.Classes.Contains("is-warned"));
+            _world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_Hud_AWorldThatIsNotKept_ShowsNoSaveMark_NegativeTwin()
+        {
+            FakeRbxUiBackend.FakeElement save = Screen.Find("save");
+            Assert.IsTrue(save.Classes.Contains("is-hidden"), "no CoreAIWorldSaveState, no mark");
+
+            _world.SetAttribute("CoreAIWorldSaveState", "saved");
+            _world.Frame();
+            _world.SetAttribute("CoreAIWorldSaveState", null);
+            _world.Frame();
+
+            Assert.IsTrue(save.Classes.Contains("is-hidden"), "and the mark goes when the attribute does");
+            _world.AssertHealthy(Mod);
+        }
+
+        [Test]
         public void P6_Hud_TheVeil_CoversTheScreen_WhileTheFirstViewIsBuilt_AndCountsItsColumns()
         {
             FakeRbxUiBackend.FakeElement veil = Screen.Find("veil");

@@ -57,8 +57,8 @@ Counter: BpeTokenCounter fallback estimator
 | Lua Modding read_skill result, section example | 1951 | 1951 | 488 |
 | Lua Modding read_skill result, section errors | 1502 | 1502 | 376 |
 | Lua Modding catalog entry | 253 | 253 | 64 |
-| Rbx API instructions (Resources) | 87209 | 87311 | 21803 |
-| Rbx API instructions (C# literal) | 87209 | 87311 | 21803 |
+| Rbx API instructions (Resources) | 87295 | 87397 | 21824 |
+| Rbx API instructions (C# literal) | 87295 | 87397 | 21824 |
 | Rbx API read_skill result | 7996 | 7996 | 1999 |
 | Rbx API read_skill result, section scripting | 7526 | 7536 | 1882 |
 | Rbx API read_skill result, section datatypes | 4948 | 4950 | 1237 |
@@ -74,7 +74,7 @@ Counter: BpeTokenCounter fallback estimator
 | Rbx API read_skill result, section rig | 1697 | 1697 | 425 |
 | Rbx API read_skill result, section input | 4757 | 4763 | 1190 |
 | Rbx API read_skill result, section camera | 3820 | 3832 | 955 |
-| Rbx API read_skill result, section gui | 3744 | 3744 | 936 |
+| Rbx API read_skill result, section gui | 3831 | 3831 | 958 |
 | Rbx API read_skill result, section uxml | 6743 | 6747 | 1686 |
 | Rbx API read_skill result, section chat | 2011 | 2011 | 503 |
 | Rbx API read_skill result, section lighting | 3615 | 3615 | 904 |
@@ -144,6 +144,21 @@ history and the user message come on top.
 chat role, so a SmartChat host with the panel pays 1017 more per request. `call_skill_tool` (158) is offered only
 while a skill of the role has tools or the role authors skills, so the Programmer, whose three skills carry
 instructions only, does not pay for it (P16, 2026-11-12; before: 4525 tool tokens, 5561 in total).
+
+## Orchestrator mode on top of a chat role
+
+What orchestrator mode adds to every request of the chat agent, on the same meter, with the two shipped
+default sub-agents in `agent_start`'s roster (measured by `SubAgentTeamToolCostEditModeTests`, which pins the
+definitions at 600 and the instructions at 220; not generated, update these rows when that test's output
+changes):
+
+| Added per request | Tokens |
+|---|---|
+| Team style: `agent_start` 240, `agent_send` 106, `agent_read` 113, `agent_stop` 73 | 532 |
+| Team style: instruction block | 159 |
+| Team style in total (the Programmer above: 3938 + 691) | 691 |
+| Plan style: `delegate_task` + `declare_tasks`, and the plan instructions | 488 + 385 |
+| Mode off, or no sub-agent registered | 0 |
 
 ## Progressive disclosure, measured
 

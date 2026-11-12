@@ -1875,6 +1875,28 @@ namespace CoreAI.Mods.WorldPackages
         private RbxInstance _editCountedWorkspace;
         private Action<TerrainChangeSet> _onEditCountedTerrainChanged;
         private long _terrainEdits;
+        private readonly RbxKeptWorldJournal _journal = new();
+        private long _journalEpoch;
+        private bool _journalFailureReported;
+        private bool _unjournaledPending;
+        private bool _unjournaledInRecord;
+        private string _keptSaveFailure = "";
+        private bool _keptRestoreFellBack;
+        private bool _awaitingStorageFlush;
+        private RbxKeptWorldSaveState _publishedSaveState = RbxKeptWorldSaveState.NotKept;
+        private string _publishedSaveNote = "";
+        private bool _pageLeaveGuarded;
+        private bool _guardPageLeaveWhileUnsaved = true;
+        private bool _saveAttributeFailureReported;
+        private Func<bool> _storageFlushIdle = () => CoreAI.Infrastructure.CoreAiWebGlPersistence.IsFlushIdle;
+        private Func<int> _otherPagesSharingStorage = () => CoreAI.Infrastructure.CoreAiWebGlPersistence.OtherPagesSharingStorage;
+        private Action<bool> _guardPageLeave = CoreAI.Infrastructure.CoreAiWebGlPersistence.GuardPageLeave;
+
+        private static readonly string SaveStateMember =
+            CoreAI.Mods.Rbx.Instances.Replication.ReplicationMembers.Attribute(WorldSaveStateAttribute);
+
+        private static readonly string SaveNoteMember =
+            CoreAI.Mods.Rbx.Instances.Replication.ReplicationMembers.Attribute(WorldSaveNoteAttribute);
 
         public RbxWorldRuntimeSessionController(
             IRbxWorldSessionHost host,
@@ -2071,10 +2093,10 @@ namespace CoreAI.Mods.WorldPackages
             {
                 _keepWorld = true;
                 _bundledForRestore = bundled ?? Array.Empty<CoreAI.Infrastructure.Lua.IBundledModSource>();
-                // WHY a debounce unless the host chose its own: a record captures and encodes the whole world (about
-                // 120 ms of main-thread work at radius 8 in the editor, the encode spread over frames), so it waits
-                // until the player stopped changing the world for a moment, and one who never stops gets a record a
-                // minute; /save records at once.
+                // WHY a debounce unless the host chose its own: a record captures the whole world in one frame (7 to
+                // 21 ms in the editor) and encodes it a few milliseconds a frame, so it waits until the player stopped
+                // changing the world for a moment, and one who never stops gets a record every 15 s; /save records at
+                // once.
                 if (_startupRefreshInterval == DefaultStartupRefreshInterval)
                 {
                     _startupRefreshInterval = KeptWorldRefreshInterval;
@@ -2090,16 +2112,20 @@ namespace CoreAI.Mods.WorldPackages
         }
 
         /// <summary>
-        /// The longest a kept world's change waits for its record while the world keeps changing: 60 s (the
+        /// The longest a kept world's change waits for its record while the world keeps changing: 15 s (the
         /// <see cref="StartupRefreshInterval"/> unless the host set its own).
         /// </summary>
-        public static readonly TimeSpan KeptWorldRefreshInterval = TimeSpan.FromSeconds(60d);
+        /// <remarks>
+        /// WHY 15 s and not a minute: a player who builds without a pause and reloads lost everything since the first
+        /// block of the burst. The cost is one capture frame every 15 s of nonstop building.
+        /// </remarks>
+        public static readonly TimeSpan KeptWorldRefreshInterval = TimeSpan.FromSeconds(15d);
 
         /// <summary>
-        /// How long a kept world must stay unchanged before its changes are recorded: 3 s (the
+        /// How long a kept world must stay unchanged before its changes are recorded: 2 s (the
         /// <see cref="StartupRefreshDebounce"/> of a kept world is at least this).
         /// </summary>
-        public static readonly TimeSpan KeptWorldQuietTime = TimeSpan.FromSeconds(3d);
+        public static readonly TimeSpan KeptWorldQuietTime = TimeSpan.FromSeconds(2d);
 
         /// <summary>
         /// A number on the Workspace a mod raises after a change the world should keep that is neither a Terrain write
@@ -2109,14 +2135,108 @@ namespace CoreAI.Mods.WorldPackages
         public const string WorldEditsAttribute = "CoreAIWorldEdits";
 
         /// <summary>
+        /// The Workspace attribute where a kept world says how its record stands, every frame: <c>"saved"</c>,
+        /// <c>"pending"</c>, <c>"saving"</c> or <c>"failed"</c> (<see cref="RbxKeptWorldSaveState"/>); absent while
+        /// the world is not kept. The world's own records, backups and saves never hold it.
+        /// </summary>
+        public const string WorldSaveStateAttribute = "CoreAIWorldSaveState";
+
+        /// <summary>
+        /// The Workspace attribute next to <see cref="WorldSaveStateAttribute"/>: why the world is not saved while the
+        /// state is <c>"failed"</c>, a warning that endangers the save in any other state (another page of the game is
+        /// open), or empty. Absent while the world is not kept.
+        /// </summary>
+        public const string WorldSaveNoteAttribute = "CoreAIWorldSaveNote";
+
+        /// <summary>The kept world's state as of the last frame (<see cref="WorldSaveStateAttribute"/>).</summary>
+        public RbxKeptWorldSaveState KeptWorldSaveState
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _publishedSaveState;
+                }
+            }
+        }
+
+        /// <summary>The note published with <see cref="KeptWorldSaveState"/> as of the last frame; empty for none.</summary>
+        public string KeptWorldSaveNote
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _publishedSaveNote;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Raised on the frame the kept world's state or note changed, with both; on the frame pump's thread (the
+        /// main thread). The chat line of a failed record listens here.
+        /// </summary>
+        public event Action<RbxKeptWorldSaveState, string> KeptWorldSaveStateChanged;
+
+        /// <summary>
+        /// In a WebGL player, ask the browser to confirm a reload or a close while the kept world has a change that is
+        /// not stored yet (<see cref="RbxKeptWorldSaveState.Pending"/> or <see cref="RbxKeptWorldSaveState.Saving"/>);
+        /// true by default. A no-op on every other platform.
+        /// </summary>
+        /// <remarks>
+        /// WHY: a browser runs no code a page could finish a record with once it unloads (no OnApplicationQuit on the
+        /// Web, the storage written asynchronously after the frame), so the only honest choice left is to ask.
+        /// </remarks>
+        public bool GuardPageLeaveWhileUnsaved
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _guardPageLeaveWhileUnsaved;
+                }
+            }
+            set
+            {
+                lock (_gate)
+                {
+                    _guardPageLeaveWhileUnsaved = value;
+                }
+            }
+        }
+
+        /// <summary>Replaces the page probes and the leave guard, for tests; null keeps the current one.</summary>
+        internal void ConfigureSaveStateProbesForTests(
+            Func<bool> storageFlushIdle,
+            Func<int> otherPagesSharingStorage,
+            Action<bool> guardPageLeave)
+        {
+            lock (_gate)
+            {
+                _storageFlushIdle = storageFlushIdle ?? _storageFlushIdle;
+                _otherPagesSharingStorage = otherPagesSharingStorage ?? _otherPagesSharingStorage;
+                _guardPageLeave = guardPageLeave ?? _guardPageLeave;
+            }
+        }
+
+        /// <summary>
         /// After a start that restored nothing: makes the default world the world that opens on the next start, when
         /// the world is kept and the package store keeps a startup selection. Its first record follows its first change.
+        /// After a start whose restore fell back it does nothing: the saved world that could not be opened stays the
+        /// startup selection until the player decides (<see cref="SaveKeptWorldNowAsync"/>, or the Hub's
+        /// "Start with the default world next time").
         /// </summary>
+        /// <remarks>
+        /// WHY held: a record of the default world prunes every older startup entry, so adopting it here deleted the
+        /// one save the restore could not open (a corrupt file, a refused mod, a bug a later build fixes) at the
+        /// player's first block, although the restore's own report says the selection was kept.
+        /// </remarks>
         public void AdoptDefaultWorldIfKept()
         {
             lock (_gate)
             {
-                if (!_keepWorld || _disposed || _startupStore == null || _liveStartupSource != null)
+                if (!_keepWorld || _disposed || _startupStore == null || _liveStartupSource != null
+                    || _keptRestoreFellBack)
                 {
                     return;
                 }
@@ -2127,13 +2247,23 @@ namespace CoreAI.Mods.WorldPackages
 
         /// <summary>
         /// Records a kept world now (the <c>/save</c> chat command) and answers in one sentence what was saved, or why
-        /// nothing was. Never throws.
+        /// nothing was. After a start whose restore fell back, it is the player's choice to keep this world instead:
+        /// the world is adopted and recorded, and the saved world that could not be opened is replaced. Never throws.
         /// </summary>
         public async UniTask<string> SaveKeptWorldNowAsync()
         {
             bool kept;
+            bool replacesUnopened = false;
             lock (_gate)
             {
+                if (_keepWorld && _startupStore != null && _liveStartupSource == null && _keptRestoreFellBack
+                    && !_disposed)
+                {
+                    _keptRestoreFellBack = false;
+                    replacesUnopened = true;
+                    SetLiveStartupSourceLocked(new StartupSource(KeptWorldSourceKind, "default", null));
+                }
+
                 kept = _keepWorld && _startupStore != null && _liveStartupSource != null && !_disposed;
             }
 
@@ -2158,12 +2288,23 @@ namespace CoreAI.Mods.WorldPackages
                 note = ex.Message;
             }
 
+            if (note.Length == 0)
+            {
+                // WHY read back: a refusal of the same world as the last one is reported once, so its note comes
+                // back empty while the record still did not happen.
+                lock (_gate)
+                {
+                    note = _keptSaveFailure;
+                }
+            }
+
             if (note.Length > 0)
             {
                 return "The world was not saved: " + note;
             }
 
             return "Saved " + LastKeptWorldRecord + "."
+                   + (replacesUnopened ? " It replaces the saved world that could not be opened." : "")
 #if UNITY_WEBGL && !UNITY_EDITOR
                    + " The browser stores it a moment later."
 #endif
@@ -2210,7 +2351,10 @@ namespace CoreAI.Mods.WorldPackages
                 return;
             }
 
-            DebounceStartupRefresh(true);
+            // WHY both: the journal keeps the write within a frame, and the full record still follows once the world
+            // is quiet, which compacts the journal and holds what the journal cannot.
+            bool journaled = _journal.TryRecord(changes, _watchedTerrain?.Store);
+            DebounceStartupRefresh(true, journaled);
         }
 
         /// <summary>Marks a kept world when <see cref="WorldEditsAttribute"/> changed since the last frame.</summary>
@@ -2417,7 +2561,7 @@ namespace CoreAI.Mods.WorldPackages
         {
             DemandActive();
             Session session = Current;
-            return RbxWorldPackageSerializer.Capture(new RbxWorldPackageCaptureContext(
+            RbxWorldPackagePayload payload = RbxWorldPackageSerializer.Capture(new RbxWorldPackageCaptureContext(
                 session.RbxApi.Registry,
                 session.RbxApi.Game,
                 session.RbxApi.PartSink,
@@ -2425,6 +2569,42 @@ namespace CoreAI.Mods.WorldPackages
                 session.RbxApi.CameraRig,
                 session.SourceStore,
                 modFolderListStore: ModFolderListStore));
+            LeaveOutSaveStateAttributes(payload);
+            return payload;
+        }
+
+        /// <summary>Removes the save state this controller publishes on the Workspace from a capture of the world.</summary>
+        /// <remarks>
+        /// WHY: it describes this session's record, not the world. Kept in a package it would come back stale after a
+        /// restore or an undo, and a record would differ from the last one only by its own state.
+        /// </remarks>
+        private static void LeaveOutSaveStateAttributes(RbxWorldPackagePayload payload)
+        {
+            List<InstanceSnapshot> nodes = payload?.Tree?.Instances;
+            if (nodes == null)
+            {
+                return;
+            }
+
+            for (int index = 0; index < nodes.Count; index++)
+            {
+                InstanceSnapshot node = nodes[index];
+                if (node?.Attributes == null || node.Attributes.Count == 0
+                    || !string.Equals(node.ClassName, "Workspace", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                for (int attribute = node.Attributes.Count - 1; attribute >= 0; attribute--)
+                {
+                    string name = node.Attributes[attribute]?.Name;
+                    if (string.Equals(name, WorldSaveStateAttribute, StringComparison.Ordinal)
+                        || string.Equals(name, WorldSaveNoteAttribute, StringComparison.Ordinal))
+                    {
+                        node.Attributes.RemoveAt(attribute);
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -2822,14 +3002,31 @@ namespace CoreAI.Mods.WorldPackages
 
             RbxWorldLoadResult loaded;
             int replacedByBundles = 0;
+            string journalDirectory = (_startupStore as FileRbxWorldPackageStore)?.JournalDirectory;
+            RbxKeptWorldJournalReplay replay = default;
+            RbxWorldPackagePayload journaled = selection.Payload;
             try
             {
+                // WHY before the staged load: the mods and a world generator then start on the land as the player
+                // left it, not on the land of the last full record.
+                replay = RbxKeptWorldJournal.Replay(journalDirectory, selection.Sequence, selection.Payload.Terrain);
+                if (replay.Applied > 0)
+                {
+                    RbxWorldPackageOptionalState optional = selection.Payload.OptionalState;
+                    optional.Terrain = replay.Terrain;
+                    journaled = new RbxWorldPackagePayload(selection.Payload.CapturedAtUtc, selection.Payload.Settings,
+                        selection.Payload.Tree, selection.Payload.Parts, selection.Payload.CameraCFrame,
+                        selection.Payload.Mods, selection.Payload.Diagnostics, optional);
+                }
+
                 // WHY a kept world takes newer bundles: its package holds the exact sources of the last start, and
                 // without the seeder's rule a returning player would never get a sample's next version.
-                RbxWorldPackagePayload payload = WithNewerBundledMods(selection.Payload, out replacedByBundles);
+                RbxWorldPackagePayload payload = WithNewerBundledMods(journaled, out replacedByBundles);
                 // WHY no pre-load safety autosave: the outgoing world at boot is the reproducible
                 // default world, and one autosave per boot would evict the real backups from the
                 // bounded ring within a handful of restarts.
+                // WHY no content after a replay: the live world is then newer than the entry, and its next record
+                // must be written, which also takes the journal's place.
                 loaded = await LoadConfirmedCoreAsync(
                     payload,
                     false,
@@ -2837,7 +3034,7 @@ namespace CoreAI.Mods.WorldPackages
                     new StartupSource(
                         selection.SourceKind,
                         selection.SourceName,
-                        ComputeStartupContentOrNull(selection.Payload)),
+                        replay.Applied > 0 ? null : ComputeStartupContentOrNull(selection.Payload)),
                     cancellationToken);
             }
             catch (Exception ex)
@@ -2852,6 +3049,8 @@ namespace CoreAI.Mods.WorldPackages
                     selection.WorldId,
                     loaded?.Error ?? "the staged restore returned no result");
             }
+
+            ResumeJournalAfterRestore(journalDirectory, selection.Sequence, journaled.Terrain, replay);
 
             if (replacedByBundles > 0)
             {
@@ -2891,6 +3090,23 @@ namespace CoreAI.Mods.WorldPackages
                 if (cleared != null && cleared.Success)
                 {
                     SetLiveStartupSource(null);
+                    lock (_gate)
+                    {
+                        // WHY: the player chose the default world for the next start, which is the decision a
+                        // fallen-back restore waited for.
+                        _keptRestoreFellBack = false;
+                        _keptSaveFailure = "";
+                        SuspendJournalLocked();
+                    }
+
+                    try
+                    {
+                        RbxKeptWorldJournal.DeleteJournals((_startupStore as FileRbxWorldPackageStore)?.JournalDirectory, null);
+                    }
+                    catch (Exception ex)
+                    {
+                        ReportJournalFailure("change journal could not be deleted with the cleared selection: " + ex.Message);
+                    }
                 }
 
                 return cleared;
@@ -3211,6 +3427,9 @@ namespace CoreAI.Mods.WorldPackages
                     // sources marks it from here on, also while this load still records its selection,
                     // and the refresh after the record picks it up instead of losing it.
                     SetLiveStartupSourceLocked(restoredStartup);
+                    // WHY suspended: the journal's writes extend the world just replaced; the new world's first
+                    // record (or the startup restore, for the world it replayed) starts it again.
+                    SuspendJournalLocked();
                     published = true;
                 }
 
@@ -3377,8 +3596,212 @@ namespace CoreAI.Mods.WorldPackages
 
             EndAbandonedMutationWatch();
             WatchTerrainOf(session);
+            // WHY before a record may start: the file then holds every write the record's capture holds, and the
+            // writes of this frame reach the browser's storage with this frame.
+            FlushJournal();
             StartPendingStartupRefresh();
+            PublishKeptWorldSaveState(session);
             AcknowledgeReportedMissingAutoSaves();
+        }
+
+        /// <summary>
+        /// Works out the kept world's state for this frame, writes it to the Workspace attributes, keeps the page's
+        /// leave guard in step and raises <see cref="KeptWorldSaveStateChanged"/> when it changed. Never throws.
+        /// </summary>
+        private void PublishKeptWorldSaveState(Session session)
+        {
+            bool awaitingFlush;
+            Func<bool> flushIdleProbe;
+            Func<int> otherPagesProbe;
+            lock (_gate)
+            {
+                if (_disposed || (!_keepWorld && _publishedSaveState == RbxKeptWorldSaveState.NotKept))
+                {
+                    return;
+                }
+
+                awaitingFlush = _awaitingStorageFlush;
+                flushIdleProbe = _storageFlushIdle;
+                otherPagesProbe = _otherPagesSharingStorage;
+            }
+
+            bool flushIdle = !awaitingFlush || Probe(flushIdleProbe, true);
+            int otherPages = Probe(otherPagesProbe, 0);
+            RbxKeptWorldSaveState state;
+            string note;
+            bool changed;
+            bool guard;
+            Action<bool> guardSink = null;
+            lock (_gate)
+            {
+                if (awaitingFlush && flushIdle)
+                {
+                    _awaitingStorageFlush = false;
+                }
+
+                state = ComputeKeptWorldSaveStateLocked(flushIdle, otherPages, out note, out bool unsaved);
+                changed = state != _publishedSaveState || !string.Equals(note, _publishedSaveNote, StringComparison.Ordinal);
+                _publishedSaveState = state;
+                _publishedSaveNote = note;
+                guard = unsaved && _guardPageLeaveWhileUnsaved;
+                if (guard != _pageLeaveGuarded)
+                {
+                    _pageLeaveGuarded = guard;
+                    guardSink = _guardPageLeave;
+                }
+            }
+
+            WriteSaveStateAttributes(session, state, note);
+            if (guardSink != null)
+            {
+                try
+                {
+                    guardSink(guard);
+                }
+                catch (Exception ex)
+                {
+                    ReportDiagnostic("The page's leave guard could not be set: " + ex.Message);
+                }
+            }
+
+            if (!changed)
+            {
+                return;
+            }
+
+            Action<RbxKeptWorldSaveState, string> handlers = KeptWorldSaveStateChanged;
+            if (handlers == null)
+            {
+                return;
+            }
+
+            try
+            {
+                handlers(state, note);
+            }
+            catch (Exception ex)
+            {
+                ReportDiagnostic("A listener of the kept world's save state failed: " + ex.Message);
+            }
+        }
+
+        /// <summary>The kept world's state from what this controller knows now; <paramref name="unsaved"/> is true while
+        /// a change is not stored yet (waiting for the quiet time, being recorded or being stored by the browser).</summary>
+        private RbxKeptWorldSaveState ComputeKeptWorldSaveStateLocked(
+            bool flushIdle,
+            int otherPages,
+            out string note,
+            out bool unsaved)
+        {
+            note = "";
+            unsaved = false;
+            bool held = _keepWorld && _keptRestoreFellBack && _liveStartupSource == null;
+            if (!_keepWorld || _disposed || _startupStore == null || (_liveStartupSource == null && !held))
+            {
+                return RbxKeptWorldSaveState.NotKept;
+            }
+
+            // WHY a record counts as saving only for what no journal holds: a change already journaled is stored
+            // before the record that compacts it, so the record's frames are no time to hold the player back.
+            bool recordInFlight = _startupRefreshRunning || _recordEncodes.Count > 0;
+            bool recording = recordInFlight && (_unjournaledInRecord || _keptSaveFailure.Length > 0);
+            bool waiting = !held && (_unjournaledPending || _startupRefreshPending || _worldRefreshDeferred);
+            bool journalUnwritten = _journal.HasUnwritten;
+            unsaved = recording || waiting || journalUnwritten || !flushIdle;
+            if (_keptSaveFailure.Length > 0 && !recording)
+            {
+                note = _keptSaveFailure;
+                return RbxKeptWorldSaveState.Failed;
+            }
+
+            if (otherPages > 0)
+            {
+                note = (otherPages == 1 ? "Another page" : otherPages.ToString(CultureInfo.InvariantCulture) + " other pages")
+                       + " of this game " + (otherPages == 1 ? "is" : "are")
+                       + " open in this browser, and the page that stores last overwrites the other's saved world: "
+                       + "close the other tabs of this game.";
+            }
+
+            if (recording)
+            {
+                return RbxKeptWorldSaveState.Saving;
+            }
+
+            if (waiting)
+            {
+                return RbxKeptWorldSaveState.Pending;
+            }
+
+            return journalUnwritten || !flushIdle ? RbxKeptWorldSaveState.Saving : RbxKeptWorldSaveState.Saved;
+        }
+
+        /// <summary>
+        /// Brings the published Workspace's save state attributes to <paramref name="state"/> and <paramref name="note"/>
+        /// (both removed for <see cref="RbxKeptWorldSaveState.NotKept"/>), writing only what differs, so a world
+        /// replaced by a load or an undo gets them on its first frame.
+        /// </summary>
+        private void WriteSaveStateAttributes(Session session, RbxKeptWorldSaveState state, string note)
+        {
+            try
+            {
+                RbxInstance workspace = session?.RbxApi?.Game?.FindFirstChildOfClass("Workspace");
+                if (workspace == null || workspace.IsDestroyed)
+                {
+                    return;
+                }
+
+                string stateValue = SaveStateValue(state);
+                string noteValue = state == RbxKeptWorldSaveState.NotKept ? null : note ?? "";
+                if (!Equals(workspace.GetAttribute(WorldSaveStateAttribute), stateValue))
+                {
+                    workspace.SetAttribute(WorldSaveStateAttribute, stateValue);
+                }
+
+                if (!Equals(workspace.GetAttribute(WorldSaveNoteAttribute), noteValue))
+                {
+                    workspace.SetAttribute(WorldSaveNoteAttribute, noteValue);
+                }
+            }
+            catch (Exception ex)
+            {
+                // WHY once: the pump runs every frame, and a Workspace that refuses an attribute (one already holding
+                // the most attributes an instance can keep) would otherwise log the same warning every frame.
+                if (!_saveAttributeFailureReported)
+                {
+                    _saveAttributeFailureReported = true;
+                    ReportDiagnostic("The kept world's save state could not be shown on the Workspace: " + ex.Message);
+                }
+            }
+        }
+
+        /// <summary>The attribute value of <paramref name="state"/>: its lowercase name, or null when not kept.</summary>
+        internal static string SaveStateValue(RbxKeptWorldSaveState state)
+        {
+            switch (state)
+            {
+                case RbxKeptWorldSaveState.Saved:
+                    return "saved";
+                case RbxKeptWorldSaveState.Pending:
+                    return "pending";
+                case RbxKeptWorldSaveState.Saving:
+                    return "saving";
+                case RbxKeptWorldSaveState.Failed:
+                    return "failed";
+                default:
+                    return null;
+            }
+        }
+
+        private static T Probe<T>(Func<T> probe, T fallback)
+        {
+            try
+            {
+                return probe != null ? probe() : fallback;
+            }
+            catch (Exception)
+            {
+                return fallback;
+            }
         }
 
         private void AcknowledgeReportedMissingAutoSaves()
@@ -3404,6 +3827,7 @@ namespace CoreAI.Mods.WorldPackages
             Session outgoing;
             InstanceRegistry watched;
             RbxTerrain editCounted;
+            Action<bool> releaseGuard = null;
             lock (_gate)
             {
                 if (_disposed)
@@ -3419,11 +3843,24 @@ namespace CoreAI.Mods.WorldPackages
                 _mutationWatchActive = false;
                 editCounted = _editCountedTerrain;
                 _editCountedTerrain = null;
+                if (_pageLeaveGuarded)
+                {
+                    _pageLeaveGuarded = false;
+                    releaseGuard = _guardPageLeave;
+                }
             }
 
             if (editCounted != null)
             {
                 editCounted.Store.Changed -= _onEditCountedTerrainChanged;
+            }
+
+            try
+            {
+                releaseGuard?.Invoke(false);
+            }
+            catch (Exception)
+            {
             }
 
             Unwatch(watched);
@@ -3435,14 +3872,15 @@ namespace CoreAI.Mods.WorldPackages
         }
 
         /// <summary>
-        /// Finishes every write of this play world whose encode is spread over frames in one step now: each record of
-        /// the world that opens on the next start and the autosave written behind the last gated mutation. The encode
-        /// then runs to its end inside this call; the file write that follows still yields a frame per 64 KiB written,
-        /// as every package write does. <see cref="Dispose"/> calls it; a host calls it too when it is about to lose
-        /// its frames (an application pause or quit). Never throws.
+        /// Finishes every write of this play world whose encode is spread over frames in one step now: the change
+        /// journal's writes of this frame, each record of the world that opens on the next start and the autosave
+        /// written behind the last gated mutation. The encode then runs to its end inside this call; the file write that
+        /// follows still yields a frame per 64 KiB written, as every package write does. <see cref="Dispose"/> calls it;
+        /// a host calls it too when it is about to lose its frames (an application pause or quit). Never throws.
         /// </summary>
         public void FinishWritesInFlightAtOnce()
         {
+            FlushJournal();
             RbxWorldPackageEncodeUrgency[] records;
             lock (_gate)
             {
@@ -3728,6 +4166,14 @@ namespace CoreAI.Mods.WorldPackages
                 await _startupSelectionGate.WaitAsync(CancellationToken.None);
                 RbxWorldPackageSerializer.IncrementalEncoder encoding = null;
                 RbxWorldPackageEncodeUrgency urgency = BeginRecordEncode();
+                long journalEpoch;
+                lock (_gate)
+                {
+                    // WHY: the loaded world reopens only once this record is written.
+                    _unjournaledInRecord = true;
+                    journalEpoch = _journalEpoch;
+                }
+
                 try
                 {
                     // WHY the content first and its entries reused: the record then encodes the world once,
@@ -3757,6 +4203,8 @@ namespace CoreAI.Mods.WorldPackages
                             source.SourceKind,
                             source.Slot,
                             encoding?.EntryDigest));
+                        NoteStartupEntryCurrent(true);
+                        RebaseJournalOnto(written.Path, _journal.Position, journalEpoch, source.Payload.Terrain);
                         return "";
                     }
 
@@ -3770,10 +4218,20 @@ namespace CoreAI.Mods.WorldPackages
                 }
                 finally
                 {
+                    lock (_gate)
+                    {
+                        _unjournaledInRecord = false;
+                    }
+
                     EndRecordEncode(urgency);
                     encoding?.Dispose();
                     _startupSelectionGate.Release();
                 }
+            }
+
+            if (_startupStore != null)
+            {
+                NoteKeptSaveFailure(reason);
             }
 
             ReportDiagnostic(
@@ -3848,14 +4306,22 @@ namespace CoreAI.Mods.WorldPackages
             return RefreshStartupSelectionAsync(trigger, change == MutationChange.World);
         }
 
-        /// <summary>Leaves a gated change to the frame pump, which records the burst once it is quiet.</summary>
-        private void DebounceStartupRefresh(bool worldOnly)
+        /// <summary>
+        /// Leaves a change to the frame pump, which records the burst once it is quiet; <paramref name="journaled"/> is
+        /// true for a change the change journal already keeps, which the record then only compacts.
+        /// </summary>
+        private void DebounceStartupRefresh(bool worldOnly, bool journaled = false)
         {
             lock (_gate)
             {
                 if (_disposed || _liveStartupSource == null)
                 {
                     return;
+                }
+
+                if (!journaled)
+                {
+                    _unjournaledPending = true;
                 }
 
                 DateTime now = _utcNow();
@@ -4052,6 +4518,13 @@ namespace CoreAI.Mods.WorldPackages
 
         private void OnWatchedRevisionAdvanced(InstanceId id, long revision, string member)
         {
+            // WHY: the save state the pump publishes describes the record, not the world, and no package holds it.
+            if (string.Equals(member, SaveStateMember, StringComparison.Ordinal)
+                || string.Equals(member, SaveNoteMember, StringComparison.Ordinal))
+            {
+                return;
+            }
+
             InstanceRegistry registry = Volatile.Read(ref _watchedRegistry);
             if (registry == null
                 || !registry.TryGetRecord(id, out InstanceRecord record)
@@ -4126,6 +4599,10 @@ namespace CoreAI.Mods.WorldPackages
                 try
                 {
                     System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+                    // WHY read next to the capture: every write journaled up to this position is in the world captured
+                    // now, so after the record only the later ones stay journaled.
+                    long journalThrough = _journal.Position;
+                    long journalEpoch = ReadJournalEpoch();
                     RbxWorldPackagePayload captured = CaptureCurrent();
                     double captureMs = watch.Elapsed.TotalMilliseconds;
                     // WHY the digest a frame budget at a time, and its entries kept for the write: a record of a
@@ -4148,6 +4625,7 @@ namespace CoreAI.Mods.WorldPackages
                         }
 
                         SetStartupSelectionNote("");
+                        NoteStartupEntryCurrent(false);
                         return "";
                     }
 
@@ -4157,6 +4635,7 @@ namespace CoreAI.Mods.WorldPackages
                     string refusal = DescribeUnloadablePackage(captured);
                     if (refusal.Length > 0)
                     {
+                        NoteKeptSaveFailure(refusal);
                         return ReportStartupRefusal(content, refusal);
                     }
 
@@ -4182,6 +4661,8 @@ namespace CoreAI.Mods.WorldPackages
                         }
 
                         SetStartupSelectionNote("");
+                        NoteStartupEntryCurrent(true);
+                        RebaseJournalOnto(written.Path, journalThrough, journalEpoch, captured.Terrain);
                         return "";
                     }
 
@@ -4194,6 +4675,7 @@ namespace CoreAI.Mods.WorldPackages
                     reason = ex.Message;
                 }
 
+                NoteKeptSaveFailure(reason);
                 ReportDiagnostic(
                     "The live world changed ('" + trigger + "'), but the change was not recorded for the "
                     + "next start: " + reason + " The next start opens the world as it was before it.");
@@ -4207,9 +4689,163 @@ namespace CoreAI.Mods.WorldPackages
             }
             finally
             {
+                lock (_gate)
+                {
+                    _unjournaledInRecord = false;
+                }
+
                 EndRecordEncode(urgency);
                 _startupSelectionGate.Release();
             }
+        }
+
+        private long ReadJournalEpoch()
+        {
+            lock (_gate)
+            {
+                return _journalEpoch;
+            }
+        }
+
+        /// <summary>
+        /// After a startup entry was written at <paramref name="packagePath"/> from a capture taken when the journal stood
+        /// at <paramref name="journalThrough"/>: the writes journaled since that capture become the new entry's journal,
+        /// and the older journals go. Nothing when the world is not kept (stale journals are deleted then), when the
+        /// store has no journal, or when the world was replaced after the capture (the journal then waits, suspended,
+        /// for the record of the new world). Never throws.
+        /// </summary>
+        private void RebaseJournalOnto(string packagePath, long journalThrough, long journalEpoch, TerrainSnapshot terrain)
+        {
+            string directory = (_startupStore as FileRbxWorldPackageStore)?.JournalDirectory;
+            if (directory == null)
+            {
+                return;
+            }
+
+            bool keep;
+            lock (_gate)
+            {
+                keep = _keepWorld && !_disposed;
+                if (journalEpoch != _journalEpoch)
+                {
+                    return;
+                }
+            }
+
+            try
+            {
+                if (!keep)
+                {
+                    RbxKeptWorldJournal.DeleteJournals(directory, null);
+                    return;
+                }
+
+                if (!TryParseStartupSequence(packagePath, out int sequence))
+                {
+                    _journal.Suspend();
+                    DebounceStartupRefresh(true);
+                    return;
+                }
+
+                _journal.Rebase(directory, sequence, journalThrough, terrain);
+            }
+            catch (Exception ex)
+            {
+                ReportJournalFailure("change journal could not be moved onto the new record: " + ex.Message);
+                // WHY: the writes journaled after the capture are only in the old journal now, which the new record
+                // no longer reads, so the next record has to hold them.
+                DebounceStartupRefresh(true);
+            }
+        }
+
+        /// <summary>The sequence of a startup entry from its package path (ten digits and the package extension).</summary>
+        private static bool TryParseStartupSequence(string packagePath, out int sequence)
+        {
+            sequence = 0;
+            string stem = string.IsNullOrEmpty(packagePath) ? "" : System.IO.Path.GetFileNameWithoutExtension(packagePath);
+            return stem.Length == 10
+                   && int.TryParse(stem, NumberStyles.None, CultureInfo.InvariantCulture, out sequence)
+                   && sequence > 0;
+        }
+
+        /// <summary>
+        /// Appends the writes journaled this frame. A failure suspends the journal until the next record, leaves those
+        /// writes to it and is reported once.
+        /// </summary>
+        private void FlushJournal()
+        {
+            if (!_journal.HasUnwritten)
+            {
+                return;
+            }
+
+            try
+            {
+                if (_journal.Flush() > 0)
+                {
+                    lock (_gate)
+                    {
+                        _awaitingStorageFlush = true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ReportJournalFailure("change journal could not be written: " + ex.Message);
+                DebounceStartupRefresh(true);
+            }
+        }
+
+        private void ReportJournalFailure(string problem)
+        {
+            bool first;
+            lock (_gate)
+            {
+                first = !_journalFailureReported;
+                _journalFailureReported = true;
+            }
+
+            if (first)
+            {
+                ReportDiagnostic("The kept world's " + problem.TrimEnd('.')
+                                 + ". Its changes are saved by the full record until the next one restarts the journal.");
+            }
+        }
+
+        /// <summary>
+        /// After the startup restore published entry <paramref name="sequence"/> with its journal replayed: journaling goes
+        /// on in the same file over the replayed Terrain, and a journal that could not be read in full is reported.
+        /// </summary>
+        private void ResumeJournalAfterRestore(string directory, int sequence, TerrainSnapshot terrain,
+            RbxKeptWorldJournalReplay replay)
+        {
+            bool keep;
+            lock (_gate)
+            {
+                keep = _keepWorld && !_disposed;
+            }
+
+            if (replay.Problem.Length > 0)
+            {
+                ReportDiagnostic("The startup world reopened, but " + replay.Problem.TrimEnd('.')
+                                 + ". The changes after that point are lost; the rest of the world opened.");
+                if (keep)
+                {
+                    NoteKeptSaveFailure("The last changes before this start could not all be read back: " + replay.Problem);
+                }
+            }
+
+            if (keep && directory != null)
+            {
+                _journal.Begin(directory, sequence, terrain, replay.ReadableBytes);
+            }
+        }
+
+        /// <summary>Stops the journal for a world that was replaced or whose selection was cleared.</summary>
+        private void SuspendJournalLocked()
+        {
+            _journalEpoch++;
+            _journal.Suspend();
         }
 
         /// <summary>Keeps what a record of a kept world held and cost, for <see cref="LastKeptWorldRecord"/>.</summary>
@@ -4234,6 +4870,34 @@ namespace CoreAI.Mods.WorldPackages
             lock (_gate)
             {
                 _startupSelectionNote = note ?? "";
+            }
+        }
+
+        /// <summary>
+        /// The newest startup entry holds the live world again: a failure or a fallen-back restore no longer stands,
+        /// and after a write (<paramref name="written"/>) the kept world counts as saving until the browser's storage
+        /// has carried it.
+        /// </summary>
+        private void NoteStartupEntryCurrent(bool written)
+        {
+            lock (_gate)
+            {
+                _keptSaveFailure = "";
+                _keptRestoreFellBack = false;
+                if (written)
+                {
+                    _awaitingStorageFlush = true;
+                }
+            }
+        }
+
+        /// <summary>Keeps why the latest change of the kept world was not recorded, for its save state.</summary>
+        private void NoteKeptSaveFailure(string reason)
+        {
+            string trimmed = (reason ?? "").Trim();
+            lock (_gate)
+            {
+                _keptSaveFailure = trimmed.Length > 0 ? trimmed : "the record failed without a reason";
             }
         }
 
@@ -4361,6 +5025,9 @@ namespace CoreAI.Mods.WorldPackages
         {
             lock (_gate)
             {
+                // WHY kept for the record: a change no journal holds is safe only once this record is written.
+                _unjournaledInRecord = _unjournaledPending || _startupRefreshPending || _worldRefreshDeferred;
+                _unjournaledPending = false;
                 _startupRefreshPending = false;
                 _worldRefreshDeferred = false;
                 _debouncedRefreshPending = false;
@@ -4491,6 +5158,17 @@ namespace CoreAI.Mods.WorldPackages
 
         private RbxWorldStartupRestoreResult FallBackAtStartup(int sequence, string worldId, string reason)
         {
+            lock (_gate)
+            {
+                if (_keepWorld)
+                {
+                    _keptRestoreFellBack = true;
+                    _keptSaveFailure = "The saved world could not be opened, so it is kept and this start is not saved; "
+                                       + "type /save to keep this world instead (it replaces the saved one): "
+                                       + (reason ?? "").Trim();
+                }
+            }
+
             ReportDiagnostic(
                 "The startup world selection #" + sequence.ToString(CultureInfo.InvariantCulture)
                 + " ('" + (worldId ?? "") + "') could not be restored, so the default world stays live: "

@@ -714,6 +714,37 @@ namespace CoreAI.RuntimeUi
             return true;
         }
 
+        /// <summary>
+        /// Measures <paramref name="text"/> as this label or button draws it at <paramref name="fontSize"/> pixels;
+        /// <paramref name="maxWidth"/> above 0 wraps it at that width. The element's resolved style supplies the font,
+        /// and the result is scaled from its resolved size to <paramref name="fontSize"/>, so a size pushed this frame is
+        /// already honoured. False for an element that draws no text or is not on a panel yet.
+        /// </summary>
+        public bool TryMeasureText(string text, float fontSize, float maxWidth, out float width, out float height)
+        {
+            width = 0f;
+            height = 0f;
+            if (!IsAlive || !(Record.Element is TextElement element) || element.panel == null)
+            {
+                return false;
+            }
+
+            float resolved = element.resolvedStyle.fontSize;
+            float scale = resolved > 0f && fontSize > 0f ? fontSize / resolved : 1f;
+            bool wrap = maxWidth > 0f;
+            Vector2 measured = element.MeasureTextSize(text ?? "", wrap ? maxWidth / scale : 0f,
+                wrap ? VisualElement.MeasureMode.AtMost : VisualElement.MeasureMode.Undefined, 0f,
+                VisualElement.MeasureMode.Undefined);
+            if (!IsFinite(measured.x) || !IsFinite(measured.y))
+            {
+                return false;
+            }
+
+            width = measured.x * scale;
+            height = measured.y * scale;
+            return true;
+        }
+
         private static void FocusAtEnd(VisualElement element)
         {
             element.Focus();

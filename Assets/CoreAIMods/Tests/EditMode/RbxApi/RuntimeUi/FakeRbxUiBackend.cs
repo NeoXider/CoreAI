@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
+using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances.RuntimeUi;
 
 namespace CoreAI.Tests.EditMode.RbxApi.RuntimeUi
@@ -760,6 +761,31 @@ namespace CoreAI.Tests.EditMode.RbxApi.RuntimeUi
                 }
 
                 return IsAlive;
+            }
+
+            /// <summary>
+            /// How this element measures text (text, font size, wrap width) as the host would; null measures nothing,
+            /// so the layout estimates.
+            /// </summary>
+            public Func<string, float, float, RbxVector2> Measure { get; set; }
+
+            /// <summary>How many times <see cref="TryMeasureText"/> measured.</summary>
+            public int MeasureCount { get; private set; }
+
+            public bool TryMeasureText(string text, float fontSize, float maxWidth, out float width, out float height)
+            {
+                width = 0f;
+                height = 0f;
+                if (Measure == null || !IsAlive)
+                {
+                    return false;
+                }
+
+                MeasureCount++;
+                RbxVector2 size = Measure(text, fontSize, maxWidth);
+                width = size.X;
+                height = size.Y;
+                return true;
             }
 
             /// <summary>The held keys the last <see cref="FocusForTyping"/> was given; null before any.</summary>

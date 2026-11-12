@@ -9,6 +9,20 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
     /// children in child order, the first modifier of each kind among its children, the box the layout computed
     /// and the element that draws it.
     /// </summary>
+    /// <summary>One cached text measurement of a node (<see cref="RbxGuiLayout"/>).</summary>
+    internal struct RbxTextMeasure
+    {
+        public bool Valid;
+        public string Text;
+        public float Size;
+        public float Width;
+        public float LineHeight;
+        public int Font;
+        public RbxVector2 Value;
+        public int Confirm;
+        public int Pass;
+    }
+
     internal sealed class RbxGuiNode
     {
         public RbxGuiNode(RbxGuiBase2d gui, RbxGuiNode parent)
@@ -16,6 +30,10 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
             Gui = gui;
             Parent = parent;
         }
+
+        /// <summary>The last measurement of a text object's text on one line, and wrapped at a width.</summary>
+        public RbxTextMeasure MeasureLine;
+        public RbxTextMeasure MeasureWrapped;
 
         public RbxGuiBase2d Gui { get; }
 
@@ -162,6 +180,19 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
         private const float ScrollEpsilon = 0.5f;
         private const int MaxScrollPasses = 4;
 
+        // WHY a pass-wide flag: the host measures with the element's resolved style, which a style set this frame
+        // reaches only on the next one, so a new measurement is taken once more on the next frame's layout.
+        [ThreadStatic] private static bool _unsettled;
+        [ThreadStatic] private static int _pass;
+
+        /// <summary>True when the last passes took a host measurement that must be confirmed next frame; clears it.</summary>
+        public static bool TakeUnsettled()
+        {
+            bool unsettled = _unsettled;
+            _unsettled = false;
+            return unsettled;
+        }
+
         // WHY [ThreadStatic] scratch: a layout pass runs on the main thread only, and sorting the children of a
         // list must not allocate per frame; the list is cleared before every use.
         [ThreadStatic] private static List<RbxGuiNode> _sortScratch;
@@ -173,6 +204,7 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
         /// <summary>Lays out a whole screen against a viewport of the given size.</summary>
         public static void LayoutScreen(RbxGuiNode root, float width, float height)
         {
+            _pass++;
             root.X = 0f;
             root.Y = 0f;
             root.W = Math.Max(0f, width);
@@ -386,7 +418,119 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
 
             float w = size.X.Scale * scaleW + size.X.Offset;
             float h = size.Y.Scale * scaleH + size.Y.Offset;
+            if (gui.AutomaticSize != RbxAutomaticSize.None && gui is IRbxGuiTextObject textObject)
+            {
+                GrowToText(node, textObject.TextState, gui.AutomaticSize, ref w, ref h);
+            }
+
             return Constrain(node, w, h, parentW, parentH);
+        }
+
+        /// <summary>
+        /// <c>AutomaticSize</c> of a text object: the box grows to the text, wrapped at its own width when
+        /// <c>TextWrapped</c>, plus its <c>UIPadding</c>; it never shrinks below its <c>Size</c>.
+        /// </summary>
+        private static void GrowToText(RbxGuiNode node, RbxGuiText text, RbxAutomaticSize mode, ref float w, ref float h)
+        {
+            InsetsFor(node, w, h, out float left, out float top, out float right, out float bottom);
+            if ((mode & RbxAutomaticSize.X) != 0)
+            {
+                RbxVector2 line = MeasureText(node, text, 0f);
+                w = Math.Max(w, line.X + left + right);
+            }
+
+            if ((mode & RbxAutomaticSize.Y) != 0)
+            {
+                float wrapAt = text.TextWrapped ? Math.Max(1f, w - left - right) : 0f;
+                RbxVector2 block = MeasureText(node, text, wrapAt);
+                h = Math.Max(h, block.Y + top + bottom);
+            }
+        }
+
+        private static void InsetsFor(RbxGuiNode node, float w, float h, out float left, out float top,
+            out float right, out float bottom)
+        {
+            left = 0f;
+            top = 0f;
+            right = 0f;
+            bottom = 0f;
+            if (node.Padding != null)
+            {
+                left = Resolve(node.Padding.PaddingLeft, w);
+                right = Resolve(node.Padding.PaddingRight, w);
+                top = Resolve(node.Padding.PaddingTop, h);
+                bottom = Resolve(node.Padding.PaddingBottom, h);
+            }
+        }
+
+        /// <summary>
+        /// Mirror <c>TextBounds</c>: the size of the text as drawn in the box, wrapped at its width when
+        /// <c>TextWrapped</c>; only for a text object whose bounds a script has read.
+        /// </summary>
+        private static void ApplyTextBounds(RbxGuiNode node, float w, float h)
+        {
+            if (!(node.Gui is IRbxGuiTextObject textObject) || !textObject.TextState.BoundsWanted)
+            {
+                return;
+            }
+
+            RbxGuiText text = textObject.TextState;
+            InsetsFor(node, w, h, out float left, out _, out float right, out _);
+            RbxVector2 bounds = MeasureText(node, text, text.TextWrapped ? Math.Max(1f, w - left - right) : 0f);
+            text.ApplyTextBounds(bounds);
+        }
+
+        /// <summary>
+        /// The size of the node's text, from the host when it measures, else estimated; cached per node until the
+        /// text, its size, font, line height or the wrap width change, and taken once more on the next frame after
+        /// the host measured a change.
+        /// </summary>
+        private static RbxVector2 MeasureText(RbxGuiNode node, RbxGuiText text, float maxWidth)
+        {
+            ref RbxTextMeasure cache = ref (maxWidth > 0f ? ref node.MeasureWrapped : ref node.MeasureLine);
+            string value = text.Text ?? string.Empty;
+            float size = text.TextSize;
+            float width = maxWidth > 0f ? maxWidth : 0f;
+            float lineHeight = text.LineHeight;
+            int font = text.Font;
+            bool same = cache.Valid && cache.Size.Equals(size) && cache.Width.Equals(width)
+                        && cache.LineHeight.Equals(lineHeight) && cache.Font == font
+                        && string.Equals(cache.Text, value, StringComparison.Ordinal);
+            // WHY a later pass: the confirmation is for a style that resolves on the next frame, not for a second read
+            // of the same pass (TextBounds after AutomaticSize).
+            if (same && (cache.Confirm == 0 || cache.Pass == _pass))
+            {
+                return cache.Value;
+            }
+
+            RbxVector2 measured;
+            int confirm = 0;
+            IRbxUiElement element = node.Element;
+            if (element != null && element.IsAlive
+                                && element.TryMeasureText(value, size, width, out float measuredW, out float measuredH))
+            {
+                measured = new RbxVector2(measuredW, measuredH);
+                if (!same)
+                {
+                    confirm = 1;
+                    _unsettled = true;
+                }
+            }
+            else
+            {
+                measured = RbxTextMetrics.Estimate(value, size, width, lineHeight);
+            }
+
+            cache.Valid = true;
+            cache.Text = value;
+            cache.Size = size;
+            cache.Width = width;
+            cache.LineHeight = lineHeight;
+            cache.Font = font;
+            cache.Value = measured;
+            cache.Confirm = confirm;
+            cache.Pass = _pass;
+            return measured;
         }
 
         private static RbxVector2 Constrain(RbxGuiNode node, float w, float h, float parentW, float parentH)
@@ -456,6 +600,7 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
             node.H = h;
             node.Rotation = parent.Rotation + node.Object.Rotation;
             node.Gui.ApplyLayout(new RbxVector2(x, y), new RbxVector2(w, h), node.Rotation);
+            ApplyTextBounds(node, w, h);
         }
 
         private static void ArrangeList(RbxGuiNode parent, RbxUiListLayout list)
@@ -620,6 +765,17 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
                 default:
                     return 0;
             }
+        }
+
+        /// <summary>
+        /// True when a text change of <paramref name="node"/> moves the layout: its box grows to its text
+        /// (<c>AutomaticSize</c>) or a script reads its <c>TextBounds</c>. Any other new text is a repaint.
+        /// </summary>
+        internal static bool MeasuresText(RbxGuiNode node)
+        {
+            return node.Gui is IRbxGuiTextObject text
+                   && (text.TextState.BoundsWanted
+                       || (node.Object != null && node.Object.AutomaticSize != RbxAutomaticSize.None));
         }
 
         /// <summary>Grows a box with AutomaticSize to hold its children, keeping its anchor point where it was.</summary>

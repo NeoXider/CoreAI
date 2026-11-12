@@ -72,11 +72,19 @@ namespace CoreAI.Mcp.Protocol
         /// working with a live game. Hosts replace it through <c>CoreAiMcpServer.Instructions</c>.
         /// </summary>
         public const string DefaultInstructions =
-            "This server runs inside a live CoreAI game. Every tool acts on the running world on the game's " +
-            "main thread. Before writing Lua, call read_skill (for example name 'Rbx API' or 'Lua Modding') " +
-            "when it is listed. Tools missing from tools/list are reachable through coreai_tools " +
-            "(action list, describe, call). Verify each change with screenshot and get_mod_logs. A result " +
-            "with isError=true means the action did not happen as asked; its text says what to do next.";
+            "This server runs inside a live CoreAI game; every tool acts on the running world. Start with " +
+            "game_status. Before writing Lua call read_skill: 'Lua Modding' for mods, 'Rbx API' for anything " +
+            "visible; each returns its core and a section list, so read only the sections the task needs. " +
+            "Rules the in-game Programmer follows: build Roblox-style (Instance.new('Part'), workspace, " +
+            "Vector3/CFrame/Color3, Parent = workspace); use only APIs the skills name, never invented ones " +
+            "(game.create, game.rules, GameObject.Find); pass function values to hooks_on/logic_define; no " +
+            "io/os/load/debug. execute_lua is one-off; behaviour that lasts is a mod: manage_mods load (the " +
+            "optional @coreai header, context: and category:, is in the skills). To change a mod: get_source " +
+            "(follow next_from_line), then edit with old_text copied " +
+            "exactly; reload replaces the WHOLE mod. After a change: get_mod_logs with mod_id, since_reload=true, " +
+            "wait_seconds=5, then screenshot (screen=true includes the UI). Other tools, including every tool " +
+            "the in-game agents have, are reached through coreai_tools (list, describe, call). isError=true " +
+            "means it did not happen as asked; the text says what to do next.";
 
         /// <summary>Revisions answered by echoing them back from <c>initialize</c>, newest first.</summary>
         public static IReadOnlyList<string> NegotiatedProtocolVersions { get; } =

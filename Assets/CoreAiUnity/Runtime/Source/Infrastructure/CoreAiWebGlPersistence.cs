@@ -45,7 +45,86 @@ namespace CoreAI.Infrastructure
 
         [DllImport("__Internal")]
         private static extern int CoreAi_PersistFsAutoSyncEnabled();
+
+        [DllImport("__Internal")]
+        private static extern int CoreAi_PersistFsFlushPending();
+
+        [DllImport("__Internal")]
+        private static extern void CoreAi_SetLeaveGuard(int on);
+
+        [DllImport("__Internal")]
+        private static extern int CoreAi_OtherPagesSharingStorage();
 #endif
+
+        /// <summary>
+        /// True when the engine's automatic persistence has nothing left to carry into IndexedDB: no persist is
+        /// queued or running. Once a write has completed, the first true answer after it means that write's sync
+        /// ended. Always true outside a WebGL player, and in a player whose storage mount cannot be read.
+        /// </summary>
+        /// <remarks>
+        /// WHY "ended" and not "committed": the engine drops the error of a failed sync (a full quota), so a sync
+        /// that failed ends idle too. This is the best answer the page has, not a durability proof.
+        /// </remarks>
+        public static bool IsFlushIdle
+        {
+            get
+            {
+#if UNITY_WEBGL && !UNITY_EDITOR
+                try
+                {
+                    return CoreAi_PersistFsFlushPending() != 1;
+                }
+                catch (Exception)
+                {
+                    return true;
+                }
+#else
+                return true;
+#endif
+            }
+        }
+
+        /// <summary>
+        /// How many other pages of this origin run CoreAI now. They share this page's IndexedDB copy of
+        /// <c>Application.persistentDataPath</c>, and each page's persistence writes its own view of the folder, so
+        /// two open pages can overwrite each other's saves. Always 0 outside a WebGL player.
+        /// </summary>
+        public static int OtherPagesSharingStorage
+        {
+            get
+            {
+#if UNITY_WEBGL && !UNITY_EDITOR
+                try
+                {
+                    return Math.Max(0, CoreAi_OtherPagesSharingStorage());
+                }
+                catch (Exception)
+                {
+                    return 0;
+                }
+#else
+                return 0;
+#endif
+            }
+        }
+
+        /// <summary>
+        /// Asks the browser to confirm before the page is closed or reloaded (<paramref name="on"/> true), or stops
+        /// asking. A no-op outside a WebGL player. The browser shows its own fixed text, and only after the player
+        /// has interacted with the page.
+        /// </summary>
+        public static void GuardPageLeave(bool on)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            try
+            {
+                CoreAi_SetLeaveGuard(on ? 1 : 0);
+            }
+            catch (Exception)
+            {
+            }
+#endif
+        }
 
         /// <summary>
         /// True when writes under <c>Application.persistentDataPath</c> are persisted automatically by

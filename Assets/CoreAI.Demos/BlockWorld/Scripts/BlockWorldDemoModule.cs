@@ -74,6 +74,24 @@ namespace CoreAI.Demos.BlockWorld
         [Range(0, 16)]
         private int webGlMaxViewRadius = 12;
 
+        [Tooltip("Let the chat agent hand big jobs to a background Lua sub-agent and keep talking meanwhile "
+                 + "(orchestrator mode, Team style), for this scene's CoreAI scope only. In play, /orchestrator off "
+                 + "and /orchestrator on switch it.")]
+        [SerializeField]
+        private bool delegateBigJobs = true;
+
+        [Tooltip("Let the bundled Lua chat mod (coreai_chat) talk to the player's assistant, so it can be turned on "
+                 + "from the Hub's Mods page; while it runs, the C# chat overlay steps aside.")]
+        [SerializeField]
+        private bool allowLuaChat = true;
+
+        [Tooltip("Turn the Lua chat mod on at the start instead of the C# chat overlay. Off: the mod is only "
+                 + "installed, and the player's own choice in the Mods page is kept.")]
+        [SerializeField]
+        private bool useLuaChat;
+
+        private const string LuaChatModId = "coreai_chat";
+
         private readonly List<string> _switchedOn = new();
         private readonly HereContextProvider _here = new();
         private CoreAiPlayWorldComposition _composition;
@@ -99,7 +117,23 @@ namespace CoreAI.Demos.BlockWorld
             if (mods != null && mods.Container == null)
             {
                 mods.SetAllowAgentsFromLua(allowAgentsFromLua);
+                mods.SetAllowPlayerAssistantFromLua(allowLuaChat || useLuaChat);
                 mods.SetKeepWorldBetweenStarts(keepWorldBetweenStarts);
+            }
+
+            CoreAILifetimeScope core = composition?.CoreScope;
+            if (delegateBigJobs && core != null && core.Container == null)
+            {
+                core.OrchestratorMode = new CoreAI.Ai.SubAgents.OrchestratorModeOptions { Enabled = true };
+                core.DefaultSubAgents = new CoreAiDefaultSubAgents(new[]
+                {
+                    new DefaultSubAgentSpec(CoreAiDefaultSubAgents.ScripterId, BuiltInAgentRoleIds.Programmer,
+                        "Builds in this Block World with Lua: terrain blocks from the workspace attribute "
+                        + "BuildHereCell (Terrain:FillBlock, FillRegion, WriteVoxels), parts and mods with behaviour. "
+                        + "Give it one whole job with sizes and places, for example 'build a 7x7 stone house with a "
+                        + "door, starting at BuildHereCell'.",
+                        new[] { BuiltInToolProfileIds.LuaBuilder })
+                });
             }
         }
 
@@ -159,7 +193,9 @@ namespace CoreAI.Demos.BlockWorld
             // said once and the world plays on without the folder.
             try
             {
-                SwitchFolderOn(container.Resolve<ILuaModSourceStore>());
+                ILuaModSourceStore store = container.Resolve<ILuaModSourceStore>();
+                SwitchFolderOn(store);
+                InstallLuaChat(store);
                 ActorContext player = container.Resolve<IActorIdentityProvider>()
                     .GetActorContext(BuiltInAgentRoleIds.Programmer);
                 LoadedByThisModule = session.CurrentConcreteRuntime.RehydrateFromStore(player, LuaCapabilities.All);
@@ -167,6 +203,38 @@ namespace CoreAI.Demos.BlockWorld
             catch (Exception ex)
             {
                 Fail("switching the folder '" + ModFolder + "' on failed: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Installs the bundled Lua chat mod into the store and, with <see cref="useLuaChat"/>, turns it on.
+        /// </summary>
+        private void InstallLuaChat(ILuaModSourceStore store)
+        {
+            if (!allowLuaChat && !useLuaChat)
+            {
+                return;
+            }
+
+            // WHY seeded here: a world kept between starts restores its own exact set of mods, so a mod a later
+            // build bundles is not in it; without this the Mods page would have no chat mod to turn on.
+            ResourcesBundledModSource resources = new();
+            List<BundledMod> chat = new();
+            foreach (BundledMod mod in resources.Load())
+            {
+                if (string.Equals(mod.Id, LuaChatModId, StringComparison.Ordinal))
+                {
+                    chat.Add(mod);
+                }
+            }
+
+            new BundledModSeeder(store, new IBundledModSource[] { new ListedBundledModSource(resources.Origin, chat) })
+                .Seed();
+            // WHY never switched off here: with useLuaChat off the choice is the player's, made in the Mods page.
+            if (useLuaChat && store.TryLoad(LuaChatModId, out _, out LuaModManifest manifest) && manifest != null &&
+                !manifest.Active)
+            {
+                store.SetActive(LuaChatModId, true);
             }
         }
 

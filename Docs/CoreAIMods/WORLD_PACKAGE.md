@@ -529,14 +529,63 @@ and the autosave behind the last gated mutation in one step, inside the call
 `LuaModRuntimeTickDriver` calls it on an application pause and on quit). "Finished" means encoded: the file write
 that follows still yields a frame per 64 KiB written, as every package write always did, so a player that stops
 running frames at once can still lose a write of more than 64 KiB, exactly as before the incremental encode. A
-record that starts after the stop is not spread over frames either. A browser gives no callback on a page unload:
-there, a record or a backup still encoding when the page closes is lost (before the incremental encode only its
-write was in flight, a frame or two; now the encode is too, about 13-16 frames for a Block World's record at 60 fps,
-none in a hidden tab), and the autosave behind a mutation is reported at the next start as a missing backup. A change
-made while a record is encoding gets its own record afterwards (the record took its pending state when it captured
-the world). Tests: `KeptWorldRecordAndBackupBehind_MidSlicesWhenThePlayWorldStops_AreFinishedAtOnce`,
+record that starts after the stop is not spread over frames either. A browser gives no callback on a page unload
+(Unity's documentation: the Web platform does not support `OnApplicationQuit`): there, a record or a backup still encoding when the page closes is lost (before the incremental
+encode only its write was in flight, a frame or two; now the encode is too, about 13-16 frames for a Block World's
+record at 60 fps), and the autosave behind a mutation is reported at the next start as a missing backup. A hidden tab
+whose player runs on `requestAnimationFrame` (Unity's default, no `Application.targetFrameRate`) runs no frames at
+all, so a record waits there until the tab is shown again. A change made while a record is encoding gets its own
+record afterwards (the record took its pending state when it captured the world). Tests:
+`KeptWorldRecordAndBackupBehind_MidSlicesWhenThePlayWorldStops_AreFinishedAtOnce`,
 `KeptWorldRecord_FinishWritesInFlightAtOnce_EndsTheWaitForFrames`,
 `KeptWorld_AChangeWhileARecordIsMidSlices_GetsARecordOfItsOwn`.
+
+**When a browser stores a write.** Read from the loader Unity 6000.6 ships (`BuildTools/prejs/IdbFs.js` and
+Emscripten's `libidbfs.js`), with `config.autoSyncPersistentDataPath = true`: a file write lands in the page's
+in-memory file system at once; closing a written file, a rename, a delete or a new directory queues a persist that
+starts after the current frame (`setTimeout(0)`); the persist lists every file of `persistentDataPath`, reads every
+key of the IndexedDB store, then writes every changed file whole in one IndexedDB transaction. A write made while a
+persist runs queues one more. A page closed or reloaded before that transaction commits loses that persist (the
+previous one stays, a transaction is all or nothing), and the loader drops a persist's error (a full quota) without
+a word. Every page of an origin shares one IndexedDB copy and each persist writes its own page's view of the whole
+folder, removing files that page does not have, so two open pages of a game overwrite each other's saves. None of
+this was timed in a player.
+
+### The change journal of a kept world
+
+A world kept between starts writes a player's Terrain changes to a small journal next to its newest startup entry
+(`Startup/<entry>.journal`, `RbxKeptWorldJournal`) in the frame they were made, and the full record of the world
+(after the quiet time, at most every 15 s while it keeps changing) takes the journal's place. A start opens the entry,
+replays its journal over the entry's Terrain and then starts the world, so a block placed a moment before a reload is
+there after it without waiting for a full record.
+
+- **What is journaled.** A Terrain write made outside the generator's mark (`CoreAITerrainGenerating`), of at most
+  4,096 cells, in chunks the entry holds. A record holds the cells of the changed box as they are after the write
+  (values, not the operation), so a write replayed twice in order gives the same cells. One placed or broken block is
+  29 bytes (an 8-byte length and CRC-32, the box, one material and one occupancy byte per cell); the file starts with
+  8 header bytes. Measured engine-free on a contended Windows machine: 0.36 to 1.6 ms a block for the file's open,
+  append and close (once a frame, whatever the number of writes in it), a journal of 5,000 blocks is 145,008 bytes, and
+  replaying it at a start took 6 to 14 ms.
+- **What waits for the full record.** A write in land the entry does not hold (a generator that fills only empty
+  cells would fill a block the player broke there again at the next start), a write over 4,096 cells, a reset of the
+  Terrain, every change that is not a Terrain write (AI changes, instances, mod sources, Workspace attributes such as
+  the Block World's torch list), and any write once the journal holds 256 KiB (a browser writes the whole file again
+  after each frame that changed it).
+- **Order.** A record takes the journal's position when it captures the world; once its entry is written, the writes
+  journaled after that capture become the new entry's journal and the older journals are deleted, in the same step, so
+  one browser persist carries both. A write made while a record encodes is in that record or in the journal after it.
+- **When the journal stops.** A confirmed load, an undo or redo (the world is replaced in place), a cleared startup
+  selection and a start whose restore fell back stop the journal until the next record of the world starts it again;
+  meanwhile writes wait for that record. A cleared selection deletes the journals.
+- **A journal that cannot be read.** A record whose length or checksum does not match (a write cut short by a crash or
+  a reload) ends the replay there: the records before it are applied, the rest is reported (a diagnostic and the
+  save state's note), and the file is cut back to its readable part so later appends stay readable. The entry itself
+  is never touched.
+- **A store of its own.** The journal writes the file store's startup directory directly, so a store built over its
+  own file system (a test double) keeps no journal, and every change waits for the full record.
+
+Tests: `KeptWorldJournalEditModeTests` (engine-free), `KeptWorldJournalRestoreEditModeTests` (in Unity: the restore reads
+packages with player-loop frames).
 
 File reads/writes are chunked with PlayerLoop yields. Decoding is not incremental, and the WebGL write budget
 below predates the incremental encode and is kept as it was, so

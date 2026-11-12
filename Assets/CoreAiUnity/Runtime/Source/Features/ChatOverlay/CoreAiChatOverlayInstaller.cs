@@ -130,7 +130,8 @@ namespace CoreAI.ChatOverlay
                             c.ResolveOrDefault<IAgentToolEventSource>(),
                             options,
                             c.ResolveOrDefault<ILog>(),
-                            () => clock.NowSeconds);
+                            () => clock.NowSeconds,
+                            c.ResolveOrDefault<ChatOverlayController>());
                     },
                     Lifetime.Singleton);
             }
