@@ -583,6 +583,25 @@ Owner's questions and decisions on the Block World (2026-11-11):
       buffer (0.15 s), a slope limit, a frictionless material, swimming on the surface and under water and
       climbing out onto a ledge. It is a Unity component of another game, not read in detail yet: what to take
       is the rules and the numbers, into CoreAI's engine-free character body, not the component itself.
+- [ ] **Hub: the World tab becomes the world's hierarchy** (owner, 2026-11-12, on a screenshot of the World tab,
+      which today holds only "World State": has a saved state, Reset World, Save Now). His words: "там где у
+      нас World нужно будет сделать иерархию полноценную (и возможно это заменит вкладку моды, а моды будут в
+      дочерней вкладке открываться ... сопоставимо с роблоксом, где в ворлд и скрипты и объекты лежат по
+      папкам, да и интерфейс и серверная часть и тд)". So: a tree of the world as Roblox's Explorer shows it
+      (Workspace, Players, Lighting, ReplicatedStorage, ServerScriptService, ServerStorage, StarterGui,
+      StarterPlayer and the rest), with objects and scripts in their folders, the interface and the server
+      side in their own places; a script opens in a child tab (its source, the mod's actions); the Mods tab
+      may be folded into it. Not designed yet. What it meets: plan decision D9 (one mode, no Studio) moved
+      MVP12's Explorer and Properties panel to the backlog (`Docs/ROADMAP.md`) - this asks for the Explorer
+      inside the Hub, without a separate mode, so the roadmap entry must be updated when the design is made.
+      What already exists to build on: since MVP4 a declared mod is a real Script, LocalScript or ModuleScript
+      instance at a path in that tree (`script_path` and `run_state` in `manage_mods list`), a mod's folder is
+      its `category`, and the Mods page has the folder tree, the search, the logs and the mod actions. To
+      decide in the design: whether the Mods tab goes away or stays as a flat view; where Reset World and
+      Save Now live; what a node shows (properties?) and which edits it allows (rename, move, delete - gated
+      and undoable like the build tools of P5); how a mod that declares no context (one synthetic script) and
+      a detached script are shown; the Terrain as one node, not its cells; a virtualized tree that stays fast
+      in WebGL with thousands of instances.
 - [ ] **Hub in a play world (F2): the scroll bar is unstyled and no FPS is shown** (owner, a screenshot of the
       Graphics page, 2026-11-12: "плохо выглядит скролл бар, а так же fps не пишется"). The page's vertical
       scroll bar is UI Toolkit's default (a light grey track with white arrow buttons and a grey thumb) on the
