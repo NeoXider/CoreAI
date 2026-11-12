@@ -624,6 +624,23 @@ Owner's questions and decisions on the Block World (2026-11-11):
       when something asks to replace the world. Proposal to decide with the World hierarchy: fold it into the
       World tab as a "Saves" part, and ask the approval in a dialog when a request arrives instead of on a
       page that is empty the rest of the time.
+- [ ] **Chat and every other panel: Russian text is not drawn in a WebGL player** (owner, a screenshot of
+      WebGL build 8, 2026-11-12: "почему то русский не поддерживает"). In the chat his Russian line is an
+      empty "You:" and the model's Russian answer is blanks with only "Block World", digits and punctuation
+      left; the long dash of an English answer is a gap too. Cause read from the code, not yet proven by a
+      run: no panel names a font - `textSettings` is empty in `CoreAiChatPanelSettings_Demo.asset` and
+      `CoreAiHubPanelSettings.asset`, the chat's own panel (`CoreAiChatOverlaySurface.CreateRuntimePanelSettings`)
+      sets none, and no style sheet has a font definition - so the text is drawn with Unity's built-in font,
+      which borrows missing letters from the system's fonts; a browser page has none to lend. The model is
+      not the problem: it answered in Russian. Not checked: whether the typed Russian line reaches the model
+      whole (the model replied "looks like a typo"; the proxy log keeps no request bodies).
+      To do: ship one font with Latin and Cyrillic in the package (the tree already has
+      `Assets/TextMesh Pro/Fonts/LiberationSans.ttf`, 350 KB, but outside the packages; check its licence
+      file goes with it) as a font asset with a fallback list, and give it to every panel in one place: the
+      chat, the Hub, the Lua-made interface (`ScreenGui`, `TextLabel`), speech bubbles, the download overlay.
+      Tests: the font asset has the Russian alphabet and the long dash; a WebGL check that a Russian line is
+      drawn and that a typed one reaches the request unchanged. Other scripts (Chinese, Japanese, Korean,
+      Arabic, emoji) are megabytes each - decide separately, as optional downloads.
 - [ ] **Hub in a play world (F2): the scroll bar is unstyled and no FPS is shown** (owner, a screenshot of the
       Graphics page, 2026-11-12: "плохо выглядит скролл бар, а так же fps не пишется"). The page's vertical
       scroll bar is UI Toolkit's default (a light grey track with white arrow buttons and a grey thumb) on the
