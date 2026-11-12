@@ -565,6 +565,17 @@ Owner's questions and decisions on the Block World (2026-11-11):
       the view is left on after the player comes out; what the horizon dome and the water's underside draw
       against that fog. Needs captured frames from the sea floor at noon and from a beach, in a player, before
       any fix.
+- [ ] **Block World: the character controller is bad to play** (owner, WebGL play, 2026-11-12: "контроллер в
+      CoreAI плохой"). Three things he named, and "and so on": (1) after falling off a block the character
+      goes on sliding by itself; (2) walking into a one-block step should climb it without a jump, as
+      Minecraft's auto-jump does (today it needs a jump); (3) a double tap of W does not sprint, although the
+      legend promises "Ctrl, W twice". Not investigated. Known and relevant: the capsule body is frictionless
+      while it moves and grips when idle (what it does right after a landing is the first thing to look at for
+      the slide), and the sprint passed its Play Mode test on desktop, so the browser's side of the double tap
+      (key timing, key repeat, the tap window) is the first suspect. Do first: a played pass of the controller
+      in a WebGL player against Minecraft's basics (walk, stop, step up, fall, sprint, jump while sprinting,
+      swim), with every difference written down; then the fixes in the engine's character body and the control
+      script, each proven by playing, not only by a test.
 - [ ] **Block World: chunks load badly** (the same play: "под водой да и в целом чанки плохо грузятся"). Land
       comes in slowly and with holes: a bay with nothing past its near shore, a flat sea floor with no further
       terrain. Not measured. To measure in a WebGL player in a foreground tab: the time to fill the view radius
