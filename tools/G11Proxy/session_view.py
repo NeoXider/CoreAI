@@ -59,7 +59,10 @@ def print_session(body, chars):
 
 
 def main(argv):
-    parser = argparse.ArgumentParser(description="Print an agent session from captured chat requests.")
+    # WHY: a Windows console defaults to its code page (cp1251 here) and a session's text holds any character.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    parser =argparse.ArgumentParser(description="Print an agent session from captured chat requests.")
     parser.add_argument("capture_dir")
     parser.add_argument("--file", help="one capture file name instead of the newest")
     parser.add_argument("--chars", type=int, default=600, help="cut every text at this many characters; 0 = never")

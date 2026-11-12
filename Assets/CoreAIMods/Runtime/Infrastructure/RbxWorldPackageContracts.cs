@@ -3632,6 +3632,42 @@ namespace CoreAI.Mods.WorldPackages
             StartPendingStartupRefresh();
             PublishKeptWorldSaveState(session);
             AcknowledgeReportedMissingAutoSaves();
+            ReportStuckSaveWork();
+        }
+
+        /// <summary>A save step running this long is reported: a whole record of a large world takes about a second.</summary>
+        internal static readonly TimeSpan StuckSaveReportAfter = TimeSpan.FromSeconds(20d);
+
+        private long _nextStuckCheckTicks;
+        private string _lastStuckReport = "";
+
+        /// <summary>
+        /// Logs the save steps (<see cref="WorldSaveStages"/>) that have waited past <see cref="StuckSaveReportAfter"/>,
+        /// checked every two seconds and logged again only when the set of steps changes. Never throws.
+        /// </summary>
+        private void ReportStuckSaveWork()
+        {
+            long now = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (now < _nextStuckCheckTicks)
+            {
+                return;
+            }
+
+            _nextStuckCheckTicks = now + System.Diagnostics.Stopwatch.Frequency * 2L;
+            string stuck = WorldSaveStages.DescribeStuck(StuckSaveReportAfter);
+            // WHY the seconds left out of the comparison: they grow every check, and one report per stuck set is enough.
+            string key = System.Text.RegularExpressions.Regex.Replace(stuck, @" for \d+ s", "");
+            if (string.Equals(key, _lastStuckReport, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastStuckReport = key;
+            if (stuck.Length > 0)
+            {
+                ReportDiagnostic("World save work is waiting far longer than a save takes: " + stuck
+                                 + ". Every later world change waits behind it (TODO.md, the kept-world hang).");
+            }
         }
 
         /// <summary>
@@ -4615,8 +4651,13 @@ namespace CoreAI.Mods.WorldPackages
                 return "";
             }
 
-            await _startupSelectionGate.WaitAsync(CancellationToken.None);
+            using (WorldSaveStages.Enter("record", "'" + trigger + "' waits for the record before it"))
+            {
+                await _startupSelectionGate.WaitAsync(CancellationToken.None);
+            }
+
             RbxWorldPackageEncodeUrgency urgency = BeginRecordEncode();
+            IDisposable stage = WorldSaveStages.Enter("record", "'" + trigger + "' captures and encodes the world");
             try
             {
                 StartupSource source = TakeLiveStartupSourceForRefresh();
@@ -4674,6 +4715,8 @@ namespace CoreAI.Mods.WorldPackages
                         StartWorldRefreshInterval();
                     }
 
+                    stage.Dispose();
+                    stage = WorldSaveStages.Enter("record", "'" + trigger + "' writes the record");
                     RbxWorldPackageWriteResult written = _startupStore is FileRbxWorldPackageStore fileStore
                         ? await fileStore.SelectStartupAsync(
                             captured, source.Kind, source.Name, CancellationToken.None, encoding, urgency)
@@ -4719,6 +4762,7 @@ namespace CoreAI.Mods.WorldPackages
             }
             finally
             {
+                stage.Dispose();
                 lock (_gate)
                 {
                     _unjournaledInRecord = false;

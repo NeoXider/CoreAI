@@ -16,6 +16,17 @@ using UnityEngine;
 
 namespace CoreAI.Mods.WorldPackages
 {
+    /// <summary>
+    /// One transaction at a time per package store root: a FIFO lock whose waiters are completed by
+    /// <see cref="UniTaskCompletionSource"/>, so a hand-over never goes through the task scheduler.
+    /// </summary>
+    /// <remarks>
+    /// WHY not a SemaphoreSlim: its async waiters are tasks that resume on the captured context or, without one, on
+    /// the thread pool, which a WebGL player does not run. Build 12 showed the result live: the record was handed the
+    /// transaction and never resumed, and every later save and world change waited behind it for good (TODO.md, the
+    /// kept-world hang). Here the releaser resumes the next holder itself, after it has let go of everything.
+    /// The holder's purpose is a save step (<see cref="WorldSaveStages"/>), so a hang names who holds the store.
+    /// </remarks>
     internal static class WorldPackageTransactions
     {
         private static readonly object Gate = new();
@@ -35,9 +46,19 @@ namespace CoreAI.Mods.WorldPackages
             public override int GetHashCode() => (PathComparer.GetHashCode(Path) * 397) ^ RuntimeHelpers.GetHashCode(FileSystem);
         }
 
+        private sealed class Waiter
+        {
+            public readonly UniTaskCompletionSource Granted = new();
+            public readonly string Purpose;
+            public bool Handed;
+            public bool Cancelled;
+            public Waiter(string purpose) { Purpose = purpose; }
+        }
+
         private sealed class Entry
         {
-            public readonly SemaphoreSlim Semaphore = new(1, 1);
+            public readonly Queue<Waiter> Waiters = new();
+            public bool Held;
             public int References;
         }
 
@@ -45,13 +66,43 @@ namespace CoreAI.Mods.WorldPackages
         {
             private readonly Key _key;
             private Entry _entry;
-            public Lease(Key key, Entry entry) { _key = key; _entry = entry; }
+            private IDisposable _stage;
+
+            public Lease(Key key, Entry entry, string purpose)
+            {
+                _key = key;
+                _entry = entry;
+                _stage = WorldSaveStages.Enter("store", "holds the package store's transaction: " + purpose);
+            }
+
             public void Dispose()
             {
                 Entry entry = Interlocked.Exchange(ref _entry, null);
                 if (entry == null) { return; }
-                entry.Semaphore.Release();
+                Interlocked.Exchange(ref _stage, null)?.Dispose();
+                Waiter next = null;
+                lock (Gate)
+                {
+                    while (entry.Waiters.Count > 0)
+                    {
+                        Waiter waiter = entry.Waiters.Dequeue();
+                        if (!waiter.Cancelled)
+                        {
+                            waiter.Handed = true;
+                            next = waiter;
+                            break;
+                        }
+                    }
+
+                    if (next == null)
+                    {
+                        entry.Held = false;
+                    }
+                }
+
                 ReleaseReference(_key, entry);
+                // WHY last: the next holder resumes inside this call, and this lease has let go of everything by now.
+                next?.Granted.TrySetResult();
             }
         }
 
@@ -77,20 +128,48 @@ namespace CoreAI.Mods.WorldPackages
                 if (--entry.References == 0)
                 {
                     Entries.Remove(key);
-                    entry.Semaphore.Dispose();
                 }
             }
         }
 
-        public static async UniTask<IDisposable> EnterAsync(string root, object fileSystem, CancellationToken token)
+        /// <param name="purpose">What the transaction is for, named while it is held or awaited.</param>
+        public static async UniTask<IDisposable> EnterAsync(
+            string root,
+            object fileSystem,
+            CancellationToken token,
+            string purpose = "")
         {
             token.ThrowIfCancellationRequested();
             Key key = new(root, fileSystem);
             Entry entry = Retain(key);
+            Waiter waiter = null;
+            lock (Gate)
+            {
+                if (entry.Held)
+                {
+                    waiter = new Waiter(purpose);
+                    entry.Waiters.Enqueue(waiter);
+                }
+                else
+                {
+                    entry.Held = true;
+                }
+            }
+
+            if (waiter == null)
+            {
+                return new Lease(key, entry, purpose);
+            }
+
             try
             {
-                await entry.Semaphore.WaitAsync(token);
-                return new Lease(key, entry);
+                using (WorldSaveStages.Enter("store", "waiting for the package store's transaction: " + purpose))
+                using (token.CanBeCanceled ? token.Register(() => Cancel(waiter)) : default(CancellationTokenRegistration))
+                {
+                    await waiter.Granted.Task;
+                }
+
+                return new Lease(key, entry, purpose);
             }
             catch
             {
@@ -99,11 +178,34 @@ namespace CoreAI.Mods.WorldPackages
             }
         }
 
-        public static IDisposable TryEnter(string root, object fileSystem)
+        private static void Cancel(Waiter waiter)
+        {
+            lock (Gate)
+            {
+                if (waiter.Handed)
+                {
+                    return;
+                }
+
+                waiter.Cancelled = true;
+            }
+
+            waiter.Granted.TrySetCanceled();
+        }
+
+        public static IDisposable TryEnter(string root, object fileSystem, string purpose = "")
         {
             Key key = new(root, fileSystem);
             Entry entry = Retain(key);
-            if (entry.Semaphore.Wait(0)) { return new Lease(key, entry); }
+            lock (Gate)
+            {
+                if (!entry.Held)
+                {
+                    entry.Held = true;
+                    return new Lease(key, entry, purpose);
+                }
+            }
+
             ReleaseReference(key, entry);
             return null;
         }
@@ -625,7 +727,7 @@ namespace CoreAI.Mods.WorldPackages
             _transactionRoot = Path.GetFullPath(resolvedRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             _transactionFileSystem = _fileSystem is SystemRbxWorldPackageFileSystem
                 ? typeof(SystemRbxWorldPackageFileSystem) : _fileSystem;
-            using (IDisposable transaction = WorldPackageTransactions.TryEnter(_transactionRoot, _transactionFileSystem))
+            using (IDisposable transaction = WorldPackageTransactions.TryEnter(_transactionRoot, _transactionFileSystem, "opening the store"))
             {
                 if (transaction != null)
                 {
@@ -727,7 +829,7 @@ namespace CoreAI.Mods.WorldPackages
                 }
 
                 IDisposable transaction = await WorldPackageTransactions.EnterAsync(
-                    _transactionRoot, _transactionFileSystem, cancellationToken);
+                    _transactionRoot, _transactionFileSystem, cancellationToken, "the autosave written behind a change");
                 try
                 {
                     string path;
@@ -986,7 +1088,7 @@ namespace CoreAI.Mods.WorldPackages
             cancellationToken.ThrowIfCancellationRequested();
             EncodedAhead encoded = await EncodeAheadAsync(payload, cancellationToken, digestedEntries, urgency);
             IDisposable transaction = await WorldPackageTransactions.EnterAsync(
-                _transactionRoot, _transactionFileSystem, cancellationToken);
+                _transactionRoot, _transactionFileSystem, cancellationToken, "recording the startup world");
             try
             {
                 int sequence;
@@ -1044,7 +1146,7 @@ namespace CoreAI.Mods.WorldPackages
         {
             cancellationToken.ThrowIfCancellationRequested();
             IDisposable transaction = await WorldPackageTransactions.EnterAsync(
-                _transactionRoot, _transactionFileSystem, cancellationToken);
+                _transactionRoot, _transactionFileSystem, cancellationToken, "clearing the startup world");
             try
             {
                 int sequence;
@@ -1093,7 +1195,7 @@ namespace CoreAI.Mods.WorldPackages
         {
             cancellationToken.ThrowIfCancellationRequested();
             IDisposable transaction = await WorldPackageTransactions.EnterAsync(
-                _transactionRoot, _transactionFileSystem, cancellationToken);
+                _transactionRoot, _transactionFileSystem, cancellationToken, "reading the startup world");
             try
             {
                 StartupEntry current;
@@ -1164,7 +1266,7 @@ namespace CoreAI.Mods.WorldPackages
         {
             cancellationToken.ThrowIfCancellationRequested();
             IDisposable transaction = await WorldPackageTransactions.EnterAsync(
-                _transactionRoot, _transactionFileSystem, cancellationToken);
+                _transactionRoot, _transactionFileSystem, cancellationToken, "reading the startup world's info");
             try
             {
                 StartupEntry current;
@@ -1215,7 +1317,7 @@ namespace CoreAI.Mods.WorldPackages
             string safeSlot = ValidateName(slot, "manual slot");
             EncodedAhead encoded = await EncodeAheadAsync(payload, cancellationToken);
             IDisposable transaction = await WorldPackageTransactions.EnterAsync(
-                _transactionRoot, _transactionFileSystem, cancellationToken);
+                _transactionRoot, _transactionFileSystem, cancellationToken, "a manual save");
             try
             {
                 string path = Path.Combine(_manualDirectory, safeSlot + Extension);
@@ -1405,7 +1507,7 @@ namespace CoreAI.Mods.WorldPackages
             DateTime requestedAtUtc = _utcNow();
             EncodedAhead encoded = await EncodeAheadAsync(payload, cancellationToken);
             IDisposable transaction = await WorldPackageTransactions.EnterAsync(
-                _transactionRoot, _transactionFileSystem, cancellationToken);
+                _transactionRoot, _transactionFileSystem, cancellationToken, "the autosave before a change");
             try
             {
                 string path;

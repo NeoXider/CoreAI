@@ -775,6 +775,20 @@ Owner's questions and decisions on the Block World (2026-11-11):
         loaded and reloaded fine twice before in that page. Start by logging each await of
         `ConfirmedWorldMutationGate` (the mutation itself, `NotifyAfterMutationAsync`, the backup) and of
         `RefreshStartupSelectionAsync` (`_startupSelectionGate`, the frame-budget digest) in a WebGL player.
+        2026-11-13, build 12 with that logging (`WorldSaveStages`, logged after 20 s): it hung with no mod at all,
+        after two `execute_lua` calls - "record: 'world change' writes the record; store: waiting for the package
+        store's transaction; autosave: writing the autosave behind 'execute_lua'; store: waiting for the package
+        store's transaction", and every later gated call queued behind; nothing named held the transaction. Read as
+        the record handed the store's `SemaphoreSlim` slot and never resumed (a context-less task continuation goes
+        to the thread pool, which a WebGL player does not run). Fixed in the tree: the transaction lock is a FIFO of
+        `UniTaskCompletionSource` waiters resumed by the release (`WorldPackageTransactionLockEditModeTests`), and
+        the holder is named in the hang log. Verified in build 13 (headless WSN page, 35-42 FPS): two pillars of 6
+        blocks, one `execute_lua` per block (0.7-1.8 s each), `manage_mods load` and `reload` of the 4-pig herd,
+        every later call answered, state `saved`, and after a page reload all 12 blocks and 4 pigs were back; no
+        "World save work is waiting" line. In the owner's Chrome tab in the background (1 FPS) a call can still
+        take over a minute, because a save advances a frame at a time - slow, not stuck.
+        Same pattern still elsewhere: `ConfirmedWorldMutationGate._singleFlight`, the controller's
+        `_startupSelectionGate` and `FileLuaModStore._gate` are `SemaphoreSlim`s awaited the same way.
       - **What a captured session showed (2026-11-12, "a pink pig of blocks that slowly walks", owner's local
         `swift-1.5`, `tools/G11Proxy/session_view.py`):** 11 steps in 20 min and no pig: 4 skill reads (both
         cores, terrain, loops, datatypes) and 6 `execute_lua` surveys mapping the terrain around `BuildHereCell`,
@@ -790,6 +804,19 @@ Owner's questions and decisions on the Block World (2026-11-11):
         auto-compaction works and tool calls do not flood the context": that compaction runs on a long turn,
         that skill reads and big tool results are cut or summarized, and measure it on a captured session. The pig
         was never made, so the kept-world hang with an AI-made moving mod is still reproduced only over MCP.
+      - **Not in a build yet (2026-11-13, owner: no build 14, weekly limits):** a character stands back up
+        (`UnityRbxCharacterMotor.StandUpright`; villagers the owner moved stayed lying on the grass), EditMode
+        green (`UnityRbxCharacterMotorUprightEditModeTests`). In build 13 but not checked by hand: a villager under
+        a roof stays on the floor (`blockworld_villagers` `floorOutOf`). Build 13 is 87 MB with no `LlamaLib*`
+        (the guard now also cleans the output; 3.9 GB reached builds 2 and 12, what put it back is not known).
+        Check them in the next build.
+      - **Block World pig herd (`test_pig`, made over MCP 2026-11-13):** four Humanoid pigs that keep together,
+        graze, flee a close player and give up a stuck walk; the first version (posing 4x17 parts every Heartbeat,
+        deciding every frame) hit "Lua coroutine resume exceeded 500 ms" and started a model repair turn. The
+        lighter version (decisions at 5 Hz, a still pig not posed) runs in build 13 with no budget warning and
+        survives a reload; it lives only in the session scratchpad, not in the repository. Why the first one's
+        68 CFrame writes a frame cost over 500 ms in WebGL is open - measure a Part.CFrame write there.
+        `BasePart.CanQuery` is NOT_IMPLEMENTED (a pig's body parts wanted it).
       - **Block World: the player's position is not kept** - `blockworld_world` puts the character at
         `BlockWorldSpawn` at every start (owner: "местоположение тоже сбрасывается"). A Lua fix: keep the last
         position in the world (an attribute written when the player stops, not every frame, so it does not keep the

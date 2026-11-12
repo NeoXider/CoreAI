@@ -576,6 +576,7 @@ namespace CoreAI.Mods.Rbx.Binding
         /// </remarks>
         public void Step(double deltaSeconds)
         {
+            StandUpright();
             if (_flying)
             {
                 StepFlight(deltaSeconds);
@@ -589,6 +590,34 @@ namespace CoreAI.Mods.Rbx.Binding
             }
 
             StepWalk(deltaSeconds);
+        }
+
+        /// <summary>The tilt (degrees) a character body stands back up from.</summary>
+        internal const float UprightToleranceDegrees = 0.5f;
+
+        /// <summary>
+        /// Stands a tilted body back up, keeping its heading: a Humanoid's character stays upright, as in Roblox.
+        /// </summary>
+        /// <remarks>
+        /// WHY here: rotation is frozen against physics, so nothing undid a tilt given from outside (a Hub move of
+        /// a villager, a script's PivotTo with a rotation), and the motor only turns the yaw while walking; the
+        /// owner moved villagers and they stayed lying on the grass.
+        /// </remarks>
+        private void StandUpright()
+        {
+            if (_body == null || _body.isKinematic)
+            {
+                return;
+            }
+
+            Transform bodyTransform = _body.transform;
+            if (Vector3.Angle(bodyTransform.up, Vector3.up) <= UprightToleranceDegrees)
+            {
+                return;
+            }
+
+            double yaw = RbxCharacterFacing.YawOf(RbxSpace.RotationFromUnity(bodyTransform.rotation).LookVector);
+            bodyTransform.rotation = RbxSpace.ToUnity(RbxCFrame.Angles(0f, (float)yaw, 0f));
         }
 
         /// <summary>Advances the walk by one fixed step. Call from the fixed-step pump.</summary>

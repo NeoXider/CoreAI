@@ -301,8 +301,14 @@ namespace CoreAI.Mods.WorldPackages
                 throw new ArgumentNullException(nameof(mutationAsync));
             }
 
-            await _singleFlight.WaitAsync(cancellationToken);
+            using (WorldSaveStages.Enter("gate", "'" + trigger + "' waits for the change before it"))
+            {
+                await _singleFlight.WaitAsync(cancellationToken);
+            }
+
             Volatile.Write(ref _held, 1);
+            IDisposable stage = WorldSaveStages.Enter("gate", "'" + trigger + "' waits for the autosave behind '"
+                                                             + _pendingTrigger + "'");
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -310,6 +316,8 @@ namespace CoreAI.Mods.WorldPackages
                 // holds two half-written backups, and a failed one makes this mutation back itself up
                 // durably before it runs, as every mutation did before write-behind.
                 string previousBackupFailure = await SettlePendingBackupAsync();
+                stage.Dispose();
+                stage = WorldSaveStages.Enter("gate", "'" + trigger + "' captures and backs up the world");
                 // WHY a confirmed load stays durable-first: the player chose to replace the whole world, the
                 // outgoing world exists nowhere else afterwards, and a load is never on the AI's hot path.
                 bool writeBehind = WritesBehind
@@ -416,6 +424,8 @@ namespace CoreAI.Mods.WorldPackages
                     : RbxWorldSnapshot.Of(trigger, payload.CapturedAtUtc, payload, prepared);
                 NotifyMutationStarting(trigger);
                 NotifyObserversStarting(mutation);
+                stage.Dispose();
+                stage = WorldSaveStages.Enter("gate", "'" + trigger + "' runs");
                 Task<TResult> running = StartMutation(mutationAsync, cancellationToken);
                 // WHY after the mutation has started: its synchronous part (all of a one-off execute_lua
                 // build) is visible before any storage work, and the write that follows still takes the
@@ -447,11 +457,14 @@ namespace CoreAI.Mods.WorldPackages
                     result = WithNote(result, combinedBackupNote, BackupNoteField);
                 }
 
+                stage.Dispose();
+                stage = WorldSaveStages.Enter("gate", "'" + trigger + "' records the world after it");
                 string note = await NotifyAfterMutationAsync(trigger);
                 return note.Length == 0 ? result : WithNote(result, note, StartupNoteField);
             }
             finally
             {
+                stage.Dispose();
                 Volatile.Write(ref _held, 0);
                 _singleFlight.Release();
             }
@@ -574,6 +587,7 @@ namespace CoreAI.Mods.WorldPackages
         {
             Stopwatch watch = Stopwatch.StartNew();
             RbxWorldPackageWriteResult result;
+            IDisposable stage = WorldSaveStages.Enter("autosave", "writing the autosave behind '" + prepared.Trigger + "'");
             try
             {
                 // WHY uncancelled: the mutation already ran, so abandoning its backup half-way would only
@@ -584,6 +598,10 @@ namespace CoreAI.Mods.WorldPackages
             catch (Exception ex)
             {
                 result = new RbxWorldPackageWriteResult(false, "", ex.Message);
+            }
+            finally
+            {
+                stage.Dispose();
             }
 
             if (result.Success)

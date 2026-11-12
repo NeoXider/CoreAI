@@ -272,6 +272,54 @@ workspace:SetAttribute('TestHairHeld', body.Hair.Anchored and not body.Hair.CanC
             _world.AssertHealthy(Mod);
         }
 
+        [Test]
+        public void P6_Villagers_ARoofBuiltOverOne_IsNotTakenForTheGround()
+        {
+            StartOnGround(pitUnderTobin: false);
+            TobinStands();
+            // WHY two rows from 12 up: the owner's report, a ceiling a block over the villager's head; the old check
+            // took the column's highest ground (the roof's top, 20) for the floor and stood him on the roof.
+            TerrainMaterials.TryGetSlot("Grass", out byte grass);
+            for (int x = TobinCellX - 1; x <= TobinCellX + 1; x++)
+            {
+                for (int z = TobinCellZ - 1; z <= TobinCellZ + 1; z++)
+                {
+                    _world.Terrain.Store.SetCell(x, 3, z, grass, 255);
+                    _world.Terrain.Store.SetCell(x, 4, z, grass, 255);
+                }
+            }
+
+            _world.Frame(60);
+
+            Assert.AreEqual(StandingY, TobinAt().Y, 0.01d, "Tobin stays on the floor under the roof");
+            Assert.IsNull(_world.Attribute("TestTobinRescues"), "nobody moved Tobin");
+            _world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_Villagers_OneStuckInsideAWallUnderARoof_IsLiftedToTheFloorOfTheGap_NotOntoTheRoof()
+        {
+            StartOnGround(pitUnderTobin: false);
+            TobinStands();
+            TerrainMaterials.TryGetSlot("Grass", out byte grass);
+            // A roof two rows above a gap of two rows (8..16 open, 16..24 roof).
+            for (int x = TobinCellX - 1; x <= TobinCellX + 1; x++)
+            {
+                for (int z = TobinCellZ - 1; z <= TobinCellZ + 1; z++)
+                {
+                    _world.Terrain.Store.SetCell(x, 4, z, grass, 255);
+                    _world.Terrain.Store.SetCell(x, 5, z, grass, 255);
+                }
+            }
+
+            _world.LoadSource("test_bury_tobin_roofed", "workspace.Tobin:PivotTo(CFrame.new(18, -20, -2))");
+            _world.Frame(30);
+
+            Assert.AreEqual(StandingY, TobinAt().Y, 0.01d, "Tobin stands on the floor (8) of the first gap, not on the roof (24)");
+            Assert.AreEqual(1d, System.Convert.ToDouble(_world.Attribute("TestTobinRescues")), "one rescue");
+            _world.AssertHealthy(Mod);
+        }
+
         private static double Flat(RbxVector3 a, RbxVector3 b)
         {
             return new RbxVector3(a.X - b.X, 0f, a.Z - b.Z).Magnitude;

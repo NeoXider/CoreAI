@@ -43,6 +43,25 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public void RemoveGuardedFoldersFromOutput_DeletesLocalModelFolders_AndKeepsTheRest()
+        {
+            string output = Path.Combine(_backupRoot, "Build");
+            string streaming = Path.Combine(output, "StreamingAssets");
+            Directory.CreateDirectory(Path.Combine(streaming, "LlamaLib-v2.0.5", "windows"));
+            File.WriteAllText(Path.Combine(streaming, "LlamaLib-v2.0.5", "windows", "llama.dll"), "native");
+            Directory.CreateDirectory(Path.Combine(streaming, "CoreAIMods"));
+            File.WriteAllText(Path.Combine(streaming, "CoreAIMods", "mod.lua"), "print('kept')");
+
+            int removed = CoreAIWebGlStreamingAssetsGuard.RemoveGuardedFoldersFromOutput(output);
+
+            Assert.AreEqual(1, removed);
+            Assert.IsFalse(Directory.Exists(Path.Combine(streaming, "LlamaLib-v2.0.5")), "a browser cannot load it");
+            Assert.IsTrue(File.Exists(Path.Combine(streaming, "CoreAIMods", "mod.lua")), "the game's own data stays");
+            Assert.AreEqual(0, CoreAIWebGlStreamingAssetsGuard.RemoveGuardedFoldersFromOutput(
+                Path.Combine(_backupRoot, "NoSuchBuild")), "a missing output is no error");
+        }
+
+        [Test]
         public void ExcludeFolders_UnresolvedConflict_PreservesBothGenerationsAndManifest()
         {
             string projectRoot = Path.Combine(_backupRoot, "Project");

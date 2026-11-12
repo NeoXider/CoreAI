@@ -447,28 +447,55 @@ local function tryPlace(villager, force)
     giveBrain(villager)
 end
 
--- WHY stood back on top and not held: a body the host has no collider under yet sinks into the land, and the
--- check catches it within a quarter second; a villager on land not made yet is taken home, whose column is made.
+-- The floor (studs) a villager whose feet are at `feetY` should stand on: nil when its body is in open air (standing,
+-- walking, or under a roof someone built over it); else the top of the solid run its body is stuck in, the floor of
+-- the first gap above it tall enough for a body (two cells), so a villager is never lifted past a ceiling.
+local function isSolid(material)
+    return material ~= Enum.Material.Air and material ~= Enum.Material.Water
+end
+local function floorOutOf(spot, feetY)
+    local cell = terrain:WorldToCell(Vector3.new(spot.X, 0, spot.Z))
+    local bottom = terrain:CellCornerToWorld(cell.X, BEDROCK_ROW, cell.Z)
+    local pillar = terrain:ReadVoxels(Region3.new(bottom, bottom + Vector3.new(4, 32 * 4, 4)), 4)[1]
+    -- The cell a stud above the feet: the body's lowest cell (a foot sunk a little into the floor is not stuck).
+    local index = math.floor((feetY + 1 - bottom.Y) / 4) + 1
+    if index < 1 or index > #pillar or not isSolid(pillar[index][1]) then
+        return nil
+    end
+    while index <= #pillar do
+        local here, above = pillar[index][1], pillar[index + 1] and pillar[index + 1][1] or Enum.Material.Air
+        if not isSolid(here) and not isSolid(above) then
+            return bottom.Y + (index - 1) * 4
+        end
+        index = index + 1
+    end
+    return bottom.Y + #pillar * 4
+end
+
+-- WHY stood back up and not held: a body the host has no collider under yet sinks into the land, and the check
+-- catches it within a quarter second; a villager on land not made yet is taken home, whose column is made.
+-- WHY the first gap and not the column's top: a block placed over a villager's head is a roof, not the ground, and
+-- the old "top of the column" check stood the villager on it.
 local function checkFooting(villager)
     local root = villager.root
     local position = root.Position
-    local spot = position
+    local half = root.Size.Y / 2
+    local spot, floor
     if not columnMade(position) then
         spot = villager.home
+        floor = topGround(spot)
+    elseif position.Y <= (BEDROCK_ROW + 2) * 4 then
+        -- Fell through the land to the bedrock: back on top of its column.
+        spot = position
+        floor = topGround(spot)
+    else
+        spot = position
+        floor = floorOutOf(spot, position.Y - half)
     end
-    local top = topGround(spot)
-    local half = root.Size.Y / 2
-    if spot == position and top and position.Y - half >= top - 0.5 and position.Y > (BEDROCK_ROW + 2) * 4 then
+    if not floor then
         return
     end
-    if spot == position and not top then
-        return
-    end
-    top = top or topGround(villager.home)
-    if not top then
-        return
-    end
-    villager.model:PivotTo(CFrame.new(spot.X, top + half, spot.Z))
+    villager.model:PivotTo(CFrame.new(spot.X, floor + half, spot.Z))
     -- WHY guarded: a host without body velocities still gets the villager back on top.
     pcall(function()
         root.AssemblyLinearVelocity = Vector3.zero

@@ -164,6 +164,52 @@ namespace CoreAI.Editor
             }
 
             RestoreMovedFoldersIfAny(true);
+            int removed = RemoveGuardedFoldersFromOutput(report.summary.outputPath);
+            if (removed > 0)
+            {
+                CoreAIEditorLog.Log(
+                    $"WebGL build: removed {removed} local-model folder(s) that reached the output's StreamingAssets.");
+            }
+        }
+
+        /// <summary>
+        /// Deletes the guarded local-model folders (LlamaLib and the like) from a WebGL build output's StreamingAssets;
+        /// answers how many it deleted. A browser player cannot load native libraries, so they never belong there.
+        /// </summary>
+        /// <remarks>
+        /// WHY after the build as well as before it: WebGL builds 2 and 12 shipped 3.9 GB of LlamaLib although the
+        /// preprocess step had moved the project's folder away; a later step put it back into the output, so the
+        /// output itself is cleaned (this runs after the other build postprocessors, <see cref="callbackOrder"/>).
+        /// </remarks>
+        internal static int RemoveGuardedFoldersFromOutput(string outputPath)
+        {
+            if (string.IsNullOrEmpty(outputPath))
+            {
+                return 0;
+            }
+
+            string streamingAssets = Path.Combine(outputPath, "StreamingAssets");
+            if (!Directory.Exists(streamingAssets))
+            {
+                return 0;
+            }
+
+            int removed = 0;
+            foreach (string folder in Directory.GetDirectories(streamingAssets))
+            {
+                string name = Path.GetFileName(folder);
+                foreach (string prefix in GuardedFolderPrefixes)
+                {
+                    if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Directory.Delete(folder, true);
+                        removed++;
+                        break;
+                    }
+                }
+            }
+
+            return removed;
         }
 
         public void OnProcessScene(Scene scene, BuildReport report)
