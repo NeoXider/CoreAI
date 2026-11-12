@@ -40,7 +40,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
     {
         internal ScriptInstancePlacement(string sourceId, RbxLuaSourceContainer script, bool created, bool adopted,
             RbxInstance previousParent, int previousSiblingIndex, int previousRunContext,
-            List<RbxInstance> createdFolders)
+            List<RbxInstance> createdFolders, RbxLuaSourceContainer replaced = null,
+            List<RbxInstance> movedChildren = null)
         {
             SourceId = sourceId;
             Script = script;
@@ -50,6 +51,8 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
             PreviousSiblingIndex = previousSiblingIndex;
             PreviousRunContext = previousRunContext;
             CreatedFolders = createdFolders;
+            Replaced = replaced;
+            MovedChildren = movedChildren;
         }
 
         public string SourceId { get; }
@@ -57,7 +60,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
         /// <summary>The instance now bound to <see cref="SourceId"/>.</summary>
         public RbxLuaSourceContainer Script { get; }
 
-        /// <summary>True when the placement created the instance.</summary>
+        /// <summary>True when the placement created the instance (also for a replacement, SC-4).</summary>
         public bool Created { get; }
 
         /// <summary>True when it bound an unbound instance that already sat at the placement (a version 1 save).</summary>
@@ -65,6 +68,13 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
 
         /// <summary>True when the instance was bound to the source before the placement.</summary>
         public bool Reused => !Created && !Adopted;
+
+        /// <summary>
+        /// True when the placement replaced the bound instance with one of another class (SC-4): the old instance waits,
+        /// unbound and out of the world, for <see cref="IScriptInstanceHost.CompletePlacement"/> to destroy it or
+        /// <see cref="IScriptInstanceHost.UndoPlacement"/> to put it back.
+        /// </summary>
+        public bool ReplacedPrevious => Replaced != null;
 
         internal RbxInstance PreviousParent { get; }
 
@@ -74,7 +84,14 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
 
         internal List<RbxInstance> CreatedFolders { get; }
 
+        internal RbxLuaSourceContainer Replaced { get; }
+
+        /// <summary>The children a replacement moved from <see cref="Replaced"/> to <see cref="Script"/>, in order.</summary>
+        internal List<RbxInstance> MovedChildren { get; }
+
         internal bool Undone { get; set; }
+
+        internal bool Completed { get; set; }
     }
 
     /// <summary>
@@ -96,18 +113,27 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
 
         /// <summary>
         /// Applies a durable <paramref name="plan"/>: creates the instance (or adopts an unbound one of the planned class
-        /// and name at the placement), or moves and updates the bound one. Throws BAD_ARGUMENT for a <c>parent:</c> path
-        /// that does not resolve, or that names a parent the world would not save with it, and changes nothing then.
+        /// and name at the placement), moves and updates the bound one, or replaces the bound one with an instance of the
+        /// planned class that takes its name, parent and children (<see cref="ScriptPlacementPlan.ReplacesBoundInstance"/>).
+        /// Throws BAD_ARGUMENT for a <c>parent:</c> path that does not resolve, or that names a parent the world would not
+        /// save with it, and changes nothing then.
         /// </summary>
         ScriptInstancePlacement Place(string sourceId, ScriptPlacementPlan plan, string ownerActorId,
             bool ownerHasHostAuthority);
 
         /// <summary>
         /// Reverses <paramref name="placement"/> after a failed build: a created instance is destroyed, an adopted one is
-        /// unbound, a reused one goes back to its parent and <c>RunContext</c>; folders the placement created are
-        /// destroyed when they are empty. A second call does nothing.
+        /// unbound, a reused one goes back to its parent and <c>RunContext</c>, a replaced one gets its children, parent
+        /// and binding back; folders the placement created are destroyed when they are empty. A second call, or a call
+        /// after <see cref="CompletePlacement"/>, does nothing.
         /// </summary>
         void UndoPlacement(ScriptInstancePlacement placement);
+
+        /// <summary>
+        /// Finishes <paramref name="placement"/> once its build succeeded: the instance a replacement took the place of
+        /// is destroyed. Nothing else changes; a second call, or a call after an undo, does nothing.
+        /// </summary>
+        void CompletePlacement(ScriptInstancePlacement placement);
 
         /// <summary>
         /// Ends the binding of a forgotten source: the instance is destroyed when it is still at the default placement

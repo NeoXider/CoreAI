@@ -7,7 +7,7 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
     /// </summary>
     public struct ScriptRunFacts
     {
-        /// <summary>The source has a live run in this runtime.</summary>
+        /// <summary>The source is loaded in this runtime: it has a live run, or is registered without one.</summary>
         public bool IsLoaded;
 
         /// <summary>The manifest's <c>Active</c>: the source is meant to start with the world.</summary>
@@ -23,20 +23,34 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
 
         /// <summary>A live world-owned instance is bound to the source.</summary>
         public bool HasBoundInstance;
+
+        /// <summary>
+        /// The loaded source is registered without a run (MVP4 step C1-6): a ModuleScript, a detached source, or a script
+        /// the run predicate did not start; <see cref="NotRunningState"/> says why.
+        /// </summary>
+        public bool IsRegisteredWithoutRun;
+
+        /// <summary>Why a source registered without a run has none, as <see cref="ScriptRunRules.Evaluate"/> answered at its start.</summary>
+        public ScriptRunState NotRunningState;
     }
 
     /// <summary>
-    /// The run state reported for a source (decision SC-9's list), from <see cref="ScriptRunFacts"/>. Until step C1-6
-    /// gates starts by <see cref="ScriptRunRules.Evaluate"/>, every loaded source has a live run, so a loaded source is
-    /// <see cref="ScriptRunState.Running"/> unless quarantined or suspended. A source without a run is
-    /// <see cref="ScriptRunState.Suspended"/> after budget trips, <see cref="ScriptRunState.Unloaded"/> when it is not
-    /// active, and <see cref="ScriptRunState.Detached"/> when it is active and declared but no instance is bound to it
-    /// (rule R3: it does not start at the legacy placement).
+    /// The run state reported for a source (decision SC-9's list), from <see cref="ScriptRunFacts"/>. A source with a
+    /// live run is <see cref="ScriptRunState.Running"/> unless quarantined or suspended. A loaded source registered
+    /// without a run reports why it did not start, or <see cref="ScriptRunState.Detached"/> once its instance is gone. A
+    /// source that is not loaded is <see cref="ScriptRunState.Suspended"/> after budget trips,
+    /// <see cref="ScriptRunState.Unloaded"/> when it is not active, and <see cref="ScriptRunState.Detached"/> when it is
+    /// active and declared but no instance is bound to it (rule R3: it does not start at the legacy placement).
     /// </summary>
     public static class ScriptRunStates
     {
         public static ScriptRunState Describe(in ScriptRunFacts facts)
         {
+            if (facts.IsLoaded && facts.IsRegisteredWithoutRun)
+            {
+                return facts.HasBoundInstance ? facts.NotRunningState : ScriptRunState.Detached;
+            }
+
             if (facts.IsLoaded)
             {
                 if (facts.IsQuarantined)

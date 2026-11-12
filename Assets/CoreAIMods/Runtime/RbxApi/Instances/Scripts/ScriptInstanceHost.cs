@@ -89,9 +89,14 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
             List<RbxInstance> createdFolders = new List<RbxInstance>();
             try
             {
-                return hasBound
-                    ? Update(sourceId, bound, plan, ownerActorId, ownerHasHostAuthority, createdFolders)
-                    : Create(sourceId, plan, ownerActorId, ownerHasHostAuthority, createdFolders);
+                if (!hasBound)
+                {
+                    return Create(sourceId, plan, ownerActorId, ownerHasHostAuthority, createdFolders);
+                }
+
+                return plan.ReplacesBoundInstance
+                    ? Replace(sourceId, bound, plan, ownerActorId, ownerHasHostAuthority, createdFolders)
+                    : Update(sourceId, bound, plan, ownerActorId, ownerHasHostAuthority, createdFolders);
             }
             catch
             {
@@ -103,14 +108,20 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
         /// <inheritdoc />
         public void UndoPlacement(ScriptInstancePlacement placement)
         {
-            if (placement == null || placement.Undone)
+            if (placement == null || placement.Undone || placement.Completed)
             {
                 return;
             }
 
             placement.Undone = true;
             RbxLuaSourceContainer script = placement.Script;
-            if (placement.Created)
+            if (placement.Replaced != null)
+            {
+                PutReplacedBack(placement.SourceId, placement.Replaced, placement.PreviousParent,
+                    placement.PreviousSiblingIndex, script, placement.MovedChildren);
+                Raise(placement.SourceId, ScriptInstanceChange.Bound);
+            }
+            else if (placement.Created)
             {
                 Unbind(placement.SourceId, script);
                 if (!script.IsDestroyed)
@@ -138,6 +149,22 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
             }
 
             DestroyEmptyFolders(placement.CreatedFolders);
+        }
+
+        /// <inheritdoc />
+        public void CompletePlacement(ScriptInstancePlacement placement)
+        {
+            if (placement == null || placement.Undone || placement.Completed)
+            {
+                return;
+            }
+
+            placement.Completed = true;
+            RbxLuaSourceContainer replaced = placement.Replaced;
+            if (replaced != null && !replaced.IsDestroyed)
+            {
+                replaced.Destroy();
+            }
         }
 
         /// <inheritdoc />
@@ -336,6 +363,113 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
 
             return new ScriptInstancePlacement(sourceId, script, false, false, previousParent, previousSiblingIndex,
                 previousRunContext, createdFolders);
+        }
+
+        /// <summary>
+        /// SC-4: a new instance of the planned class takes the bound one's name, owner, parent (or the new default
+        /// placement when the old one still sat at its own) and children, and the binding; the old instance leaves the
+        /// world unbound and waits for <see cref="CompletePlacement"/> or <see cref="UndoPlacement"/>.
+        /// </summary>
+        private ScriptInstancePlacement Replace(string sourceId, RbxLuaSourceContainer previous,
+            ScriptPlacementPlan plan, string ownerActorId, bool ownerHasHostAuthority, List<RbxInstance> createdFolders)
+        {
+            RbxInstance previousParent = previous.Parent;
+            int previousSiblingIndex = SiblingIndexOf(previous);
+            RbxInstance target = previousParent;
+            if (plan.ParentPath != null)
+            {
+                target = ResolveParentPath(sourceId, plan.ParentPath, ownerActorId, ownerHasHostAuthority);
+            }
+            else if (plan.PreviousDefaultPath != null && IsAt(previousParent, plan.PreviousDefaultPath)
+                                                      && !SamePath(plan.PreviousDefaultPath, plan.DefaultPath))
+            {
+                target = EnsureDefaultPath(plan.DefaultPath, createdFolders);
+            }
+
+            string owner = _registry.TryGetRecord(previous.Id, out InstanceRecord record)
+                ? record.OwnerActorId
+                : ownerActorId?.Trim();
+            bool indexWasStale = _indexStale;
+            RbxLuaSourceContainer successor = null;
+            List<RbxInstance> moved = new List<RbxInstance>();
+            try
+            {
+                successor = (RbxLuaSourceContainer)_registry.Create(plan.ClassName, null, OriginTag.FromMod(sourceId),
+                    ownerActorId: string.IsNullOrWhiteSpace(owner) ? null : owner,
+                    operation: "replacing the script of mod '" + sourceId + "'");
+                successor.Name = previous.Name;
+                SetRunContext(successor, plan.RunContext);
+                if (successor is RbxBaseScript next && previous is RbxBaseScript prior)
+                {
+                    next.Enabled = prior.Enabled;
+                }
+
+                List<RbxInstance> children = new List<RbxInstance>(previous.GetChildren());
+                for (int index = 0; index < children.Count; index++)
+                {
+                    children[index].Parent = successor;
+                    moved.Add(children[index]);
+                }
+
+                Unbind(sourceId, previous);
+                previous.Parent = null;
+                successor.SourceId = sourceId;
+                successor.Parent = target;
+            }
+            catch
+            {
+                PutReplacedBack(sourceId, previous, previousParent, previousSiblingIndex, successor, moved);
+                throw;
+            }
+            finally
+            {
+                _indexStale = indexWasStale;
+            }
+
+            _bound[sourceId] = successor;
+            Raise(sourceId, ScriptInstanceChange.Bound);
+            return new ScriptInstancePlacement(sourceId, successor, true, false, previousParent, previousSiblingIndex,
+                RunContextOf(previous), createdFolders, previous, moved);
+        }
+
+        /// <summary>
+        /// Reverses a replacement: the children go back to <paramref name="previous"/>, which is bound and parented again
+        /// where it was, and the <paramref name="successor"/> is destroyed.
+        /// </summary>
+        private void PutReplacedBack(string sourceId, RbxLuaSourceContainer previous, RbxInstance previousParent,
+            int previousSiblingIndex, RbxLuaSourceContainer successor, List<RbxInstance> moved)
+        {
+            if (!previous.IsDestroyed)
+            {
+                if (!ReferenceEquals(previous.Parent, previousParent)
+                    && (previousParent == null || !previousParent.IsDestroyed))
+                {
+                    previous.SetParentAtSiblingIndex(previousParent, previousSiblingIndex);
+                }
+
+                for (int index = 0; index < moved.Count; index++)
+                {
+                    RbxInstance child = moved[index];
+                    if (!child.IsDestroyed && ReferenceEquals(child.Parent, successor))
+                    {
+                        child.Parent = previous;
+                    }
+                }
+
+                previous.SourceId = sourceId;
+                _bound[sourceId] = previous;
+            }
+
+            if (successor != null && !successor.IsDestroyed)
+            {
+                if (_bound.TryGetValue(sourceId, out RbxLuaSourceContainer indexed) && ReferenceEquals(indexed, successor))
+                {
+                    _bound.Remove(sourceId);
+                }
+
+                successor.SourceId = string.Empty;
+                successor.Destroy();
+            }
         }
 
         /// <summary>

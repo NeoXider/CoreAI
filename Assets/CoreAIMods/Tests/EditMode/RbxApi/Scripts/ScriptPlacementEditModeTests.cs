@@ -127,22 +127,27 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scripts
         }
 
         [Test]
-        public void C1_SharedContext_IsNotImplementedNamingStepC4()
+        public void C1_6_SharedContext_PlacesAModuleScriptInReplicatedStorageUnderTheFolder()
         {
-            RbxError refusal = Refusal(Request("shared"));
+            ScriptPlacementPlan plan = Plan(Request("shared", folders: new[] { "Games" }));
 
-            Assert.AreEqual(RbxErrorCode.NotImplemented, refusal.Code);
-            StringAssert.Contains("context: shared", refusal.Message);
-            StringAssert.Contains("MVP4 step C4", refusal.Message);
+            Assert.AreEqual(ScriptPlacementKind.Durable, plan.Kind);
+            Assert.AreEqual(ScriptContext.Shared, plan.Context);
+            Assert.AreEqual(ScriptClassNames.ModuleScript, plan.ClassName);
+            Assert.AreEqual(RunContextValues.Legacy, plan.RunContext, "a ModuleScript has no RunContext of its own");
+            Assert.IsFalse(plan.ReusesBoundInstance);
+            CollectionAssert.AreEqual(new[] { "ReplicatedStorage", "Games" }, plan.DefaultPath);
         }
 
         [Test]
-        public void C1_ABoundModuleScriptWithAHeaderThatDeclaresNothing_IsStillShared_AndRefused()
+        public void C1_6_ABoundModuleScriptWithAHeaderThatDeclaresNothing_StaysShared_AndIsReused()
         {
-            RbxError refusal = Refusal(Bound(Request(), ScriptClassNames.ModuleScript, RunContextValues.Legacy));
+            ScriptPlacementPlan plan = Plan(Bound(Request(), ScriptClassNames.ModuleScript, RunContextValues.Legacy));
 
-            Assert.AreEqual(RbxErrorCode.NotImplemented, refusal.Code);
-            StringAssert.Contains("MVP4 step C4", refusal.Message);
+            Assert.AreEqual(ScriptContext.Shared, plan.Context, "SC-5: the bound instance decides without a header context");
+            Assert.IsTrue(plan.ReusesBoundInstance);
+            Assert.IsFalse(plan.ReplacesBoundInstance);
+            Assert.AreEqual(ScriptClassNames.ModuleScript, plan.ClassName);
         }
 
         [TestCase("Workspace//Door", "empty component")]
@@ -263,23 +268,51 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scripts
         }
 
         [Test]
-        public void C1_ABoundLocalScriptDeclaredServer_ChangesTheClass_AndIsNotImplementedNamingC1_6()
+        public void SC_4_ABoundLocalScriptDeclaredServer_IsReplacedByAServerScript()
         {
-            RbxError refusal = Refusal(Bound(Request("server"), ScriptClassNames.LocalScript, RunContextValues.Legacy));
+            ScriptPlacementRequest request = Bound(Request("server"), ScriptClassNames.LocalScript,
+                RunContextValues.Legacy);
 
-            Assert.AreEqual(RbxErrorCode.NotImplemented, refusal.Code);
-            StringAssert.Contains("replacing the LocalScript bound to mod 'door' with Script", refusal.Message);
-            StringAssert.Contains("MVP4 step C1-6", refusal.Message);
+            ScriptPlacementPlan plan = Plan(request);
+
+            Assert.IsTrue(plan.ReusesBoundInstance, "the source had a bound instance");
+            Assert.IsTrue(plan.ReplacesBoundInstance);
+            Assert.AreEqual(ScriptClassNames.Script, plan.ClassName);
+            Assert.AreEqual(RunContextValues.Server, plan.RunContext);
+            CollectionAssert.AreEqual(new[] { "ReplicatedStorage" }, plan.PreviousDefaultPath,
+                "a LocalScript's default placement is the client one, so one still there moves to the server one");
+            CollectionAssert.AreEqual(new[] { "ServerScriptService" }, plan.DefaultPath);
         }
 
         [Test]
-        public void C1_ABoundModuleScriptDeclaredServer_ChangesTheClass_AndIsNotImplemented()
+        public void SC_4_ABoundModuleScriptDeclaredServer_IsReplacedByAServerScript()
         {
-            RbxError refusal = Refusal(Bound(Request("server"), ScriptClassNames.ModuleScript, RunContextValues.Legacy));
+            ScriptPlacementPlan plan = Plan(Bound(Request("server"), ScriptClassNames.ModuleScript,
+                RunContextValues.Legacy));
 
-            Assert.AreEqual(RbxErrorCode.NotImplemented, refusal.Code);
-            StringAssert.Contains("ModuleScript", refusal.Message);
-            StringAssert.Contains("MVP4 step C1-6", refusal.Message);
+            Assert.IsTrue(plan.ReplacesBoundInstance);
+            Assert.AreEqual(ScriptClassNames.Script, plan.ClassName);
+            Assert.AreEqual(RunContextValues.Server, plan.RunContext);
+        }
+
+        [Test]
+        public void SC_4_ABoundServerScriptDeclaredShared_IsReplacedByAModuleScript()
+        {
+            ScriptPlacementPlan plan = Plan(Bound(Request("shared"), ScriptClassNames.Script, RunContextValues.Server));
+
+            Assert.IsTrue(plan.ReplacesBoundInstance);
+            Assert.AreEqual(ScriptClassNames.ModuleScript, plan.ClassName);
+            Assert.AreEqual(RunContextValues.Legacy, plan.RunContext);
+        }
+
+        [Test]
+        public void SC_4_Negative_AServerScriptDeclaredClient_KeepsItsClass_AndOnlyChangesItsRunContext()
+        {
+            ScriptPlacementPlan plan = Plan(Bound(Request("client"), ScriptClassNames.Script, RunContextValues.Server));
+
+            Assert.IsFalse(plan.ReplacesBoundInstance, "Script to Script needs no new instance");
+            Assert.AreEqual(ScriptClassNames.Script, plan.ClassName);
+            Assert.AreEqual(RunContextValues.Client, plan.RunContext);
         }
 
         // ---- run states ----------------------------------------------------------------------
@@ -323,6 +356,36 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scripts
             Assert.AreEqual(ScriptRunState.Unloaded, Describe(false, false, ScriptContext.Client, false),
                 "an inactive source is unloaded, whatever it declares");
             Assert.AreEqual(ScriptRunState.Suspended, Describe(false, false, ScriptContext.Client, false, false, true));
+        }
+
+        private static ScriptRunState DescribeRegistered(ScriptRunState notRunning, bool bound)
+        {
+            ScriptRunFacts facts = new()
+            {
+                IsLoaded = true,
+                IsActive = true,
+                HasBoundInstance = bound,
+                IsRegisteredWithoutRun = true,
+                NotRunningState = notRunning
+            };
+            return ScriptRunStates.Describe(in facts);
+        }
+
+        [TestCase(ScriptRunState.Module)]
+        [TestCase(ScriptRunState.NotOnThisSide)]
+        [TestCase(ScriptRunState.ContainerDoesNotRun)]
+        [TestCase(ScriptRunState.Disabled)]
+        public void RunState_C1_6_ASourceRegisteredWithoutARun_ReportsWhyItDidNotStart(ScriptRunState notRunning)
+        {
+            Assert.AreEqual(notRunning, DescribeRegistered(notRunning, true));
+        }
+
+        [Test]
+        public void RunState_C1_6_ARegisteredSourceWhoseInstanceIsGone_IsDetached()
+        {
+            Assert.AreEqual(ScriptRunState.Detached, DescribeRegistered(ScriptRunState.Module, false),
+                "a module whose ModuleScript was destroyed has nothing left to require");
+            Assert.AreEqual(ScriptRunState.Detached, DescribeRegistered(ScriptRunState.Detached, false));
         }
 
         // ---- R4 ------------------------------------------------------------------------------

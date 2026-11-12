@@ -383,15 +383,12 @@ store_set('runs', tostring(runs))");
         }
 
         [Test]
-        public void C1_Load_SharedContext_IsNotImplementedNamingStepC4()
+        public void C1_6_Load_SharedContext_PlacesAModuleScript_AndNeverRunsIt()
         {
-            Exception failure = Assert.Catch(() =>
-                _world.Load("tools", "-- @coreai context: shared\nstore_set('ran', 'yes')"));
+            _world.Load("tools", "-- @coreai context: shared\nstore_set('ran', 'yes')");
 
-            StringAssert.Contains("NOT_IMPLEMENTED", failure.Message);
-            StringAssert.Contains("MVP4 step C4", failure.Message);
             Assert.AreEqual("", _world.Get("tools", "ran"), "a module is never run as a mod");
-            Assert.IsFalse(IsBound("tools"));
+            Assert.IsTrue(IsBound("tools"), "step C1-6 registers it on a ModuleScript (ScriptRunGateLuaEditModeTests)");
         }
 
         [Test]
@@ -476,18 +473,17 @@ store_set('runs', tostring(runs))");
         }
 
         [Test]
-        public void C1_Reload_ToShared_IsRefused_AndTheRunStaysAsItWas()
+        public void C1_6_Reload_ToShared_ReplacesTheScriptWithAModuleScript_AndRunsNothing()
         {
             _world.Load("door", ServerHeader + "store_set('run', 'first')");
             RbxBaseScript script = BoundScript("door");
 
-            Exception failure = Assert.Catch(() =>
-                _world.Stack.Runtime.ReloadMod("door", "-- @coreai context: shared\nstore_set('run', 'module')"));
+            _world.Stack.Runtime.ReloadMod("door", "-- @coreai context: shared\nstore_set('run', 'module')");
 
-            StringAssert.Contains("NOT_IMPLEMENTED", failure.Message);
-            Assert.AreEqual("first", _world.Get("door", "run"));
-            Assert.AreSame(script, BoundScript("door"));
-            Assert.AreEqual(RunContextValues.Server, script.RunContext);
+            Assert.AreEqual("first", _world.Get("door", "run"), "the module's chunk never ran");
+            Assert.IsTrue(script.IsDestroyed, "SC-4: the class changed, so a ModuleScript took the Script's place");
+            Assert.IsTrue(_world.Roblox.ScriptInstances.TryGetBoundScript("door", out RbxLuaSourceContainer module));
+            Assert.AreEqual(ScriptClassNames.ModuleScript, module.ClassName);
         }
 
         [TestCase(ModReloadMode.KeepObjects)]

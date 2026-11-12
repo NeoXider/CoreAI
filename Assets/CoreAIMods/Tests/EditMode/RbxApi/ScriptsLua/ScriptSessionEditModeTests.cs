@@ -87,6 +87,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.ScriptsLua
             return session.Controller.CurrentRbxApi.Game.FindFirstChildOfClass("ServerScriptService");
         }
 
+        private static string RunStateOf(P3HeadlessSession session, ActorContext actor, string id)
+        {
+            foreach (LuaModInfo info in session.Controller.Runtime.ListMods(actor))
+            {
+                if (info.Id == id)
+                {
+                    return info.RunState;
+                }
+            }
+
+            return "not listed";
+        }
+
         // ---- R3: the package's format decides how its mods start ------------------------------
 
         [Test]
@@ -131,9 +144,13 @@ namespace CoreAI.Tests.EditMode.RbxApi.ScriptsLua
             Assert.IsTrue(loaded.Success, loaded.Error);
             Assert.AreEqual(1, loaded.ActiveModsStarted, "only the legacy mod starts");
             CollectionAssert.AreEqual(new[] { "door (detached)" }, loaded.NotStartedMods);
-            Assert.IsFalse(session.Controller.Runtime.IsLoaded(actor, "door"));
+            Assert.IsTrue(session.Controller.Runtime.IsLoaded(actor, "door"),
+                "step C1-6: a detached source is registered without a run, so it is listed and can be reloaded");
+            Assert.AreEqual("detached", RunStateOf(session, actor, "door"));
+            Assert.IsFalse(TryBound(session, "door", out _));
             Assert.IsTrue(session.Controller.Runtime.IsLoaded(actor, "alpha"),
                 "twin: a legacy source without an instance starts at the synthetic placement (R3)");
+            Assert.AreEqual("running", RunStateOf(session, actor, "alpha"));
             Assert.AreEqual(0, CountNamed(session.Controller.CurrentRbxApi.Registry.WorldRoot, "DoorStart"));
             Assert.IsTrue(session.Controller.SourceStore.TryLoad("door", out _, out LuaModManifest manifest),
                 "a detached source stays in the world with its versions");
@@ -182,6 +199,71 @@ namespace CoreAI.Tests.EditMode.RbxApi.ScriptsLua
             Assert.AreEqual(saved.Id, migrated.Id, "the unbound node version 1 kept is bound again");
             Assert.AreEqual(1, CountNamed(ServerScripts(session), "door"));
             Assert.AreEqual(RunContextValues.Server, ((RbxBaseScript)migrated).RunContext);
+        }
+
+        // ---- C1-6: sources registered without a run ---------------------------------------------
+
+        [Test]
+        public async Task C1_6_PackageV2_AModuleAndADisabledScript_AreRegisteredOnTheirSavedInstances_NotStarted()
+        {
+            using P3HeadlessSession session = new(new P3MemoryPackageStore(), new P3MemorySourceStore());
+            ActorContext actor = Actor(new LocalActorIdentityProvider("kit-author"));
+            Load(session, actor, "tools", "-- @coreai context: shared\nreturn {}");
+            Load(session, actor, "door", ServerHeader + "local f = Instance.new('Folder') f.Name = 'DoorStart' f.Parent = workspace");
+            Assert.IsTrue(TryBound(session, "tools", out RbxLuaSourceContainer module));
+            Assert.IsTrue(TryBound(session, "door", out RbxLuaSourceContainer door));
+            ((RbxBaseScript)door).Enabled = false;
+            RbxWorldPackagePayload saved = session.Controller.CaptureCurrent();
+
+            RbxWorldLoadResult loaded = await session.Controller.LoadConfirmedAsync(saved);
+
+            Assert.IsTrue(loaded.Success, loaded.Error);
+            Assert.AreEqual(0, loaded.ActiveModsStarted);
+            CollectionAssert.AreEquivalent(new[] { "tools (module)", "door (disabled)" }, loaded.NotStartedMods);
+            Assert.AreEqual("module", RunStateOf(session, actor, "tools"));
+            Assert.AreEqual("disabled", RunStateOf(session, actor, "door"));
+            Assert.IsTrue(TryBound(session, "tools", out RbxLuaSourceContainer restoredModule));
+            Assert.AreEqual(module.Id, restoredModule.Id, "the module is registered on the instance the world saved");
+            Assert.AreEqual(0, CountNamed(session.Controller.CurrentRbxApi.Registry.WorldRoot, "DoorStart"),
+                "the disabled script's main chunk did not run, so nothing rebuilt its startup folder");
+        }
+
+        [Test]
+        public async Task C1_6_PackageV2_Negative_TheEnabledScriptBesideAModule_Starts()
+        {
+            using P3HeadlessSession session = new(new P3MemoryPackageStore(), new P3MemorySourceStore());
+            ActorContext actor = Actor(new LocalActorIdentityProvider("kit-author"));
+            Load(session, actor, "tools", "-- @coreai context: shared\nreturn {}");
+            Load(session, actor, "door", ServerHeader + "local value = 1");
+            RbxWorldPackagePayload saved = session.Controller.CaptureCurrent();
+
+            RbxWorldLoadResult loaded = await session.Controller.LoadConfirmedAsync(saved);
+
+            Assert.IsTrue(loaded.Success, loaded.Error);
+            Assert.AreEqual(1, loaded.ActiveModsStarted);
+            CollectionAssert.AreEqual(new[] { "tools (module)" }, loaded.NotStartedMods);
+            Assert.AreEqual("running", RunStateOf(session, actor, "door"));
+        }
+
+        [Test]
+        public async Task C1_6_ReloadOfADetachedSource_PlacesANewInstance_AndRunsIt()
+        {
+            using P3HeadlessSession session = new(new P3MemoryPackageStore(), new P3MemorySourceStore());
+            ActorContext actor = Actor(new LocalActorIdentityProvider("door-author"));
+            const string source = ServerHeader + "local f = Instance.new('Folder') f.Name = 'DoorStart' f.Parent = workspace";
+            Load(session, actor, "door", source);
+            Assert.IsTrue(TryBound(session, "door", out RbxLuaSourceContainer script));
+            script.Destroy();
+            RbxWorldLoadResult loaded = await session.Controller.LoadConfirmedAsync(session.Controller.CaptureCurrent());
+            Assert.IsTrue(loaded.Success, loaded.Error);
+            Assert.AreEqual("detached", RunStateOf(session, actor, "door"));
+
+            session.Controller.Runtime.ReloadMod(actor, "door", source);
+
+            Assert.AreEqual("running", RunStateOf(session, actor, "door"));
+            Assert.IsTrue(TryBound(session, "door", out RbxLuaSourceContainer placed));
+            Assert.AreSame(ServerScripts(session), placed.Parent, "a load of a detached source re-creates its instance");
+            Assert.AreEqual(1, CountNamed(session.Controller.CurrentRbxApi.Registry.WorldRoot, "DoorStart"));
         }
 
         // ---- C1-5: manage_mods list -------------------------------------------------------------

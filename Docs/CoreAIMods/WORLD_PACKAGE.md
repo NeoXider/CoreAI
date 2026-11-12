@@ -168,14 +168,18 @@ on a LocalScript, and `enabled` or `run_context` on a ModuleScript.
   mod-ephemeral subtree is left out (`mod-ephemeral`, member `Script`), so its source loads detached. Two instances
   bound to one source, or a binding that disagrees with its source's context, can only come from a runtime defect, so
   a version 2 capture fails on it instead of saving another script than the one running.
-- **How a loaded world starts its mods (rule R3).** In version 1 every active mod starts: a mod that declares nothing
+- **How a loaded world starts its mods (rule R3).** In version 1 every active mod is loaded: a mod that declares nothing
   at the legacy placement, a declared mod at its placement, where it binds the unbound node the version 1 save kept
   for it. In version 2 a declared source (a header `context:` or `parent:`, or a stored `Context`) whose instance the
-  world does not hold is detached and does not start; a mod that declares nothing still starts at the legacy
-  placement. A `context: shared` source (a ModuleScript) is never started as a script in either version. Client
-  scripts start after every server-side one. The load reports what it did not start in
-  `RbxWorldLoadResult.NotStartedMods` (`door (detached)`, `tools (module)`) and in one session diagnostic. The
-  default world's store holds no tree, so its boot start is the version 1 way.
+  world does not hold is detached: it is loaded and listed (`run_state` `detached`) but does not start, and a reload
+  places a new instance and starts it; a mod that declares nothing still starts at the legacy placement. Whether a
+  loaded declared source starts follows the run predicate (`Docs/CoreAIMods/mod-system.md`, "Where `script` lives"): a
+  `context: shared` source (a ModuleScript) never starts as a script, nor does a saved script with `enabled` false, one
+  in a container that does not run it, or one whose side the machine lacks (a client script on a dedicated server).
+  Client scripts start after every server-side one. The load reports every active source it loaded without starting
+  in `RbxWorldLoadResult.NotStartedMods` with its run state (`door (detached)`, `tools (module)`,
+  `hud (not-on-this-side)`, `gate (disabled)`) and in one session diagnostic. The default world's store holds no tree,
+  so its boot start is the version 1 way.
 - Readers up to 7.56.0, and every reader before this one, accept `format_version` 1 only and refuse a version 2
   package by its version ("Unsupported world package format version 2").
 

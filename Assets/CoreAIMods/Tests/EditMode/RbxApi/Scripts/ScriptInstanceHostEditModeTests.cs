@@ -436,5 +436,102 @@ namespace CoreAI.Tests.EditMode.RbxApi.Scripts
                 Assert.IsTrue(own.IsDestroyed, "a clean reload removes what the mod owns, as its startup objects");
             }
         }
+
+        // ---- SC-4: a class change replaces the instance (step C1-6) ---------------------------
+
+        private RbxLuaSourceContainer ServerScriptWithChildren(out RbxInstance first, out RbxInstance second)
+        {
+            RbxLuaSourceContainer script = _host.Place("door", Plan("server"), "alice", true).Script;
+            first = WorldPart("First", script);
+            second = WorldPart("Second", script);
+            _changes.Clear();
+            return script;
+        }
+
+        [Test]
+        public void SC_4_Replace_ServerToShared_NewModuleScriptTakesNameParentChildrenAndTheBinding()
+        {
+            RbxLuaSourceContainer previous = ServerScriptWithChildren(out RbxInstance first, out RbxInstance second);
+
+            ScriptInstancePlacement placement = _host.Place("door", Plan("shared", bound: previous), "alice", true);
+
+            RbxLuaSourceContainer module = placement.Script;
+            Assert.AreEqual(ScriptClassNames.ModuleScript, module.ClassName);
+            Assert.AreNotEqual(previous.Id, module.Id, "a new class is a new instance with a new id");
+            Assert.AreEqual("door", module.Name);
+            Assert.AreSame(Service("ReplicatedStorage"), module.Parent,
+                "a script still at its default placement moves to the new context's default placement");
+            CollectionAssert.AreEqual(new[] { first, second }, module.GetChildren(), "the children keep their order");
+            Assert.AreEqual("door", module.SourceId);
+            Assert.IsTrue(_host.TryGetBoundScript("door", out RbxLuaSourceContainer found));
+            Assert.AreSame(module, found);
+            Assert.AreEqual("alice", Record(module).OwnerActorId, "the owner of the replaced instance is kept");
+            Assert.IsTrue(placement.ReplacedPrevious);
+            Assert.IsFalse(previous.IsDestroyed, "the old instance waits for the build's outcome");
+            Assert.IsNull(previous.Parent);
+            Assert.IsFalse(previous.IsBound);
+
+            _host.CompletePlacement(placement);
+
+            Assert.IsTrue(previous.IsDestroyed, "a successful build destroys the replaced instance");
+            Assert.IsTrue(_host.TryGetBoundScript("door", out found));
+            Assert.AreSame(module, found, "destroying the unbound old instance does not touch the binding");
+            Assert.IsFalse(_changes.Contains("door:Destroyed"));
+        }
+
+        [Test]
+        public void SC_4_Replace_Undo_PutsTheOldInstanceItsChildrenAndItsBindingBack()
+        {
+            RbxLuaSourceContainer previous = ServerScriptWithChildren(out RbxInstance first, out RbxInstance second);
+            WorldPart("Other", Service("ServerScriptService"));
+            int index = new List<RbxInstance>(Service("ServerScriptService").GetChildren()).IndexOf(previous);
+            Assert.Less(index, Service("ServerScriptService").GetChildren().Count - 1,
+                "precondition: the script has a sibling after it, so its position is observable");
+
+            ScriptInstancePlacement placement = _host.Place("door", Plan("shared", bound: previous), "alice", true);
+            RbxLuaSourceContainer module = placement.Script;
+            _host.UndoPlacement(placement);
+            _host.CompletePlacement(placement);
+
+            Assert.IsTrue(module.IsDestroyed);
+            Assert.IsFalse(previous.IsDestroyed, "a completion after an undo does nothing");
+            Assert.AreSame(Service("ServerScriptService"), previous.Parent);
+            Assert.AreEqual(index, new List<RbxInstance>(Service("ServerScriptService").GetChildren()).IndexOf(previous),
+                "the old instance goes back to its position among its siblings");
+            CollectionAssert.AreEqual(new[] { first, second }, previous.GetChildren());
+            Assert.IsTrue(_host.TryGetBoundScript("door", out RbxLuaSourceContainer found));
+            Assert.AreSame(previous, found);
+        }
+
+        [Test]
+        public void SC_4_Replace_Negative_AScriptSomeoneMovedKeepsItsParent()
+        {
+            RbxLuaSourceContainer previous = _host.Place("door", Plan("server"), "", true).Script;
+            RbxInstance gate = WorldPart("Gate", Service("Workspace"));
+            previous.Parent = gate;
+
+            ScriptInstancePlacement placement = _host.Place("door", Plan("shared", bound: previous), "", true);
+
+            Assert.AreSame(gate, placement.Script.Parent, "only a default-placed instance follows the new context");
+        }
+
+        [Test]
+        public void SC_4_Replace_LocalScriptToServer_KeepsEnabledAndGetsTheServerRunContext()
+        {
+            RbxBaseScript local = (RbxBaseScript)_registry.Create(ScriptClassNames.LocalScript, null,
+                OriginTag.FromMod("door"));
+            local.Name = "door";
+            local.SourceId = "door";
+            local.Parent = Service("Workspace");
+            local.Enabled = false;
+
+            ScriptInstancePlacement placement = _host.Place("door", Plan("server", bound: local), "", true);
+
+            RbxBaseScript script = (RbxBaseScript)placement.Script;
+            Assert.AreEqual(ScriptClassNames.Script, script.ClassName);
+            Assert.AreEqual(RunContextValues.Server, script.RunContext);
+            Assert.IsFalse(script.Enabled, "Enabled is per-instance state the replacement keeps (SC-3)");
+            Assert.AreSame(Service("Workspace"), script.Parent);
+        }
     }
 }

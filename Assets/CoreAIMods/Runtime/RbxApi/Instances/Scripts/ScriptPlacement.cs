@@ -63,23 +63,25 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
 
     /// <summary>
     /// What one load does with the script instance of its source: keep the synthetic legacy placement, or place a durable
-    /// bound instance (create it, or reuse the bound one and bring its <c>RunContext</c> and default placement up to date).
+    /// bound instance (create it, reuse the bound one and bring its <c>RunContext</c> and default placement up to date, or
+    /// replace the bound one with an instance of the class a new context needs, SC-4).
     /// </summary>
     public sealed class ScriptPlacementPlan
     {
         /// <summary>The plan of a source that keeps the pre-MVP4 synthetic placement (rule R1).</summary>
         public static readonly ScriptPlacementPlan Synthetic = new(ScriptPlacementKind.Synthetic, ScriptContext.Legacy,
-            null, RunContextValues.Legacy, false, null, null, null);
+            null, RunContextValues.Legacy, false, false, null, null, null);
 
         private ScriptPlacementPlan(ScriptPlacementKind kind, ScriptContext context, string className, int runContext,
-            bool reusesBoundInstance, IReadOnlyList<string> parentPath, IReadOnlyList<string> defaultPath,
-            IReadOnlyList<string> previousDefaultPath)
+            bool reusesBoundInstance, bool replacesBoundInstance, IReadOnlyList<string> parentPath,
+            IReadOnlyList<string> defaultPath, IReadOnlyList<string> previousDefaultPath)
         {
             Kind = kind;
             Context = context;
             ClassName = className;
             RunContext = runContext;
             ReusesBoundInstance = reusesBoundInstance;
+            ReplacesBoundInstance = replacesBoundInstance;
             ParentPath = parentPath;
             DefaultPath = defaultPath;
             PreviousDefaultPath = previousDefaultPath;
@@ -93,14 +95,27 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
         /// </summary>
         public ScriptContext Context { get; }
 
-        /// <summary>The bound instance's class (<c>Script</c>, <c>LocalScript</c>); null for the synthetic placement.</summary>
+        /// <summary>
+        /// The bound instance's class (<c>Script</c>, <c>LocalScript</c>, <c>ModuleScript</c>); null for the synthetic
+        /// placement.
+        /// </summary>
         public string ClassName { get; }
 
         /// <summary>The <c>RunContext</c> the bound <c>Script</c> gets; <c>Legacy</c> for every other class.</summary>
         public int RunContext { get; }
 
-        /// <summary>True when the load keeps the instance already bound to its source; false when it creates one.</summary>
+        /// <summary>
+        /// True when the source already has a bound instance, which the load keeps or (with
+        /// <see cref="ReplacesBoundInstance"/>) replaces; false when it creates one.
+        /// </summary>
         public bool ReusesBoundInstance { get; }
+
+        /// <summary>
+        /// True when the context the load runs with needs another class than the bound instance has (SC-4, a server
+        /// script becoming <c>shared</c>, or a LocalScript a server script): the instance is replaced by one of
+        /// <see cref="ClassName"/> with the same <c>Name</c>, parent and children, and a new id.
+        /// </summary>
+        public bool ReplacesBoundInstance { get; }
 
         /// <summary>
         /// The header's <c>parent:</c> path as names from <c>game</c> (the first one a service), applied at every load
@@ -122,11 +137,11 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
         public IReadOnlyList<string> PreviousDefaultPath { get; }
 
         internal static ScriptPlacementPlan Durable(ScriptContext context, string className, int runContext,
-            bool reusesBoundInstance, IReadOnlyList<string> parentPath, IReadOnlyList<string> defaultPath,
-            IReadOnlyList<string> previousDefaultPath)
+            bool reusesBoundInstance, bool replacesBoundInstance, IReadOnlyList<string> parentPath,
+            IReadOnlyList<string> defaultPath, IReadOnlyList<string> previousDefaultPath)
         {
             return new ScriptPlacementPlan(ScriptPlacementKind.Durable, context, className, runContext,
-                reusesBoundInstance, parentPath, defaultPath, previousDefaultPath);
+                reusesBoundInstance, replacesBoundInstance, parentPath, defaultPath, previousDefaultPath);
         }
     }
 
@@ -134,24 +149,18 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
     /// The engine-free placement rules of MVP4 step C1: which context a load runs with (SC-5: the header when it declares
     /// one, else the bound instance, else the context the source last ran or was stored with, else legacy), whether the
     /// source keeps the synthetic placement (R1) or gets a durable bound instance (R2), and where that instance goes
-    /// (SC-6). The refusals are the load's: an unknown context value and a malformed <c>parent:</c> path are BAD_ARGUMENT;
-    /// <c>context: shared</c> and a change between script classes are NOT_IMPLEMENTED until the steps that build them.
+    /// (SC-6). A <c>context: shared</c> source gets a ModuleScript, and a context the bound instance's class cannot run
+    /// in replaces the instance (SC-4). The refusals are the load's: an unknown context value and a malformed
+    /// <c>parent:</c> path are BAD_ARGUMENT.
     /// </summary>
     public static class ScriptPlacementPlanner
     {
-        /// <summary>The step that brings <c>require</c> and with it ModuleScript sources.</summary>
-        public const string SharedContextStep = "MVP4 step C4";
-
-        /// <summary>The step that replaces a bound instance whose class a new context changes (SC-4).</summary>
-        public const string ClassChangeStep = "MVP4 step C1-6";
-
         /// <summary>
         /// Plans one load. Never touches a world: the caller supplies the bound instance's facts, and applies the plan.
         /// </summary>
         public static bool TryPlan(in ScriptPlacementRequest request, out ScriptPlacementPlan plan, out RbxError refusal)
         {
             plan = null;
-            string sourceId = request.SourceId ?? string.Empty;
             if (!TryResolveContext(in request, out ScriptContext context, out refusal))
             {
                 return false;
@@ -173,16 +182,6 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
                     out boundContext, out string _);
             }
 
-            if (context == ScriptContext.Shared)
-            {
-                refusal = RbxError.NotImplemented(
-                    "mod '" + sourceId + "' declares context: shared, a ModuleScript that runs when a script requires it; "
-                    + "require", SharedContextStep,
-                    "declare context: server or context: client for now, and share values through attributes or value "
-                    + "objects");
-                return false;
-            }
-
             if (!request.HasBoundInstance)
             {
                 if (context == ScriptContext.Legacy && parentPath == null)
@@ -192,24 +191,11 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
                 }
 
                 plan = ScriptPlacementPlan.Durable(context, ScriptContexts.ClassNameFor(context),
-                    ScriptContexts.RunContextFor(context), false, parentPath,
+                    NewRunContext(context), false, false, parentPath,
                     parentPath == null ? DefaultPath(context, request.FolderSegments) : null, null);
                 return true;
             }
 
-            if (!ScriptContexts.TryGetEffective(request.BoundClassName, request.BoundRunContext, context,
-                    out ScriptContext _, out string _)
-                && !IsRunContextChange(request.BoundClassName, context))
-            {
-                refusal = RbxError.NotImplemented(
-                    "replacing the " + request.BoundClassName + " bound to mod '" + sourceId + "' with "
-                    + ScriptContexts.ClassNameFor(context) + " (context: " + ScriptContexts.ToDisplayName(context)
-                    + ")", ClassChangeStep,
-                    "keep the context the script has, or forget the mod and load it again with the new context");
-                return false;
-            }
-
-            int runContext = TargetRunContext(request.BoundClassName, request.BoundRunContext, context);
             IReadOnlyList<string> defaultPath = null;
             IReadOnlyList<string> previousDefaultPath = null;
             if (parentPath == null)
@@ -219,7 +205,17 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
                     request.PreviousFolderSegments ?? request.FolderSegments);
             }
 
-            plan = ScriptPlacementPlan.Durable(context, request.BoundClassName, runContext, true, parentPath,
+            if (!ScriptContexts.TryGetEffective(request.BoundClassName, request.BoundRunContext, context,
+                    out ScriptContext _, out string _)
+                && !IsRunContextChange(request.BoundClassName, context))
+            {
+                plan = ScriptPlacementPlan.Durable(context, ScriptContexts.ClassNameFor(context),
+                    NewRunContext(context), true, true, parentPath, defaultPath, previousDefaultPath);
+                return true;
+            }
+
+            int runContext = TargetRunContext(request.BoundClassName, request.BoundRunContext, context);
+            plan = ScriptPlacementPlan.Durable(context, request.BoundClassName, runContext, true, false, parentPath,
                 defaultPath, previousDefaultPath);
             return true;
         }
@@ -336,6 +332,12 @@ namespace CoreAI.Mods.Rbx.Instances.Scripts
             }
 
             return path.AsReadOnly();
+        }
+
+        /// <summary>The <c>RunContext</c> a new instance gets: the context's for a Script, <c>Legacy</c> for a ModuleScript.</summary>
+        private static int NewRunContext(ScriptContext context)
+        {
+            return context == ScriptContext.Shared ? RunContextValues.Legacy : ScriptContexts.RunContextFor(context);
         }
 
         private static ScriptContext ParseLenient(string context)

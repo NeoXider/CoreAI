@@ -1043,12 +1043,22 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
   snapshot would ship server sources to clients, and a host-mode server script written by a restricted
   actor would run as "client".
 - **Done so far**:
-  - **2026-11-11:** the design note `dev-docs/MVP4_SCRIPT_CONTEXTS_DESIGN.md` (SC-1 to SC-19; plan decision
-    D1 (c) kept). Written: A1 (the engine-free script model, `ScriptContextRuleTable`, `ScriptRunRules`,
-    the `require` graph and policy), A2 (header keys `context:` and `parent:`, `LuaModManifest.Context`,
-    kept by every package writer) and A3 (a replica restore keeps server ids and revisions), green in
-    Unity EditMode; B1 (creatable `Script`, `LocalScript` and `ModuleScript` instances, `Enum.RunContext`)
-    with portable tests only. Not started: B2 and C1–C6; nothing acts on the declared context yet.
+  - **2026-11-11 to 2026-11-12:** the design note `dev-docs/MVP4_SCRIPT_CONTEXTS_DESIGN.md` (SC-1 to SC-19;
+    plan decision D1 (c) kept; its status line and §5 are the current record). Written: A1 (the engine-free
+    script model, `ScriptContextRuleTable`, `ScriptRunRules`, the `require` graph and policy), A2 (header keys
+    `context:` and `parent:`, `LuaModManifest.Context`, kept by every package writer) and A3 (a replica
+    restore keeps server ids and revisions), green in Unity EditMode; with portable tests only so far: B1
+    (creatable `Script`, `LocalScript` and `ModuleScript` instances, `Enum.RunContext`), B2 (the package
+    format version 2 reader: a `script` block per script node) and C1 — a declared mod gets a durable,
+    world-owned script instance at its `parent:` or default placement (a legacy mod keeps the synthetic
+    one), the writer saves version 2 only when a world needs it, a version 2 world restores a declared
+    source without an instance as detached, `manage_mods list` and the Hub report `context`, `script_path`
+    and `run_state`, a `context: shared` source loads as a ModuleScript that never runs on its own, a class
+    change replaces the instance (SC-4), and a start is gated by the SC-9 predicate (a client script never
+    starts on a dedicated server, a server script never on a pure client, nothing in `ServerStorage`, a
+    disabled script not at all; legacy mods keep today's rule). Not started: C2 (script members in Lua,
+    re-evaluating a running script), C3 (`CONTEXT_VIOLATION`, `IsNetworkServer` by context, no Player
+    minting on a replica), C4 (`require`), C5 (the client composition), C6 (skill, P1, acceptance).
   - *The survey this package started from (release 7.56.0); the lines above supersede it where they
     differ:*
   - `RbxNetworkTopology {Solo, Host, DedicatedServer, Client}` (`RbxApi/Instances/Networking/INetworkBridge.cs`)

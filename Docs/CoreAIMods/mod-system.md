@@ -53,11 +53,12 @@ tags: movement, camera
 - `tags` — optional, comma-separated.
 - `context` — optional, the script context the mod declares: `server`, `client` or `shared` (any case).
   A mod that declares one gets its own script instance in the world (below). Any other value fails the
-  load with `BAD_ARGUMENT: @coreai context 'clinet' is not server, client or shared`. `shared` (a
-  ModuleScript run by `require`) fails with `NOT_IMPLEMENTED` until `require` exists (MVP4 step C4).
-  Without the key the mod is a legacy script and runs exactly as before. What the context changes when
-  the script runs (its side, the `CONTEXT_VIOLATION` checks) arrives with later MVP4 steps
-  (`dev-docs/MVP4_SCRIPT_CONTEXTS_DESIGN.md`, SC-5, SC-9).
+  load with `BAD_ARGUMENT: @coreai context 'clinet' is not server, client or shared`. `shared` makes a
+  ModuleScript: it loads and is listed, but its code runs only when a script requires it, and `require`
+  arrives with MVP4 step C4, so until then nothing runs it. Without the key the mod is a legacy script and
+  runs exactly as before. The context decides where the script starts (below); what it changes while the
+  script runs (`CONTEXT_VIOLATION` checks) arrives with a later MVP4 step
+  (`dev-docs/MVP4_SCRIPT_CONTEXTS_DESIGN.md`, SC-5, SC-9, SC-13).
 - `parent` — optional, the `/`-separated instance path from `game` where the mod's script lives, such
   as `Workspace/Door` (a leading `@game/` is accepted). The path must exist when the mod loads and must not
   lie inside an instance a mod made; otherwise the load fails with `BAD_ARGUMENT` naming the missing
@@ -69,8 +70,9 @@ Where `script` lives:
   and removes when the mod unloads.
 - **A mod that declares `context:` or `parent:`** gets one script instance of its own, created before its
   main chunk runs: a `Script` with `RunContext` Server (`context: server`) or Client (`context: client`),
-  named after the mod, under the `parent:` path or else under `ServerScriptService` (server) or
-  `ReplicatedStorage` (client), inside folders named after the mod's `category` path. The instance belongs
+  or a `ModuleScript` (`context: shared`), named after the mod, under the `parent:` path or else under
+  `ServerScriptService` (server) or `ReplicatedStorage` (client and shared), inside folders named after the
+  mod's `category` path. The instance belongs
   to the world, not to the mod: a reload keeps it (a clean reload removes only the previous run's startup
   objects), an unload keeps it, and it costs no instance quota. A load that fails the first time removes
   it again, with the folders it created; a reload that fails keeps it where it was. Forgetting the mod
@@ -78,9 +80,11 @@ Where `script` lives:
   leaves it in the world unbound. When its instance is destroyed, the next load creates a new one.
 - A reload whose header drops `context:` keeps the context of the existing instance. A reload to another
   context moves an instance that still sits at its default placement and changes its `RunContext`; one a
-  player or script moved stays where it is. A reload that would change the class (to `shared`, or a
-  LocalScript to a server script) fails with `NOT_IMPLEMENTED` and leaves the run as it was. Moving the mod
-  to another folder moves a default-placed instance with it.
+  player or script moved stays where it is. A reload that changes the class (a script to `shared`, a
+  ModuleScript to a script, a LocalScript to a server script) replaces the instance: a new one of the new
+  class takes its name, its parent (or the new context's default placement, when the old one sat at its
+  own), its children and its `Enabled`, with a new id; the old one goes once the reload succeeded, and a
+  failed reload puts it back. Moving the mod to another folder moves a default-placed instance with it.
 - A legacy mod reloaded with a header that declares a context hands what its legacy folder held to the new
   instance (a clean reload removes what the mod itself owned there, as its startup objects) and the legacy
   folder goes.
@@ -90,10 +94,18 @@ Where `script` lives:
   and does not start until it is loaded again. A world saved as version 1 keeps the instance as a plain
   unbound script, and the next load of the mod binds it again when it still sits at its placement under the
   mod's name, instead of making a second one.
-- Where a declared script runs does not depend on its context yet. In single-player (one machine that is
-  both server and client) a `context: client` script runs once, on that machine, like every other mod.
-  TODO: on a dedicated server a `context: client` script also runs today, on the server; from MVP4 step C1-6
-  it will not start there (`dev-docs/MVP4_SCRIPT_CONTEXTS_DESIGN.md`, SC-9).
+- Whether a script with its own instance starts is decided when it loads (MVP4 SC-9): a ModuleScript never
+  starts on its own; a script with `Enabled` false does not start; a script must sit where its class runs (a
+  server script in `Workspace`, `ServerScriptService` or `ReplicatedStorage`, a client script in `Workspace`,
+  `ReplicatedStorage` or `ReplicatedFirst`, a script that declares nothing only in `Workspace` or
+  `ServerScriptService`; nothing runs in `ServerStorage`); and a declared script starts only on a side this
+  machine has: a `context: client` script never on a dedicated server, a `context: server` script never on
+  a pure client. In single-player and on a host (one machine that is both server and client) both start,
+  each once. A mod that declares nothing keeps the pre-MVP4 rule and starts on every machine it started on
+  before. A script that does not start stays loaded: it is listed with the reason as its `run_state`, keeps
+  its instance, source and versions, and starts when a reload lets it (a reload that moves it where it runs,
+  for example). TODO: MVP4 step C2 also starts and stops a running script when its `Enabled`, its place in
+  the tree or its instance changes; today only a load or reload decides.
 
 Parsing rules:
 - The block form must be the first thing in the file: the source starts with `--[[@coreai` and the
@@ -239,7 +251,7 @@ Folders through `manage_mods` (parameters `folder` and `target`):
 
 | Action | Arguments | Does |
 |---|---|---|
-| `list` | optional `folder` | each mod carries its `folder`, its `context` (`legacy`, `server`, `client`), its `script_path` (where `script` lives, as `GetFullName` spells it) and its `run_state` (`running`, `quarantined`); a `folders` array lists every folder (`path`, `mods`); with `folder` only that branch, an unknown one is `FOLDER_NOT_FOUND` |
+| `list` | optional `folder` | each mod carries its `folder`, its `context` (`legacy`, `server`, `client`), its `script_path` (where `script` lives, as `GetFullName` spells it) and its `run_state` (`running`, `quarantined`, `suspended`; for a mod loaded without a run `module`, `detached`, `disabled`, `not-on-this-side` or `container-does-not-run`); a `folders` array lists every folder (`path`, `mods`); with `folder` only that branch, an unknown one is `FOLDER_NOT_FOUND` |
 | `load` | `mod_id`, `code`, optional `folder` | writes `category: <folder>` into the header before loading (the existing casing of a folder is reused) |
 | `move` | `mod_id`, `folder` (empty = top level) | moves a loaded mod without running it again: only its header line and stored manifest change |
 | `create_folder` | `folder` | creates an empty folder; `FOLDER_ALREADY_EXISTS` when it exists in any casing |

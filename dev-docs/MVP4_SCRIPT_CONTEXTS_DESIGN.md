@@ -1,10 +1,12 @@
 # MVP4 — Script contexts and the client runtime: design note
 
-Status (2026-11-11): **steps A1–A3, B1, B2 and C1-1 to C1-5 written; C1-6 and C2–C6 not started.**
+Status (2026-11-12): **steps A1–A3, B1, B2 and C1 (C1-1 to C1-6) written; C2–C6 not started.**
 A1–A3 are green in Unity 6000.6 EditMode; B1 (the script instance classes and `Enum.RunContext`), B2 (the package v2
-reader) and C1-1 to C1-5 (declared mods get durable bound script instances, saved in format version 2, see the C1
-entry) have passed their portable tests only. The declared context decides placement and the load refusals; it does not yet decide where or
-whether a script runs (C2, C3). Written 2026-11-11 for the rung "MVP4 — Script contexts & client
+reader) and C1 (declared mods get durable bound script instances, saved in format version 2; C1-6 registers sources
+without a run and gates a start by the SC-9 predicate, see the C1 entry) have passed their portable tests only. The
+declared context decides placement, the load refusals and whether a script starts on this process; it does not yet
+change what a running script may call (C3), and nothing re-evaluates a running script when its inputs change (C2).
+Written 2026-11-11 for the rung "MVP4 — Script contexts & client
 runtime" (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md:929-977`) and the open item "Design note for plan
 decision D1 (c) before any code" (`TODO.md:557-561`). Plan decision D1 (c) — "instances are views over
 the mod source store" — is at `ROBLOX_API_ROADMAP.md:4634`; the owner may still override it.
@@ -439,6 +441,14 @@ local player appearing):
    it with the existing rule (`LocalPlayerActorId`, else the followed character's player, else the only
    player, `LuaCsRbxApiBindings.cs:3243-3262`); a replica requires `RbxPlayers.GetLocalPlayer` to answer.
 
+**Amendment (owner decision, 2026-11-12):** the side check of item 5 applies to declared contexts (`server`, `client`)
+only. A `legacy` script starts on every topology it starts on today, a pure Client included, because SC-8 makes legacy
+today's behaviour exactly, and the Mirror client process and the client-topology fixtures
+(`Mvp8PlayersCompletionEditModeTests`, `RbxRunServiceTopologyLuaBindingsEditModeTests`) run legacy mods on Client today.
+The table's "legacy: Client → never" is enforced by the client composition (SC-16, step C5): a client payload never
+holds a legacy source, and a payload that does is refused. Built in C1-6 (`EvaluateStartGate` asks the legacy case as
+Solo; pinned by `SC_8_PureClient_ALegacyModStillStarts_AsBeforeContexts`).
+
 Start order on every restart: the server side (`server` and `legacy`) first, then `client`, each in
 `CompareRestoreOrder` order (R2.2: client scripts start after the client received its world). An
 all-legacy world starts exactly as today. A run state is reported for every entry: `running`,
@@ -850,7 +860,7 @@ entry:
 - Tests read hand-written v2 packages and every v1 golden; the writer still emits v1, because until C1
   binds instances a v2 package would declare every mod detached.
 
-### C1 (M) — Registration and runs, bound instances, legacy placement, v2 writer — C1-1 to C1-3 done 2026-11-11
+### C1 (M) — Registration and runs, bound instances, legacy placement, v2 writer — done 2026-11-12 (C1-1 to C1-6)
 
 **Replaced by rules R1–R4 (accepted 2026-11-11).** The original entry below made every mod's `script` a world-owned
 saved instance. That would charge instance quota per mod, leave orphans on unload and forget, make every legacy
@@ -903,8 +913,7 @@ listed, SC-4 replacement on a class change).
   placement), so a declared mod saved before C1-4 does not get a second script after a load.
 - **A `parent:` inside a mod-owned subtree, on runtime infrastructure, or (for an actor without host authority) on
   an instance another actor owns is refused**, besides the note's mod-owned parent.
-- **Gating is not in C1**: a loaded declared script always runs; `ScriptRunStates.Describe` therefore reports a
-  loaded source as running, and the SC-9 predicate decides starts only from C1-6/C2.
+- **Gating was not in C1-1 to C1-5** (closed by C1-6 for starts, below; C2 re-evaluates a running script).
 - **Interim until C1-4** (closed by C1-4): production capture still wrote version 1, which keeps a durable instance
   as a plain script node without its binding; the next load adopts it (above).
 
@@ -930,10 +939,50 @@ the C1-5 rows of `ScriptPlacementLuaEditModeTests`; Unity-only `Mvp4HubScriptSta
   The Hub's delete releases the script instance through the new optional `ILuaModScriptInstanceReleaser` (the session
   facade forwards it), before the package is deleted so the release still knows the folder; a mod without an
   instance does nothing more than before.
-- **Not in C1-5:** detached entries are not listed by the runtime (it lists loaded runs), so `detached` and `module`
-  appear only in a load's `NotStartedMods` until C1-6 registers sources without a run.
-- **Named TODO (C1-6):** a `context: client` script on a dedicated server still runs; in single-player it runs once on
-  the one machine (pinned, `C1_ClientScript_InSinglePlayer_RunsOnceOnTheOneMachine`).
+- **Not in C1-5 (closed by C1-6):** detached entries were not listed by the runtime, and a `context: client` script on a
+  dedicated server still ran.
+
+**Built in C1-6 (2026-11-12)** (portable tests: `ScriptRunGateLuaEditModeTests`, the C1-6 rows of
+`ScriptSessionEditModeTests`, `ScriptPlacementEditModeTests` and `ScriptInstanceHostEditModeTests`):
+
+- **The registration/run split lives in the `Mod` record**, not in a separate `ScriptEntry`: a record with
+  `Runs = false` and `StartState` (the `ScriptRunRules.Evaluate` answer) is a source registered without a run. It has no
+  Lua state, no handlers and no timers, `Tick` skips it, and every existing path (reload, unload, revert, forget, move,
+  list, `get_source`, the per-actor mod cap) treats it like a loaded mod, so none of the 38 sites keyed by mod id had to
+  learn a second table. `IsLoaded` is true for it (it is `Active`, the Hub toggle is on); a load or reload that the
+  predicate allows starts it.
+- **What registers without a run:** a `context: shared` source (a ModuleScript at `ReplicatedStorage/<folder path>/<id>`;
+  the planner no longer refuses it); a declared source a version 2 world restores without an instance (`detached`, no
+  placement); and any durable placement the predicate does not start: a declared context whose side this process lacks
+  (`client` on a dedicated server, `server` on a pure client), `Enabled = false`, or a container that does not run the
+  class (`ServerStorage`, a Legacy Script under `ReplicatedStorage`, R1.5). A registered source whose instance is
+  destroyed lists as `detached`.
+- **Where the code differs from SC-9:** the side check applies to declared contexts only. A legacy mod is evaluated as in
+  single-player, so it starts on every topology it starts on today, a pure client included: SC-8 says legacy is
+  today's behaviour exactly, and the Mirror client process and the client-topology fixtures
+  (`Mvp8PlayersCompletionEditModeTests`, `RbxRunServiceTopologyLuaBindingsEditModeTests`) run legacy mods there. The
+  SC-9 table's "legacy: Client → never" is therefore the client composition's rule (C5: a client payload never holds a
+  legacy source), not the runtime's — accepted by the owner as the SC-9 amendment. The container check applies to every
+  durable placement, a legacy `parent:` script included (the `parent:` key is new in MVP4, so this changes no shipped
+  behaviour).
+- **Not in C1-6:** the local-player wait (SC-9 item 6) is C3's (`HasLocalPlayer` is passed as true); nothing re-evaluates
+  a running script when `Enabled`, its ancestry or its instance changes (C2); a module source is downleveled at load, so a
+  Luau syntax error fails the load, but it is compiled only by `require` (C4).
+- **Restores** classify only `detached` up front; every other source goes through the load, and a source registered
+  without a run is named in `NotStartedMods` with its run state (`tools (module)`, `door (disabled)`,
+  `hud (not-on-this-side)`) and not counted as started, so the session's expected count is unchanged.
+- **SC-4 replacement:** the planner returns a durable plan with `ReplacesBoundInstance` when the context needs another
+  class (server or client to `shared`, `shared` to a script, a LocalScript to `server` or `shared`). The host creates the
+  new instance with the old one's `Name`, owner actor, `Enabled` and children, at its parent (or at the new context's
+  default placement when the old one still sat at its own), binds it, and parks the old one unbound outside the world;
+  `IScriptInstanceHost.CompletePlacement` (new member of the seam, unreleased) destroys it after the build commits, and
+  `UndoPlacement` puts it, its children and its binding back. Attributes and tags are not carried over.
+- **Deliberately changed tests:** the planner and Lua pins of the `NOT_IMPLEMENTED` refusals for `shared` and for a
+  class change (`C1_SharedContext_IsNotImplementedNamingStepC4`, `C1_ABoundModuleScriptWithAHeaderThatDeclaresNothing_*`,
+  `C1_ABoundLocalScriptDeclaredServer_*`, `C1_ABoundModuleScriptDeclaredServer_*`, `C1_Load_SharedContext_*`,
+  `C1_Reload_ToShared_*`) now pin the C1-6 behaviour; `Mvp4_PackageV2_SourceWithoutBoundInstance_IsDetached` now expects
+  the detached source to be loaded (registered) and listed as `detached`. `ScriptPlacementPlanner.SharedContextStep` and
+  `ClassChangeStep` (unreleased) are gone.
 
 The original entry, kept for its file list:
 
@@ -1003,6 +1052,11 @@ The original entry, kept for its file list:
 - `ReplicaRbxWorldSessionHost` source checks; new `Infrastructure/RbxClientWorldComposition.cs`;
   `RbxWorldPackageSerializer.CaptureForRecipient`. Cuttable to the start of MVP5 if the rung runs long;
   it is in the rung's "To do" (`ROBLOX_API_ROADMAP.md:964-965`), not in its DoD.
+- **Carries the SC-9 amendment's rule:** the runtime starts legacy scripts on a Client topology (SC-8), so the client
+  composition is what keeps them off clients. `Stage` refuses a payload that holds a legacy source (a `Mods/` entry
+  without a declared context, or one bound to a Legacy `Script`) exactly as it refuses a `server` source, and
+  `CaptureForRecipient` never writes one. Test: `Mvp4_ClientComposition_RefusesAPayloadWithALegacySource` beside
+  `Mvp4_ClientComposition_RefusesAPayloadWithAServerSource`.
 
 ### C6 (S) — Fits, skill, docs, acceptance
 

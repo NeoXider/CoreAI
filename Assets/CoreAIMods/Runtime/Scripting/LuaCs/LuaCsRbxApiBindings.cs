@@ -4666,12 +4666,6 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
-        /// Hands a mod's synthetic legacy placement to its durable script once a reload moved the mod from a header
-        /// without a context to one with one (MVP4 step C1): what the synthetic folder and script hold moves into the
-        /// durable script (with <paramref name="keepOwnObjects"/> false, what the mod itself owns there goes with the
-        /// folder), and both are destroyed. False when the mod has no synthetic placement or no durable script.
-        /// </summary>
-        /// <summary>
         /// The instance a loaded mod's <c>script</c> is (MVP4 step C1-5, for listings): its bound durable instance,
         /// else its synthetic legacy script once its chunk built one. Never creates either.
         /// </summary>
@@ -4698,6 +4692,52 @@ namespace CoreAI.Ai.LuaCs
             return false;
         }
 
+        /// <summary>
+        /// Where a script instance sits for the run predicate (MVP4 SC-9 item 4): the container its ancestors name
+        /// (<see cref="ScriptContainers.FromAncestorClassNames"/>), and whether it is inside a player's folder or loaded
+        /// character, the local player's (the player at this screen, as a click resolves it) or another's.
+        /// </summary>
+        internal void DescribeScriptLocation(RbxInstance script, out ScriptContainer container,
+            out ScriptPlayerScope playerScope)
+        {
+            playerScope = ScriptPlayerScope.None;
+            List<string> ancestors = new List<string>();
+            RbxPlayer localPlayer = null;
+            bool localPlayerResolved = false;
+            for (RbxInstance node = script?.Parent; node != null; node = node.Parent)
+            {
+                ancestors.Add(node.ClassName);
+                if (playerScope != ScriptPlayerScope.None || _players == null)
+                {
+                    continue;
+                }
+
+                RbxPlayer owner = node as RbxPlayer ?? _players.GetPlayerFromLoadedCharacter(node);
+                if (owner == null)
+                {
+                    continue;
+                }
+
+                if (!localPlayerResolved)
+                {
+                    localPlayer = ResolveClickingPlayer();
+                    localPlayerResolved = true;
+                }
+
+                playerScope = ReferenceEquals(owner, localPlayer)
+                    ? ScriptPlayerScope.LocalPlayer
+                    : ScriptPlayerScope.OtherPlayer;
+            }
+
+            container = ScriptContainers.FromAncestorClassNames(ancestors);
+        }
+
+        /// <summary>
+        /// Hands a mod's synthetic legacy placement to its durable script once a reload moved the mod from a header
+        /// without a context to one with one (MVP4 step C1): what the synthetic folder and script hold moves into the
+        /// durable script (with <paramref name="keepOwnObjects"/> false, what the mod itself owns there goes with the
+        /// folder), and both are destroyed. False when the mod has no synthetic placement or no durable script.
+        /// </summary>
         internal bool RetireExecutingScript(string ownerModId, bool keepOwnObjects)
         {
             if (string.IsNullOrWhiteSpace(ownerModId)
