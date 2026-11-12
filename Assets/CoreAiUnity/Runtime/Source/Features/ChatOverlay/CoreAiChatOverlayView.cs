@@ -367,7 +367,8 @@ namespace CoreAI.ChatOverlay
             AgentStatusKind.Thinking,
             AgentStatusKind.Answering,
             AgentStatusKind.RunningTool,
-            AgentStatusKind.Retrying
+            AgentStatusKind.Retrying,
+            AgentStatusKind.ComposingTool
         };
 
         private void BindCallbacks()
@@ -570,6 +571,8 @@ namespace CoreAI.ChatOverlay
                     return "tool";
                 case AgentStatusKind.Retrying:
                     return "retrying";
+                case AgentStatusKind.ComposingTool:
+                    return "composing";
                 default:
                     return "idle";
             }

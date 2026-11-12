@@ -565,6 +565,28 @@ Owner's questions and decisions on the Block World (2026-11-11):
       the view is left on after the player comes out; what the horizon dome and the water's underside draw
       against that fog. Needs captured frames from the sea floor at noon and from a beach, in a player, before
       any fix.
+- [ ] **Block World (WebGL): a player's build was gone after a restart** (owner, WebGL build 8, 2026-11-12:
+      "я построил постройку, перезапустил, и её не оказалось в игре"). The scene keeps the world between
+      starts (`keepWorldBetweenStarts: 1`), and the editor tests of it pass, so this is the browser side. Not
+      reproduced: in the lead's browser pane a click cannot break or place a block (no pointer lock), so the
+      case needs a real browser or the MCP bridge for WebGL. Suspects, in the order to check: (1) the record
+      of the kept world is taken only after a quiet time (3 s) - a reload sooner loses the last changes;
+      (2) in a WebGL player the record can be refused by the package's work-budget check (the line "Startup
+      world not updated: ..."), and with a streamed world the package is large; (3) the write reaches the
+      browser's storage only when the file system is flushed - a reload before that loses it; (4) blocks
+      placed in land that streamed in after the start. To do: reproduce with the bridge (place blocks by a
+      script, wait, reload, read the log and the world), then fix; show the player a short "world saved"
+      mark so that a reload is known to be safe. Until then `/save` records the world at once.
+- [ ] **Block World: land far behind the player is never unloaded** (the Block World agent's note,
+      2026-11-12). Columns made stay for good at any view radius; a long walk in a WebGL player will
+      fill the Terrain's 4.2 million cells. With a view radius up to 16 this comes sooner. Needs a rule in
+      the mod for which far columns may go (never one the player built in) and a Roblox-shaped way to
+      clear them.
+- [ ] **A kept world never receives bundled mods added after it was saved** (the Block World agent's note,
+      2026-11-12). A world kept from an earlier build restores only the mods it was saved with, so a mod
+      a later build adds to its folder is missing there. Worked around in the Block World demo module (it
+      seeds the folder's missing mods); the generic place is the restore code,
+      `RbxWorldPackageContracts.WithNewerBundledMods`.
 - [ ] **Block World: the sun or the sky moves in jumps** (owner, WebGL play, 2026-11-12: "солнце не плавно, а
       скачками двигается или небо скачками меняется", and "потемнение скачками, а не плавно"). Not investigated.
       The darkening is the mod's own part: `applyAmbient` sets the light of the sky by the hour - check

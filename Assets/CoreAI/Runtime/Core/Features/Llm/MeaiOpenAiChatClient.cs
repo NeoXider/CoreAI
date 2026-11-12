@@ -617,6 +617,7 @@ namespace CoreAI.Infrastructure.Llm
                     providerResponseState?.RecordResponse();
 
                     SseToolCallAccumulator toolAccumulator = new(_log);
+                    int composingCharactersReported = 0;
 
                     bool sawTerminalFrame = false;
                     bool sawUsableOutput = false;
@@ -662,6 +663,17 @@ namespace CoreAI.Infrastructure.Llm
                             // and hiding that here hides it from whoever would otherwise fix it.
                             double consumerStarted = MonotonicSeconds();
                             yield return update;
+                            timeoutBudget.ExcludeConsumerWait(MonotonicSeconds() - consumerStarted);
+                        }
+                        else if (toolAccumulator.FedArgumentCharacters - composingCharactersReported >=
+                                 ToolCallComposingStepCharacters)
+                        {
+                            // WHY not counted as a parsed delta: it carries nothing of the answer, so the
+                            // empty-stream check must go on judging the stream by what the model said.
+                            composingCharactersReported = toolAccumulator.FedArgumentCharacters;
+                            double consumerStarted = MonotonicSeconds();
+                            yield return BuildToolCallComposingUpdate(toolAccumulator.LastFedToolName,
+                                composingCharactersReported);
                             timeoutBudget.ExcludeConsumerWait(MonotonicSeconds() - consumerStarted);
                         }
 
@@ -1907,6 +1919,26 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Whitelisted <c>generation_progress.phase</c> value treated as safe liveness progress.</summary>
         public const string GenerationProgressPhaseProcessing = "processing";
 
+        /// <summary>
+        /// MEAI update metadata key of the tool-call composing signal: the model is streaming a tool call's
+        /// arguments, which show nothing until the call is complete. The value is the tool's name (empty when
+        /// the provider has not sent it yet); <see cref="ToolCallComposingCharactersMetadataKey"/> carries the
+        /// size. The update has no text and no content.
+        /// </summary>
+        public const string ToolCallComposingMetadataKey = "coreai_tool_call_composing";
+
+        /// <summary>
+        /// MEAI update metadata key next to <see cref="ToolCallComposingMetadataKey"/>: argument characters
+        /// received so far in this response, over all its tool calls (an <see cref="int"/>).
+        /// </summary>
+        public const string ToolCallComposingCharactersMetadataKey = "coreai_tool_call_composing_characters";
+
+        /// <summary>
+        /// Argument characters between two composing signals. WHY a step: a signal per fragment would double
+        /// the updates of a long call for a number nobody reads that often, and a short call needs none.
+        /// </summary>
+        public const int ToolCallComposingStepCharacters = 256;
+
         /// <summary>True when the payload range found by <see cref="TryGetSseDataRange"/> is <c>[DONE]</c>.</summary>
         private static bool IsSseDoneRange(string line, int start, int end)
         {
@@ -2375,6 +2407,42 @@ namespace CoreAI.Infrastructure.Llm
             return update;
         }
 
+        /// <summary>
+        /// The metadata-only update that says a tool call is being composed (see
+        /// <see cref="ToolCallComposingMetadataKey"/>).
+        /// </summary>
+        private static MEAI.ChatResponseUpdate BuildToolCallComposingUpdate(string toolName, int characters)
+        {
+            MEAI.ChatResponseUpdate update = new(MEAI.ChatRole.Assistant, "");
+            update.AdditionalProperties ??= new MEAI.AdditionalPropertiesDictionary();
+            update.AdditionalProperties[ToolCallComposingMetadataKey] = toolName ?? "";
+            update.AdditionalProperties[ToolCallComposingCharactersMetadataKey] = characters;
+            return update;
+        }
+
+        /// <summary>
+        /// Reads the tool-call composing signal off <paramref name="update"/>; false for every other update.
+        /// </summary>
+        public static bool TryReadToolCallComposing(MEAI.ChatResponseUpdate update, out string toolName,
+            out int characters)
+        {
+            toolName = "";
+            characters = 0;
+            MEAI.AdditionalPropertiesDictionary properties = update?.AdditionalProperties;
+            if (properties == null || !properties.TryGetValue(ToolCallComposingMetadataKey, out object name))
+            {
+                return false;
+            }
+
+            toolName = name as string ?? "";
+            if (properties.TryGetValue(ToolCallComposingCharactersMetadataKey, out object size) && size is int count)
+            {
+                characters = Math.Max(0, count);
+            }
+
+            return true;
+        }
+
         /// <summary>OpenAI streaming: final SSE object may have <c>choices: []</c> and root <c>usage</c> when <c>stream_options.include_usage</c> is set.</summary>
         private static MEAI.ChatResponseUpdate TryParseStreamingUsageChunk(JObject obj)
         {
@@ -2677,6 +2745,12 @@ namespace CoreAI.Infrastructure.Llm
 
             internal int FragmentVersion { get; private set; }
 
+            /// <summary>Argument characters fed so far in this response, over all its tool calls.</summary>
+            internal int FedArgumentCharacters { get; private set; }
+
+            /// <summary>Name of the tool call that took the latest fragment; empty until a name arrived.</summary>
+            internal string LastFedToolName { get; private set; } = "";
+
             /// <summary>
             /// The ONE place accumulated arguments turn into a string. Single funnel on purpose: it
             /// keeps the cost countable, and it makes an accidental "just call ToString() to check
@@ -2771,6 +2845,12 @@ namespace CoreAI.Infrastructure.Llm
                 if (!string.IsNullOrEmpty(argumentsFragment))
                 {
                     entry.AppendArguments(argumentsFragment);
+                    FedArgumentCharacters += argumentsFragment.Length;
+                }
+
+                if (!string.IsNullOrEmpty(entry.Name))
+                {
+                    LastFedToolName = entry.Name;
                 }
             }
 

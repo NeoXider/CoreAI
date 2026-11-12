@@ -109,10 +109,42 @@ namespace CoreAI.ChatOverlay
                 ["manage_mods"] = "loading mod"
             };
 
+        /// <summary>
+        /// Status while the model writes a tool call (its arguments stream and nothing shows yet).
+        /// Placeholder: <c>{tool}</c>.
+        /// </summary>
+        public string ComposingToolFormat { get; set; } = "preparing {tool}";
+
+        /// <summary>
+        /// Status text per tool name while its call is being written, replacing
+        /// <see cref="ComposingToolFormat"/> for that tool (matched without regard to case).
+        /// </summary>
+        public IDictionary<string, string> ComposingToolTexts { get; set; } =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["execute_lua"] = "writing a script",
+                ["manage_mods"] = "writing a mod"
+            };
+
+        /// <summary>
+        /// The status with the turn's output so far, added after the elapsed time. Placeholders:
+        /// <c>{status}</c>, <c>{tokens}</c>. Empty hides the count.
+        /// </summary>
+        public string OutputTokensFormat { get; set; } = "{status} \u00b7 ~{tokens} tokens";
+
+        /// <summary>
+        /// Characters counted as one output token while a turn runs. The count shown is an estimate from the
+        /// characters that arrived: a provider reports its own number only when a response ends.
+        /// </summary>
+        public double CharactersPerOutputToken { get; set; } = 4d;
+
         /// <summary>A copy that can be changed without touching this instance.</summary>
         public ChatOverlayOptions Clone()
         {
             ChatOverlayOptions copy = (ChatOverlayOptions)MemberwiseClone();
+            copy.ComposingToolTexts = ComposingToolTexts == null
+                ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, string>(ComposingToolTexts, StringComparer.OrdinalIgnoreCase);
             copy.ToolStatusTexts = ToolStatusTexts == null
                 ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 : new Dictionary<string, string>(ToolStatusTexts, StringComparer.OrdinalIgnoreCase);

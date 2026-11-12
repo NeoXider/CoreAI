@@ -26,6 +26,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Added
 
+- **Chat overlay: the status line has a `--composing` state.** The view styles `AgentStatusKind.ComposingTool` with the class `coreai-chat-overlay__status--composing`; `CHAT_OVERLAY.md` describes the new status texts and the output count.
 - **Hub Graphics page: the frame rate.** A "Performance" section at the top shows frames per second and the frame time, refreshed twice a second while the page is open, whoever owns rendering (also when the page says the game manages its graphics).
 - **Test a server, use it, remember it.** `CoreAiBackend.CheckConnectionAsync` and `ConnectHttpApiAsync` test the typed server, use it for the session and remember the address and the model on the device, never the key (`RestoreRememberedBackend`, `TryGetRememberedBackend`, `ForgetRememberedBackend`; `FileLlmRememberedBackendStore` writes `persistentDataPath/CoreAI/remembered-backend.json`, in a browser through the engine's automatic persistence). Hub AI Settings has a Test connection button, a note that keys are never saved, and the HTTP fields shown while Offline with a first-time line.
 - `CoreAiHubWindow.CaptureKeyboardWhileExpanded`, `IsCollapsed` and `HoldsKeyboard`. The offline Programmer reply no longer names the Hub; a host sets its own second sentence for the session with `CoreAISettingsAsset.SetSessionModelSetupHint`.

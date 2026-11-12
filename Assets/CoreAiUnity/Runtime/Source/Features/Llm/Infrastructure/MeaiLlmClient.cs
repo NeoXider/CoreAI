@@ -1117,6 +1117,21 @@ namespace CoreAI.Infrastructure.Llm
                         continue;
                     }
 
+                    if (MeaiOpenAiChatClient.TryReadToolCallComposing(update, out string composingTool,
+                            out int composingCharacters))
+                    {
+                        // WHY with the liveness flag: a consumer that knows only "still generating" keeps
+                        // waiting exactly as before; one that knows the composing fields can say what is
+                        // being written and how much of it there is.
+                        yield return new LlmStreamChunk
+                        {
+                            GenerationInProgress = true,
+                            ComposingToolName = composingTool,
+                            ComposingToolCharacters = composingCharacters
+                        };
+                        continue;
+                    }
+
                     int nativeToolCountBeforeUpdate = nativeToolCalls.Count;
                     if (update.Contents != null)
                     {

@@ -498,6 +498,74 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
+        public async Task Streaming_LongToolCall_ReportsWhatIsBeingComposedInSteps()
+        {
+            string arguments = "{\"code\":\"" + new string('x', 700) + "\"}";
+            (List<(string Tool, int Characters)> composing, List<MEAI.FunctionCallContent> calls) =
+                await StreamToolCallAsync("execute_lua", arguments, 100);
+
+            Assert.AreEqual(1, calls.Count, "the call itself still arrives once, whole");
+            Assert.AreEqual("execute_lua", calls[0].Name);
+            CollectionAssert.AreEqual(new[] { ("execute_lua", 300), ("execute_lua", 600) }, composing,
+                "711 characters in fragments of 100: one signal per 256 characters or more");
+        }
+
+        [Test]
+        public async Task Streaming_ShortToolCall_ReportsNoComposing()
+        {
+            (List<(string Tool, int Characters)> composing, List<MEAI.FunctionCallContent> calls) =
+                await StreamToolCallAsync("lookup", "{\"value\":1}", 4);
+
+            Assert.AreEqual(1, calls.Count);
+            CollectionAssert.IsEmpty(composing);
+        }
+
+        private static async Task<(List<(string Tool, int Characters)>, List<MEAI.FunctionCallContent>)>
+            StreamToolCallAsync(string toolName, string arguments, int fragmentLength)
+        {
+            ScriptedTimeTransport transport = new();
+            for (int offset = 0; offset < arguments.Length; offset += fragmentLength)
+            {
+                JObject function = new()
+                {
+                    ["arguments"] = arguments.Substring(offset, Math.Min(fragmentLength, arguments.Length - offset))
+                };
+                if (offset == 0) function["name"] = toolName;
+                JObject root = new()
+                {
+                    ["choices"] = new JArray(new JObject
+                    {
+                        ["delta"] = new JObject
+                        {
+                            ["tool_calls"] = new JArray(new JObject
+                            {
+                                ["index"] = 0, ["id"] = "call_1", ["function"] = function
+                            })
+                        }
+                    })
+                };
+                transport.Steps.Add((1, "data: " + root.ToString(Newtonsoft.Json.Formatting.None) + "\n\n"));
+            }
+
+            transport.Steps.Add((0, "data: [DONE]\n\n"));
+            List<(string Tool, int Characters)> composing = new();
+            List<MEAI.FunctionCallContent> calls = new();
+            await foreach (MEAI.ChatResponseUpdate update in TimedClient(transport).GetStreamingResponseAsync(
+                               new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "hello") }))
+            {
+                if (MeaiOpenAiChatClient.TryReadToolCallComposing(update, out string tool, out int characters))
+                {
+                    Assert.AreEqual("", update.Text, "a composing signal carries no text");
+                    composing.Add((tool, characters));
+                }
+
+                calls.AddRange(update.Contents.OfType<MEAI.FunctionCallContent>());
+            }
+
+            return (composing, calls);
+        }
+
+        [Test]
         public void ResponseWait_AbandonedReadIsCancelledAndDisposedThroughHostDelay()
         {
             ScriptedTimeTransport transport = new() { BlockReads = true };

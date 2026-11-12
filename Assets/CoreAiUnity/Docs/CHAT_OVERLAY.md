@@ -29,9 +29,13 @@ WebGL (no threads, no blocking waits), and is UI Toolkit only.
   another font lacks. A panel you assign with its own text settings keeps them. The caret and the selection
   are light in the default style, so they show on the dark field.
 - The status line under the input shows the agent's activity during a turn: `thinking`,
-  `answering`, `running execute_lua`, `loading mod` (for `manage_mods`), `execute_lua failed, retrying`,
-  `running execute_lua (retry 1)`, with the elapsed time (`thinking · 4s`) from the first second on. It
-  clears when the turn ends: done, error or cancel.
+  `writing a script` (the model is composing an `execute_lua` call; `writing a mod` for `manage_mods`,
+  `preparing <tool>` for any other tool), `running execute_lua`, `loading mod` (for `manage_mods`),
+  `answering`, `execute_lua failed, retrying`, `running execute_lua (retry 1)`. From the first second on it
+  adds the elapsed time and, once anything arrived, the output so far: `writing a script · 12s · ~1.1k
+  tokens`. The count is an estimate from the characters received (answer, reasoning and tool-call
+  arguments), four characters a token by default. The line clears when the turn ends: done, error or
+  cancel; while sub-agents go on working in the background it names them instead.
 - A failed turn adds one readable error line (the same sentences the chat panel uses, from
   `LlmErrorPresentation`); a stopped turn adds `Stopped.`.
 - While the agent is still answering, a new message is refused locally with a hint to type `/stop`.
@@ -199,7 +203,7 @@ these classes: `coreai-chat-overlay` (root, plus `coreai-chat-overlay--open` whi
 `coreai-chat-overlay__column`, `coreai-chat-overlay__feed`, `coreai-chat-overlay__line` (plus
 `--player`, `--assistant`, `--system`, `--command`, `--error`, and `--faded` while faded out),
 `coreai-chat-overlay__speaker`, `coreai-chat-overlay__text`, `coreai-chat-overlay__input` and
-`coreai-chat-overlay__status` (plus `--thinking`, `--answering`, `--tool`, `--retrying`). While the input is
+`coreai-chat-overlay__status` (plus `--thinking`, `--composing`, `--answering`, `--tool`, `--retrying`). While the input is
 closed nothing in the overlay takes the pointer, so clicks and the wheel reach the game.
 
 ## Layers

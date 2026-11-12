@@ -842,6 +842,20 @@ namespace CoreAI.Ai
         /// </summary>
         public bool GenerationInProgress { get; set; }
 
+        /// <summary>
+        /// Name of the tool whose call the model is composing right now: its arguments are streaming and
+        /// nothing displayable arrives meanwhile (a long script, for example). Empty on every other chunk.
+        /// Set together with <see cref="GenerationInProgress"/>, so a consumer that knows only the liveness
+        /// signal keeps waiting as before. Never persisted to history, memory, or notes.
+        /// </summary>
+        public string ComposingToolName { get; set; } = "";
+
+        /// <summary>
+        /// Argument characters of the tool calls composed so far in the current model response; 0 on every
+        /// chunk that is not a composing signal. Starts again from 0 with the next response of the turn.
+        /// </summary>
+        public int ComposingToolCharacters { get; set; }
+
 
         /// <summary>
         /// When <c>true</c> with <see cref="BufferedStreamingNoToolBinding"/>, host UI should show a short
@@ -881,6 +895,8 @@ namespace CoreAI.Ai
                 CacheWriteTokens = CacheWriteTokens,
                 ExecutedToolCalls = ExecutedToolCalls,
                 GenerationInProgress = GenerationInProgress,
+                ComposingToolName = ComposingToolName,
+                ComposingToolCharacters = ComposingToolCharacters,
                 BufferedStreamingUseToolProgressHint = BufferedStreamingUseToolProgressHint,
                 BufferedStreamingNoToolBinding = BufferedStreamingNoToolBinding
             };
