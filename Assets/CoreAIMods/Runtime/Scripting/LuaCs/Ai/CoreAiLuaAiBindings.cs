@@ -28,6 +28,7 @@ namespace CoreAI.Ai.LuaCs
         /// <param name="moderation">The moderation filter of prompts and answers; null passes everything.</param>
         /// <param name="textBackend">Replaces the orchestrator-based text backend.</param>
         /// <param name="log">Diagnostics.</param>
+        /// <param name="assistant">The player's own agent behind <c>AIService:GetAssistant()</c>; null leaves it unavailable.</param>
         public static Action<LuaCsApiRegistry, LuaCapabilities> Attach(
             LuaCsRbxApiBindings rbxApi,
             CoreAiLuaAiOptions options,
@@ -38,10 +39,11 @@ namespace CoreAI.Ai.LuaCs
             NpcSpeechAnchorRegistry anchors = null,
             ITextModerationFilter moderation = null,
             IRbxTextGenerationBackend textBackend = null,
-            ILog log = null)
+            ILog log = null,
+            CoreAI.ChatOverlay.ChatAgentTurns assistant = null)
         {
             return Attach(rbxApi, options, orchestrator, director, existing, bodyAnchor, anchors, moderation, textBackend,
-                log, out _);
+                log, assistant, out _);
         }
 
         internal static Action<LuaCsApiRegistry, LuaCapabilities> Attach(
@@ -57,6 +59,24 @@ namespace CoreAI.Ai.LuaCs
             ILog log,
             out LuaCsRbxAiServiceAdapter adapter)
         {
+            return Attach(rbxApi, options, orchestrator, director, existing, bodyAnchor, anchors, moderation, textBackend,
+                log, null, out adapter);
+        }
+
+        internal static Action<LuaCsApiRegistry, LuaCapabilities> Attach(
+            LuaCsRbxApiBindings rbxApi,
+            CoreAiLuaAiOptions options,
+            IAiOrchestrationService orchestrator,
+            INpcDirector director,
+            Action<LuaCsApiRegistry, LuaCapabilities> existing,
+            Func<RbxInstance, NpcPosition?> bodyAnchor,
+            NpcSpeechAnchorRegistry anchors,
+            ITextModerationFilter moderation,
+            IRbxTextGenerationBackend textBackend,
+            ILog log,
+            CoreAI.ChatOverlay.ChatAgentTurns assistant,
+            out LuaCsRbxAiServiceAdapter adapter)
+        {
             adapter = null;
             if (rbxApi == null)
             {
@@ -69,7 +89,7 @@ namespace CoreAI.Ai.LuaCs
                                                  ? new OrchestratorTextGenerationBackend(orchestrator, resolved)
                                                  : null);
             LuaCsRbxAiServiceAdapter created = new(rbxApi, resolved, text, director, bodyAnchor, anchors, moderation,
-                null, log);
+                null, log, assistant);
             adapter = created;
             return (registry, capabilities) =>
             {

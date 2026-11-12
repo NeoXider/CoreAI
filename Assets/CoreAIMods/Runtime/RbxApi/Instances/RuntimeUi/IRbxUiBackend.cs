@@ -233,6 +233,18 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
         /// <summary>Gives the element keyboard focus.</summary>
         bool Focus();
 
+        /// <summary>
+        /// Gives a text field keyboard focus for typing: the caret goes after the text, and when
+        /// <paramref name="heldKeyCodes"/> is not empty (the keyboard keys held when the script asked, as
+        /// <c>Enum.KeyCode</c> values) the keystroke that is being pressed does not type into the field: a key
+        /// down of one of those keys, and the first typed character, in this frame or the next. A host without
+        /// the distinction focuses as <see cref="Focus"/> does.
+        /// </summary>
+        bool FocusForTyping(IReadOnlyList<int> heldKeyCodes)
+        {
+            return Focus();
+        }
+
         /// <summary>Takes keyboard focus away from the element.</summary>
         bool Blur();
 

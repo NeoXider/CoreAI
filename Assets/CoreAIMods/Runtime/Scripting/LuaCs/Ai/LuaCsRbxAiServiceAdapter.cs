@@ -20,7 +20,8 @@ namespace CoreAI.Ai.LuaCs
     /// <summary>
     /// The Lua surface of AI from mods: Roblox's <c>TextGenerator</c> (four properties and the yielding
     /// <c>GenerateTextAsync</c>) and CoreAI's <c>AIService</c> (<c>CreateAgent</c>, <c>GetAgent</c>, <c>GetAgents</c>,
-    /// <c>Hear</c>) with the agent objects it returns (<c>Ask</c>, <c>Say</c>, <c>Destroy</c>, <c>IsSpeaking</c>,
+    /// <c>Hear</c>, and <c>GetAssistant</c>, the player's own agent, in <see cref="LuaCsRbxAssistantSurface"/>) with the
+    /// agent objects it returns (<c>Ask</c>, <c>Say</c>, <c>Destroy</c>, <c>IsSpeaking</c>,
     /// <c>Replied</c>, <c>Addressed</c>). Installed as an environment decorator next to HttpService: it patches the
     /// instance metatable for the two classes only and delegates every other member. Yielding calls use the same
     /// one-signal-per-request <c>signal:Wait</c> bridge as HttpService, and completions are applied on the
@@ -89,6 +90,7 @@ namespace CoreAI.Ai.LuaCs
         private readonly RbxInstance _service;
         private long _generationCounter;
         private long _agentSuffix;
+        private readonly LuaCsRbxAssistantSurface _assistant;
         private bool _inAskCall;
         private bool _disposed;
 
@@ -101,7 +103,8 @@ namespace CoreAI.Ai.LuaCs
             NpcSpeechAnchorRegistry anchors = null,
             ITextModerationFilter moderation = null,
             Func<double> monotonicClock = null,
-            ILog log = null)
+            ILog log = null,
+            CoreAI.ChatOverlay.ChatAgentTurns assistant = null)
         {
             _bindings = bindings ?? throw new ArgumentNullException(nameof(bindings));
             _options = options ?? new CoreAiLuaAiOptions();
@@ -120,6 +123,7 @@ namespace CoreAI.Ai.LuaCs
             RbxAiClasses.EnsureRegistered(_bindings.Registry.Catalog);
             _service = AttachService();
             _bindings.Scheduler.PhaseReached += Drain;
+            _assistant = new LuaCsRbxAssistantSurface(_bindings, assistant, _options);
             if (_director != null)
             {
                 _director.NpcAddressed += OnNpcAddressed;
@@ -200,6 +204,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             _bindings.Scheduler.PhaseReached -= Drain;
+            _assistant.Dispose();
             foreach (PendingGeneration pending in generations)
             {
                 pending.Cancel();
@@ -392,6 +397,8 @@ namespace CoreAI.Ai.LuaCs
 
                 return new LuaValue(list);
             }, context);
+            methods["GetAssistant"] = _assistant.BuildGetAssistant(context, capabilities,
+                ctx => RequireService(ctx, context));
             methods["Hear"] = Fn("AIService.Hear", ctx =>
             {
                 RequireService(ctx, context);

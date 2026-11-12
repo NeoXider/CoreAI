@@ -429,6 +429,7 @@ namespace CoreAI.Ai.LuaCs
             _remoteFunctionWaitGenerations = new();
         private readonly Dictionary<InstanceId, List<PendingBindableInvoke>> _pendingBindableInvokes = new();
         private readonly Dictionary<RbxPlayer, RbxTextSource> _textSources = new();
+        private RbxTextChatService _chatHostService;
         private RbxScriptSignal _bindableInvokeSignal;
         private RbxScriptConnection _bindableInvokeConnection;
         private readonly HashSet<string> _legacySchedulerDeprecationOwners =
@@ -1969,7 +1970,15 @@ namespace CoreAI.Ai.LuaCs
             // detached its own sink; FindFirstChildOfClass throws on a destroyed DataModel.
             if (_game != null && !_game.IsDestroyed)
             {
-                (_game.FindFirstChildOfClass("TextChatService") as RbxTextChatService)?.DetachCommandSink();
+                RbxTextChatService chat = _game.FindFirstChildOfClass("TextChatService") as RbxTextChatService;
+                chat?.DetachCommandSink();
+                chat?.DetachChatHost();
+            }
+
+            if (_chatHostService != null)
+            {
+                _scheduler.PhaseReached -= CheckChatConfigurationWriters;
+                _chatHostService = null;
             }
 
             _textSources.Clear();
@@ -2645,6 +2654,44 @@ namespace CoreAI.Ai.LuaCs
             }
 
             service.AttachCommandSink(sink, ResolveLocalTextSource, LogSink);
+        }
+
+        /// <summary>
+        /// Connects this world's <c>TextChatService</c> to the host's in-world chat for messages (roadmap P2):
+        /// <c>TextChannel:SendAsync</c> runs commands and reaches the host's listeners through <paramref name="host"/>,
+        /// host lines arrive as <c>RBXSystem</c> messages, and a configuration's <c>Enabled = false</c> makes the host's
+        /// default chat step aside while the writing mod runs. The mods composition calls it for every world it
+        /// builds; null detaches.
+        /// </summary>
+        public void AttachChatHost(IRbxChatHost host)
+        {
+            if (_game == null || _game.IsDestroyed
+                || !(_game.FindFirstChildOfClass("TextChatService") is RbxTextChatService service))
+            {
+                return;
+            }
+
+            if (host == null)
+            {
+                service.DetachChatHost();
+                return;
+            }
+
+            service.AttachChatHost(host, ResolveLocalTextSource);
+            if (_chatHostService == null)
+            {
+                _scheduler.PhaseReached += CheckChatConfigurationWriters;
+            }
+
+            _chatHostService = service;
+        }
+
+        private void CheckChatConfigurationWriters(SchedulerPhase phase, double deltaSeconds)
+        {
+            if (phase == SchedulerPhase.Heartbeat && _chatHostService != null && !_chatHostService.IsDestroyed)
+            {
+                _chatHostService.CheckConfigurationWriters();
+            }
         }
 
         /// <summary>The local player's TextSource, made once per player; null without a local player.</summary>

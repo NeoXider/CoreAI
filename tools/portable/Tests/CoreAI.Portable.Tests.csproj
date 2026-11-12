@@ -165,6 +165,8 @@
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayPreSendHookEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayPreSendHookEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayHostTurnEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayHostTurnEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/AgentStatusEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/AgentStatusEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatAgentTurnsEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatAgentTurnsEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/AgentStatusTrackerEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/AgentStatusTrackerEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayBuiltInCommandsEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayBuiltInCommandsEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayArchitectureFitnessEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ChatOverlay/ChatOverlayArchitectureFitnessEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ChatMarkdown/ChatMarkdownTextEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ChatMarkdown/ChatMarkdownTextEditModeTests.cs" />

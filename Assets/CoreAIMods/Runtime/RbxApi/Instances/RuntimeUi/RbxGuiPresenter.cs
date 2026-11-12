@@ -91,6 +91,8 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
         private readonly Action<SchedulerPhase, double> _onPhase;
         private readonly Action<RbxTextBox, bool> _onFocusRequest;
         private ModScheduler _scheduler;
+        private RbxTextBox _pendingFocus;
+        private int[] _pendingFocusKeys;
         private RbxPlayer _lastPlayer;
         private RbxInstance _lastPlayerGui;
         private bool _structureDirty = true;
@@ -153,6 +155,13 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
 
         /// <summary>The shown TextBox that holds keyboard focus, or null.</summary>
         public RbxTextBox FocusedTextBox { get; private set; }
+
+        /// <summary>
+        /// The keyboard keys held right now as <c>Enum.KeyCode</c> values, read when a script calls
+        /// <c>TextBox:CaptureFocus()</c>: the keystroke being pressed then does not type into the box (the key that
+        /// opened a chat). Null swallows nothing.
+        /// </summary>
+        public Func<int[]> HeldKeyboardKeys { get; set; }
 
         /// <summary>The host screen showing <paramref name="screenGui"/>, or null.</summary>
         public IRbxUiScreen GetScreenPort(RbxScreenGui screenGui)
@@ -230,6 +239,8 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
             {
                 _screenOrder[i].Update(true);
             }
+
+            ApplyPendingFocus();
         }
 
         /// <inheritdoc />
@@ -249,6 +260,8 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
 
             _screenScratch.Clear();
             _disposed = true;
+            _pendingFocus = null;
+            _pendingFocusKeys = null;
             _registry.Unregistered -= _onUnregistered;
             _registry.ParentChanged -= _onParentChanged;
             if (ReferenceEquals(_registry.GuiLayout, this))
@@ -262,6 +275,14 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
         }
 
         internal RbxUiWorld World => _world;
+
+        void IRbxGuiLayoutSource.RequestFocus(RbxTextBox box, bool focus)
+        {
+            if (!_disposed && box != null)
+            {
+                OnFocusRequest(box, focus);
+            }
+        }
 
         void IRbxGuiLayoutSource.EnsureLayout(RbxInstance instance)
         {
@@ -999,18 +1020,52 @@ namespace CoreAI.Mods.Rbx.Instances.RuntimeUi
 
         private void OnFocusRequest(RbxTextBox box, bool focus)
         {
-            if (!_nodes.TryGetValue(box, out RbxGuiNode node) || node.Element == null)
+            if (!focus)
+            {
+                if (ReferenceEquals(_pendingFocus, box))
+                {
+                    _pendingFocus = null;
+                    _pendingFocusKeys = null;
+                }
+
+                if (_nodes.TryGetValue(box, out RbxGuiNode focused) && focused.Element != null)
+                {
+                    focused.Element.Blur();
+                }
+
+                return;
+            }
+
+            int[] held = HeldKeyboardKeys?.Invoke() ?? Array.Empty<int>();
+            if (_nodes.TryGetValue(box, out RbxGuiNode node) && node.Element != null && node.Element.IsAlive
+                && !_structureDirty && ScreenOf(node)?.HasDirty != true)
+            {
+                node.Element.FocusForTyping(held);
+                return;
+            }
+
+            // WHY deferred to the end of this frame's GUI update: a box made visible (or created) in the same
+            // handler that captures focus has no element yet, or one that is still hidden, and a hidden field
+            // cannot take focus; the chat opens exactly that way.
+            _pendingFocus = box;
+            _pendingFocusKeys = held;
+        }
+
+        private void ApplyPendingFocus()
+        {
+            RbxTextBox box = _pendingFocus;
+            if (box == null)
             {
                 return;
             }
 
-            if (focus)
+            int[] held = _pendingFocusKeys ?? Array.Empty<int>();
+            _pendingFocus = null;
+            _pendingFocusKeys = null;
+            if (!box.IsDestroyed && _nodes.TryGetValue(box, out RbxGuiNode node) && node.Element != null
+                && node.Element.IsAlive)
             {
-                node.Element.Focus();
-            }
-            else
-            {
-                node.Element.Blur();
+                node.Element.FocusForTyping(held);
             }
         }
 

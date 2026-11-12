@@ -220,6 +220,10 @@ namespace CoreAI.Mods.Rbx.Datatypes
             registry.Register(new RbxEnum("RunContext",
                 ("Legacy", 0), ("Server", 1), ("Client", 2), ("Plugin", 3)));
             registry.Register(new RbxEnum("ChatVersion", ("LegacyChatService", 0), ("TextChatService", 1)));
+            registry.Register(new RbxEnum("TextChatMessageStatus",
+                ("Unknown", 1), ("Success", 2), ("Sending", 3), ("TextFilterFailed", 4), ("Floodchecked", 5),
+                ("InvalidPrivacySettings", 6), ("InvalidTextChannelPermissions", 7), ("MessageTooLong", 8),
+                ("ModerationTimeout", 9)));
             // WHY the FULL mirror item set and not only the five states CoreAI enters: an enum is a
             // vocabulary, and a script that writes Enum.HumanoidStateType.Seated must fail on the
             // ChangeState call it makes, with a message naming what is missing — not on the enum

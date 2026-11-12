@@ -80,6 +80,7 @@ namespace CoreAI.Ai.LuaCs
                     rbxApi.ReadMouseLocation, rbxApi.CreateGuiClickInput, rbxApi.LogSink, prefix);
                 world.AttachGuiPresenter(presenter);
                 rbxApi.UserInputService?.AttachFocusedTextBoxSource(() => presenter.FocusedTextBox);
+                presenter.HeldKeyboardKeys = () => HeldKeyboardKeys(rbxApi.UserInputService);
             }
 
             service.Attach(world);
@@ -104,6 +105,22 @@ namespace CoreAI.Ai.LuaCs
 
             _worlds.Clear();
             _focusReporter.Dispose();
+        }
+
+        /// <summary>The keyboard keys (not gamepad buttons) the world's input source holds now.</summary>
+        internal static int[] HeldKeyboardKeys(RbxUserInputService input)
+        {
+            IInputSource source = input?.InputSource;
+            if (source == null)
+            {
+                return Array.Empty<int>();
+            }
+
+            List<int> held = new();
+            source.CollectPressedKeyCodes(held);
+            // WHY below 1000: gamepad buttons share Enum.KeyCode from 1000 up and never type into a field.
+            held.RemoveAll(key => key >= 1000);
+            return held.ToArray();
         }
 
         private static RbxUxmlService EnsureService(RbxDataModel game)

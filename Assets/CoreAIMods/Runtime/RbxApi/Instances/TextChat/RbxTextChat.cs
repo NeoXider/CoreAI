@@ -190,7 +190,10 @@ namespace CoreAI.Mods.Rbx.Instances.TextChat
     }
 
     /// <summary>
-    /// Mirror <c>TextChatService</c>, the commands part: every <see cref="RbxTextChatCommand"/> below it that is
+    /// Mirror <c>TextChatService</c>. The messages part (<see cref="AttachChatHost"/>): the detached default channels,
+    /// <c>SendAsync</c>, <c>DisplaySystemMessage</c>, <c>MessageReceived</c>, <c>SendingMessage</c>, the two
+    /// configurations whose <c>Enabled = false</c> makes the host's own chat step aside, and the host's commands
+    /// (DEV-142). The commands part: every <see cref="RbxTextChatCommand"/> below it that is
     /// enabled and has an alias is a command of the in-world chat while a host attached the chat
     /// (<see cref="AttachCommandSink"/>). A command goes away when it is destroyed (with its mod), disabled or moved
     /// out; an alias the chat already answers is kept by its first owner and the newcomer is reported once.
@@ -208,10 +211,383 @@ namespace CoreAI.Mods.Rbx.Instances.TextChat
         private Action<string> _log;
         private InstanceRegistry _subscribed;
         private Action<RbxTextChatCommand> _onCommandChanged;
+        private IRbxChatHost _host;
+        private Func<RbxInstance> _hostTextSource;
+        private Action<RbxChatHostLine> _onHostLine;
+        private Action _onHostCommandsChanged;
+        private IDisposable _chatClaim;
+        private RbxInstance _channelsFolder;
+        private RbxTextChannel _general;
+        private RbxTextChannel _system;
+        private RbxChatWindowConfiguration _window;
+        private RbxChatInputBarConfiguration _inputBar;
+        private RbxInstance _hostCommandsFolder;
+        private bool _hostCommandsDirty = true;
+        private long _messageCounter;
 
         internal RbxTextChatService(ClassDescriptor descriptor)
             : base(descriptor)
         {
+        }
+
+        /// <summary>Mirror <c>TextChatService.MessageReceived(textChatMessage)</c>: every message shown on this machine.</summary>
+        public RbxScriptSignal MessageReceived => GetOrCreateSignal("MessageReceived");
+
+        /// <summary>Mirror <c>TextChatService.SendingMessage(textChatMessage)</c>: fired by <c>SendAsync</c> before delivery.</summary>
+        public RbxScriptSignal SendingMessage => GetOrCreateSignal("SendingMessage");
+
+        /// <summary>The <c>TextChannels</c> folder with <c>RBXGeneral</c> and <c>RBXSystem</c> (detached, DEV-142).</summary>
+        public RbxInstance TextChannels
+        {
+            get
+            {
+                EnsureChannels();
+                return _channelsFolder;
+            }
+        }
+
+        /// <summary><c>TextChannels.RBXGeneral</c>: what players say.</summary>
+        public RbxTextChannel GeneralChannel
+        {
+            get
+            {
+                EnsureChannels();
+                return _general;
+            }
+        }
+
+        /// <summary><c>TextChannels.RBXSystem</c>: system lines.</summary>
+        public RbxTextChannel SystemChannel
+        {
+            get
+            {
+                EnsureChannels();
+                return _system;
+            }
+        }
+
+        /// <summary>Mirror <c>TextChatService.ChatWindowConfiguration</c> (detached).</summary>
+        public RbxChatWindowConfiguration ChatWindowConfiguration
+        {
+            get
+            {
+                EnsureConfigurations();
+                return _window;
+            }
+        }
+
+        /// <summary>Mirror <c>TextChatService.ChatInputBarConfiguration</c> (detached).</summary>
+        public RbxChatInputBarConfiguration ChatInputBarConfiguration
+        {
+            get
+            {
+                EnsureConfigurations();
+                return _inputBar;
+            }
+        }
+
+        /// <summary>
+        /// The host's own commands as read-only <c>TextChatCommand</c>s in a detached <c>TextChatCommands</c> folder:
+        /// <c>PrimaryAlias</c>, <c>SecondaryAlias</c> and the attributes <c>Description</c> and <c>Usage</c>. Writing
+        /// them changes nothing in the host. Empty without an attached host.
+        /// </summary>
+        public RbxInstance TextChatCommands
+        {
+            get
+            {
+                RefreshHostCommands();
+                return _hostCommandsFolder;
+            }
+        }
+
+        /// <summary>True while a script holds a configuration's <c>Enabled</c> at false and the host's chat stepped aside.</summary>
+        public bool IsChatClaimed => _chatClaim != null;
+
+        /// <summary>True while a chat host is attached.</summary>
+        public bool HasChatHost => _host != null;
+
+        /// <summary>
+        /// Connects the host's in-world chat: <c>SendAsync</c> goes through <paramref name="host"/>, host lines arrive as
+        /// system messages, and <paramref name="textSource"/> answers the local player's <c>TextSource</c>. Replaces an
+        /// earlier host; a claim the world held moves to the new one.
+        /// </summary>
+        public void AttachChatHost(IRbxChatHost host, Func<RbxInstance> textSource)
+        {
+            DetachChatHost();
+            _host = host ?? throw new ArgumentNullException(nameof(host));
+            _hostTextSource = textSource;
+            _onHostLine ??= OnHostLine;
+            _onHostCommandsChanged ??= () => _hostCommandsDirty = true;
+            _host.LinePosted += _onHostLine;
+            _host.HostCommandsChanged += _onHostCommandsChanged;
+            _hostCommandsDirty = true;
+            OnConfigurationChanged();
+        }
+
+        /// <summary>Disconnects the chat host and releases a claim on its chat.</summary>
+        public void DetachChatHost()
+        {
+            if (_host != null)
+            {
+                _host.LinePosted -= _onHostLine;
+                _host.HostCommandsChanged -= _onHostCommandsChanged;
+            }
+
+            _chatClaim?.Dispose();
+            _chatClaim = null;
+            _host = null;
+            _hostTextSource = null;
+            _hostCommandsDirty = true;
+        }
+
+        /// <summary>
+        /// Mirror <c>TextChannel:SendAsync(message, metadata)</c> for the local player: fires <c>SendingMessage</c>, then
+        /// a line naming a command runs it (its reply arrives in <c>RBXSystem</c>), a line a host listener takes stops
+        /// there, and any other line is delivered. The returned message's <c>Metadata</c> says which
+        /// (<see cref="RbxTextChatMetadata.Command"/>, <see cref="RbxTextChatMetadata.Taken"/>, or the metadata given).
+        /// </summary>
+        public RbxTextChatMessage SendAsync(RbxTextChannel channel, string text, string metadata)
+        {
+            ThrowIfDestroyed("SendAsync");
+            RbxTextChannel target = channel ?? GeneralChannel;
+            RbxInstance source = _hostTextSource?.Invoke() ?? _textSource?.Invoke();
+            RbxTextChatMessage message = NewMessage(target, text, metadata, string.Empty, source,
+                RbxTextChatMessageStatus.Sending);
+            if (HasSignalConnections("SendingMessage"))
+            {
+                FireSignal("SendingMessage", message);
+            }
+
+            RbxChatSendResult result = _host?.RunCommand(message.Text) ?? RunWorldCommand(message.Text, source);
+            message.Status = RbxTextChatMessageStatus.Success;
+            if (result.Kind == RbxChatSendKind.Command)
+            {
+                message.Metadata = RbxTextChatMetadata.Command;
+                if (result.Reply.Length > 0)
+                {
+                    DisplaySystemMessage(SystemChannel, result.Reply,
+                        result.Failed ? RbxTextChatMetadata.Error : RbxTextChatMetadata.Command, string.Empty);
+                }
+
+                return message;
+            }
+
+            if (result.DeliveredText != null)
+            {
+                message.Text = result.DeliveredText;
+            }
+
+            // WHY delivered before the listeners hear it: a villager who answers at once (a line without a model)
+            // must speak after the line it answers; a taken line was still said in the channel, only the AI does
+            // not get it.
+            Deliver(message);
+            if (_host != null && message.Text.Length > 0 && _host.OfferPlayerLine(message.Text))
+            {
+                message.Metadata = RbxTextChatMetadata.Taken;
+            }
+
+            return message;
+        }
+
+        /// <summary>
+        /// Mirror <c>TextChannel:DisplaySystemMessage(systemMessage, metadata)</c>: a message shown on this machine only,
+        /// with <paramref name="prefix"/> as its <c>PrefixText</c>.
+        /// </summary>
+        public RbxTextChatMessage DisplaySystemMessage(RbxTextChannel channel, string text, string metadata,
+            string prefix)
+        {
+            ThrowIfDestroyed("DisplaySystemMessage");
+            RbxTextChatMessage message = NewMessage(channel ?? SystemChannel, text, metadata, prefix, null,
+                RbxTextChatMessageStatus.Success);
+            Deliver(message);
+            return message;
+        }
+
+        /// <summary>
+        /// Gives the host's chat back when the script that switched a configuration off no longer runs: its
+        /// <c>Enabled</c> returns to true. The world calls it once per frame.
+        /// </summary>
+        public void CheckConfigurationWriters()
+        {
+            Revert(_window);
+            Revert(_inputBar);
+        }
+
+        internal void OnConfigurationChanged()
+        {
+            bool wanted = _host != null && !IsDestroyed
+                                        && ((_window != null && !_window.Enabled)
+                                            || (_inputBar != null && !_inputBar.Enabled));
+            if (wanted && _chatClaim == null)
+            {
+                _chatClaim = _host.ClaimChat("world chat (TextChatService)");
+            }
+            else if (!wanted && _chatClaim != null)
+            {
+                _chatClaim.Dispose();
+                _chatClaim = null;
+            }
+        }
+
+        private static void Revert(RbxTextChatConfiguration configuration)
+        {
+            if (configuration == null || configuration.Enabled || configuration.IsDestroyed)
+            {
+                return;
+            }
+
+            Func<bool> alive = configuration.WriterAlive;
+            if (alive != null && !alive())
+            {
+                configuration.SetEnabled(true, null);
+            }
+        }
+
+        /// <summary>
+        /// Without a host, the world's own <c>TextChatCommand</c>s still answer <c>SendAsync</c>, as in Roblox: a line
+        /// naming an enabled command fires its <c>Triggered</c> instead of being sent.
+        /// </summary>
+        private RbxChatSendResult RunWorldCommand(string text, RbxInstance source)
+        {
+            string line = (text ?? string.Empty).Trim();
+            if (line.Length >= 2 && line[0] == '/' && line[1] == '/')
+            {
+                return RbxChatSendResult.Deliver(line.Substring(1));
+            }
+
+            if (line.Length < 2 || line[0] != '/')
+            {
+                return RbxChatSendResult.Deliver();
+            }
+
+            int end = line.IndexOfAny(new[] { ' ', '\t' }, 1);
+            string name = end < 0 ? line.Substring(1) : line.Substring(1, end - 1);
+            IReadOnlyList<RbxInstance> descendants = GetDescendants();
+            for (int i = 0; i < descendants.Count; i++)
+            {
+                if (descendants[i] is RbxTextChatCommand command && command.Enabled
+                    && (string.Equals(Normalize(command.PrimaryAlias), name, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(Normalize(command.SecondaryAlias), name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    command.FireTriggered(source, line);
+                    return RbxChatSendResult.Command(string.Empty);
+                }
+            }
+
+            return RbxChatSendResult.Deliver();
+        }
+
+        private void OnHostLine(RbxChatHostLine line)
+        {
+            if (IsDestroyed || line.Text.Length == 0)
+            {
+                return;
+            }
+
+            DisplaySystemMessage(SystemChannel, line.Text,
+                line.Metadata.Length == 0 ? RbxTextChatMetadata.System : line.Metadata, line.Speaker);
+        }
+
+        private void Deliver(RbxTextChatMessage message)
+        {
+            message.TextChannel?.FireMessageReceived(message);
+            if (HasSignalConnections("MessageReceived"))
+            {
+                FireSignal("MessageReceived", message);
+            }
+        }
+
+        private RbxTextChatMessage NewMessage(RbxTextChannel channel, string text, string metadata, string prefix,
+            RbxInstance source, int status)
+        {
+            RbxTextChatMessage message = new(DescriptorOf("TextChatMessage", "Instance"))
+            {
+                Text = text ?? string.Empty,
+                Metadata = metadata ?? string.Empty,
+                PrefixText = prefix ?? string.Empty,
+                TextSource = source,
+                TextChannel = channel,
+                Status = status,
+                MessageId = "coreai-" + (++_messageCounter).ToString(System.Globalization.CultureInfo.InvariantCulture)
+            };
+            message.Name = "TextChatMessage";
+            return message;
+        }
+
+        private void EnsureChannels()
+        {
+            if (_channelsFolder != null)
+            {
+                return;
+            }
+
+            _channelsFolder = new RbxInstance(DescriptorOf("Folder", "Instance")) { Name = "TextChannels" };
+            _general = new RbxTextChannel(DescriptorOf("TextChannel", "Instance")) { Name = "RBXGeneral", Service = this };
+            _system = new RbxTextChannel(DescriptorOf("TextChannel", "Instance")) { Name = "RBXSystem", Service = this };
+            _general.Parent = _channelsFolder;
+            _system.Parent = _channelsFolder;
+        }
+
+        private void EnsureConfigurations()
+        {
+            if (_window != null)
+            {
+                return;
+            }
+
+            _window = new RbxChatWindowConfiguration(DescriptorOf("ChatWindowConfiguration", "TextChatConfigurations"))
+            {
+                Name = "ChatWindowConfiguration", Service = this
+            };
+            _inputBar = new RbxChatInputBarConfiguration(
+                DescriptorOf("ChatInputBarConfiguration", "TextChatConfigurations"))
+            {
+                Name = "ChatInputBarConfiguration", Service = this
+            };
+        }
+
+        private void RefreshHostCommands()
+        {
+            if (_hostCommandsFolder == null)
+            {
+                _hostCommandsFolder = new RbxInstance(DescriptorOf("Folder", "Instance")) { Name = "TextChatCommands" };
+            }
+
+            if (!_hostCommandsDirty)
+            {
+                return;
+            }
+
+            _hostCommandsDirty = false;
+            IReadOnlyList<RbxInstance> old = _hostCommandsFolder.GetChildren();
+            for (int i = 0; i < old.Count; i++)
+            {
+                old[i].Parent = null;
+            }
+
+            IReadOnlyList<RbxChatHostCommand> commands = _host?.GetHostCommands();
+            if (commands == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < commands.Count; i++)
+            {
+                RbxChatHostCommand entry = commands[i];
+                RbxTextChatCommand command = new(DescriptorOf("TextChatCommand", "Instance")) { Name = entry.Name };
+                command.PrimaryAlias = "/" + entry.Name;
+                command.SecondaryAlias = entry.Aliases.Count > 0 ? "/" + entry.Aliases[0] : string.Empty;
+                command.SetAttribute("Description", entry.Description);
+                command.SetAttribute("Usage", entry.Usage);
+                command.Parent = _hostCommandsFolder;
+            }
+        }
+
+        private ClassDescriptor DescriptorOf(string className, string baseClassName)
+        {
+            return Registry != null && Registry.Catalog.TryGet(className, out ClassDescriptor descriptor)
+                ? descriptor
+                : new ClassDescriptor(className, baseClassName, false, false, false);
         }
 
         /// <summary>Mirror <c>TextChatService.ChatVersion</c>: always <c>Enum.ChatVersion.TextChatService</c> (1).</summary>
@@ -275,6 +651,7 @@ namespace CoreAI.Mods.Rbx.Instances.TextChat
         {
             base.DisconnectCustomSignals();
             DetachCommandSink();
+            DetachChatHost();
             if (_subscribed != null)
             {
                 _subscribed.Registered -= OnRegistered;

@@ -30,6 +30,9 @@ namespace CoreAI.RuntimeUi
         private readonly EventCallback<FocusInEvent> _onFocusIn;
         private readonly EventCallback<FocusOutEvent> _onFocusOut;
         private readonly Action<float> _onScrollerValueChanged;
+        private readonly EventCallback<KeyDownEvent> _onTypingKeyDown;
+        private readonly OpeningKeystrokeFilter _openingKeystroke = new();
+        private VisualElement _typingKeyDownOn;
 
         private Action<RuntimeUiElement> _clicked;
         private Action<RuntimeUiElement> _valueChanged;
@@ -72,6 +75,7 @@ namespace CoreAI.RuntimeUi
             _onFocusIn = OnFocusIn;
             _onFocusOut = OnFocusOut;
             _onScrollerValueChanged = OnScrollerValueChanged;
+            _onTypingKeyDown = OnTypingKeyDown;
         }
 
         [Flags]
@@ -660,6 +664,66 @@ namespace CoreAI.RuntimeUi
             return true;
         }
 
+        /// <summary>
+        /// Gives a text field keyboard focus for typing: the caret goes after the text, focus is asked again on the
+        /// next layout pass when the field could not take it yet (it was hidden a moment ago), and while
+        /// <paramref name="heldKeyCodes"/> is not empty the keystroke being pressed does not type into it
+        /// (<see cref="OpeningKeystrokeFilter"/>). Other elements are focused as <see cref="Focus"/> does.
+        /// </summary>
+        public bool FocusForTyping(IReadOnlyList<int> heldKeyCodes)
+        {
+            if (!IsAlive)
+            {
+                return false;
+            }
+
+            VisualElement element = Record.Element;
+            if (!(element is TextField))
+            {
+                return Focus();
+            }
+
+            if (heldKeyCodes != null && heldKeyCodes.Count > 0)
+            {
+                _openingKeystroke.Arm(heldKeyCodes, Time.frameCount);
+                if (!ReferenceEquals(_typingKeyDownOn, element))
+                {
+                    _typingKeyDownOn?.UnregisterCallback(_onTypingKeyDown, TrickleDown.TrickleDown);
+                    element.RegisterCallback(_onTypingKeyDown, TrickleDown.TrickleDown);
+                    _typingKeyDownOn = element;
+                }
+            }
+            else
+            {
+                _openingKeystroke.Disarm();
+            }
+
+            FocusAtEnd(element);
+            if (element.panel != null && element.focusController?.focusedElement != element)
+            {
+                // WHY: a field that was display:none a moment ago cannot take focus until the next layout pass.
+                element.schedule.Execute(() =>
+                {
+                    if (IsAlive && ReferenceEquals(Record.Element, element))
+                    {
+                        FocusAtEnd(element);
+                    }
+                });
+            }
+
+            return true;
+        }
+
+        private static void FocusAtEnd(VisualElement element)
+        {
+            element.Focus();
+            if (element is TextField field)
+            {
+                int end = (field.value ?? "").Length;
+                field.SelectRange(end, end);
+            }
+        }
+
         /// <summary>Takes keyboard focus away from the element.</summary>
         public bool Blur()
         {
@@ -1145,8 +1209,39 @@ namespace CoreAI.RuntimeUi
             Screen.Raise(_valueChanged, this, "ValueChanged");
         }
 
+        private void OnTypingKeyDown(KeyDownEvent evt)
+        {
+            // WHY skipped then: the submit listener on the same field already filters the keystroke (so the opening
+            // Enter never submits), and each event is checked once.
+            if ((_registered & EventGroups.Submit) != 0 && ReferenceEquals(_registeredOn, _typingKeyDownOn))
+            {
+                return;
+            }
+
+            SwallowOpeningKeystroke(evt);
+        }
+
+        private bool SwallowOpeningKeystroke(KeyDownEvent evt)
+        {
+            if (!_openingKeystroke.IsArmed
+                || !_openingKeystroke.ShouldSwallow((int)evt.keyCode, evt.character, Time.frameCount))
+            {
+                return false;
+            }
+
+            evt.StopImmediatePropagation();
+            VisualElement target = evt.target as VisualElement ?? Record?.Element;
+            target?.focusController?.IgnoreEvent(evt);
+            return true;
+        }
+
         private void OnKeyDown(KeyDownEvent evt)
         {
+            if (SwallowOpeningKeystroke(evt))
+            {
+                return;
+            }
+
             if (Record?.Element is TextField field && !field.multiline
                                                     && (evt.keyCode == KeyCode.Return
                                                         || evt.keyCode == KeyCode.KeypadEnter))

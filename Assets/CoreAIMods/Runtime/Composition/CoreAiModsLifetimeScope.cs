@@ -107,6 +107,12 @@ namespace CoreAI.Composition
         [SerializeField]
         private bool allowAgentsFromLua;
 
+        [Tooltip("Framework setting of this game: mods may talk to the player's own agent "
+                 + "(AIService:GetAssistant), which a chat made in Lua needs. Off by default; it drives the "
+                 + "player's tools, so a host turns it on together with a Lua chat.")]
+        [SerializeField]
+        private bool allowPlayerAssistantFromLua;
+
         [Header("World between starts")]
         [Tooltip("Keep the world between starts: the default world opens again as the player and the AI left it "
                  + "(recorded a few seconds after a change; /save records it now), and a newer bundled sample "
@@ -146,6 +152,19 @@ namespace CoreAI.Composition
         {
             DemandNotBuilt(nameof(SetAllowAgentsFromLua));
             allowAgentsFromLua = allow;
+        }
+
+        /// <summary>
+        /// The framework setting <see cref="Ai.LuaCs.CoreAiLuaAiOptions.AllowPlayerAssistantFromLua"/> this scope
+        /// registers when the host registered no <see cref="Ai.LuaCs.CoreAiLuaAiOptions"/> of its own.
+        /// </summary>
+        public bool AllowPlayerAssistantFromLua => allowPlayerAssistantFromLua;
+
+        /// <summary>Sets <see cref="AllowPlayerAssistantFromLua"/> before this scope builds its container.</summary>
+        public void SetAllowPlayerAssistantFromLua(bool allow)
+        {
+            DemandNotBuilt(nameof(SetAllowPlayerAssistantFromLua));
+            allowPlayerAssistantFromLua = allow;
         }
 
         /// <summary>The play world setting <see cref="CoreAiWorldKeepOptions.KeepWorldBetweenStarts"/> this scope registers.</summary>
@@ -292,7 +311,11 @@ namespace CoreAI.Composition
 
             if (!builder.Exists(typeof(Ai.LuaCs.CoreAiLuaAiOptions), false, true))
             {
-                builder.RegisterInstance(new Ai.LuaCs.CoreAiLuaAiOptions { AllowAgentsFromLua = allowAgentsFromLua });
+                builder.RegisterInstance(new Ai.LuaCs.CoreAiLuaAiOptions
+                {
+                    AllowAgentsFromLua = allowAgentsFromLua,
+                    AllowPlayerAssistantFromLua = allowPlayerAssistantFromLua
+                });
             }
 
             IEnumerable<string> scenes = allowedLuaScenes is { Length: > 0 } ? allowedLuaScenes : null;

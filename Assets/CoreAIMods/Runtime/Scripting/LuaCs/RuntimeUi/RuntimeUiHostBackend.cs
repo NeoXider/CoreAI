@@ -652,6 +652,11 @@ namespace CoreAI.Ai.LuaCs
                 return Handle.Focus();
             }
 
+            public bool FocusForTyping(IReadOnlyList<int> heldKeyCodes)
+            {
+                return Handle.FocusForTyping(heldKeyCodes);
+            }
+
             public bool Blur()
             {
                 return Handle.Blur();

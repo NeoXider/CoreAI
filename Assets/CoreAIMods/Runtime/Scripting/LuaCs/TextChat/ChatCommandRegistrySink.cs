@@ -36,16 +36,41 @@ namespace CoreAI.Ai.LuaCs
                 throw new ArgumentNullException(nameof(trigger));
             }
 
-            ChatCommand command = secondaryAlias == null
-                ? new ChatCommand(name, Description, context => Run(context, trigger))
-                : new ChatCommand(name, Description, context => Run(context, trigger), "", secondaryAlias);
+            ScriptCommand command = new(name, secondaryAlias, trigger);
             return _registry.Register(command);
         }
 
-        private static ChatCommandResult Run(ChatCommandContext context, Action<string> trigger)
+        /// <summary>True when <paramref name="command"/> is a world's <c>TextChatCommand</c> added through a sink.</summary>
+        public static bool IsScriptCommand(IChatCommand command)
         {
-            trigger(context.Invocation.RawText);
-            return ChatCommandResult.Handled();
+            return command is ScriptCommand;
+        }
+
+        /// <summary>A <c>TextChatCommand</c> in the registry; marked so the host's command list leaves it out.</summary>
+        private sealed class ScriptCommand : IChatCommand
+        {
+            private readonly Action<string> _trigger;
+
+            public ScriptCommand(string name, string secondaryAlias, Action<string> trigger)
+            {
+                Name = name;
+                Aliases = secondaryAlias == null ? Array.Empty<string>() : new[] { secondaryAlias };
+                _trigger = trigger;
+            }
+
+            public string Name { get; }
+
+            public System.Collections.Generic.IReadOnlyList<string> Aliases { get; }
+
+            public string Usage => "";
+
+            public string Description => ChatCommandRegistrySink.Description;
+
+            public ChatCommandResult Execute(ChatCommandContext context)
+            {
+                _trigger(context.Invocation.RawText);
+                return ChatCommandResult.Handled();
+            }
         }
     }
 }

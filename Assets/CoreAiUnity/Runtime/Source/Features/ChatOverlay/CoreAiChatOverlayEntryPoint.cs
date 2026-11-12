@@ -10,7 +10,10 @@ namespace CoreAI.ChatOverlay
     /// Scope entry point of the in-world chat: registers the built-in commands, puts the default view on its own
     /// document (or into <see cref="CoreAiChatOverlaySettings.HostElement"/>), polls the open and close keys and
     /// ticks the controller every frame. A replaced view that is not <see cref="CoreAiChatOverlayView"/> gets no
-    /// document; it owns its presentation. Disposing removes the commands and the document.
+    /// document; it owns its presentation. Disposing removes the commands and the document. While another surface
+    /// claims the chat (<see cref="IChatOverlaySurfaceSwitch"/>, a chat made in Lua) the overlay steps aside: its view
+    /// is detached, no key is read and its built-in commands are removed, so the claimant's own commands of those
+    /// names register; the controller keeps ticking.
     /// </summary>
     public sealed class CoreAiChatOverlayEntryPoint : IStartable, ITickable, IDisposable
     {
@@ -22,13 +25,18 @@ namespace CoreAI.ChatOverlay
         private readonly IChatModelSelector _models;
         private readonly IChatOverlayOpenGate _gate;
         private readonly IGameLogger _logger;
+        private readonly IChatOverlaySurfaceSwitch _surfaceSwitch;
         private CoreAiChatOverlaySurface _surface;
         private VisualElement _attachedRoot;
         private IDisposable _builtIns;
         private bool _started;
         private bool _disposed;
+        private bool _steppedAside;
 
-        /// <summary>Creates the entry point; <paramref name="models"/>, <paramref name="gate"/> and <paramref name="logger"/> may be null.</summary>
+        /// <summary>
+        /// Creates the entry point; <paramref name="models"/>, <paramref name="gate"/>, <paramref name="logger"/> and
+        /// <paramref name="surfaceSwitch"/> may be null.
+        /// </summary>
         public CoreAiChatOverlayEntryPoint(
             ChatOverlayController controller,
             IChatOverlayView view,
@@ -37,7 +45,8 @@ namespace CoreAI.ChatOverlay
             IChatAgentSelector agents,
             IChatModelSelector models = null,
             IChatOverlayOpenGate gate = null,
-            IGameLogger logger = null)
+            IGameLogger logger = null,
+            IChatOverlaySurfaceSwitch surfaceSwitch = null)
         {
             _controller = controller ?? throw new ArgumentNullException(nameof(controller));
             _view = view ?? throw new ArgumentNullException(nameof(view));
@@ -47,7 +56,11 @@ namespace CoreAI.ChatOverlay
             _models = models;
             _gate = gate;
             _logger = logger;
+            _surfaceSwitch = surfaceSwitch;
         }
+
+        /// <summary>True while another surface claimed the chat and the overlay shows nothing.</summary>
+        public bool IsSteppedAside => _steppedAside;
 
         /// <summary>The overlay's own document; null when attached into a host element or not started.</summary>
         public CoreAiChatOverlaySurface Surface => _surface;
@@ -61,7 +74,23 @@ namespace CoreAI.ChatOverlay
             }
 
             _started = true;
-            if (_settings.RegisterBuiltInCommands)
+            if (_surfaceSwitch != null)
+            {
+                _surfaceSwitch.Changed += OnSurfaceChanged;
+            }
+
+            if (_surfaceSwitch != null && !_surfaceSwitch.IsDefaultSurfaceShown)
+            {
+                _steppedAside = true;
+                return;
+            }
+
+            ShowOverlay();
+        }
+
+        private void ShowOverlay()
+        {
+            if (_settings.RegisterBuiltInCommands && _builtIns == null)
             {
                 _builtIns = ChatOverlayBuiltInCommands.RegisterAll(_controller.Commands, _agents, _models, _controller);
             }
@@ -71,7 +100,7 @@ namespace CoreAI.ChatOverlay
                 VisualElement host = _settings.HostElement;
                 if (host == null)
                 {
-                    _surface = CoreAiChatOverlaySurface.Create(_settings);
+                    _surface ??= CoreAiChatOverlaySurface.Create(_settings);
                     host = _surface.Root;
                 }
 
@@ -83,6 +112,52 @@ namespace CoreAI.ChatOverlay
             }
         }
 
+        private void HideOverlay()
+        {
+            _controller.CloseInput();
+            _builtIns?.Dispose();
+            _builtIns = null;
+            if (_view is CoreAiChatOverlayView view)
+            {
+                view.Detach();
+            }
+
+            _attachedRoot = null;
+        }
+
+        /// <summary>Follows the surface switch at once, so a claimant registers its commands in the same frame.</summary>
+        internal void OnSurfaceChanged()
+        {
+            if (!_started || _disposed || _surfaceSwitch == null)
+            {
+                return;
+            }
+
+            bool aside = !_surfaceSwitch.IsDefaultSurfaceShown;
+            if (aside == _steppedAside)
+            {
+                return;
+            }
+
+            _steppedAside = aside;
+            try
+            {
+                if (aside)
+                {
+                    HideOverlay();
+                }
+                else
+                {
+                    ShowOverlay();
+                }
+            }
+            catch (Exception ex)
+            {
+                (_logger ?? GameLoggerUnscopedFallback.Instance).LogWarning(GameLogFeature.Core,
+                    $"[CoreAiChatOverlay] Stepping {(aside ? "aside" : "back")} failed: {ex.Message}");
+            }
+        }
+
         /// <inheritdoc />
         public void Tick()
         {
@@ -91,8 +166,12 @@ namespace CoreAI.ChatOverlay
                 return;
             }
 
-            ReattachIfRebuilt();
-            PollKeys(Time.frameCount);
+            if (!_steppedAside)
+            {
+                ReattachIfRebuilt();
+                PollKeys(Time.frameCount);
+            }
+
             _controller.Tick();
         }
 
@@ -105,6 +184,11 @@ namespace CoreAI.ChatOverlay
             }
 
             _disposed = true;
+            if (_surfaceSwitch != null)
+            {
+                _surfaceSwitch.Changed -= OnSurfaceChanged;
+            }
+
             _builtIns?.Dispose();
             _builtIns = null;
             if (_view is CoreAiChatOverlayView view)

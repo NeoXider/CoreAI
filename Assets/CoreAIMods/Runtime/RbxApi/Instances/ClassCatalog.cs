@@ -593,15 +593,26 @@ namespace CoreAI.Mods.Rbx.Instances
                 descriptor => new RbxRemoteFunction(descriptor)));
             catalog.Register(new ClassDescriptor("BindableEvent", "Instance", false, true, false,
                 descriptor => new RbxBindableEvent(descriptor)));
-            // WHY TextChatService a real service with only its commands part: the in-world chat already exists as
-            // CoreAI's chat, and TextChatCommand over its command registry is what scripts need first; the
-            // messaging half (channels, MessageReceived, bubbles) is the rest of P2 and stays loud stubs below.
+            // WHY TextChatService a real service with its commands and its messages: a chat made in Lua sends through
+            // the in-world chat's command registry and hooks (DEV-142); bubbles, callbacks and filtering stay loud
+            // stubs below.
             catalog.Register(new ClassDescriptor("TextChatService", "Instance", false, false, true,
                 descriptor => new RbxTextChatService(descriptor)));
             catalog.Register(new ClassDescriptor("TextChatCommand", "Instance", false, true, false,
                 descriptor => new RbxTextChatCommand(descriptor)));
             catalog.Register(new ClassDescriptor("TextSource", "Instance", false, false, false,
                 descriptor => new RbxTextSource(descriptor)));
+            // WHY NotCreatable here although TextChannel.yaml is creatable: the world has its two default channels
+            // only, detached like the configurations and the messages (DEV-142).
+            catalog.Register(new ClassDescriptor("TextChannel", "Instance", false, false, false,
+                descriptor => new RbxTextChannel(descriptor)));
+            catalog.Register(new ClassDescriptor("TextChatMessage", "Instance", false, false, false,
+                descriptor => new RbxTextChatMessage(descriptor)));
+            catalog.Register(new ClassDescriptor("TextChatConfigurations", "Instance", true, false, false));
+            catalog.Register(new ClassDescriptor("ChatWindowConfiguration", "TextChatConfigurations", false, false,
+                false, descriptor => new RbxChatWindowConfiguration(descriptor)));
+            catalog.Register(new ClassDescriptor("ChatInputBarConfiguration", "TextChatConfigurations", false, false,
+                false, descriptor => new RbxChatInputBarConfiguration(descriptor)));
             catalog.Register(new ClassDescriptor("BindableFunction", "Instance", false, true, false,
                 descriptor => new RbxBindableFunction(descriptor)));
             catalog.Register(new ClassDescriptor("Player", "Instance", false, false, false,
@@ -734,11 +745,9 @@ namespace CoreAI.Mods.Rbx.Instances
                 descriptor => new RbxParticleEmitter(descriptor)));
 
             const string chatMessages =
-                "the messaging half of TextChatService (channels, MessageReceived, bubbles) lands with P2; "
-                + "TextChatCommand works now, and a mod reaches the player through UxmlService or a ScreenGui";
+                "bubbles, callbacks and filtering of TextChatService are not built; TextChatCommand, the RBXGeneral and "
+                + "RBXSystem channels and MessageReceived work, and a mod reaches the player through a ScreenGui";
             catalog.RegisterKnownUnimplementedMembers("TextChatService",
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("MessageReceived", "P2", chatMessages),
-                RbxKnownUnimplementedMemberDescriptor.PlannedProperty("SendingMessage", "P2", chatMessages),
                 RbxKnownUnimplementedMemberDescriptor.PlannedProperty("OnIncomingMessage", "P2", chatMessages),
                 RbxKnownUnimplementedMemberDescriptor.PlannedProperty("OnBubbleAdded", "P2", chatMessages),
                 RbxKnownUnimplementedMemberDescriptor.PlannedProperty("OnChatWindowAdded", "P2", chatMessages),
@@ -750,6 +759,22 @@ namespace CoreAI.Mods.Rbx.Instances
                 RbxKnownUnimplementedMemberDescriptor.PlannedMethod("GetChatGroupsAsync", "P2", chatMessages),
                 RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("ChatTranslationEnabled",
                     "CoreAI's chat does not translate"));
+            const string oneMachine = "CoreAI's chat has the two default channels of one machine";
+            catalog.RegisterKnownUnimplementedMembers("TextChannel",
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("DirectChatRequester", oneMachine),
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod("SetDirectChatRequester", oneMachine),
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod("AddUserAsync", oneMachine),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("OnIncomingMessage",
+                    "change a message where you show it, in your MessageReceived handler"),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("ShouldDeliverCallback", oneMachine));
+            catalog.RegisterKnownUnimplementedMembers("TextChatMessage",
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("Timestamp",
+                    "read os.clock() when MessageReceived fires"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("Translation",
+                    "CoreAI's chat does not translate"),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("BubbleChatMessageProperties", chatMessages),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("ChatWindowMessageProperties",
+                    "style the message in your own chat window"));
             // WHY only LinkedSource: Enabled, Disabled, RunContext and Source are bound (MVP4 step C2, LuaCsRbxInstanceBindings).
             catalog.RegisterKnownUnimplementedMembers("BaseScript",
                 RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("LinkedSource",

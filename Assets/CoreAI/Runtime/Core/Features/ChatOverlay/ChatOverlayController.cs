@@ -16,7 +16,7 @@ namespace CoreAI.ChatOverlay
     /// line no hook takes reaches the agent.
     /// </summary>
     public sealed class ChatOverlayController : IChatOverlayInputState, IChatOverlayMessages, IChatTurnControl,
-        IChatOverlayPreSendHooks, IDisposable
+        IChatOverlayPreSendHooks, IChatOverlayPlayerLineRouter, IDisposable
     {
         private readonly ChatOverlayOptions _options;
         private readonly IChatOverlayView _view;
@@ -229,6 +229,24 @@ namespace CoreAI.ChatOverlay
             }
 
             return registration;
+        }
+
+        /// <inheritdoc />
+        public bool OfferPlayerLine(string text)
+        {
+            string trimmed = (text ?? "").Trim();
+            if (_disposed || trimmed.Length == 0 || _preSendHooks.Count == 0)
+            {
+                return false;
+            }
+
+            if (_options.MaxInputLength > 0 && trimmed.Length > _options.MaxInputLength)
+            {
+                trimmed = trimmed.Substring(0, _options.MaxInputLength);
+            }
+
+            return OfferToPreSendHooks(new ChatOverlayPlayerLine(trimmed, _options.PlayerSpeakerName,
+                _clock.NowSeconds));
         }
 
         /// <inheritdoc />
@@ -924,6 +942,7 @@ namespace CoreAI.ChatOverlay
                     return;
                 }
 
+                _owner.Status.AddStreamedCharacters((chunk.Text?.Length ?? 0) + (chunk.ReasoningText?.Length ?? 0));
                 if (chunk.BufferedStreamingNoToolBinding)
                 {
                     if (chunk.BufferedStreamingUseToolProgressHint)
@@ -945,7 +964,14 @@ namespace CoreAI.ChatOverlay
                 }
                 else if (!string.IsNullOrEmpty(chunk.ReasoningText) || chunk.GenerationInProgress)
                 {
-                    _owner.Status.MarkThinking();
+                    if (chunk.ComposingToolCharacters > 0)
+                    {
+                        _owner.Status.ToolComposing(chunk.ComposingToolName, chunk.ComposingToolCharacters);
+                    }
+                    else
+                    {
+                        _owner.Status.MarkThinking();
+                    }
                 }
             }
 

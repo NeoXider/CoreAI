@@ -43,4 +43,18 @@ namespace CoreAI.ChatOverlay
         /// </summary>
         IDisposable AddPreSendHook(IChatOverlayPreSendHook hook);
     }
+
+    /// <summary>
+    /// Offers a line the player said through another chat surface (a script's chat) to the same pre-send hooks the
+    /// overlay asks, so a villager hears it and a game's listener records it exactly as if it was typed in the
+    /// overlay. The overlay's <see cref="ChatOverlayController"/> implements it.
+    /// </summary>
+    public interface IChatOverlayPlayerLineRouter
+    {
+        /// <summary>
+        /// Asks the hooks in order; true when one took <paramref name="text"/>, which then must not reach the
+        /// player's agent. A hook that throws is skipped. Call it on the chat's thread.
+        /// </summary>
+        bool OfferPlayerLine(string text);
+    }
 }

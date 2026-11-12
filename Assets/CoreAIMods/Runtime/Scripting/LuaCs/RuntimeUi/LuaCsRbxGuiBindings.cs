@@ -158,6 +158,7 @@ namespace CoreAI.Ai.LuaCs
         {
             return instance is RbxGuiBase2d || instance is RbxUiBase || instance is RbxBasePlayerGui
                    || instance is RbxTextChatCommand || instance is RbxTextChatService || instance is RbxTextSource
+                   || instance is RbxTextChannel || instance is RbxTextChatMessage || instance is RbxTextChatConfiguration
                    || instance is RbxGuiBase3d || instance is RbxHighlight;
         }
 
@@ -176,6 +177,11 @@ namespace CoreAI.Ai.LuaCs
             if (TryFind(context.Bindings.Registry.Catalog, self.ClassName, key, out Property property))
             {
                 value = Read(context, self, property);
+                return true;
+            }
+
+            if (LuaCsRbxTextChatBindings.Answers(self) && LuaCsRbxTextChatBindings.TryRead(context, self, key, out value))
+            {
                 return true;
             }
 
@@ -230,6 +236,11 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public static bool TryWrite(LuaCsRbxModContext context, RbxInstance self, string key, LuaValue value)
         {
+            if (LuaCsRbxTextChatBindings.Answers(self) && LuaCsRbxTextChatBindings.TryWrite(context, self, key, value))
+            {
+                return true;
+            }
+
             if (!IsGuiInstance(self)
                 || !TryFind(context.Bindings.Registry.Catalog, self.ClassName, key, out Property property))
             {
@@ -1091,6 +1102,17 @@ namespace CoreAI.Ai.LuaCs
             Bool("TextChatService", "CreateDefaultCommands", s => ((RbxTextChatService)s).CreateDefaultCommands, null);
             Bool("TextChatService", "CreateDefaultTextChannels",
                 s => ((RbxTextChatService)s).CreateDefaultTextChannels, null);
+            // WHY read-only: CoreAI has no OnIncomingMessage callback, the one place Roblox lets a script rewrite one.
+            Text("TextChatMessage", "Text", s => ((RbxTextChatMessage)s).Text, null);
+            Text("TextChatMessage", "PrefixText", s => ((RbxTextChatMessage)s).PrefixText, null);
+            Text("TextChatMessage", "Metadata", s => ((RbxTextChatMessage)s).Metadata, null);
+            Text("TextChatMessage", "MessageId", s => ((RbxTextChatMessage)s).MessageId, null);
+            EnumItem("TextChatMessage", "Status", "TextChatMessageStatus", s => ((RbxTextChatMessage)s).Status, null);
+            Reference("TextChatMessage", "TextSource", s => ((RbxTextChatMessage)s).TextSource, null);
+            Reference("TextChatMessage", "TextChannel", s => ((RbxTextChatMessage)s).TextChannel, null);
+            EnumItem("ChatInputBarConfiguration", "KeyboardKeyCode", "KeyCode",
+                s => ((RbxChatInputBarConfiguration)s).KeyboardKeyCode,
+                (s, v) => ((RbxChatInputBarConfiguration)s).KeyboardKeyCode = v);
         }
     }
 }

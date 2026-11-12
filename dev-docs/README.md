@@ -34,11 +34,13 @@ Internal design, planning and research notes. NOT user documentation — user/pr
 ## Chat, LLM path and context
 
 - MULTI_CHAT_PLAN.md — multi-chat (NPC + CoreAI, shared surfaces) design
+- CHAT_AS_LUA_MOD_DESIGN.md — the in-world chat as a Lua mod (`coreai_chat`): the gap list against the C# overlay, the engine pieces (TextChatService messaging, `AIService:GetAssistant`, focus rules, the surface switch), DEV-140 to DEV-142, the parity checklist and what remains
 - MEAI_AS_PRIMARY_PATH_PLAN.md — MEAI as the primary LLM path: current boundaries and the historical plan (Russian)
 - CONTEXT_MANAGEMENT_ROADMAP.md — planned context management design: token budget, rolling summaries, compaction (moved here from the Unity package docs)
 - TOKENS_PER_SEC_FIX_PLAN.md — tokens-per-second measurement fix plan; implemented 2026-07-01, retained as the reference for what was and was not adopted (moved here from `Docs/`)
 - WEBGL_SSE_STREAMING_HISTORY.md — the WebGL SSE streaming investigation and how the `fetch` bridge replaced it; history (moved here from `Assets/CoreAiUnity/Docs/STREAMING_WEBGL_TODO.md` on 2026-10-15). The current behaviour is documented in `Assets/CoreAiUnity/Docs/STREAMING_ARCHITECTURE.md`
 - MULTI_AGENT_ORCHESTRATION_V2_PLAN.md — sub-agent orchestration plan (moved here from `TODO/MultiAgent_Orchestration_v2.0.md` on 2026-10-15); written on 2026-11-11 as orchestrator mode (P14), wired into the chat and off by default, EditMode green in Unity; history per conversation and a model run are open (R9 in `TODO.md`). User docs: `Assets/CoreAiUnity/Docs/ORCHESTRATOR_MODE.md`
+- ORCHESTRATION_SUBAGENT_CONTROL_DESIGN.md — Team style of orchestrator mode (2026-11-12): background sub-agents the chat agent starts, messages, continues, reads and stops itself (`agent_start`, `agent_send`, `agent_read`, `agent_stop`), completion notices and wake turns, budgets per player message, the dsh and Claude Code references, the tool-shape decision and its measured token cost
 
 ## Materials and graphics
 

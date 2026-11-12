@@ -65,6 +65,9 @@ namespace CoreAI.Mods.Rbx.Instances
     {
         /// <summary>Re-reads the shown trees if they changed and lays out the screen holding <paramref name="instance"/>.</summary>
         void EnsureLayout(RbxInstance instance);
+
+        /// <summary>Moves keyboard focus into or out of a box the presenter does not draw yet (it was made this frame).</summary>
+        void RequestFocus(RbxTextBox box, bool focus);
     }
 
     /// <summary>

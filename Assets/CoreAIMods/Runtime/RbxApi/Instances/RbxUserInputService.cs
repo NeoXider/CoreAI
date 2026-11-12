@@ -291,8 +291,12 @@ namespace CoreAI.Mods.Rbx.Instances
             bool captured = IsGameInputCaptured;
             _processedThisStep = captured ? GameProcessed : GameNotProcessed;
             _pointerProcessedThisStep = IsPointerInputProcessed ? GameProcessed : GameNotProcessed;
+            // WHY: a TextBox that lost focus since the last step was released by a key (Enter, Escape) the box
+            // took, which this step reports as newly pressed; it must stay processed, or an "open the chat on
+            // Enter" handler reopens the box that Enter has just closed.
+            bool textBoxReleased = _wasFocusedTextBox != null && ReadFocusedTextBox() == null;
             StepTextFocus(captured);
-            StepKeys();
+            StepKeys(textBoxReleased ? GameProcessed : _processedThisStep);
             StepMouseButtons();
             StepMouseMovement();
             StepMouseWheel();
@@ -369,7 +373,7 @@ namespace CoreAI.Mods.Rbx.Instances
             return new RbxVector2(x, y);
         }
 
-        private void StepKeys()
+        private void StepKeys(object processed)
         {
             _pollBuffer.Clear();
             InputSource.CollectPressedKeyCodes(_pollBuffer);
@@ -387,7 +391,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 {
                     if (!_previousKeys.Contains(keyCode))
                     {
-                        InputBegan.Fire(MakeKeyInput(keyCode, "Begin"), _processedThisStep);
+                        InputBegan.Fire(MakeKeyInput(keyCode, "Begin"), processed);
                     }
                 }
             }
@@ -398,7 +402,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 {
                     if (!_currentKeys.Contains(keyCode))
                     {
-                        InputEnded.Fire(MakeKeyInput(keyCode, "End"), _processedThisStep);
+                        InputEnded.Fire(MakeKeyInput(keyCode, "End"), processed);
                     }
                 }
             }

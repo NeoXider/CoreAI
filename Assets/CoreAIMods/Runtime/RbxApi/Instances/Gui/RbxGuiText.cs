@@ -406,11 +406,29 @@ namespace CoreAI.Mods.Rbx.Instances
             SetField(ref _showNativeInput, value, nameof(ShowNativeInput), RbxGuiChange.None);
         }
 
-        /// <summary>Mirror <c>TextBox:CaptureFocus()</c>: the field on screen takes keyboard focus.</summary>
+        /// <summary>
+        /// Mirror <c>TextBox:CaptureFocus()</c>: the field on screen takes keyboard focus, with the caret after the
+        /// text. A box shown or created in the same frame takes it once the frame's GUI update has drawn it, and
+        /// the keystroke being pressed when the script asks does not type into it (DEV-141).
+        /// </summary>
         public void CaptureFocus()
         {
             ThrowIfDestroyed("CaptureFocus");
-            FocusRequest?.Invoke(this, true);
+            RequestFocus(true);
+        }
+
+        private void RequestFocus(bool focus)
+        {
+            if (FocusRequest != null)
+            {
+                FocusRequest(this, focus);
+            }
+            else
+            {
+                // WHY through the registry: a box made in the same handler has no element yet, so no presenter
+                // has wired it; the world's presenter still takes the request and applies it after its update.
+                Registry?.GuiLayout?.RequestFocus(this, focus);
+            }
         }
 
         /// <summary>Mirror <c>TextBox:ReleaseFocus(submitted)</c>: focus leaves; FocusLost carries <paramref name="submitted"/>.</summary>
@@ -419,11 +437,13 @@ namespace CoreAI.Mods.Rbx.Instances
             ThrowIfDestroyed("ReleaseFocus");
             if (!IsFocused)
             {
+                // WHY told anyway: a CaptureFocus of this frame may still wait for the GUI update; it is dropped.
+                RequestFocus(false);
                 return;
             }
 
             PendingEnterPressed = submitted;
-            FocusRequest?.Invoke(this, false);
+            RequestFocus(false);
         }
 
         /// <summary>The enterPressed value the next FocusLost carries.</summary>

@@ -217,9 +217,18 @@ The core references no Unity, VContainer or UniTask type; `ChatOverlayArchitectu
 fails when it does, and when the Unity layer uses editor APIs, IMGUI, threads, blocking waits or per-frame
 tree queries.
 
+## Stepping aside for a Lua chat
+
+The chat can also be a Lua mod built on the Roblox-shaped API (`coreai_chat`, bundled and off by default:
+`Docs/CoreAIMods/LUA_CHAT.md`). While such a mod runs, this overlay steps aside: a surface claims the chat
+through `IChatOverlaySurfaceSwitch` (a Lua chat does it by setting `ChatInputBarConfiguration.Enabled` or
+`ChatWindowConfiguration.Enabled` to false), the overlay's view is detached, it reads no keys, and its
+built-in `/help`, `/agent`, `/model` and `/stop` are given back to the registry for the mod to own. The
+controller keeps ticking, so host lines, commands and pre-send hooks still work and reach the mod through
+`TextChatService`. When the mod unloads, the overlay returns.
+
 ## Not yet
 
-- A Roblox-shaped Lua surface (`TextChatService`, `TextChannel`, `TextChatCommand`) over the same registry.
 - The chat panel's transcript and the overlay's feed are separate views: both reach the same history, but a
   line typed in one is not drawn in the other.
 - `/stop` always ends the overlay's own request; whether the agent pipeline stops work started elsewhere

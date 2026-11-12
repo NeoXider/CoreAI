@@ -762,6 +762,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.RuntimeUi
                 return IsAlive;
             }
 
+            /// <summary>The held keys the last <see cref="FocusForTyping"/> was given; null before any.</summary>
+            public IReadOnlyList<int> LastFocusHeldKeys { get; private set; }
+
+            /// <summary>How many times <see cref="FocusForTyping"/> ran.</summary>
+            public int FocusForTypingCount { get; private set; }
+
+            public bool FocusForTyping(IReadOnlyList<int> heldKeyCodes)
+            {
+                FocusForTypingCount++;
+                LastFocusHeldKeys = heldKeyCodes ?? Array.Empty<int>();
+                return Focus();
+            }
+
             public bool Blur()
             {
                 if (IsAlive && Focused)

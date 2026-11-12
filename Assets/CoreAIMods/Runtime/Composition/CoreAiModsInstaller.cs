@@ -227,6 +227,7 @@ namespace CoreAI.Composition
             builder.RegisterBuildCallback(container => container.Resolve<CoreAiUiFocusBridge>());
             builder.RegisterRuntimeUiLua();
             RegisterWorldAgents(builder);
+            RegisterWorldChatHost(builder);
 
             // WHY: one Lua-CSharp stack shared across both surfaces, so persistent runtime and one-off executor
             // resolve the same sandbox + gameplay bindings instance rather than diverging copies.
@@ -890,6 +891,12 @@ namespace CoreAI.Composition
                 rbxApi.AttachChatCommands(new ChatCommandRegistrySink(chatCommands));
             }
 
+            ChatOverlayWorldChatHost chatHost = c.ResolveOrDefault<ChatOverlayWorldChatHost>();
+            if (chatHost != null)
+            {
+                rbxApi.AttachChatHost(chatHost);
+            }
+
             CoreAiPlayerCameraSettings camera = c.ResolveOrDefault<CoreAiPlayerCameraSettings>();
             if (camera != null)
             {
@@ -919,7 +926,35 @@ namespace CoreAI.Composition
                 withData,
                 RbxBoundObjectAnchors.CreateResolver(rbxApi.PartSink),
                 c.ResolveOrDefault<CoreAI.Ai.Npc.NpcSpeechAnchorRegistry>(),
-                c.ResolveOrDefault<CoreAI.Ai.Npc.ITextModerationFilter>());
+                c.ResolveOrDefault<CoreAI.Ai.Npc.ITextModerationFilter>(),
+                null,
+                null,
+                c.ResolveOrDefault<CoreAI.ChatOverlay.ChatAgentTurns>());
+        }
+
+        /// <summary>
+        /// The bridge between every world's <c>TextChatService</c> messages and the in-world chat services of the
+        /// CoreAI scope (the command registry, the overlay's hooks and feed, the surface switch). Without them (a
+        /// scope with no chat) it runs over an empty registry and nothing else; a host registration wins.
+        /// </summary>
+        private static void RegisterWorldChatHost(IContainerBuilder builder)
+        {
+            if (builder.Exists(typeof(ChatOverlayWorldChatHost)))
+            {
+                return;
+            }
+
+            builder.Register(c =>
+            {
+                CoreAI.ChatOverlay.IChatCommandRegistry registry =
+                    c.ResolveOrDefault<CoreAI.ChatOverlay.IChatCommandRegistry>()
+                    ?? new CoreAI.ChatOverlay.ChatCommandRegistry();
+                CoreAI.ChatOverlay.ChatOverlayController overlay =
+                    c.ResolveOrDefault<CoreAI.ChatOverlay.ChatOverlayController>();
+                return new ChatOverlayWorldChatHost(registry, overlay, overlay?.Feed,
+                    c.ResolveOrDefault<CoreAI.ChatOverlay.IChatOverlaySurfaceSwitch>(), overlay, overlay?.Options,
+                    c.ResolveOrDefault<CoreAI.Logging.ILog>());
+            }, Lifetime.Singleton);
         }
 
         /// <summary>

@@ -14,8 +14,10 @@ namespace CoreAI.ChatOverlay
     /// <summary>
     /// Registers the in-world chat overlay: the command registry, the controller (also exposed as
     /// <see cref="IChatOverlayInputState"/>, <see cref="IChatOverlayMessages"/> and <see cref="IChatTurnControl"/>),
-    /// the default view, sender, selectors, keyboard, clock and the entry point. A registration of any of those
-    /// interfaces made before this call wins, so a game replaces one block without touching the rest.
+    /// the default view, sender, selectors, keyboard, clock and the entry point, plus the two services a chat drawn
+    /// elsewhere (a Lua mod) uses: <see cref="IChatOverlaySurfaceSwitch"/> and <see cref="ChatAgentTurns"/>. A
+    /// registration of any of those interfaces made before this call wins, so a game replaces one block without
+    /// touching the rest.
     /// </summary>
     public static class CoreAiChatOverlayInstaller
     {
@@ -38,7 +40,8 @@ namespace CoreAI.ChatOverlay
                     c.Resolve<IChatAgentSelector>(),
                     c.ResolveOrDefault<IChatModelSelector>(),
                     c.ResolveOrDefault<IChatOverlayOpenGate>(),
-                    c.ResolveOrDefault<IGameLogger>()),
+                    c.ResolveOrDefault<IGameLogger>(),
+                    c.ResolveOrDefault<IChatOverlaySurfaceSwitch>()),
                 Lifetime.Singleton);
         }
 
@@ -107,6 +110,28 @@ namespace CoreAI.ChatOverlay
             if (!builder.Exists(typeof(IChatOverlayView), true))
             {
                 builder.Register<IChatOverlayView>(_ => new CoreAiChatOverlayView(resolved, options),
+                    Lifetime.Singleton);
+            }
+
+            if (!builder.Exists(typeof(IChatOverlaySurfaceSwitch), true))
+            {
+                builder.Register<IChatOverlaySurfaceSwitch>(_ => new ChatOverlaySurfaceSwitch(), Lifetime.Singleton);
+            }
+
+            if (!builder.Exists(typeof(ChatAgentTurns)))
+            {
+                builder.Register(c =>
+                    {
+                        IChatOverlayClock clock = c.Resolve<IChatOverlayClock>();
+                        return new ChatAgentTurns(
+                            c.Resolve<IChatOverlayTurnSender>(),
+                            c.Resolve<IChatAgentSelector>(),
+                            c.ResolveOrDefault<IChatModelSelector>(),
+                            c.ResolveOrDefault<IAgentToolEventSource>(),
+                            options,
+                            c.ResolveOrDefault<ILog>(),
+                            () => clock.NowSeconds);
+                    },
                     Lifetime.Singleton);
             }
 

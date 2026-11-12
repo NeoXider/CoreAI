@@ -20,6 +20,17 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         public bool AllowAgentsFromLua { get; set; }
 
+        /// <summary>The name the player's-assistant refusal quotes.</summary>
+        public const string AssistantSettingName = "CoreAiLuaAiOptions.AllowPlayerAssistantFromLua";
+
+        /// <summary>
+        /// The framework setting for <c>AIService:GetAssistant()</c>: mods may talk to the player's own agent (the
+        /// role the in-world chat talks to, with the player's tools), which is what a chat made in Lua needs. Off by
+        /// default and separate from <see cref="AllowAgentsFromLua"/>, because that agent acts with the player's
+        /// tools; a host turns it on together with a Lua chat.
+        /// </summary>
+        public bool AllowPlayerAssistantFromLua { get; set; }
+
         /// <summary>
         /// Also require the per-mod <see cref="LuaAiCapability.Ai"/> capability bit, for a host that grants AI to
         /// some mods only. False (the default) lets the framework setting alone decide, as the owner's rule says.
