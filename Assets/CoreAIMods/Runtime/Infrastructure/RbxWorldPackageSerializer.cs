@@ -172,6 +172,8 @@ namespace CoreAI.Mods.WorldPackages
 
         private const string SelectionBoxClassName = "SelectionBox";
 
+        private const string HighlightClassName = "Highlight";
+
         /// <summary>
         /// Captures the supported world-owned DataModel projection plus settings and mods, in the lowest format version
         /// that can express them (MVP4 rule R4, <see cref="FormatVersionFor"/>).
@@ -308,7 +310,8 @@ namespace CoreAI.Mods.WorldPackages
                     Gui = CaptureGui(tree, context.Registry, diagnostics),
                     StarterGui = CaptureStarterGui(tree, context.Game),
                     TextChatCommands = CaptureTextChatCommands(tree, context.Registry, diagnostics),
-                    SelectionBoxes = CaptureSelectionBoxes(tree, context.Registry, diagnostics)
+                    SelectionBoxes = CaptureSelectionBoxes(tree, context.Registry, diagnostics),
+                    Highlights = CaptureHighlights(tree, context.Registry, diagnostics)
                 });
             ValidatePayload(payload, context.Registry.Catalog);
             return payload;
@@ -529,6 +532,67 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             return boxes;
+        }
+
+        /// <summary>
+        /// The block of every retained Highlight, or null when the tree holds none; an adornee the package does not keep
+        /// and a non-finite colour are captured as for <see cref="CaptureSelectionBoxes"/>.
+        /// </summary>
+        private static Dictionary<InstanceId, RbxWorldPackageHighlight> CaptureHighlights(
+            InstanceTreeSnapshot tree,
+            InstanceRegistry registry,
+            List<RbxWorldPackageDiagnostic> diagnostics)
+        {
+            Dictionary<InstanceId, RbxWorldPackageHighlight> highlights = null;
+            HashSet<ulong> retained = null;
+            foreach (InstanceSnapshot node in tree.Instances)
+            {
+                InstanceId id = new(node.Id);
+                if (!string.Equals(node.ClassName, HighlightClassName, StringComparison.Ordinal)
+                    || !registry.TryGet(id, out RbxInstance instance) || !(instance is RbxHighlight highlight))
+                {
+                    continue;
+                }
+
+                if (retained == null)
+                {
+                    retained = new HashSet<ulong>();
+                    foreach (InstanceSnapshot kept in tree.Instances)
+                    {
+                        retained.Add(kept.Id);
+                    }
+                }
+
+                RbxWorldPackageHighlight state = RbxWorldPackageHighlight.Of(highlight);
+                if (state.AdorneeId != 0UL && !retained.Contains(state.AdorneeId))
+                {
+                    string reason = registry.TryGetRecord(new InstanceId(state.AdorneeId), out InstanceRecord record)
+                                    && (record.OwnerModId != null || record.IsRuntimeInfrastructure)
+                        ? ModEphemeralReason
+                        : MissingReason;
+                    diagnostics.Add(new RbxWorldPackageDiagnostic(node.Id, 0UL, reason, "Adornee"));
+                    state = state.WithAdorneeId(0UL);
+                }
+
+                RbxColor3 fill = state.FillColor;
+                if (!IsFinite(fill.R) || !IsFinite(fill.G) || !IsFinite(fill.B))
+                {
+                    diagnostics.Add(NonFiniteValueDiagnostic(node.Id, "FillColor"));
+                    fill = RbxHighlight.DefaultFillColor;
+                }
+
+                RbxColor3 outline = state.OutlineColor;
+                if (!IsFinite(outline.R) || !IsFinite(outline.G) || !IsFinite(outline.B))
+                {
+                    diagnostics.Add(NonFiniteValueDiagnostic(node.Id, "OutlineColor"));
+                    outline = RbxHighlight.DefaultOutlineColor;
+                }
+
+                highlights ??= new Dictionary<InstanceId, RbxWorldPackageHighlight>();
+                highlights.Add(id, state.WithColors(fill, outline));
+            }
+
+            return highlights;
         }
 
         private static RbxWorldPackageStarterGui? CaptureStarterGui(InstanceTreeSnapshot tree, RbxDataModel game)
@@ -1674,6 +1738,18 @@ namespace CoreAI.Mods.WorldPackages
                     }
                 }
 
+                foreach (KeyValuePair<InstanceId, RbxWorldPackageHighlight> entry in payload.Highlights)
+                {
+                    if (registry.TryGet(entry.Key, out RbxInstance instance) && instance is RbxHighlight highlight)
+                    {
+                        RbxInstance adornee = entry.Value.AdorneeId != 0UL
+                                              && registry.TryGet(new InstanceId(entry.Value.AdorneeId), out RbxInstance target)
+                            ? target
+                            : null;
+                        entry.Value.ApplyTo(highlight, adornee);
+                    }
+                }
+
                 registry.SetSceneRoot(game);
                 RbxInstance workspace = game.FindFirstChildOfClass("Workspace")
                     ?? throw new RbxWorldPackageException(
@@ -2033,6 +2109,20 @@ namespace CoreAI.Mods.WorldPackages
                     };
                 }
 
+                if (payload.Highlights.TryGetValue(new InstanceId(node.Id), out RbxWorldPackageHighlight highlight))
+                {
+                    dto.Highlight = new WorldHighlightDto
+                    {
+                        AdorneeId = U(highlight.AdorneeId),
+                        DepthMode = highlight.DepthMode.ToString(),
+                        Enabled = highlight.Enabled,
+                        FillColor = new[] { highlight.FillColor.R, highlight.FillColor.G, highlight.FillColor.B },
+                        FillTransparency = highlight.FillTransparency,
+                        OutlineColor = new[] { highlight.OutlineColor.R, highlight.OutlineColor.G, highlight.OutlineColor.B },
+                        OutlineTransparency = highlight.OutlineTransparency
+                    };
+                }
+
                 if (node.Humanoid != null)
                 {
                     dto.Humanoid = new WorldHumanoidDto
@@ -2183,6 +2273,7 @@ namespace CoreAI.Mods.WorldPackages
             Dictionary<InstanceId, RbxWorldPackageGui> gui = null;
             Dictionary<InstanceId, RbxWorldPackageTextChatCommand> commands = null;
             Dictionary<InstanceId, RbxWorldPackageSelectionBox> boxes = null;
+            Dictionary<InstanceId, RbxWorldPackageHighlight> highlights = null;
             foreach (WorldInstanceDto dto in world.Instances)
             {
                 InstanceSnapshot node = BuildInstanceSnapshot(dto);
@@ -2231,6 +2322,15 @@ namespace CoreAI.Mods.WorldPackages
                         throw new RbxWorldPackageException("world.json repeats instance id " + node.Id + ".");
                     }
                 }
+
+                if (dto.Highlight != null)
+                {
+                    highlights ??= new Dictionary<InstanceId, RbxWorldPackageHighlight>();
+                    if (!highlights.TryAdd(new InstanceId(node.Id), BuildHighlight(dto.Highlight)))
+                    {
+                        throw new RbxWorldPackageException("world.json repeats instance id " + node.Id + ".");
+                    }
+                }
             }
 
             DateTime capturedAtUtc;
@@ -2261,6 +2361,11 @@ namespace CoreAI.Mods.WorldPackages
                 diagnostics = ResolveSelectionBoxAdornees(tree, boxes, diagnostics);
             }
 
+            if (highlights != null)
+            {
+                diagnostics = ResolveHighlightAdornees(tree, highlights, diagnostics);
+            }
+
             return new RbxWorldPackagePayload(
                 NormalizeUtc(capturedAtUtc), settings, tree, parts, cameraCFrame, mods, diagnostics,
                 new RbxWorldPackageOptionalState
@@ -2276,6 +2381,7 @@ namespace CoreAI.Mods.WorldPackages
                     Gui = gui,
                     TextChatCommands = commands,
                     SelectionBoxes = boxes,
+                    Highlights = highlights,
                     StarterGui = world.StarterGui == null
                         ? (RbxWorldPackageStarterGui?)null
                         : new RbxWorldPackageStarterGui(
@@ -2449,6 +2555,55 @@ namespace CoreAI.Mods.WorldPackages
                 dto.LineThickness,
                 new RbxColor3(dto.SurfaceColor3[0], dto.SurfaceColor3[1], dto.SurfaceColor3[2]),
                 dto.SurfaceTransparency);
+        }
+
+        private static RbxWorldPackageHighlight BuildHighlight(WorldHighlightDto dto)
+        {
+            RequireLength(dto.FillColor, 3, "highlight.fill_color");
+            RequireLength(dto.OutlineColor, 3, "highlight.outline_color");
+            if (!Enum.TryParse(dto.DepthMode, false, out RbxHighlightDepthMode depthMode)
+                || !Enum.IsDefined(typeof(RbxHighlightDepthMode), depthMode)
+                || !string.Equals(depthMode.ToString(), dto.DepthMode, StringComparison.Ordinal))
+            {
+                throw new RbxWorldPackageException("highlight has unsupported depth_mode '" + dto.DepthMode + "'.");
+            }
+
+            return new RbxWorldPackageHighlight(
+                ParseUlong(dto.AdorneeId, "highlight adornee id"),
+                depthMode,
+                dto.Enabled,
+                new RbxColor3(dto.FillColor[0], dto.FillColor[1], dto.FillColor[2]),
+                dto.FillTransparency,
+                new RbxColor3(dto.OutlineColor[0], dto.OutlineColor[1], dto.OutlineColor[2]),
+                dto.OutlineTransparency);
+        }
+
+        /// <summary>The Highlight twin of <see cref="ResolveSelectionBoxAdornees"/>.</summary>
+        private static IReadOnlyList<RbxWorldPackageDiagnostic> ResolveHighlightAdornees(
+            InstanceTreeSnapshot tree,
+            Dictionary<InstanceId, RbxWorldPackageHighlight> highlights,
+            IReadOnlyList<RbxWorldPackageDiagnostic> diagnostics)
+        {
+            HashSet<ulong> ids = new();
+            foreach (InstanceSnapshot node in tree.Instances)
+            {
+                ids.Add(node.Id);
+            }
+
+            List<RbxWorldPackageDiagnostic> result = null;
+            foreach (KeyValuePair<InstanceId, RbxWorldPackageHighlight> entry in new List<KeyValuePair<InstanceId, RbxWorldPackageHighlight>>(highlights))
+            {
+                if (entry.Value.AdorneeId == 0UL || ids.Contains(entry.Value.AdorneeId))
+                {
+                    continue;
+                }
+
+                result ??= new List<RbxWorldPackageDiagnostic>(diagnostics);
+                result.Add(new RbxWorldPackageDiagnostic(entry.Key.Value, 0UL, MissingReason, "Adornee"));
+                highlights[entry.Key] = entry.Value.WithAdorneeId(0UL);
+            }
+
+            return result ?? diagnostics;
         }
 
         /// <summary>
@@ -2725,6 +2880,7 @@ namespace CoreAI.Mods.WorldPackages
             ValidateStarterGui(payload, root);
             ValidateTextChatCommands(payload);
             ValidateSelectionBoxes(payload);
+            ValidateHighlights(payload);
 
             string previousModId = null;
             foreach (RbxWorldModSource mod in payload.Mods)
@@ -3065,6 +3221,42 @@ namespace CoreAI.Mods.WorldPackages
                 {
                     throw new RbxWorldPackageException(
                         "SelectionBox " + entry.Key.Value + " needs finite colours, transparencies and line thickness.");
+                }
+            }
+        }
+
+        private static void ValidateHighlights(RbxWorldPackagePayload payload)
+        {
+            if (payload.Highlights.Count == 0)
+            {
+                return;
+            }
+
+            Dictionary<ulong, string> classes = ClassesById(payload);
+            foreach (KeyValuePair<InstanceId, RbxWorldPackageHighlight> entry in payload.Highlights)
+            {
+                if (!classes.TryGetValue(entry.Key.Value, out string className)
+                    || !string.Equals(className, HighlightClassName, StringComparison.Ordinal))
+                {
+                    throw new RbxWorldPackageException(
+                        "World package carries Highlight state for instance " + entry.Key.Value
+                        + ", which is not a Highlight of the tree.");
+                }
+
+                RbxWorldPackageHighlight highlight = entry.Value;
+                if (highlight.AdorneeId != 0UL && !classes.ContainsKey(highlight.AdorneeId))
+                {
+                    throw new RbxWorldPackageException(
+                        "Highlight " + entry.Key.Value + " names adornee " + highlight.AdorneeId + ", which is not in the package.");
+                }
+
+                if (!IsFinite(highlight.FillColor.R) || !IsFinite(highlight.FillColor.G) || !IsFinite(highlight.FillColor.B)
+                    || !IsFinite(highlight.OutlineColor.R) || !IsFinite(highlight.OutlineColor.G)
+                    || !IsFinite(highlight.OutlineColor.B) || !IsFinite(highlight.FillTransparency)
+                    || !IsFinite(highlight.OutlineTransparency))
+                {
+                    throw new RbxWorldPackageException(
+                        "Highlight " + entry.Key.Value + " needs finite colours and transparencies.");
                 }
             }
         }
@@ -3991,6 +4183,36 @@ namespace CoreAI.Mods.WorldPackages
 
             [JsonProperty("selection_box", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
             public WorldSelectionBoxDto SelectionBox;
+
+            // WHY omitted when null: an instance that is no Highlight writes no key, so every package without one stays
+            // byte-identical; a reader that predates the key refuses it by name.
+            [JsonProperty("highlight", Required = Required.Default, NullValueHandling = NullValueHandling.Ignore)]
+            public WorldHighlightDto Highlight;
+        }
+
+        [Serializable]
+        private sealed class WorldHighlightDto
+        {
+            [JsonProperty("adornee_id", Required = Required.Always)]
+            public string AdorneeId;
+
+            [JsonProperty("depth_mode", Required = Required.Always)]
+            public string DepthMode;
+
+            [JsonProperty("enabled", Required = Required.Always)]
+            public bool Enabled;
+
+            [JsonProperty("fill_color", Required = Required.Always)]
+            public float[] FillColor;
+
+            [JsonProperty("fill_transparency", Required = Required.Always)]
+            public float FillTransparency;
+
+            [JsonProperty("outline_color", Required = Required.Always)]
+            public float[] OutlineColor;
+
+            [JsonProperty("outline_transparency", Required = Required.Always)]
+            public float OutlineTransparency;
         }
 
         [Serializable]

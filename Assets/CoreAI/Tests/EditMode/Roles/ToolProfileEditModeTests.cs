@@ -266,7 +266,7 @@ namespace CoreAI.Core.Tests.EditMode
             string[] tools = AgentRoleTestHarness.ToolNames(policy.GetToolsForRole("Modder"));
             CollectionAssert.IsSubsetOf(
                 AgentMemoryPolicyGoldenSnapshotEditModeTests.ShippedComposition.LuaBuilderTools, tools);
-            CollectionAssert.IsSubsetOf(new[] { "dig", "read_skill", "call_skill_tool" }, tools);
+            CollectionAssert.IsSubsetOf(new[] { "dig", "read_skill" }, tools);
             CollectionAssert.AreEqual(new[] { BuiltInToolProfileIds.LuaBuilder }, config.ToolProfiles);
             CollectionAssert.AreEqual(new[] { "Lua Modding", "Rbx API", "Full Lua" },
                 policy.GetSkillsForRole("Modder").Select(skill => skill.Name));

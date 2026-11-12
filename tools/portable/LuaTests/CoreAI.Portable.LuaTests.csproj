@@ -99,6 +99,7 @@
     <Compile Include="$(TestsRoot)/LuaCsExecuteLuaPrintedEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaCsExecuteLuaPrintedEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaModHostAuthorityRestoreEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaModHostAuthorityRestoreEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaModsLlmToolSourceEditingEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaModsLlmToolSourceEditingEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/LuaModsLlmToolResultsEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaModsLlmToolResultsEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaCsWithheldApiStubEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaCsWithheldApiStubEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaGenerationRateLimiterEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaGenerationRateLimiterEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/P3InstantEditFixtures.cs" Link="Assets/CoreAIMods/Tests/EditMode/P3InstantEditFixtures.cs" />
@@ -177,6 +178,8 @@
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/CharacterRigLuaEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/CharacterRigLuaEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/CharacterRig/CharacterRigTestDoubles.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/CharacterRig/CharacterRigTestDoubles.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/P9LightingLuaEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/P9LightingLuaEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/Mvp17SoundLuaEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/Mvp17SoundLuaEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/Mvp17ParticleLuaEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/Mvp17ParticleLuaEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/P4TerrainShippedRegistrationEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/P4TerrainShippedRegistrationEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Binding/P1UiFocusBridgeEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Binding/P1UiFocusBridgeEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/LuaBindings/RbxJsonContractEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/LuaBindings/RbxJsonContractEditModeTests.cs" />

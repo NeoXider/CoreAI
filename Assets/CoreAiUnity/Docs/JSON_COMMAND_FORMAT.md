@@ -651,7 +651,7 @@ A failed call is returned to the model as the tool result; the model decides whe
 ```
 Roundtrip 1: Model → {"name": "memory", "arguments": {"content": "..."}}   ← action missing
   ↓
-Tool result: "Error: Tool 'memory' is missing required argument(s): action. Retry the same tool call with JSON arguments matching this schema: {...}"
+Tool result: "Error: Tool 'memory' is missing required argument(s): action. It was not run; send the call again with action (string: Action: read, write, append, ...) set."
   ↓
 Roundtrip 2: Model → {"name": "memory", "arguments": {"action": "write", "content": "..."}}  ✅
 ```

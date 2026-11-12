@@ -263,7 +263,7 @@ JSON boolean `true`; `"true"`, `1` or `"yes"` leave it ordinary text).
 
 How the lifted message reads:
 
-- **Camera tools** (`camera_capture`, `screenshot`, and the scene tool `capture_camera`): one user message with the
+- **Camera tools** (`camera_capture`, `screenshot`): one user message with the
   fixed prompt *"Camera frame from your latest capture. Inspect the image and continue the requested scene work
   using what you see."* and the frame. A new frame **replaces** the previous camera message, so a long build
   session carries one frame, not all of them. This wording is part of the benchmark contract (G6) and does not
@@ -352,11 +352,15 @@ builder.Register(r => new AgentCameraService(r.Resolve<AgentCameraOptions>(), r.
 
 ---
 
-## 8. Relationship to the existing `capture_camera` tool (deprecated alias)
+## 8. Relationship to the removed `capture_camera` tool
 
-`CoreAI.Infrastructure.World.CameraLlmTool` (`camera_tool` → `capture_camera`) predates this feature and is
-**deprecated onto the `camera` tool**: it keeps working, unchanged, for one release (7.57.x) and is scheduled
-for removal after it. It is capture-only, has no ownership model, and is registered on demand for SmartChat
+The scene tool `camera_tool` → `capture_camera` was **removed after its release of aliasing (P16,
+2026-11-12)**. `CoreAI.Infrastructure.World.CameraLlmTool` is now a static class that keeps only its host
+helpers (`ResolveCamera`, `CaptureCameraJpeg`, `CaptureCameraImageContent`, `TryExtractImageContentFromResult`,
+`TryParseImageDataUri`); `CoreAi.RegisterCameraVisionTool` registers the `camera` tool instead; a request
+allowlist that still names `camera_tool` or `capture_camera` reaches `camera` / `camera_capture`
+(`AiOrchestrator.MapRemovedToolName`). What it was, for the record: it predated this feature and was
+**deprecated onto the `camera` tool** for one release (7.57.x). It is capture-only, has no ownership model, and is registered on demand for SmartChat
 (`CoreAi.RegisterCameraVisionTool`). It now captures through the same implementation, the shared
 `ICameraFrameReadback`, so it gets the async readback too (`new CameraLlmTool(readback)` injects one; the
 parameterless constructor uses `CameraFrameReadback.CreateDefault()`). Its name, its parameters
@@ -369,7 +373,7 @@ Name map for the alias period:
 
 | Old name | Use instead | Status |
 | --- | --- | --- |
-| `camera_tool` → `capture_camera(cameraName, width, height)` | `camera` → `camera_capture(cameraName, maxSize)` | deprecated alias, one release |
+| `camera_tool` → `capture_camera(cameraName, width, height)` | `camera` → `camera_capture(cameraName, maxSize)` | removed 2026-11-12; allowlist names mapped |
 | `screenshot` | `camera_capture` | permanent discoverability alias (same function) |
 | `camera_look(cameraName, posX..rotZ, lookAt)` | the same function; new optional `targetX/Y/Z`, `fov` | unchanged, extended |
 

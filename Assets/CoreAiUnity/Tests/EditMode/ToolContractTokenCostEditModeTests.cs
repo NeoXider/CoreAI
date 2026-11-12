@@ -87,6 +87,48 @@ namespace CoreAI.Tests.EditMode
             }
         }
 
+        /// <summary>
+        /// P16 DoD: every function the Programmer is offered in a play world carries a description within the tool
+        /// contract limit, so the cacheable prefix never clips one and a small model reads each in full.
+        /// world_command (Creator, Builder) is not in this surface.
+        /// </summary>
+        [Test]
+        public void EveryProgrammerToolDescription_FitsTheToolContractLimit()
+        {
+            int limit = AiToolContractPromptFormatter.ToolDescriptionMaxChars;
+            List<SkillSet> catalog = new()
+            {
+                SkillSet.FromTextContent("Lua Modding", "Mods.", "x"), SkillSet.FromTextContent("Rbx API", "Rbx.", "y")
+            };
+            List<Microsoft.Extensions.AI.AIFunction> functions = new()
+            {
+                new MemoryTool(new InMemoryAgentMemoryStore(), BuiltInAgentRoleIds.Programmer).CreateAIFunction(),
+                ((IAIFunctionLlmTool)ReadSkillLlmTool.Create(catalog)).CreateAIFunction()
+            };
+            foreach (ILlmTool tool in Tools())
+            {
+                if (tool.Name == "world_command")
+                {
+                    continue;
+                }
+
+                Assert.LessOrEqual(tool.Description.Length, limit, tool.Name);
+                if (tool is IAIFunctionsLlmTool wrapper)
+                {
+                    functions.AddRange(wrapper.CreateAIFunctions());
+                }
+                else if (tool is IAIFunctionLlmTool single)
+                {
+                    functions.Add(single.CreateAIFunction());
+                }
+            }
+
+            foreach (Microsoft.Extensions.AI.AIFunction function in functions)
+            {
+                Assert.LessOrEqual(function.Description.Length, limit, function.Name);
+            }
+        }
+
         /// <summary>Prints the rows for the host-tool table of the document.</summary>
         [Test]
         [Explicit("Prints the regenerated host tool-contract rows for the document.")]

@@ -1395,7 +1395,7 @@ namespace CoreAI.Infrastructure.Llm
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
                     // WHY: Streaming owns its own tool loop, so the native client's image lift never runs.
                     SmartToolCallingChatClient.LiftCameraImages(chatMessages, ref liftedCameraCallIds);
-                    TrimStreamingToolCallHistory(chatMessages);
+                    TrimStreamingToolCallHistory(chatMessages, policy);
                     if (!batch.AllFailed)
                     {
                         anyToolCallSucceededInStream = true;
@@ -1541,7 +1541,7 @@ namespace CoreAI.Infrastructure.Llm
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, batch.Results));
                     // WHY: Text-shaped camera calls need the same image feedback as native calls.
                     SmartToolCallingChatClient.LiftCameraImages(chatMessages, ref liftedCameraCallIds);
-                    TrimStreamingToolCallHistory(chatMessages);
+                    TrimStreamingToolCallHistory(chatMessages, policy);
 
                     // WHY: mirror the native path's streamedExecutedCallCount bump for text-extracted tool
                     // calls too — these ran through ExecuteBatchAsync and may have mutated the world, so a
@@ -1657,7 +1657,7 @@ namespace CoreAI.Infrastructure.Llm
                     ToolExecutionPolicy.BatchToolCallResult malformedBatch =
                         await policy.ExecuteBatchAsync(malformedCalls, chatOptions, cancellationToken);
                     chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Tool, malformedBatch.Results));
-                    TrimStreamingToolCallHistory(chatMessages);
+                    TrimStreamingToolCallHistory(chatMessages, policy);
                     if (!malformedBatch.AllFailed)
                     {
                         anyToolCallSucceededInStream = true;
@@ -1865,7 +1865,7 @@ namespace CoreAI.Infrastructure.Llm
         /// via the shared <see cref="ToolCallHistoryTrimmer"/> (system + original user messages are
         /// kept; units are removed whole so no tool message is ever orphaned). 0 = unlimited.
         /// </summary>
-        private void TrimStreamingToolCallHistory(List<MEAI.ChatMessage> chatMessages)
+        private void TrimStreamingToolCallHistory(List<MEAI.ChatMessage> chatMessages, ToolExecutionPolicy policy)
         {
             int maxHistoryMessages = _settings.MaxToolCallHistoryMessages;
             if (maxHistoryMessages <= 0)
@@ -1874,6 +1874,7 @@ namespace CoreAI.Infrastructure.Llm
             }
 
             int removed = ToolCallHistoryTrimmer.Trim(chatMessages, maxHistoryMessages);
+            policy?.OnToolHistoryTrimmed(removed);
             if (removed > 0 && _settings.LogMeaiToolCallingSteps)
             {
                 _logger.LogInfo(GameLogFeature.Llm,

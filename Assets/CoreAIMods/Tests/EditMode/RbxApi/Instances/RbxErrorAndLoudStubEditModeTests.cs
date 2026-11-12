@@ -280,7 +280,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             string[] known =
             {
                 "WedgePart", "SpawnLocation", "MeshPart", "Weld", "WeldConstraint", "Attachment",
-                "Configuration", "Sound", "ParticleEmitter", "BillboardGui", "BodyVelocity", "Tool"
+                "Configuration", "BillboardGui", "BodyVelocity", "Tool"
             };
             foreach (string className in known)
             {
@@ -298,7 +298,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             }
 
             foreach (string real in new[] { "Part", "Folder", "Model", "Workspace", "Camera", "Script",
-                         "StarterGui", "ScreenGui", "TextLabel", "UICorner", "Bogus" })
+                         "StarterGui", "ScreenGui", "TextLabel", "UICorner", "Sound", "SoundGroup", "ParticleEmitter", "Bogus" })
             {
                 Assert.IsFalse(catalog.TryGetKnownUnimplementedClass(real, out _),
                     real + " must not be a known-unimplemented class");
@@ -307,10 +307,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             Assert.IsFalse(catalog.TryGetKnownUnimplementedClass(null, out _));
 
             Assert.IsTrue(catalog.TryGetKnownUnimplementedClass(
-                "Sound", out RbxKnownUnimplementedClassDescriptor sound));
-            RbxError planned = sound.CreateInstanceNewError();
+                "MeshPart", out RbxKnownUnimplementedClassDescriptor meshPart));
+            RbxError planned = meshPart.CreateInstanceNewError();
             Assert.AreEqual(RbxErrorCode.NotImplemented, planned.Code);
-            Assert.AreEqual("Instance.new(\"Sound\") is planned for MVP17.", planned.RawMessage);
+            Assert.AreEqual("Instance.new(\"MeshPart\") is planned for P10.", planned.RawMessage);
 
             Assert.IsTrue(catalog.TryGetKnownUnimplementedClass(
                 "WeldConstraint", out RbxKnownUnimplementedClassDescriptor weld));

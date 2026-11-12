@@ -545,14 +545,15 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             World world = BuildWorld();
             world.Load("m", @"
                 local function try(f) local ok, err = pcall(f) return tostring(err) end
-                store_set('sound', try(function() return Instance.new('Sound') end))
+                store_set('sound', try(function() return Instance.new('Decal') end))
                 store_set('gui', try(function() return Instance.new('UIGradient') end))
                 store_set('mesh', try(function() return Instance.new('MeshPart') end))
                 store_set('store', try(function() return game:GetService('DataStoreService'):GetDataStore('x') end))
                 store_set('actions', try(function() return game:GetService('ContextActionService'):BindAction() end))
                 store_set('close', try(function() game:BindToClose(function() end) end))");
 
-            StringAssert.Contains("is planned for MVP17", world.Get("m", "sound"));
+            StringAssert.Contains("is planned for P10", world.Get("m", "sound"),
+                "Sound shipped in MVP17; Decal is still a planned stub");
             StringAssert.Contains("is planned for MVP15", world.Get("m", "gui"));
             StringAssert.Contains("is planned for P10", world.Get("m", "mesh"));
             StringAssert.Contains("is implemented but is not attached", world.Get("m", "store"),

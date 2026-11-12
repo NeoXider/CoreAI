@@ -218,7 +218,7 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.RegisterImplementedFallback("UserInputService");
             catalog.RegisterImplementedFallback("StarterGui");
             catalog.RegisterStub("ContextActionService", "MVP7", implementedServiceHint);
-            catalog.RegisterStub("SoundService", "MVP17", implementedServiceHint);
+            catalog.RegisterImplementedFallback("SoundService");
             catalog.RegisterStub("AIService", "P12",
                 "CoreAI agent/chat access from Lua is planned; not yet scriptable");
             catalog.RegisterUnsupportedStub("PathfindingService",

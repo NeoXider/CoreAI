@@ -128,6 +128,9 @@ namespace CoreAI.Mods.WorldPackages
         /// <summary>The properties of every world-owned SelectionBox, by instance id; missing ids are class defaults.</summary>
         public IReadOnlyDictionary<InstanceId, RbxWorldPackageSelectionBox> SelectionBoxes { get; set; }
 
+        /// <summary>The properties of every world-owned Highlight, by instance id; missing ids are class defaults.</summary>
+        public IReadOnlyDictionary<InstanceId, RbxWorldPackageHighlight> Highlights { get; set; }
+
         internal RbxWorldPackageOptionalState Clone()
         {
             return new RbxWorldPackageOptionalState
@@ -141,7 +144,8 @@ namespace CoreAI.Mods.WorldPackages
                 Gui = Gui,
                 StarterGui = StarterGui,
                 TextChatCommands = TextChatCommands,
-                SelectionBoxes = SelectionBoxes
+                SelectionBoxes = SelectionBoxes,
+                Highlights = Highlights
             };
         }
     }
@@ -308,6 +312,9 @@ namespace CoreAI.Mods.WorldPackages
         private static readonly IReadOnlyDictionary<InstanceId, RbxWorldPackageSelectionBox> EmptySelectionBoxes =
             new Dictionary<InstanceId, RbxWorldPackageSelectionBox>();
 
+        private static readonly IReadOnlyDictionary<InstanceId, RbxWorldPackageHighlight> EmptyHighlights =
+            new Dictionary<InstanceId, RbxWorldPackageHighlight>();
+
         private static readonly IReadOnlyDictionary<InstanceId, RbxWorldPackageGui> EmptyGui =
             new Dictionary<InstanceId, RbxWorldPackageGui>();
 
@@ -406,6 +413,10 @@ namespace CoreAI.Mods.WorldPackages
         /// <summary>The properties of every SelectionBox the package stores, by instance id; never null.</summary>
         public IReadOnlyDictionary<InstanceId, RbxWorldPackageSelectionBox> SelectionBoxes =>
             _optional.SelectionBoxes ?? EmptySelectionBoxes;
+
+        /// <summary>The properties of every Highlight the package stores, by instance id; never null.</summary>
+        public IReadOnlyDictionary<InstanceId, RbxWorldPackageHighlight> Highlights =>
+            _optional.Highlights ?? EmptyHighlights;
 
         /// <summary>A copy of the optional blocks, for a caller that builds a payload from this one.</summary>
         public RbxWorldPackageOptionalState OptionalState => _optional.Clone();
@@ -1039,12 +1050,20 @@ namespace CoreAI.Mods.WorldPackages
                 });
             }
 
-            return JsonConvert.SerializeObject(new
-            {
-                success = result.Success,
-                path = result.Path,
-                error = result.Error
-            });
+            // WHY two shapes: a success carried "error":null, noise a small model reasoned over.
+            return result.Success
+                ? JsonConvert.SerializeObject(new
+                {
+                    success = true,
+                    path = result.Path,
+                    message = "World saved to slot '" + slot + "'; load_world with this slot asks the player to load it."
+                })
+                : JsonConvert.SerializeObject(new
+                {
+                    success = false,
+                    path = result.Path,
+                    error = result.Error
+                });
         }
     }
 

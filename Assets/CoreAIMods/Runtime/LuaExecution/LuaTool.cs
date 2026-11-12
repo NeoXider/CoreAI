@@ -17,22 +17,18 @@ namespace CoreAI.Ai
     {
         public const string ExecuteLuaToolName = "execute_lua";
 
+        // WHY this short: the description is sent on every request. The invented-API list, the scene queries and the
+        // mod globals live in the Programmer prompt, the references in the skills it names.
         public const string ExecuteLuaDescription =
-            "Execute sandboxed Lua code using only globals exposed by the current game. " +
-            "Runtime rule slots are changed through the logic_* API: call logic_list() when unsure, then use " +
-            "logic_define('slot_name', function(...) return value end); for example " +
-            "logic_define('loot_formula', function(bossMaxHp) return 1000 end). " +
-            "Build and edit world objects Roblox-style (Instance.new('Part'), game/workspace, Vector3/CFrame/Color3) - " +
-            "call read_skill('Rbx API') for the reference; report() alone is not a scene change. " +
-            "Inspect the existing scene with the read-only queries coreai_world_find(pattern), coreai_world_pos(name), and coreai_world_exists(name). " +
-            "Full reflection (unity_* scene APIs) is a rarely-needed backup; when a task truly needs it, call read_skill('Full Lua') first. " +
-            "Do not hard-code visual recipes; inspect the scene/components first, then use the smallest real API that matches the host. " +
-            "Use report(message) to describe the applied change. Do not invent helper globals; " +
-            "only call APIs listed by the prompt/tool contract or discovered from the environment. " +
-            "Never call invented APIs such as game.rules, game_rules, game.enemies, game.create, game.destroy, or GameObject.Find from Lua.";
+            "Run sandboxed Lua once in the live game; returns Success, Output (the return value), Printed, " +
+            "Error. Use it to build, change or inspect the world now; code that must keep running (handlers, " +
+            "timers) belongs in a mod (manage_mods). Build Roblox-style (Instance.new('Part'), workspace, Vector3, " +
+            "CFrame, Color3): read_skill('Rbx API') first. Rule slots: logic_list(), then " +
+            "logic_define('slot', function(...) return value end). unity_* reflection: read_skill('Full Lua'). " +
+            "report(msg) says what changed.";
 
-        private const string ExecuteLuaCodeParameterDescription =
-            "Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. Build world objects Roblox-style (Instance.new('Part'), game/workspace) - see read_skill('Rbx API'). Inspect the scene with coreai_world_find(pattern), coreai_world_pos(name), coreai_world_exists(name). Full reflection is a rarely-needed backup - see read_skill('Full Lua'). Return compact JSON/string for diagnostics.";
+        internal const string ExecuteLuaCodeParameterDescription =
+            "Lua source, run once. Return a short value to inspect something; report(message) says what changed.";
 
         private readonly ILuaExecutor _executor;
         private readonly ICoreAISettings _settings;

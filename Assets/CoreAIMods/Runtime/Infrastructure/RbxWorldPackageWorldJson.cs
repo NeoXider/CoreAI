@@ -623,6 +623,26 @@ namespace CoreAI.Mods.WorldPackages
                 sink.EndObject();
             }
 
+            if (payload.Highlights.TryGetValue(new InstanceId(node.Id), out RbxWorldPackageHighlight highlight))
+            {
+                sink.Name("highlight");
+                sink.StartObject();
+                sink.Name("adornee_id");
+                sink.Decimal(highlight.AdorneeId);
+                Required(sink, "depth_mode", highlight.DepthMode.ToString());
+                sink.Name("enabled");
+                sink.Bool(highlight.Enabled);
+                sink.Name("fill_color");
+                Vector(sink, highlight.FillColor.R, highlight.FillColor.G, highlight.FillColor.B);
+                sink.Name("fill_transparency");
+                sink.Number(highlight.FillTransparency);
+                sink.Name("outline_color");
+                Vector(sink, highlight.OutlineColor.R, highlight.OutlineColor.G, highlight.OutlineColor.B);
+                sink.Name("outline_transparency");
+                sink.Number(highlight.OutlineTransparency);
+                sink.EndObject();
+            }
+
             sink.EndObject();
         }
 

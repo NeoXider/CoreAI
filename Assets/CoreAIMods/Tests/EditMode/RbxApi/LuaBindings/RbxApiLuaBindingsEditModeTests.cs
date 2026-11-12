@@ -2496,9 +2496,6 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [TestCase("BrickColor")]
-        [TestCase("NumberSequence")]
-        [TestCase("ColorSequence")]
-        [TestCase("NumberRange")]
         [TestCase("Rect")]
         [TestCase("PhysicalProperties")]
         [TestCase("OverlapParams")]
@@ -2739,6 +2736,10 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             "(function() local p = Instance.new('Part'); p.Anchored = true; p.Parent = workspace; "
             + "return p end)()";
 
+        /// <summary>A Sound inside the game, so the id the drift world registers loads on the next frame.</summary>
+        private const string PlacedSoundLua =
+            "(function() local s = Instance.new('Sound'); s.Parent = workspace; return s end)()";
+
         /// <summary>
         /// One driver per mutable BoundProperties row: <c>Target</c> is a Lua expression for the
         /// watched instance (bound to <c>t</c>), <c>Drive</c> makes one real change and then
@@ -2882,6 +2883,47 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
                 ("Light.Enabled", "Instance.new('PointLight')", "t.Enabled = false; t.Enabled = false", 1),
                 ("Light.Shadows", "Instance.new('PointLight')", "t.Shadows = true; t.Shadows = true", 1),
                 ("PointLight.Range", "Instance.new('PointLight')", "t.Range = 12; t.Range = 12", 1),
+                ("Sound.SoundId", "Instance.new('Sound')", "t.SoundId = 'x'; t.SoundId = 'x'", 1),
+                ("Sound.Volume", "Instance.new('Sound')", "t.Volume = 0.8; t.Volume = 0.8", 1),
+                ("Sound.Looped", "Instance.new('Sound')", "t.Looped = true; t.Looped = true", 1),
+                ("Sound.PlaybackSpeed", "Instance.new('Sound')", "t.PlaybackSpeed = 2; t.PlaybackSpeed = 2", 1),
+                ("Sound.TimePosition", "Instance.new('Sound')", "t.TimePosition = 1; t.TimePosition = 1", 1),
+                ("Sound.TimeLength", PlacedSoundLua, "t.SoundId = 'drift-probe'; t.SoundId = 'drift-probe'", 1),
+                ("Sound.IsLoaded", PlacedSoundLua, "t.SoundId = 'drift-probe'; t.SoundId = 'drift-probe'", 1),
+                ("Sound.Playing", "Instance.new('Sound')", "t.Playing = true; t.Playing = true", 1),
+                ("Sound.IsPlaying", "Instance.new('Sound')", "t:Play(); t:Play()", 1),
+                ("Sound.IsPaused", "Instance.new('Sound')", "t:Play(); t:Play()", 1),
+                ("Sound.RollOffMinDistance", "Instance.new('Sound')",
+                    "t.RollOffMinDistance = 5; t.RollOffMinDistance = 5", 1),
+                ("Sound.RollOffMaxDistance", "Instance.new('Sound')",
+                    "t.RollOffMaxDistance = 500; t.RollOffMaxDistance = 500", 1),
+                ("Sound.RollOffMode", "Instance.new('Sound')",
+                    "t.RollOffMode = Enum.RollOffMode.Linear; t.RollOffMode = Enum.RollOffMode.Linear", 1),
+                ("Sound.PlayOnRemove", "Instance.new('Sound')", "t.PlayOnRemove = true; t.PlayOnRemove = true", 1),
+                ("Sound.SoundGroup", "Instance.new('Sound')",
+                    "local g = Instance.new('SoundGroup'); t.SoundGroup = g; t.SoundGroup = g", 1),
+                ("SoundGroup.Volume", "Instance.new('SoundGroup')", "t.Volume = 0.8; t.Volume = 0.8", 1),
+                ("ParticleEmitter.Enabled", "Instance.new('ParticleEmitter')", "t.Enabled = false; t.Enabled = false", 1),
+                ("ParticleEmitter.Rate", "Instance.new('ParticleEmitter')", "t.Rate = 50; t.Rate = 50", 1),
+                ("ParticleEmitter.Lifetime", "Instance.new('ParticleEmitter')",
+                    "t.Lifetime = NumberRange.new(1, 2); t.Lifetime = NumberRange.new(1, 2)", 1),
+                ("ParticleEmitter.Speed", "Instance.new('ParticleEmitter')",
+                    "t.Speed = NumberRange.new(3); t.Speed = NumberRange.new(3)", 1),
+                ("ParticleEmitter.Color", "Instance.new('ParticleEmitter')",
+                    "t.Color = ColorSequence.new(Color3.new(1, 0, 0)); t.Color = ColorSequence.new(Color3.new(1, 0, 0))",
+                    1),
+                ("ParticleEmitter.Size", "Instance.new('ParticleEmitter')",
+                    "t.Size = NumberSequence.new(2); t.Size = NumberSequence.new(2)", 1),
+                ("ParticleEmitter.Transparency", "Instance.new('ParticleEmitter')",
+                    "t.Transparency = NumberSequence.new(0, 1); t.Transparency = NumberSequence.new(0, 1)", 1),
+                ("ParticleEmitter.Texture", "Instance.new('ParticleEmitter')",
+                    "t.Texture = 'Sparks'; t.Texture = 'Sparks'", 1),
+                ("ParticleEmitter.SpreadAngle", "Instance.new('ParticleEmitter')",
+                    "t.SpreadAngle = Vector2.new(30, 30); t.SpreadAngle = Vector2.new(30, 30)", 1),
+                ("ParticleEmitter.Acceleration", "Instance.new('ParticleEmitter')",
+                    "t.Acceleration = Vector3.new(0, 5, 0); t.Acceleration = Vector3.new(0, 5, 0)", 1),
+                ("ParticleEmitter.EmissionDirection", "Instance.new('ParticleEmitter')",
+                    "t.EmissionDirection = Enum.NormalId.Bottom; t.EmissionDirection = Enum.NormalId.Bottom", 1),
                 ("BaseScript.Enabled", "Instance.new('Script')", "t.Enabled = false; t.Enabled = false", 1),
                 ("BaseScript.Disabled", "Instance.new('Script')", "t.Disabled = true; t.Disabled = true", 1),
                 ("ValueBase.Value", "Instance.new('IntValue')", "t.Value = 5; t.Value = 5", 1),
@@ -2940,6 +2982,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
             LuaCsRbxApiBindings roblox = new();
             roblox.AttachCharacterMotorFactory(_ => new SteerableMotor());
+            RbxSoundLibrary driftSounds = new();
+            driftSounds.Register("drift-probe", 1d);
+            roblox.Sounds.Service.AttachLibrary(driftSounds);
             MemoryStore store = new();
             LuaCsModStack stack = BuildStack(roblox, store);
             roblox.Players.EnsureActor(roblox.Registry, "drift-actor");

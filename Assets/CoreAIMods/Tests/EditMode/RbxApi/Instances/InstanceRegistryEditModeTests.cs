@@ -448,7 +448,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
         [TestCase("WeldConstraint", "no roadmap rung is assigned")]
         [TestCase("SpawnLocation", "no roadmap rung is assigned")]
         [TestCase("WedgePart", "no roadmap rung is assigned")]
-        [TestCase("Sound", "is planned for MVP17")]
+        [TestCase("Decal", "is planned for P10")]
         [TestCase("UIGradient", "is planned for MVP15")]
         [TestCase("SpotLight", "is planned for P9")]
         [TestCase("MeshPart", "is planned for P10")]

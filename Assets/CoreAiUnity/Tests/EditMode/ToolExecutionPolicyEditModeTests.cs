@@ -630,7 +630,9 @@ namespace CoreAI.Tests.EditMode
             string text = result.Result.Result.ToString();
             Assert.IsFalse(result.Succeeded);
             StringAssert.Contains("missing required argument(s): action", text);
-            StringAssert.Contains("Retry the same tool call with JSON arguments matching this schema", text);
+            StringAssert.Contains("send the call again with action (string: One of: list, load) set", text,
+                "the refusal names the argument with its type and description instead of dumping the schema");
+            StringAssert.DoesNotContain("\"properties\"", text);
             Assert.AreEqual(1, policy.ExecutedTraces.Count);
             Assert.AreEqual("schema-validation", policy.ExecutedTraces[0].Source);
         }
@@ -748,8 +750,8 @@ namespace CoreAI.Tests.EditMode
 
             Assert.IsFalse(result.Succeeded);
             string text = result.Result.Result.ToString();
-            StringAssert.Contains("matching this schema", text);
-            StringAssert.Contains("\"count\"", text, "The compact schema itself must be embedded");
+            StringAssert.Contains("Expected parameters: count (integer, required).", text,
+                "The parameter list from the schema must be embedded");
         }
 
         [Test]
@@ -2858,8 +2860,8 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(refused.Succeeded);
             Assert.AreEqual(0, wrapper.Looks, "the function body must not run without its required argument");
             StringAssert.Contains("Tool 'camera_look' is missing required argument(s): target", text);
-            StringAssert.Contains("matching this schema", text);
-            StringAssert.Contains("\"target\"", text, "the hint must show the function's own schema, the metadata one is {}");
+            StringAssert.Contains("with target (string) set", text,
+                "the hint must come from the function's own schema, the metadata one is {}");
             Assert.AreEqual("schema-validation", policy.ExecutedTraces[0].Source);
 
             ToolExecutionPolicy.ToolCallResult ran = await policy.ExecuteSingleAsync(

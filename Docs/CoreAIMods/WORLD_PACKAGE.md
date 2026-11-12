@@ -108,6 +108,15 @@ a missing field and an unknown key by name. A world without either class writes 
 refuse either key by name. `BasePart.LocalTransparencyModifier` is local to each machine and never saved. Tests:
 `WorldPackageAdornmentsEditModeTests`.
 
+**Highlights.** A world-owned `Highlight` carries an optional `highlight` block (`adornee_id` as a decimal string,
+`"0"` for nil, which highlights the parent; `depth_mode` `"AlwaysOnTop"` or `"Occluded"`; `enabled`; `fill_color` and
+`outline_color` [r, g, b]; `fill_transparency`, `outline_transparency`), with the same rules as `selection_box`:
+restored without a revision advance, an adornee the package does not keep captured as nil with a diagnostic and read
+as nil when it names no instance, non-finite values and unknown keys refused by name. The key is omitted when absent,
+so a world without a Highlight writes the same bytes as before, and a package written before the block existed loads
+its Highlights with the class defaults; no `format_version` change. Tests: `WorldPackageAdornmentsEditModeTests`
+(`Highlight_*`).
+
 **Terrain cells.** The Workspace `Terrain` node is runtime infrastructure (every data model bootstrap
 creates it, so it is not in `world.json`), but its cells are durable: a world with at least one cell writes
 them in a last entry `Terrain/voxels.bin` (`TerrainVoxelCodec`, CAVX v1, canonical run-length chunks; save,

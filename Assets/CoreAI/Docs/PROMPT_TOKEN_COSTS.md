@@ -88,7 +88,7 @@ Counter: BpeTokenCounter fallback estimator
 | Tool contract | Characters | UTF-8 bytes | Tokens |
 |---|---|---|---|
 | `memory` | 1207 | 1207 | 302 |
-| `read_skill` | 829 | 829 | 208 |
+| `read_skill` | 683 | 683 | 171 |
 | `call_skill_tool` | 632 | 632 | 158 |
 | `wait` | 561 | 561 | 141 |
 | `get_inventory` | 220 | 220 | 55 |
@@ -105,7 +105,7 @@ Counter: BpeTokenCounter fallback estimator
 | PlainChat role prompt | 310 | 310 | 78 |
 | SmartChat role prompt | 594 | 594 | 149 |
 | Merchant role prompt | 593 | 593 | 149 |
-| Skill catalog header | 166 | 166 | 42 |
+| Skill catalog header | 107 | 107 | 27 |
 <!-- end generated -->
 
 ## Host tool contracts
@@ -113,9 +113,9 @@ Counter: BpeTokenCounter fallback estimator
 <!-- generated: ToolContractTokenCostEditModeTests.PrintCurrentRows -->
 | Tool contract | Characters | UTF-8 bytes | Tokens |
 |---|---|---|---|
-| `camera` | 5408 | 5408 | 1352 |
-| `execute_lua` | 1827 | 1827 | 457 |
-| `manage_mods` | 5885 | 5885 | 1472 |
+| `camera` | 4065 | 4065 | 1017 |
+| `execute_lua` | 776 | 776 | 194 |
+| `manage_mods` | 2453 | 2453 | 614 |
 | `get_mod_logs` | 1087 | 1087 | 272 |
 | `save_world` | 326 | 326 | 82 |
 | `load_world` | 347 | 347 | 87 |
@@ -133,7 +133,7 @@ history and the user message come on top.
 
 | Role | Tools offered | Tool definitions | Prefix + role prompt | Total |
 |---|---|---|---|---|
-| Programmer | memory, camera, execute_lua, manage_mods, get_mod_logs, save_world, load_world, list_autosaves, load_autosave, read_skill, call_skill_tool | 4525 | 1036 | 5561 |
+| Programmer | memory, camera, execute_lua, manage_mods, get_mod_logs, save_world, load_world, list_autosaves, load_autosave, read_skill | 2874 | 1036 | 3910 |
 | Creator | memory, world_command | 1771 | 385 | 2156 |
 | Builder | memory, world_command | 1771 | 337 | 2108 |
 | Merchant | memory, get_inventory | 357 | 302 | 659 |
@@ -141,7 +141,9 @@ history and the user message come on top.
 | PlainChat | none | 0 | 231 | 231 |
 
 `camera` alone is a third of the Programmer's tool definitions, and the chat panel attaches it to the active
-chat role, so a SmartChat host with the panel pays 1352 more per request.
+chat role, so a SmartChat host with the panel pays 1017 more per request. `call_skill_tool` (158) is offered only
+while a skill of the role has tools or the role authors skills, so the Programmer, whose three skills carry
+instructions only, does not pay for it (P16, 2026-11-12; before: 4525 tool tokens, 5561 in total).
 
 ## Progressive disclosure, measured
 
@@ -149,8 +151,8 @@ The Programmer's three skills are kept out of the prompt and read on demand. Mea
 
 - Inlining the three skill texts in the system prompt would cost 2970 + 21548 + 500 = **25018** tokens on
   every request.
-- Offering them through the two meta-tools costs `read_skill` + `call_skill_tool` = 208 + 158 = **366** tokens
-  per request, so a request that reads no skill saves 24652 tokens (98.5 percent of the inline cost).
+- Offering them through `read_skill` costs **171** tokens per request (`call_skill_tool` is not offered: the
+  skills have no tools), so a request that reads no skill saves 24847 tokens (99.3 percent of the inline cost).
 - A turn that reads a skill pays its `read_skill` results on top, and the two large skills are read in parts.
   A bare `read_skill("Lua Modding")` returns its core and the list of its 5 sections for 1271 tokens,
   and each section costs 248 to 491 more (all 5 together: 2059). A bare `read_skill("Rbx API")` returns its core and

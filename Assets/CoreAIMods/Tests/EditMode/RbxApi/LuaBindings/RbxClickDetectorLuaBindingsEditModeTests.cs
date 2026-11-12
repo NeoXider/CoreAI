@@ -243,9 +243,12 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
 
             public double CameraDistanceStuds { get; set; }
 
+            public RbxVector2 LastLocation { get; private set; }
+
             public bool TryPick(RbxVector2 screenPositionTopLeft, out InstanceId hitId,
                 out double distanceStuds)
             {
+                LastLocation = screenPositionTopLeft;
                 hitId = Hit;
                 distanceStuds = CameraDistanceStuds;
                 return Hit != InstanceId.None;
@@ -451,6 +454,107 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
             detector.MouseClick.Fire();
             roblox.Scheduler.Advance(0d);
             Assert.AreEqual("", store.Get("m", "clicked"));
+        }
+
+        private const string HoverModSource = @"
+            local lamp = Instance.new('Part')
+            lamp.Name = 'Lamp'
+            lamp.Size = Vector3.new(2, 2, 2)
+            lamp.Position = Vector3.new(6, 0, 0)
+            lamp.Parent = workspace
+            local detector = Instance.new('ClickDetector')
+            detector.MaxActivationDistance = 20
+            detector.Parent = lamp
+            local enters, leaves = 0, 0
+            detector.MouseHoverEnter:Connect(function(player)
+                enters = enters + 1
+                store_set('enters', tostring(enters))
+                store_set('who', typeof(player) .. ':' .. tostring(player and player.Name))
+            end)
+            detector.MouseHoverLeave:Connect(function(player)
+                leaves = leaves + 1
+                store_set('leaves', tostring(leaves))
+            end)";
+
+        private static void Frames(ClickWorld world, int count)
+        {
+            for (int frame = 0; frame < count; frame++)
+            {
+                world.Roblox.PumpPreRender(0f);
+            }
+
+            world.Roblox.Scheduler.Advance(0d);
+        }
+
+        /// <summary>
+        /// MouseHoverEnter fires once with the player when the pointer comes onto the detector's part and stays there,
+        /// MouseHoverLeave once when it moves off; nothing fires again while the pointer rests on empty space.
+        /// </summary>
+        [Test]
+        public void Lua_ClickDetector_Hover_EntersOnceAndLeavesOnce()
+        {
+            ClickWorld world = new(withCharacter: true);
+            world.Stack.Runtime.LoadMod("lamp", HoverModSource);
+            RbxInstance lamp = world.Find("Lamp");
+
+            Frames(world, 2);
+            Assert.AreEqual("", world.Store.Get("lamp", "enters"), "no hover while the pointer is on nothing");
+
+            world.Pick.Hit = lamp.Id;
+            world.Pick.CameraDistanceStuds = 8d;
+            Frames(world, 5);
+            Assert.AreEqual("1", world.Store.Get("lamp", "enters"), "one enter for five frames on the part");
+            Assert.AreEqual("Instance:" + world.Player.Name, world.Store.Get("lamp", "who"));
+            Assert.AreEqual("", world.Store.Get("lamp", "leaves"));
+
+            world.Pick.Hit = InstanceId.None;
+            Frames(world, 3);
+            Assert.AreEqual("1", world.Store.Get("lamp", "leaves"), "twin: one leave when the pointer moves off");
+            Assert.AreEqual("1", world.Store.Get("lamp", "enters"));
+        }
+
+        /// <summary>Negative twins: a detector beyond its MaxActivationDistance is not hovered, and host UI under the pointer ends a hover.</summary>
+        [Test]
+        public void Negative_Lua_ClickDetector_Hover_OutOfRangeOrOverUi_IsNoHover()
+        {
+            ClickWorld world = new(withCharacter: true);
+            world.Stack.Runtime.LoadMod("lamp", HoverModSource);
+            RbxInstance lamp = world.Find("Lamp");
+            RbxInstance root = world.Player.Character.FindFirstChild(RbxCharacterFactory.RootPartName);
+            world.Roblox.PartSink.SetPosition(root.Id, new RbxVector3(60f, 0f, 0f));
+
+            world.Pick.Hit = lamp.Id;
+            world.Pick.CameraDistanceStuds = 8d;
+            Frames(world, 3);
+            Assert.AreEqual("", world.Store.Get("lamp", "enters"), "the character stands 53 studs from a 20-stud detector");
+
+            world.Roblox.PartSink.SetPosition(root.Id, RbxVector3.Zero);
+            Frames(world, 2);
+            Assert.AreEqual("1", world.Store.Get("lamp", "enters"), "twin: in range it is hovered");
+
+            InputFocusState focus = new();
+            world.Input.FocusState = focus;
+            focus.SetPointerOverUi("panel", true);
+            Frames(world, 2);
+            Assert.AreEqual("1", world.Store.Get("lamp", "leaves"), "the pointer moved onto host UI");
+            Frames(world, 2);
+            Assert.AreEqual("1", world.Store.Get("lamp", "enters"), "no enter while the UI holds the pointer");
+        }
+
+        /// <summary>With the mouse locked to the centre (first person) the pick is made at the centre of the view, where the crosshair is.</summary>
+        [Test]
+        public void Lua_ClickDetector_LockedPointer_PicksAtTheCentreOfTheView()
+        {
+            ClickWorld world = new(withCharacter: true);
+            world.Input.SetMouseLocation(3f, 4f);
+            Frames(world, 1);
+            Assert.AreEqual(new RbxVector2(3f, 4f), world.Pick.LastLocation, "twin: a free pointer picks where the mouse is");
+
+            world.Stack.Runtime.LoadMod("lock", @"
+                game:GetService('UserInputService').MouseBehavior = Enum.MouseBehavior.LockCenter");
+            Frames(world, 1);
+            RbxVector2 viewport = world.Roblox.GetCameraViewportSize();
+            Assert.AreEqual(new RbxVector2(viewport.X * 0.5f, viewport.Y * 0.5f), world.Pick.LastLocation);
         }
     }
 }

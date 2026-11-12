@@ -46,7 +46,8 @@ sees "attempt to call a nil value".
 | `script` | The running mod's own script instance (mods only, not one-off `execute_lua`) |
 | `camera_set_cframe`, `camera_follow` | CoreAI convenience shorthands for camera control (both fire the camera's `Changed`); in a world whose `Camera` a script destroyed they raise `BAD_ARGUMENT` before anything moves |
 
-`BrickColor`, `NumberSequence`, `ColorSequence`, `NumberRange`, `Rect`,
+`NumberRange`, `NumberSequence`, `NumberSequenceKeypoint`, `ColorSequence` and `ColorSequenceKeypoint` are real
+(MVP17, see [ParticleEmitter](#particleemitter)). `BrickColor`, `Rect`,
 `PhysicalProperties`, `OverlapParams`, `DateTime` and `shared` exist as **loud stubs**: any use raises
 `NOT_IMPLEMENTED` with a workaround (`Color3.fromRGB` for `BrickColor`, `os.time()` or `workspace:GetServerTimeNow()` for `DateTime`, `mods_export`/`mods_get` for `shared`)
 instead of "attempt to index a nil value".
@@ -152,7 +153,8 @@ backward step, a client's holds too: the server sends the value its own scripts 
 
 `Instance.new` accepts: **`Part`**, **`Folder`**, **`Model`**, **`ClickDetector`**, **`MaterialVariant`**,
 **`RemoteEvent`**, **`UnreliableRemoteEvent`**, **`RemoteFunction`**, **`BindableEvent`**,
-**`BindableFunction`**, **`Humanoid`**, **`Backpack`**, **`TextChatCommand`**, **`SelectionBox`**, the
+**`BindableFunction`**, **`Humanoid`**, **`Backpack`**, **`TextChatCommand`**, **`SelectionBox`**, **`Highlight`**,
+**`PointLight`**, **`Sound`**, **`SoundGroup`**, **`ParticleEmitter`**, the
 GUI classes of [Roblox GUI](#roblox-gui), and the value objects **`IntValue`**, **`NumberValue`**, **`StringValue`**, **`BoolValue`**,
 **`ObjectValue`**, **`Vector3Value`**, **`CFrameValue`** and **`Color3Value`** (each with one
 type-checked `Value`). `Camera` is not creatable — the world's one camera is
@@ -166,9 +168,10 @@ so `IsA` works the way it does in Roblox.
 Services `game:GetService` returns as working instances: `Workspace`, `RunService`,
 `UserInputService`, `Players`, `CollectionService`, `TweenService`, `Lighting`, `Debris`,
 `HttpService`, `ReplicatedStorage`, `ServerStorage`, `ServerScriptService`, `StarterPlayer`, `StarterGui`,
-`MaterialService`, `TextChatService` (its commands, see below), `ScriptContext` and `DataStoreService`
+`MaterialService`, `TextChatService` (its commands, see below), `ScriptContext`, `SoundService`
+([below](#sound-soundgroup-and-soundservice)) and `DataStoreService`
 ([below](#datastoreservice-and-leaderstats); a DataModel the composition did not attach it to names the missing
-attachment). `ContextActionService` (MVP7) and `SoundService` (MVP17) are planned; `PathfindingService` and `MarketplaceService` are not planned. They and twenty-seven more real Roblox services (`Teams`, `PhysicsService`,
+attachment). `ContextActionService` (MVP7) is planned; `PathfindingService` and `MarketplaceService` are not planned. They and twenty-seven more real Roblox services (`Teams`, `PhysicsService`,
 `ReplicatedFirst`, `TeleportService`, `BadgeService`, …) resolve to loud placeholders whose first
 member access raises `NOT_IMPLEMENTED` with a workaround, instead of the false `X is not a valid
 Service name`; `GetService("")` is `UNKNOWN_SERVICE`.
@@ -210,7 +213,10 @@ answers the click, and of several the deepest one above the part wins. `MaxActiv
 the clicked part; without a character it falls back to the camera distance (OURS — Roblox has no
 characterless clicker). A host that runs several local players names the one at this screen with
 `LuaCsRbxApiBindings.LocalPlayerActorId`; otherwise the player whose character the camera follows,
-or the only connected player, is the clicker.
+or the only connected player, is the clicker. `MouseHoverEnter(player)` fires once when the pointer comes onto a
+part the detector owns (within `MaxActivationDistance`), `MouseHoverLeave(player)` once when it leaves, moves out of
+range or onto host UI; a detector nobody listens to is not tracked. While the mouse is locked to the centre (first
+person) clicks and hovers are picked at the centre of the view, where the crosshair is, as Roblox's `Mouse.Hit` is.
 
 `CollectionService.TagAdded`/`TagRemoved` fire when a tag enters use inside the DataModel (its first
 holder in the tree) and when it leaves use (its last holder in the tree loses the tag, leaves the tree
@@ -567,6 +573,23 @@ Drawing goes through the replaceable `IRbxSelectionBoxBackend`: `RbxSelectionBox
 `RbxWorldHost` ticks it in `LateUpdate` with `UnityRbxSelectionBoxBackend` (twelve unlit edge boxes and a face
 box, no colliders). Deviation (DEV candidate): the box around a `Model` is aligned to the world axes (DEV-87).
 
+### `Highlight`
+
+`Instance.new("Highlight")` (an `Instance`, no `Ui` capability) outlines the silhouette of its object in
+`OutlineColor` (default white) at `OutlineTransparency` (default 0) and tints it with `FillColor` (default red) at
+`FillTransparency` (default 0.5). The object is `Adornee`, or the Highlight's parent while `Adornee` is nil, as in
+Roblox; a `Model` (or any instance) is drawn as all of the parts below it, one silhouette. `DepthMode`
+(`Enum.HighlightDepthMode`, default `AlwaysOnTop`) draws it through walls, `Occluded` hides it behind them;
+`Enabled` switches it. It is drawn while it sits in the Workspace or a `PlayerGui` and its object is in the
+Workspace, from the frame after a change; as in Roblox, at most 255 Highlights draw at once (every live one takes a
+slot in creation order, a disabled one too). A world-owned Highlight is saved with the world (the adornee by id).
+Drawing goes through the replaceable `IRbxHighlightBackend`: `RbxHighlightReconciler` keeps them and `RbxWorldHost`
+ticks it in `LateUpdate` with `UnityRbxHighlightBackend`, which draws each part's own mesh twice with
+`Graphics.RenderMesh` and the `CoreAI/Rbx/Highlight` stencil shader (a tinted fill, then the mesh grown by three
+screen pixels outside the fill: the ring). Where that shader is not supported, or with **Highlight Wireframe** on the
+world host, it draws twelve edges of each part's box in the outline colour instead. No object, no collider: rays,
+clicks and the camera never stop on it.
+
 ### Roblox GUI
 
 `ScreenGui`, `Frame`, `TextLabel`, `TextButton`, `TextBox`, `ImageLabel`, `ImageButton`, `ScrollingFrame`,
@@ -630,6 +653,92 @@ point light on a child of the part's GameObject (`UnityRbxLightBackend`, replace
 lights to the camera on: 64 on desktop (the PC renderer is Forward+, clustered per tile), 8 in a WebGL player
 (the Mobile renderer is plain Forward, 4 additional lights per object, 32 visible). When the budget switches
 lights off, the world log says so once, with the counts. `Brightness`, `Color` and `Range` are tweenable.
+
+### `Sound`, `SoundGroup` and `SoundService`
+
+```lua
+local SoundService = game:GetService("SoundService")
+print(table.concat(SoundService:GetSoundIds(), ", "))  -- the sounds this game ships
+
+local coin = Instance.new("Sound")
+coin.SoundId = "coin"            -- a key from GetSoundIds(), or a path under a Resources folder
+coin.Parent = workspace.Coin     -- in a part: heard from the part; anywhere else in game: heard everywhere
+if not coin.IsLoaded then coin.Loaded:Wait() end
+coin:Play()
+coin.Ended:Wait()
+```
+
+`Instance.new("Sound")` has the dump's defaults: `SoundId` empty, `Volume` 0.5 (held to [0, 10]), `Looped` false,
+`PlaybackSpeed` 1, `TimePosition` 0, `TimeLength` 0 until loaded, `Playing` false, read-only `IsPlaying`, `IsPaused`
+and `IsLoaded`, `RollOffMinDistance` 10, `RollOffMaxDistance` 10000, `RollOffMode` `Inverse`, `PlayOnRemove` false and
+`SoundGroup` nil. `Play()` starts from the last `TimePosition` a script set (0 if none) and fires `Played`; `Stop()`
+returns to 0 and fires `Stopped`; `Pause()`/`Resume()` keep the playhead and fire `Paused`/`Resumed`; writing
+`Playing` continues or holds without either event. A sound that is not looped stops at its end, returns to 0 and
+fires `Ended`; a looped one fires `DidLoop(soundId, timesLooped)` and never `Ended`. Every event passes the
+`SoundId`. Destroying a playing sound silences it and fires no `Stopped`; with `PlayOnRemove` a destroyed or
+unparented sound plays once more as a copy. `SoundService:PlayLocalSound(sound)` plays a once-only copy (never
+looped) and leaves the original alone. A `SoundGroup` multiplies the volume of each sound whose `SoundGroup` is
+set to it. `Volume`, `PlaybackSpeed`, `TimePosition` and the roll-off distances are tweenable (fade out with
+`TweenService:Create(sound, TweenInfo.new(1), {Volume = 0})`).
+
+Where a sound comes from (DEV-134): `SoundId` names a key the game registered (`RbxWorldHost.Sounds.Register(key,
+clip)` or `RbxWorldHost.RegisterSound`) or a path under a `Resources` folder without its extension
+(`"Sounds/click"`). CoreAI ships no sounds and downloads nothing: a `rbxassetid://` id loads only if the game
+registered that exact id. An id that loads nothing behaves as a failed Roblox load (`IsLoaded` stays false,
+`TimeLength` 0, `Loaded` never fires) and the mod log says so once per id, with the fix. `GetSoundIds()` (a CoreAI
+extension, DEV-133) lists the registered keys. A sound outside `game` (parent nil) neither loads nor plays, and the
+mod is told once.
+
+When a sound is heard (DEV-135, DEV-136): the clock is the game's, so `TimePosition`, `DidLoop` and `Ended` keep
+time whether or not anything is heard. In a WebGL page the browser keeps audio off until the player's first click
+or key press: until then sounds play silently on their timelines, and afterwards each one is heard from where its
+clock is. `RbxWorldHost` plays the sounds through pooled `AudioSource`s (`UnityRbxAudioBackend`, replaceable through
+`IRbxAudioBackend`), reconciled once a frame by `RbxSoundReconciler`: a sound whose parent is a part in the
+Workspace is heard from that part with the `RollOffMode` curve against the camera; any other sound is heard
+everywhere at its volume. The loudest 32 sounds are heard on desktop and 16 on WebGL. A volume above 1 plays at the
+clip's full level, a speed above 3 sounds at 3, and there is no Doppler, no reverb and no occlusion. Not
+implemented: `PlaybackRegion`/`LoopRegion`, `PlaybackLoudness`, the listener properties (the listener is the
+camera), `SoundEffect`s, the audio-instance API (`AudioPlayer`, `Wire`). Not saved yet: a saved world keeps its sounds,
+but their properties return to the defaults when it loads.
+
+### `ParticleEmitter`
+
+```lua
+local sparks = Instance.new("ParticleEmitter")
+sparks.Rate = 0                                   -- only bursts
+sparks.Lifetime = NumberRange.new(0.8, 1.2)
+sparks.Speed = NumberRange.new(8, 12)
+sparks.SpreadAngle = Vector2.new(360, 360)        -- every direction
+sparks.Color = ColorSequence.new(Color3.fromRGB(255, 210, 60), Color3.fromRGB(255, 60, 20))
+sparks.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(1, 0) })
+sparks.Transparency = NumberSequence.new(0, 1)
+sparks.Acceleration = Vector3.new(0, -20, 0)
+sparks.Parent = workspace.Anvil                   -- emits from the part's box
+sparks:Emit(40)
+```
+
+`Instance.new("ParticleEmitter")` has the dump's defaults: `Enabled` true, `Rate` 20 a second, `Lifetime`
+`NumberRange.new(5, 10)`, `Speed` `NumberRange.new(5)`, `Color` white, `Size` 1, `Transparency` 0, `Texture`
+`rbxasset://textures/particles/sparkles_main.dds`, `SpreadAngle` (0, 0), `Acceleration` (0, 0, 0) and `EmissionDirection`
+`Top`. `Emit(count)` (16 by default, at most 1,000 at once) bursts on the next frame and `Clear()` removes the live
+particles. It emits only while it is the direct child of a part in the Workspace: particles start anywhere in the
+part's box, leave by the `EmissionDirection` face, then fly in world space; elsewhere, or over the budget, it draws
+nothing and drops `Emit`/`Clear`. `Rate` and `Acceleration` are tweenable.
+
+The datatypes are real: `NumberRange.new(min[, max])` (`Min`, `Max`), `NumberSequence.new(n)`, `.new(n0, n1)` or
+`.new({NumberSequenceKeypoint.new(time, value[, envelope]), ...})` (`Keypoints`), `ColorSequence.new(c)`, `.new(c0, c1)`
+or `.new({ColorSequenceKeypoint.new(time, color), ...})`. A keypoint list needs two to 20 keypoints in time order, the
+first at 0 and the last at 1. They are immutable, compare by value and print as the dump does (`"5 10 "`). A
+`ColorSequence` property refuses a bare `Color3` with the fix to wrap it.
+
+`Texture` follows the sound rule: a key the game registered (`RbxWorldHost.ParticleBackend.RegisterTexture`) or a path
+under a `Resources` folder; an empty, Roblox or unresolved id, Roblox's default included, draws CoreAI's soft dot.
+`RbxWorldHost` draws each emitter as a pooled Unity `ParticleSystem` on its part (`UnityRbxParticleBackend`, replaceable
+through `IRbxParticleBackend`), reconciled once a frame by `RbxParticleReconciler`: the nearest 64 emitters of at most
+1,000 live particles each on desktop, 16 of 200 on WebGL (DEV-139). `SpreadAngle` is drawn as a random-direction share
+(the larger angle over 180 degrees), keypoint envelopes are ignored, and a gradient keeps at most 8 keys. Not
+implemented: `LightEmission`, `LightInfluence`, `Brightness`, `Drag`, `LockedToPart`, `Rotation`/`RotSpeed`, the
+shapes and flipbooks, `Squash`, `TimeScale`, `ZOffset`, `FastForward`. Not saved yet, as for sounds.
 
 ### Luau `math` extensions
 

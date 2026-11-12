@@ -50,9 +50,8 @@ namespace CoreAI.Vision
     /// <summary>
     /// Renders a camera into a pooled offscreen target and returns the encoded frame. The camera's own target
     /// texture and the active render texture are restored, and its transform is never touched. Every camera tool
-    /// captures through this one seam: <see cref="AgentCameraService"/> (<c>camera_capture</c>) and
-    /// <c>CoreAI.Infrastructure.World.CameraLlmTool</c> (<c>capture_camera</c>). Replace it to change how frames
-    /// are read back; the default is <see cref="CameraFrameReadback.CreateDefault"/>.
+    /// captures through this one seam: <see cref="AgentCameraService"/> (<c>camera_capture</c>). Replace it to
+    /// change how frames are read back; the default is <see cref="CameraFrameReadback.CreateDefault"/>.
     /// </summary>
     public interface ICameraFrameReadback
     {

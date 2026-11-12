@@ -192,6 +192,123 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             Assert.IsFalse(RbxWorldStateMark.Of(world.Registry, 0).HasSameRevisionsAs(recoloured));
         }
 
+        /// <summary>A Highlight saves, loads and saves to the same bytes, and restores every property without a revision advance.</summary>
+        [Test]
+        public void Highlight_RoundTripsByteIdentically_AndRestoresEveryProperty()
+        {
+            AdornedWorld world = AdornedWorld.Create();
+            RbxHighlight glow = world.AddHighlight(world.Part);
+            RbxHighlight parentGlow = world.AddHighlight(null, world.Part);
+
+            byte[] package = RbxWorldPackageSerializer.WritePackage(world.Capture());
+            RbxWorldPackagePayload read = RbxWorldPackageSerializer.ReadPackage(package);
+            CollectionAssert.AreEqual(package, RbxWorldPackageSerializer.WritePackage(read));
+            RbxWorldPackageRestoreResult restored = RbxWorldPackageSerializer.RestoreFresh(read);
+            RbxWorldPackagePayload recaptured = RbxWorldPackageSerializer.Capture(new RbxWorldPackageCaptureContext(
+                restored.Registry, restored.Game, restored.PartSink, WorldPackageTestWorlds.NewSettingsFor(WorldId),
+                capturedAtUtc: CapturedAtUtc));
+
+            CollectionAssert.AreEqual(package, RbxWorldPackageSerializer.WritePackage(recaptured),
+                "the restore reproduces the properties and the saved revisions");
+            Assert.IsTrue(restored.Registry.TryGet(glow.Id, out RbxInstance back));
+            RbxHighlight highlight = (RbxHighlight)back;
+            Assert.AreEqual(world.Part.Id, highlight.Adornee.Id);
+            Assert.AreEqual(RbxHighlightDepthMode.Occluded, highlight.DepthMode);
+            Assert.IsFalse(highlight.Enabled);
+            Assert.AreEqual(new RbxColor3(0f, 1f, 0f), highlight.FillColor);
+            Assert.AreEqual(0.25f, highlight.FillTransparency);
+            Assert.AreEqual(new RbxColor3(0f, 0f, 1f), highlight.OutlineColor);
+            Assert.AreEqual(0.5f, highlight.OutlineTransparency);
+            Assert.IsTrue(restored.Registry.TryGet(parentGlow.Id, out RbxInstance parentBack));
+            Assert.IsNull(((RbxHighlight)parentBack).Adornee, "a nil adornee stays nil");
+            Assert.AreEqual(world.Part.Id, ((RbxHighlight)parentBack).EffectiveAdornee.Id, "and highlights its parent");
+            JObject json = WorldJson(package);
+            Assert.AreEqual("Occluded", (string)FindInstance(json, glow.Id.Value)["highlight"]["depth_mode"]);
+            Assert.AreEqual("0", (string)FindInstance(json, parentGlow.Id.Value)["highlight"]["adornee_id"]);
+            restored.Game.Destroy();
+        }
+
+        /// <summary>
+        /// Twin: a world without a Highlight writes no key, and a package written before the block existed (a Highlight
+        /// node without one) loads with the class defaults.
+        /// </summary>
+        [Test]
+        public void Highlight_AbsentBlock_WritesNoKey_AndAnOlderPackageLoadsWithTheDefaults()
+        {
+            string text = Encoding.UTF8.GetString(EntryBytes(
+                RbxWorldPackageSerializer.WritePackage(AdornedWorld.Create().Capture()), RbxWorldPackageSerializer.WorldEntryName));
+            StringAssert.DoesNotContain("\"highlight\"", text);
+
+            AdornedWorld world = AdornedWorld.Create();
+            RbxHighlight glow = world.AddHighlight(world.Part);
+            byte[] package = RbxWorldPackageSerializer.WritePackage(world.Capture());
+            JObject json = WorldJson(package);
+            ((JObject)FindInstance(json, glow.Id.Value)).Remove("highlight");
+
+            RbxWorldPackagePayload read = RbxWorldPackageSerializer.ReadPackage(ReplaceWorld(package, json));
+            Assert.AreEqual(0, read.Highlights.Count);
+            RbxWorldPackageRestoreResult restored = RbxWorldPackageSerializer.RestoreFresh(read);
+            Assert.IsTrue(restored.Registry.TryGet(glow.Id, out RbxInstance back));
+            RbxHighlight highlight = (RbxHighlight)back;
+            Assert.IsNull(highlight.Adornee);
+            Assert.IsTrue(highlight.Enabled);
+            Assert.AreEqual(RbxHighlightDepthMode.AlwaysOnTop, highlight.DepthMode);
+            Assert.AreEqual(RbxHighlight.DefaultFillColor, highlight.FillColor);
+            restored.Game.Destroy();
+        }
+
+        /// <summary>A Highlight of a mod's own part is captured with a nil adornee and one diagnostic; a foreign or broken block is refused.</summary>
+        [Test]
+        public void Highlight_OfAModsOwnPart_IsCapturedAsNil_AndABrokenBlockIsRefused()
+        {
+            AdornedWorld world = AdornedWorld.Create();
+            RbxInstance modPart = world.Registry.Create("Part", "some-mod");
+            PartProperties properties = PartProperties.CreateDefault();
+            world.Sink.SetPartProperties(modPart.Id, in properties);
+            modPart.Parent = world.Registry.WorldRoot;
+            RbxHighlight onModPart = world.AddHighlight(modPart);
+            RbxWorldPackagePayload payload = world.Capture();
+            Assert.AreEqual(0UL, payload.Highlights[onModPart.Id].AdorneeId);
+            Assert.AreEqual(1, CountDiagnostics(payload, onModPart.Id.Value, "Adornee", "mod-ephemeral"));
+
+            AdornedWorld clean = AdornedWorld.Create();
+            RbxHighlight glow = clean.AddHighlight(clean.Part);
+            byte[] package = RbxWorldPackageSerializer.WritePackage(clean.Capture());
+            AssertRefused(package, json => FindInstance(json, glow.Id.Value)["highlight"]["depth_mode"] = "Glowing", "depth_mode");
+            AssertRefused(package, json => ((JObject)FindInstance(json, glow.Id.Value)["highlight"]).Remove("fill_transparency"),
+                "fill_transparency");
+            AssertRefused(package, json => FindInstance(json, clean.Part.Id.Value)["highlight"] =
+                FindInstance(json, glow.Id.Value)["highlight"].DeepClone(), "not a Highlight");
+            Assert.IsNotNull(RbxWorldPackageSerializer.ReadPackage(package), "twin: the package as written reads");
+        }
+
+        /// <summary>Drift guard: every public property a script sets on a Highlight is stored, and a setter is an undoable change.</summary>
+        [Test]
+        public void HighlightBlock_CoversEveryPublicSettableProperty()
+        {
+            HashSet<string> stored = new(StringComparer.Ordinal)
+            {
+                "Adornee", "DepthMode", "Enabled", "FillColor", "FillTransparency", "OutlineColor", "OutlineTransparency"
+            };
+            List<string> uncovered = new();
+            foreach (PropertyInfo property in typeof(RbxHighlight).GetProperties(BindingFlags.Public | BindingFlags.Instance
+                                                                                 | BindingFlags.DeclaredOnly))
+            {
+                if (property.SetMethod != null && property.SetMethod.IsPublic && !stored.Contains(property.Name))
+                {
+                    uncovered.Add("RbxHighlight." + property.Name);
+                }
+            }
+
+            CollectionAssert.IsEmpty(uncovered, "properties a saved world would lose");
+            AdornedWorld world = AdornedWorld.Create();
+            RbxHighlight glow = world.AddHighlight(world.Part);
+            RbxWorldStateMark start = RbxWorldStateMark.Of(world.Registry, 0);
+            glow.FillColor = new RbxColor3(1f, 1f, 1f);
+            Assert.IsFalse(RbxWorldStateMark.Of(world.Registry, 0).HasSameRevisionsAs(start),
+                "a recolour is an undoable AI change");
+        }
+
         private static int CountDiagnostics(RbxWorldPackagePayload payload, ulong instanceId, string member, string reason)
         {
             int count = 0;
@@ -308,6 +425,25 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                 box.Visible = false;
                 box.Parent = Registry.WorldRoot;
                 return box;
+            }
+
+            public RbxHighlight AddHighlight(RbxInstance adornee, RbxInstance parent = null)
+            {
+                RbxHighlight highlight = (RbxHighlight)Registry.Create("Highlight", originTag: "console:build");
+                highlight.Name = "Glow";
+                highlight.Adornee = adornee;
+                if (adornee != null)
+                {
+                    highlight.DepthMode = RbxHighlightDepthMode.Occluded;
+                    highlight.Enabled = false;
+                    highlight.FillColor = new RbxColor3(0f, 1f, 0f);
+                    highlight.FillTransparency = 0.25f;
+                    highlight.OutlineColor = new RbxColor3(0f, 0f, 1f);
+                    highlight.OutlineTransparency = 0.5f;
+                }
+
+                highlight.Parent = parent ?? Registry.WorldRoot;
+                return highlight;
             }
 
             public RbxWorldPackagePayload Capture()

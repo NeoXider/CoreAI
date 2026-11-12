@@ -421,6 +421,20 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
+        /// Called by a tool loop after it removed old tool exchanges from the history
+        /// (<see cref="ToolCallHistoryTrimmer.Trim"/> returned more than zero): the results of earlier reads may be
+        /// gone from what the model sees, so an identical read runs again instead of being answered "use its
+        /// earlier result". Echoed calls that change state stay suppressed.
+        /// </summary>
+        public void OnToolHistoryTrimmed(int removedMessages)
+        {
+            if (removedMessages > 0)
+            {
+                ForgetReadSignatures();
+            }
+        }
+
+        /// <summary>
         /// Forgets the signatures of the reads registered so far; called when a turn's call that changes state
         /// succeeded, because their earlier results may no longer be true.
         /// </summary>
@@ -760,7 +774,7 @@ namespace CoreAI.Infrastructure.Llm
             if (repairedFc == null)
             {
                 // Name not found even after case-insensitive search
-                string unknown =
+                string unknown = DescribeUnofferedSkillProxyCall(fc) ??
                     $"Error: Unknown tool '{fc.Name}'. Available tools: [{string.Join(", ", _toolNames.CallableNames)}]";
                 // The failure event is published for a model-invented name too: a subscriber expecting
                 // LlmToolCallFailed "including for a missing tool" would otherwise never see it, even
@@ -832,7 +846,29 @@ namespace CoreAI.Infrastructure.Llm
                 _eventPublisher.PublishStarted(info);
                 Stopwatch sw = Stopwatch.StartNew();
 
-                string validationError = ValidateRequiredArguments(fc, aiFunc);
+                MEAI.AIFunctionArguments args = null;
+                Dictionary<string, object> normalized = null;
+                LlmToolArgumentRepair.Outcome repair = null;
+                if (fc.Arguments != null)
+                {
+                    // WHY: shared chokepoint (LlmToolArgumentNormalizer) for ALL tool calls
+                    // (native, text-extracted, function-call syntax). A copy keeps the raw
+                    // tokens on FunctionCallContent for tracing.
+                    normalized = LlmToolArgumentNormalizer.NormalizedCopy(fc.Arguments);
+
+                    // WHY only for the raw AIFunction path: a delegated call_skill_tool target is repaired
+                    // against its own function in TryResolveInvocation, and the proxy's two strings need none.
+                    if (resolved.Invocation == null)
+                    {
+                        repair = LlmToolArgumentRepair.Repair(aiFunc, normalized);
+                    }
+
+                    args = new MEAI.AIFunctionArguments(normalized);
+                }
+
+                string validationError = !string.IsNullOrEmpty(repair?.Refusal)
+                    ? "Error: " + repair.Refusal
+                    : ValidateRequiredArguments(fc.Name, aiFunc, normalized, repair?.Ignored);
                 if (!string.IsNullOrEmpty(validationError))
                 {
                     sw.Stop();
@@ -848,18 +884,6 @@ namespace CoreAI.Infrastructure.Llm
                     };
                 }
 
-                MEAI.AIFunctionArguments args = null;
-                Dictionary<string, object> normalized = null;
-                if (fc.Arguments != null)
-                {
-                    // WHY: shared chokepoint (LlmToolArgumentNormalizer) for ALL tool calls
-                    // (native, text-extracted, function-call syntax). A copy keeps the raw
-                    // tokens on FunctionCallContent for tracing.
-                    normalized = LlmToolArgumentNormalizer.NormalizedCopy(fc.Arguments);
-
-                    args = new MEAI.AIFunctionArguments(normalized);
-                }
-
                 // WHY: proves a binding failure STRUCTURALLY, before InvokeResolvedAsync is ever called, so
                 // only THIS failure may be tagged "arg-conversion" (LlmToolArgumentPreflight). Runs only
                 // for the raw AIFunction path (resolved.Invocation == null): here aiFunc is the proxy's
@@ -872,13 +896,10 @@ namespace CoreAI.Infrastructure.Llm
                         out string bindingError))
                 {
                     sw.Stop();
-                    // WHY the schema hint is appended here too: the model's only way out of a rejected
-                    // call is to retry with arguments that fit, and the MEAI-side rejection this
-                    // preflight now pre-empts always carried that hint. Dropping it would make the
-                    // stronger check the less useful one.
-                    string schemaHint = BuildSchemaRetryHint(fc.Name, aiFunc);
-                    string bindError = "Error: " + bindingError
-                        + (string.IsNullOrEmpty(schemaHint) ? "" : " " + schemaHint);
+                    // WHY a sentence instead of the schema: the finding already names the argument, what it must
+                    // be and what was sent, which is all a retry needs.
+                    string bindError = "Error: " + bindingError + " The tool was not run; send the call again with " +
+                                       "a valid value.";
                     _logger.Warn($"[ToolPolicy] {fc.Name} rejected: {bindingError}", LogTag.Llm);
                     _eventPublisher.PublishFailed(info, bindError, sw.Elapsed.TotalMilliseconds);
                     AddTrace(new LlmToolCallTrace(fc.Name ?? "", false, sw.Elapsed.TotalMilliseconds,
@@ -998,6 +1019,12 @@ namespace CoreAI.Infrastructure.Llm
                     resultText = imageResult.Text;
                 }
 
+                if (repair != null && repair.Ignored.Count > 0)
+                {
+                    resultText = WithArgumentNote(resultText,
+                        LlmToolArgumentRepair.DescribeIgnored(fc.Name, repair.Ignored));
+                }
+
                 string diagnosticResultText = resultText;
                 int maxResultChars = _settings.MaxToolResultChars;
                 if (maxResultChars > 0 && resultText.Length > maxResultChars)
@@ -1006,8 +1033,10 @@ namespace CoreAI.Infrastructure.Llm
                     // Truncation is made visible to the model with an explicit marker rather than silently:
                     // without it the cut-off JSON reads as complete. The success/failure verdict was
                     // already taken from the FULL text above.
+                    // WHY the note comes first as well: a model reads the cut JSON before it reaches the end
+                    // marker, and took the half it had for the whole.
                     int shown = char.IsHighSurrogate(resultText[maxResultChars - 1]) ? maxResultChars - 1 : maxResultChars;
-                    resultText = resultText.Substring(0, shown) +
+                    resultText = CutResultNote(resolved, fc, shown, originalLen) + "\n" + resultText.Substring(0, shown) +
                                  $"\n{TruncatedResultMarker}{originalLen} chars total -> {shown} shown]";
                     diagnosticResultText = resultText;
                     _logger.Info(
@@ -1078,7 +1107,7 @@ namespace CoreAI.Infrastructure.Llm
                 // The schema hint is appended based on the SHAPE of the exception - it is text for the
                 // model only, so that it re-issues the arguments instead of guessing from an opaque
                 // message. It does not affect the trace source below - see LooksLikeArgumentConversionError.
-                string errorMessage = ex.Message;
+                string errorMessage = DescribeReflectionConversion(ex) ?? ex.Message;
                 if (LooksLikeArgumentConversionError(ex))
                 {
                     string schemaHint = BuildSchemaRetryHint(fc.Name, aiFunc);
@@ -1105,6 +1134,78 @@ namespace CoreAI.Infrastructure.Llm
                     Succeeded = false
                 };
             }
+        }
+
+        /// <summary>
+        /// The refusal of a <c>call_skill_tool</c> call on a role that is not offered it (its skills have no tools):
+        /// names the direct tool the call wraps when the role has it; null for any other unknown name.
+        /// </summary>
+        private string DescribeUnofferedSkillProxyCall(MEAI.FunctionCallContent fc)
+        {
+            if (!string.Equals(fc?.Name, "call_skill_tool", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            string wrapped = fc.Arguments != null && fc.Arguments.TryGetValue("tool_name", out object raw)
+                ? LlmToolArgumentNormalizer.NormalizeValue(raw as JToken)?.ToString() ?? raw?.ToString()
+                : null;
+            string direct = string.IsNullOrWhiteSpace(wrapped) ? null : GetCanonicalToolName(wrapped.Trim(), out _, out _);
+            return "Error: " + CallSkillToolLlmTool.DescribeNotOffered(direct);
+        }
+
+        /// <summary>What a cut result says first when its tool gives no advice of its own.</summary>
+        internal const string GenericCutAdvice =
+            "Do not repeat this call; ask for less instead (a narrower filter, a range or a smaller count).";
+
+        /// <summary>
+        /// The line a cut result starts with: how much of it is shown, and what to ask for instead - the tool's own
+        /// advice (<see cref="ILlmToolResultCutAdvice"/>) when it gives one, else <see cref="GenericCutAdvice"/>.
+        /// </summary>
+        private string CutResultNote(ResolvedCall resolved, MEAI.FunctionCallContent fc, int shown, int total)
+        {
+            string advice = null;
+            if (resolved.Metadata is ILlmToolResultCutAdvice adviser)
+            {
+                try
+                {
+                    advice = adviser.AdviseOnCut(resolved.Invocation?.Name ?? fc.Name,
+                        resolved.Invocation?.Arguments ?? fc.Arguments);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn($"[ToolPolicy] {fc.Name}: AdviseOnCut threw, the generic advice is used: {ex.Message}",
+                        LogTag.Llm);
+                }
+            }
+
+            return $"[Result cut: only the first {shown} of {total} characters are below; the rest is missing. " +
+                   (string.IsNullOrWhiteSpace(advice) ? GenericCutAdvice : advice.Trim()) + "]";
+        }
+
+        /// <summary>
+        /// <paramref name="resultText"/> with <paramref name="note"/> added: as an <c>argument_note</c> field of a JSON
+        /// object result, else as a last line.
+        /// </summary>
+        internal static string WithArgumentNote(string resultText, string note)
+        {
+            if (resultText != null && resultText.TrimStart().StartsWith("{", StringComparison.Ordinal))
+            {
+                try
+                {
+                    JObject parsed = JObject.Parse(resultText);
+                    parsed["argument_note"] = parsed["argument_note"] is JValue { Type: JTokenType.String } existing
+                        ? existing.Value<string>() + " " + note
+                        : note;
+                    return parsed.ToString(Formatting.None);
+                }
+                catch (JsonReaderException)
+                {
+                    // WHY: text that merely starts with a brace takes the note as a last line below.
+                }
+            }
+
+            return (resultText ?? "") + "\nNote: " + note;
         }
 
         private static async Task<object> InvokeResolvedAsync(ResolvedCall resolved,
@@ -1154,15 +1255,66 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         /// <summary>
-        /// Builds the same compact-schema retry suffix the missing-required-argument path emits,
-        /// or an empty string when no meaningful schema is known for the tool.
+        /// The retry suffix of a call that failed on an argument's shape: "Expected parameters: a (string,
+        /// required), b (integer)." from the schema the binder enforces, or an empty string when no meaningful
+        /// schema is known for the tool.
         /// </summary>
+        /// <remarks>
+        /// WHY a list instead of the schema: the schema repeated every description (up to 1,200 characters) to a
+        /// model whose fix is one argument's name or type.
+        /// </remarks>
         private string BuildSchemaRetryHint(string toolName, MEAI.AIFunction aiFunc)
         {
-            string schema = ResolveSchemaForHint(toolName, aiFunc);
-            return string.IsNullOrEmpty(schema)
-                ? ""
-                : $"Retry the same tool call with JSON arguments matching this schema: {schema}";
+            string parameters = LlmToolArgumentRepair.ParameterList(ResolveRawSchemaForHint(toolName, aiFunc));
+            return parameters.Length == 0 ? "" : $"Expected parameters: {parameters}.";
+        }
+
+        /// <summary>
+        /// The text of a reflection binding failure ("Object of type 'System.String' cannot be converted to type
+        /// 'System.Boolean'") in words a model can act on; null for any other exception.
+        /// </summary>
+        internal static string DescribeReflectionConversion(Exception ex)
+        {
+            for (Exception current = ex; current != null; current = current.InnerException)
+            {
+                if (!(current is ArgumentException) || current.Message == null)
+                {
+                    continue;
+                }
+
+                System.Text.RegularExpressions.Match match = System.Text.RegularExpressions.Regex.Match(
+                    current.Message, @"Object of type '([^']+)' cannot be converted to type '([^']+)'");
+                if (match.Success)
+                {
+                    return "An argument was sent as " + ClrKind(match.Groups[1].Value) + " where " +
+                           ClrKind(match.Groups[2].Value) + " was expected, so the tool could not take it.";
+                }
+            }
+
+            return null;
+        }
+
+        private static string ClrKind(string typeName)
+        {
+            switch (typeName)
+            {
+                case "System.String":
+                    return "text";
+                case "System.Boolean":
+                    return "true or false";
+                case "System.Int32":
+                case "System.Int64":
+                case "System.Int16":
+                case "System.Byte":
+                    return "a whole number";
+                case "System.Double":
+                case "System.Single":
+                case "System.Decimal":
+                    return "a number";
+                default:
+                    int dot = typeName.LastIndexOf('.');
+                    return "a value of type " + (dot >= 0 ? typeName.Substring(dot + 1) : typeName);
+            }
         }
 
         /// <summary>
@@ -1175,7 +1327,7 @@ namespace CoreAI.Infrastructure.Llm
         /// authoritative one - and a plain tool may never have declared a schema at all. In both cases the
         /// function's schema is the one the binder enforces, so it is the one a retry must match.
         /// </remarks>
-        private string ResolveSchemaForHint(string toolName, MEAI.AIFunction aiFunc)
+        private string ResolveRawSchemaForHint(string toolName, MEAI.AIFunction aiFunc)
         {
             // WHY: looked up by registered name only, not GetCanonicalToolName - a wrapper's metadata schema
             // describes the wrapper, never one of its functions, so a function call falls through to its own.
@@ -1183,12 +1335,10 @@ namespace CoreAI.Infrastructure.Llm
                 string.Equals(t.Name, toolName, StringComparison.Ordinal));
             if (IsMeaningfulSchema(tool?.ParametersSchema))
             {
-                return CompactSchema(tool.ParametersSchema, SchemaHintMaxChars, toolName, _logger);
+                return tool.ParametersSchema;
             }
 
-            return FunctionDeclaresProperties(aiFunc)
-                ? CompactSchema(aiFunc.JsonSchema.GetRawText(), SchemaHintMaxChars, toolName, _logger)
-                : "";
+            return FunctionDeclaresProperties(aiFunc) ? aiFunc.JsonSchema.GetRawText() : "";
         }
 
         private static bool IsMeaningfulSchema(string schema)
@@ -1251,11 +1401,12 @@ namespace CoreAI.Infrastructure.Llm
         /// into a schema-validation refusal that provably never entered the body. The metadata schema is
         /// still read too, so nothing it required before is required any less.
         /// </remarks>
-        private string ValidateRequiredArguments(MEAI.FunctionCallContent fc, MEAI.AIFunction aiFunc)
+        private string ValidateRequiredArguments(string toolName, MEAI.AIFunction aiFunc,
+            IDictionary<string, object> arguments, IReadOnlyList<string> ignored)
         {
-            // WHY: looked up by registered name only, for the reason given in ResolveSchemaForHint.
+            // WHY: looked up by registered name only, for the reason given in ResolveRawSchemaForHint.
             ILlmTool tool = _originalTools.FirstOrDefault(t =>
-                string.Equals(t.Name, fc?.Name, StringComparison.Ordinal));
+                string.Equals(t.Name, toolName, StringComparison.Ordinal));
             List<string> required = IsMeaningfulSchema(tool?.ParametersSchema)
                 ? LlmToolRequiredArguments.Read(tool.ParametersSchema)
                 : new List<string>();
@@ -1275,17 +1426,17 @@ namespace CoreAI.Infrastructure.Llm
                 return "";
             }
 
-            List<string> missing = LlmToolRequiredArguments.FindMissing(required, fc?.Arguments);
+            List<string> missing = LlmToolRequiredArguments.FindMissing(required, arguments);
             if (missing.Count == 0)
             {
                 return "";
             }
 
-            string schema = ResolveSchemaForHint(fc?.Name, aiFunc);
-            string hint = string.IsNullOrEmpty(schema)
-                ? ""
-                : $" Retry the same tool call with JSON arguments matching this schema: {schema}";
-            return $"Error: Tool '{fc?.Name}' is missing required argument(s): {string.Join(", ", missing)}.{hint}";
+            string refusal = "Error: " + LlmToolArgumentRepair.DescribeMissing(toolName,
+                ResolveRawSchemaForHint(toolName, aiFunc), missing);
+            return ignored == null || ignored.Count == 0
+                ? refusal
+                : refusal + " Not its argument(s): " + string.Join(", ", ignored) + ".";
         }
 
         /// <summary>Longest parameter schema a retry hint carries.</summary>

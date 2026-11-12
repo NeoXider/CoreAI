@@ -199,7 +199,7 @@ namespace CoreAI.Ai
                     LogTag.Memory);
             }
 
-            return SerializeResult(new MemoryResult
+            MemoryResult whole = new()
             {
                 Success = true,
                 Message = string.IsNullOrEmpty(current)
@@ -208,6 +208,57 @@ namespace CoreAI.Ai
                 Version = latestVersion,
                 MemoryLength = current.Length,
                 Memory = current
+            };
+            string serialized = SerializeResult(whole);
+            int cap = _settings?.MaxToolResultChars ?? CoreAISettings.MaxToolResultChars;
+            return cap <= 0 || serialized.Length <= cap ? serialized : ReadPart(whole, current, cap);
+        }
+
+        /// <summary>
+        /// A read of a document longer than one tool result: its longest head that fits, with a message saying it is
+        /// only part of it and which actions change it without rewriting it.
+        /// </summary>
+        /// <remarks>
+        /// WHY: the tool loop cut such a read in the middle of its JSON, and a model that then called write with
+        /// what it had seen replaced the whole document with its first part.
+        /// </remarks>
+        private static string ReadPart(MemoryResult whole, string current, int cap)
+        {
+            int low = 0;
+            int high = current.Length;
+            string best = null;
+            while (low <= high)
+            {
+                int middle = low + (high - low) / 2;
+                int shown = middle > 0 && char.IsHighSurrogate(current[middle - 1]) ? middle - 1 : middle;
+                string candidate = SerializeResult(new MemoryResult
+                {
+                    Success = true,
+                    Message = $"DONE: Memory read, but it is {current.Length} chars and only the first {shown} are " +
+                              "shown. Change it with str_replace, append, insert or delete; write would replace the " +
+                              "whole document with what you send.",
+                    Version = whole.Version,
+                    MemoryLength = current.Length,
+                    Memory = current.Substring(0, shown)
+                });
+                if (candidate.Length <= cap)
+                {
+                    best = candidate;
+                    low = middle + 1;
+                }
+                else
+                {
+                    high = middle - 1;
+                }
+            }
+
+            return best ?? SerializeResult(new MemoryResult
+            {
+                Success = true,
+                Message = $"DONE: Memory is {current.Length} chars, too long to show in one result. Change it with " +
+                          "str_replace, append, insert or delete; never write it from memory of its content.",
+                Version = whole.Version,
+                MemoryLength = current.Length
             });
         }
 
@@ -681,9 +732,15 @@ namespace CoreAI.Ai
             return $"chars {before}->{after} ({(delta >= 0 ? "+" : "")}{delta})";
         }
 
+        private static readonly JsonSerializerSettings WithoutNulls = new()
+        {
+            NullValueHandling = NullValueHandling.Ignore
+        };
+
+        // WHY without nulls: "Error":null and "Memory":null on every call were noise a small model reasoned over.
         private static string SerializeResult(MemoryResult result)
         {
-            return JsonConvert.SerializeObject(result);
+            return JsonConvert.SerializeObject(result, WithoutNulls);
         }
 
 

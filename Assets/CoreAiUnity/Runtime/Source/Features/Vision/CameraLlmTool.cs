@@ -81,9 +81,8 @@ namespace CoreAI.Vision
                 {
                     Name = "camera_capture",
                     Description =
-                        "Take a screenshot of a game camera to SEE the current scene and verify your work. " +
-                        "Returns a compact JSON summary; the image itself is attached for you to look at. " +
-                        "Defaults to your own camera, else the main camera. Does NOT move the camera.",
+                        "Take a screenshot of a game camera to SEE the scene and check your work; the image is " +
+                        "attached for you. Defaults to your own camera, else the main one. Moves no camera.",
                     MarshalResult = LlmToolImageResult.PreserveResult
                 });
 
@@ -95,10 +94,7 @@ namespace CoreAI.Vision
                 {
                     Name = "screenshot",
                     Description =
-                        "Take a screenshot of a game camera to SEE the current scene and verify your work. " +
-                        "Alias for camera_capture: returns a compact JSON summary; the image itself is attached " +
-                        "for you to look at. Defaults to your own camera, else the main camera. Does NOT " +
-                        "move the camera.",
+                        "Take a screenshot to see the scene: the same as camera_capture.",
                     MarshalResult = LlmToolImageResult.PreserveResult
                 });
 
@@ -109,10 +105,9 @@ namespace CoreAI.Vision
                 {
                     Name = "camera_look",
                     Description =
-                        "Move and aim YOUR OWN camera: set a position, a rotation, an object (lookAt) or point " +
-                        "(targetX/Y/Z) to look at, and/or the field of view. Your free camera is created on first " +
-                        "use, starting at the main camera's view; the player's camera never moves. Call " +
-                        "camera_capture afterwards to see the new view."
+                        "Move and aim YOUR OWN camera: position, rotation, an object (lookAt) or point " +
+                        "(targetX/Y/Z) to look at, field of view. Your free camera starts at the main camera's " +
+                        "view; the player's camera never moves. Then call camera_capture."
                 });
 
             yield return AIFunctionFactory.Create(
@@ -122,10 +117,8 @@ namespace CoreAI.Vision
                 {
                     Name = "camera_orbit",
                     Description =
-                        "Circle YOUR OWN camera around an object or point and aim at it. yaw = heading in degrees " +
-                        "(0 looks along +Z, 90 along +X), pitch = degrees above the target (0 level, 89 top-down), " +
-                        "distance in world units. Omitted values keep the current ones; omit the target to keep " +
-                        "circling the last one. Call camera_capture afterwards to see the view."
+                        "Circle YOUR OWN camera around an object or point and aim at it (yaw, pitch, distance); " +
+                        "omitted values and target stay as they were. Then call camera_capture."
                 });
 
             yield return AIFunctionFactory.Create(
@@ -134,8 +127,7 @@ namespace CoreAI.Vision
                 {
                     Name = "camera_list",
                     Description =
-                        "List scene cameras with their name, whether they are the main camera, whether they are " +
-                        "movable by you, whether one is your free camera, and their current pose."
+                        "List cameras: name, main or not, movable by you, your free camera, pose."
                 });
         }
 
@@ -146,10 +138,9 @@ namespace CoreAI.Vision
         /// capture before the image reached the model. Failures are plain JSON strings.
         /// </summary>
         private async Task<object> CaptureCameraAsync(
-            [Description("Camera to capture: empty = your own camera if you have one, else the main camera; " +
-                         "'main'; 'agent' (your own camera); or a name from camera_list.")]
+            [Description("Empty = yours, else the main one; 'main', 'agent' or a name from camera_list.")]
             string cameraName = "",
-            [Description("Long-edge size of the screenshot in pixels (clamped 64..1024). Default 512.")]
+            [Description("Long edge in pixels, 64..1024 (default 512).")]
             int maxSize = 512,
             CancellationToken cancellationToken = default)
         {
@@ -232,30 +223,29 @@ namespace CoreAI.Vision
         }
 
         private async Task<string> LookAsync(
-            [Description("Camera to move: empty or 'agent' = your own camera, 'free' = your free camera. " +
-                         "Other cameras move only if marked agent-controllable.")]
+            [Description("Empty or 'agent' = yours, 'free' = your free camera, else a movable camera's name.")]
             string cameraName = "",
-            [Description("New world position X. Omit to leave unchanged.")]
+            [Description("Position X; omit to keep.")]
             float? posX = null,
-            [Description("New world position Y. Omit to leave unchanged.")]
+            [Description("Position Y; omit to keep.")]
             float? posY = null,
-            [Description("New world position Z. Omit to leave unchanged.")]
+            [Description("Position Z; omit to keep.")]
             float? posZ = null,
-            [Description("New Euler rotation X in degrees. Ignored when a target is set. Omit to leave unchanged.")]
+            [Description("Rotation X in degrees, ignored with a target; omit to keep.")]
             float? rotX = null,
-            [Description("New Euler rotation Y in degrees. Ignored when a target is set. Omit to leave unchanged.")]
+            [Description("Rotation Y in degrees, ignored with a target; omit to keep.")]
             float? rotY = null,
-            [Description("New Euler rotation Z in degrees. Ignored when a target is set. Omit to leave unchanged.")]
+            [Description("Rotation Z in degrees, ignored with a target; omit to keep.")]
             float? rotZ = null,
-            [Description("Name of a GameObject to orient the camera toward. Overrides rotX/rotY/rotZ and the point.")]
+            [Description("Object to aim at; wins over the rotation and the point.")]
             string lookAt = null,
-            [Description("World X of a point to look at; give targetX, targetY and targetZ together.")]
+            [Description("Point to aim at, X (give X, Y and Z).")]
             float? targetX = null,
-            [Description("World Y of a point to look at.")]
+            [Description("Point to aim at, Y.")]
             float? targetY = null,
-            [Description("World Z of a point to look at.")]
+            [Description("Point to aim at, Z.")]
             float? targetZ = null,
-            [Description("Vertical field of view in degrees (clamped, default range 10..120). Omit to keep it.")]
+            [Description("Vertical field of view in degrees (10..120); omit to keep.")]
             float? fov = null,
             CancellationToken cancellationToken = default)
         {
@@ -322,23 +312,23 @@ namespace CoreAI.Vision
         }
 
         private async Task<string> OrbitAsync(
-            [Description("Camera to move: empty or 'agent' = your own camera, 'free' = your free camera.")]
+            [Description("Empty or 'agent' = yours, 'free' = your free camera.")]
             string cameraName = "",
-            [Description("Name of the GameObject to circle around (its rendered centre). Wins over the point.")]
+            [Description("Object to circle (its centre); wins over the point.")]
             string target = null,
-            [Description("World X of a point to circle around; give targetX, targetY and targetZ together.")]
+            [Description("Point to circle, X (give X, Y and Z).")]
             float? targetX = null,
-            [Description("World Y of a point to circle around.")]
+            [Description("Point to circle, Y.")]
             float? targetY = null,
-            [Description("World Z of a point to circle around.")]
+            [Description("Point to circle, Z.")]
             float? targetZ = null,
-            [Description("Heading in degrees: 0 looks along +Z, 90 along +X, 180 along -Z. Omit to keep it.")]
+            [Description("Heading in degrees: 0 looks along +Z, 90 along +X; omit to keep.")]
             float? yaw = null,
-            [Description("Degrees above the target: 0 level, 45 from above, 89 straight down. Omit to keep it.")]
+            [Description("Degrees above the target: 0 level, 89 top-down; omit to keep.")]
             float? pitch = null,
-            [Description("Distance from the target in world units. Omit to keep it.")]
+            [Description("Distance in world units; omit to keep.")]
             float? distance = null,
-            [Description("Vertical field of view in degrees (clamped, default range 10..120). Omit to keep it.")]
+            [Description("Vertical field of view in degrees (10..120); omit to keep.")]
             float? fov = null,
             CancellationToken cancellationToken = default)
         {

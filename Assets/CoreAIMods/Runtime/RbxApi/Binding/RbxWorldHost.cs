@@ -47,6 +47,24 @@ namespace CoreAI.Mods.Rbx.Binding
         [Min(0)]
         private int _lightBudget;
 
+        [SerializeField]
+        [Tooltip("Play Sound instances through pooled AudioSources. Off keeps every sound's timeline running silently.")]
+        private bool _playSounds = true;
+
+        [SerializeField]
+        [Tooltip("Most sounds heard at once; the loudest are heard. 0 = the tier default (32 on desktop, 16 on WebGL).")]
+        [Min(0)]
+        private int _soundBudget;
+
+        [SerializeField]
+        [Tooltip("Draw ParticleEmitter instances as pooled Unity particle systems on their parent parts.")]
+        private bool _drawParticles = true;
+
+        [SerializeField]
+        [Tooltip("Draw Highlight instances as a wireframe box around each part instead of the silhouette outline. The "
+                 + "wireframe is used anyway where the outline shader is not supported.")]
+        private bool _highlightWireframe;
+
         public InstanceRegistry Registry { get; private set; }
 
         public RbxDataModel Game { get; private set; }
@@ -97,6 +115,52 @@ namespace CoreAI.Mods.Rbx.Binding
 
         /// <summary>The Unity objects behind <see cref="SelectionBoxes"/>.</summary>
         public UnityRbxSelectionBoxBackend SelectionBoxBackend { get; private set; }
+
+        /// <summary>Keeps Highlight instances drawn over their objects; null before a world is bound.</summary>
+        public RbxHighlightReconciler Highlights { get; private set; }
+
+        /// <summary>The draws behind <see cref="Highlights"/>.</summary>
+        public UnityRbxHighlightBackend HighlightBackend { get; private set; }
+
+        /// <summary>
+        /// The sounds this host provides to every world it runs (MVP17): <c>Sound.SoundId</c> names a key registered
+        /// here, or a path under a <c>Resources</c> folder; <c>SoundService:GetSoundIds()</c> lists the keys. It starts
+        /// empty: a game registers its own clips.
+        /// </summary>
+        public RbxSoundLibrary Sounds { get; } = new(UnityRbxAudioBackend.TryLoadFromResources);
+
+        /// <summary>Keeps Sound instances audible through <see cref="AudioBackend"/>; null when switched off.</summary>
+        public RbxSoundReconciler SoundReconciler { get; private set; }
+
+        /// <summary>The pooled AudioSources behind <see cref="SoundReconciler"/>; null when switched off.</summary>
+        public UnityRbxAudioBackend AudioBackend { get; private set; }
+
+        /// <summary>The sound budget of this host's tier, or the configured override.</summary>
+        public RbxSoundBudget SoundBudget => _soundBudget > 0
+            ? new RbxSoundBudget("configured", _soundBudget)
+            : Application.platform == RuntimePlatform.WebGLPlayer ? RbxSoundBudget.WebGl : RbxSoundBudget.Desktop;
+
+        /// <summary>Registers <paramref name="clip"/> as the sound <paramref name="key"/> for every world of this host.</summary>
+        public void RegisterSound(string key, AudioClip clip)
+        {
+            if (clip == null)
+            {
+                throw new ArgumentNullException(nameof(clip));
+            }
+
+            Sounds.Register(key, clip.length, clip);
+        }
+
+        /// <summary>Keeps ParticleEmitter instances drawn as Unity particle systems; null when switched off.</summary>
+        public RbxParticleReconciler ParticleReconciler { get; private set; }
+
+        /// <summary>The particle systems behind <see cref="ParticleReconciler"/>; null when switched off.</summary>
+        public UnityRbxParticleBackend ParticleBackend { get; private set; }
+
+        /// <summary>The particle budget of this host's tier: 64 emitters of 1,000 particles on desktop, 16 of 200 on WebGL.</summary>
+        public RbxParticleBudget ParticleBudget => Application.platform == RuntimePlatform.WebGLPlayer
+            ? RbxParticleBudget.WebGl
+            : RbxParticleBudget.Desktop;
 
         /// <summary>The light budget of this host's tier, or the configured override.</summary>
         public RbxLightBudget LightBudget => _lightBudget > 0
@@ -205,13 +269,22 @@ namespace CoreAI.Mods.Rbx.Binding
             PhysicsPort = new UnityRbxPhysicsPort(Binder);
             TerrainPresenter = Terrain.RbxTerrainPresenter.Attach(gameObject, Game, Logger);
             PhysicsPort.TerrainHits = TerrainPresenter;
+            if (PickSource is UnityClickPickSource unityPick)
+            {
+                unityPick.TerrainHits = TerrainPresenter;
+            }
+
             AttachLighting();
+            AttachEffects();
         }
 
         private void LateUpdate()
         {
             // WHY after Update, like the lights: the boxes follow the parts the scripts and the physics just moved.
             SelectionBoxes?.Tick();
+            Highlights?.Tick();
+            HighlightBackend?.Draw();
+            TickEffects();
             if (Lights == null)
             {
                 return;
@@ -257,6 +330,12 @@ namespace CoreAI.Mods.Rbx.Binding
                         return true;
                     });
             }
+
+            if (Registry != null && Binder != null)
+            {
+                HighlightBackend = new UnityRbxHighlightBackend(Binder, _highlightWireframe);
+                Highlights = new RbxHighlightReconciler(Registry, HighlightBackend);
+            }
         }
 
         private void DetachLighting()
@@ -276,6 +355,94 @@ namespace CoreAI.Mods.Rbx.Binding
             SelectionBoxes = null;
             SelectionBoxBackend?.Dispose();
             SelectionBoxBackend = null;
+            Highlights?.Dispose();
+            Highlights = null;
+            HighlightBackend?.Dispose();
+            HighlightBackend = null;
+        }
+
+        /// <summary>
+        /// Hands the current world's SoundService this host's <see cref="Sounds"/> and builds the sound and particle
+        /// reconcilers over the current registry (MVP17); the previous world's voices and emitters are released first.
+        /// </summary>
+        private void AttachEffects()
+        {
+            DetachEffects();
+            EnsureSoundLibraryAttached();
+            if (Registry == null || Binder == null || Game == null)
+            {
+                return;
+            }
+
+            InstanceGameObjectBinder binder = Binder;
+            if (_playSounds)
+            {
+                AudioBackend = new UnityRbxAudioBackend(transform);
+                SoundReconciler = new RbxSoundReconciler(Registry, Game, AudioBackend, binder.GetLivePositionStuds,
+                    SoundBudget, message => Logger.Warn(message, LogTag.World));
+                EnsureAudioListener();
+            }
+
+            if (_drawParticles)
+            {
+                RbxParticleBudget particleBudget = ParticleBudget;
+                ParticleBackend = new UnityRbxParticleBackend(binder, Registry, transform, particleBudget);
+                ParticleReconciler = new RbxParticleReconciler(Registry, ParticleBackend, binder.GetLivePositionStuds,
+                    id => binder.GetPartPropertiesOrDefault(id).Size, particleBudget,
+                    message => Logger.Warn(message, LogTag.World));
+            }
+        }
+
+        private void DetachEffects()
+        {
+            SoundReconciler?.Dispose();
+            SoundReconciler = null;
+            AudioBackend?.Dispose();
+            AudioBackend = null;
+            ParticleReconciler?.Dispose();
+            ParticleReconciler = null;
+            ParticleBackend?.Dispose();
+            ParticleBackend = null;
+        }
+
+        private void TickEffects()
+        {
+            EnsureSoundLibraryAttached();
+            // WHY the camera: SoundService.ListenerType defaults to Camera, so the world is heard from it, and the
+            // particle budget keeps the emitters nearest to it.
+            RbxVector3 viewer = CameraRig != null ? CameraRig.GetCFrame().Position : new RbxVector3(0f, 0f, 0f);
+            SoundReconciler?.Tick(viewer);
+            ParticleReconciler?.Tick(viewer);
+        }
+
+        /// <summary>
+        /// A world restored without a SoundService gets one from the Lua bindings after this host attached, so the
+        /// library is handed over whenever the service has none.
+        /// </summary>
+        private void EnsureSoundLibraryAttached()
+        {
+            if (Game != null && !Game.IsDestroyed
+                             && Game.FindFirstChildOfClass("SoundService") is RbxSoundService service
+                             && service.Library == null)
+            {
+                service.AttachLibrary(Sounds);
+            }
+        }
+
+        /// <summary>Gives the scene camera an AudioListener when the scene has none, so a played sound is heard.</summary>
+        private void EnsureAudioListener()
+        {
+            if (!Application.isPlaying || SceneCamera == null || SceneCamera.GetComponent<AudioListener>() != null)
+            {
+                return;
+            }
+
+            // WHY a one-time search: a scene usually brings its own listener elsewhere (a player rig), and a second
+            // one would make Unity warn every frame.
+            if (UnityEngine.Object.FindAnyObjectByType<AudioListener>() == null)
+            {
+                SceneCamera.gameObject.AddComponent<AudioListener>();
+            }
         }
 
         /// <summary>Publishes an already restored replacement and retires the outgoing host state.</summary>
@@ -295,6 +462,7 @@ namespace CoreAI.Mods.Rbx.Binding
             }
 
             DetachLighting();
+            DetachEffects();
             InstanceGameObjectBinder outgoingBinder = Binder;
             InstanceRegistry outgoingRegistry = Registry;
             RbxDataModel outgoingGame = Game;
@@ -322,10 +490,16 @@ namespace CoreAI.Mods.Rbx.Binding
 
             InputSource = inputSource;
             PickSource = pickSource;
+            if (pickSource is UnityClickPickSource replacementPick)
+            {
+                replacementPick.TerrainHits = TerrainPresenter;
+            }
+
             _metersPerStud = metersPerStud;
             _ownedSessionRoot = sessionRoot;
             Registry.Diagnostics = message => Logger.Error(message, LogTag.World);
             AttachLighting();
+            AttachEffects();
 
             try
             {
@@ -384,6 +558,7 @@ namespace CoreAI.Mods.Rbx.Binding
         private void OnDestroy()
         {
             DetachLighting();
+            DetachEffects();
             Binder?.BeginHostTeardown();
 
             // WHY: the mod stack outlives this component — LuaCsRbxApiBindings captures the registry

@@ -112,7 +112,7 @@ Reference: [AGENT_BUILDER](../CoreAI/Docs/AGENT_BUILDER.md) · [COREAI_SINGLETON
 | **Providers** | `MeaiLlmClient` (streaming tool loop), `OpenAiChatLlmClient` (HTTP APIs, and on-device GGUF through LLMUnity's built-in OpenAI-compatible server via `LlmUnityServerHttpSettings`), routing/timeout/retry/fallback decorators |
 | **WebGL** | `FetchSseOpenAiTransport` + `CoreAiSseFetch.jslib` for real incremental SSE, `UnityWebRequestOpenAiTransport` fallback, `UnityMainThreadLlmAsyncMarshaler` |
 | **Persistence** | `FileAgentMemoryStore`, `FileConversationSummaryStore`, `FileSkillStore` under one `CoreAiStorageRoot` (default `persistentDataPath`, overridable by the host; tests redirect it to a temporary folder); on WebGL the engine persists (`config.autoSyncPersistentDataPath = true`) and `CoreAiWebGlPersistence` only reports whether it is armed |
-| **Unity-only tools** | `world_command` (`WorldLlmTool`), `component_command` (`ComponentLlmTool`), `scene_tool` (`SceneLlmTool`), `camera` (`Vision.CameraLlmTool`: `camera_capture` / `screenshot`), `camera_tool` (`Infrastructure.World.CameraLlmTool`: `capture_camera`) |
+| **Unity-only tools** | `world_command` (`WorldLlmTool`), `component_command` (`ComponentLlmTool`), `scene_tool` (`SceneLlmTool`), `camera` (`Vision.CameraLlmTool`: `camera_capture` / `screenshot` / `camera_look` / `camera_orbit` / `camera_list`) |
 | **Editor** | `CoreAI → Setup → …` scene/asset wizards, Settings window, Agent Session Inspector, production-settings validation |
 
 Tools that are **not** in this package: `memory`, `game_config`, `game_state`, `get_inventory`,

@@ -35,7 +35,7 @@ namespace CoreAI.Tests.EditMode
         /// <summary>Tool names CoreAI ships, as each tool spells its own <c>Name</c>.</summary>
         private static readonly string[] ShippedToolNames =
         {
-            "call_skill_tool", "camera", "camera_tool", "check_compatibility", "component_command",
+            "call_skill_tool", "camera", "check_compatibility", "component_command",
             "execute_lua", "game_config", "game_state", "get_inventory", "list_autosaves",
             "manage_mods", "manage_skills", "memory", "read_skill", "save_world", "scene_tool",
             "wait", "world_command"

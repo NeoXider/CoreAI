@@ -200,8 +200,10 @@ namespace CoreAI.Core.Tests.EditMode
             policy.ApplyRoleDefinition(new RoleDefinition("Blacksmith") { Skills = new[] { forging } });
 
             CollectionAssert.AreEqual(new[] { "Forging" }, policy.GetSkillsForRole("Blacksmith").Select(s => s.Name));
-            CollectionAssert.IsSubsetOf(new[] { "read_skill", "call_skill_tool" },
-                AgentRoleTestHarness.ToolNames(policy.GetToolsForRole("Blacksmith")));
+            string[] blacksmithTools = AgentRoleTestHarness.ToolNames(policy.GetToolsForRole("Blacksmith"));
+            CollectionAssert.Contains(blacksmithTools, "read_skill");
+            CollectionAssert.DoesNotContain(blacksmithTools, "call_skill_tool",
+                "instruction-only skills give call_skill_tool nothing to call");
 
             policy.ApplyRoleDefinition(new RoleDefinition("Blacksmith"));
 
@@ -224,8 +226,10 @@ namespace CoreAI.Core.Tests.EditMode
             policy.ApplyRoleDefinition(new RoleDefinition("Blacksmith"));
 
             CollectionAssert.AreEqual(new[] { "Haggling" }, policy.GetSkillsForRole("Blacksmith").Select(s => s.Name));
-            CollectionAssert.IsSubsetOf(new[] { "read_skill", "call_skill_tool" },
-                AgentRoleTestHarness.ToolNames(policy.GetToolsForRole("Blacksmith")));
+            string[] blacksmithTools = AgentRoleTestHarness.ToolNames(policy.GetToolsForRole("Blacksmith"));
+            CollectionAssert.Contains(blacksmithTools, "read_skill");
+            CollectionAssert.DoesNotContain(blacksmithTools, "call_skill_tool",
+                "instruction-only skills give call_skill_tool nothing to call");
         }
     }
 }

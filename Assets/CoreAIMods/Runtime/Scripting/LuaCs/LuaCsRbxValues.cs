@@ -705,6 +705,11 @@ namespace CoreAI.Ai.LuaCs
                 case RbxScriptSignal _: return "RBXScriptSignal";
                 case RbxScriptConnection _: return "RBXScriptConnection";
                 case RbxInputObject _: return "InputObject";
+                case RbxNumberRange _: return "NumberRange";
+                case RbxNumberSequence _: return "NumberSequence";
+                case RbxNumberSequenceKeypoint _: return "NumberSequenceKeypoint";
+                case RbxColorSequence _: return "ColorSequence";
+                case RbxColorSequenceKeypoint _: return "ColorSequenceKeypoint";
                 default: return value?.GetType().Name ?? "nil";
             }
         }

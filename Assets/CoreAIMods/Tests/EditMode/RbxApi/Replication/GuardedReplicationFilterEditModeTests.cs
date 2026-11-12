@@ -448,6 +448,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Replication
             ["CollectionService"] = false,
             ["TweenService"] = false,
             ["ScriptContext"] = true,
+            ["SoundService"] = false,
             ["Player"] = false,
             ["Backpack"] = false,
             ["PlayerGui"] = false,

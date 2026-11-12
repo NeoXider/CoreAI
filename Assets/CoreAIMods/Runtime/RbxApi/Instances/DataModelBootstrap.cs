@@ -38,6 +38,7 @@ namespace CoreAI.Mods.Rbx.Instances
             CreateService(registry, game, "CollectionService");
             CreateService(registry, game, "TweenService");
             CreateService(registry, game, "ScriptContext");
+            CreateService(registry, game, "SoundService");
             return game;
         }
 
@@ -130,6 +131,13 @@ namespace CoreAI.Mods.Rbx.Instances
             if (game.FindFirstChildOfClass("ScriptContext") == null)
             {
                 CreateService(registry, game, "ScriptContext");
+            }
+
+            // WHY: snapshots taken before the MVP17 audio slice have no SoundService; restoring them must still
+            // yield a resolvable game:GetService("SoundService").
+            if (game.FindFirstChildOfClass("SoundService") == null)
+            {
+                CreateService(registry, game, "SoundService");
             }
         }
 

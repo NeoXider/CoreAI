@@ -148,6 +148,7 @@
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ToolContractPromisesStreamedEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ToolContractPromisesStreamedEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ToolDocsPolicyReferenceEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ToolDocsPolicyReferenceEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ToolExecutionPolicyEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ToolExecutionPolicyEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ToolArgumentRepairEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ToolArgumentRepairEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/ToolResultRegisterEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/ToolResultRegisterEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/TransportTimeoutClassificationEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/TransportTimeoutClassificationEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/WaitLlmToolEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/WaitLlmToolEditModeTests.cs" />
@@ -194,6 +195,8 @@
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/P1CharacterMovementEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/P1CharacterMovementEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/P1CameraModuleEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/P1CameraModuleEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/P9LightingEngineFreeEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/P9LightingEngineFreeEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/Mvp17SoundEngineFreeEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/Mvp17SoundEngineFreeEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/Mvp17ParticleEngineFreeEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/Mvp17ParticleEngineFreeEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Datatypes/P1RayAndProjectionEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Datatypes/P1RayAndProjectionEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/R6_2_DestroyEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/R6_2_DestroyEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/R6_7_AttributesEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Instances/R6_7_AttributesEditModeTests.cs" />
@@ -231,6 +234,7 @@
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Terrain/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Terrain/%(Filename)%(Extension)" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/TextChat/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/TextChat/%(Filename)%(Extension)" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Adornments/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Adornments/%(Filename)%(Extension)" />
+    <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Building/*.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Building/%(Filename)%(Extension)" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/Npc/*.cs" Link="Assets/CoreAI/Tests/EditMode/Npc/%(Filename)%(Extension)" />
     <Compile Include="../../../Assets/CoreAiUnity/Tests/EditMode/Npc/NpcArchitectureFitnessEditModeTests.cs" Link="Assets/CoreAiUnity/Tests/EditMode/Npc/NpcArchitectureFitnessEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAIMods/Tests/EditMode/RbxApi/Ai/RbxTextGenerationLimitsEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Ai/RbxTextGenerationLimitsEditModeTests.cs" />

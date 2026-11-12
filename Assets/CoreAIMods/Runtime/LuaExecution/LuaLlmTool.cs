@@ -8,8 +8,14 @@ namespace CoreAI.Ai
     /// <summary>
     /// LLM tool wrapper that exposes the sandboxed Lua executor as <c>execute_lua</c>.
     /// </summary>
-    public sealed class LuaLlmTool : IAIFunctionLlmTool
+    public sealed class LuaLlmTool : IAIFunctionLlmTool, ILlmToolResultCutAdvice
     {
+        /// <inheritdoc />
+        public string AdviseOnCut(string functionName, System.Collections.Generic.IDictionary<string, object> arguments)
+        {
+            return "Return less from the Lua: a count, a few fields or the first items, not a whole table.";
+        }
+
         private readonly LuaTool.ILuaExecutor _executor;
         private readonly ICoreAISettings _settings;
         private readonly ILog _logger;
@@ -46,10 +52,13 @@ namespace CoreAI.Ai
         public string Description => LuaTool.ExecuteLuaDescription;
 
         /// <inheritdoc />
+        // WHY the same text as the bound function's parameter: the text tool contract and the retry hints read this
+        // schema, the provider reads the function's; two wordings drifted apart before.
         public string ParametersSchema => "{" +
               "  \"type\": \"object\"," +
               "  \"properties\": {" +
-              "    \"code\": { \"type\": \"string\", \"description\": \"Lua code to execute. Prefer logic_list(), logic_define(name, function(...) return value end), logic_reset(name), and report(message) when available. Build world objects Roblox-style (Instance.new('Part'), game/workspace) - see read_skill('Rbx API'). Inspect the scene with coreai_world_find(pattern), coreai_world_pos(name), coreai_world_exists(name). Full reflection is a rarely-needed backup - see read_skill('Full Lua'). Return compact JSON/string for diagnostics. Example: logic_define('loot_formula', function(bossMaxHp) return 1000 end) report('Boss reward set to 1000 coins')\" }" +
+              "    \"code\": { \"type\": \"string\", \"description\": \"" +
+              LuaTool.ExecuteLuaCodeParameterDescription + "\" }" +
               "  }," +
               "  \"required\": [\"code\"]" +
               "}";

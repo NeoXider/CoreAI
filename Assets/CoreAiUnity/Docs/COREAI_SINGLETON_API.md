@@ -72,7 +72,7 @@ Both paths use **one** `CoreAILifetimeScope` registered on the scene and **one**
 | `AskWithImageFollowUpAsync` | `Task<string>` | One-shot question about one image (no history, no tools), e.g. a frame a tool returned. |
 | `StopAgent` | `void` | **Cancel generation** and running agent tasks for a cancellation scope (role id or domain scope). |
 | `ClearContext` | `void` | **Clear memory** (chat + long-term). |
-| `RegisterCameraVisionTool` / `RegisterGameStateTool` | `bool` | Add the `capture_camera` (vision models only) or `game_state` tool to a role at runtime. |
+| `RegisterCameraVisionTool` / `RegisterGameStateTool` | `bool` | Add the `camera` tool (`camera_capture`, `camera_look`, `camera_orbit`, `camera_list`; vision models only) or the `game_state` tool to a role at runtime. |
 | `AddSkillForRole` / `InjectSkillIntoHistory` | `bool` | Add an on-demand skill to a role; preload a skill into a role's history without a model turn. |
 | `OnToolExecuted`, `OnToolCallStarted` / `OnToolCallCompleted` / `OnToolCallFailed` | events | React to tool calls (VFX, audio, analytics). |
 | `SubscribeToolCalls` / `GetToolCallHistorySnapshot` / `ClearToolCallHistory` | `IDisposable` / list / `void` | Disposable subscription to tool-call records and the bounded recent history. |
@@ -314,7 +314,7 @@ right after the prompt; everything else (role, callbacks, cancellation) stays wh
 - Chat history stores only a placeholder such as `[attachment: shot.jpg image/jpeg 84 KB]`, never the bytes.
 - **Tools can show pictures too**: return `LlmToolImageResult` (text + images) from a tool — see
   [TOOL_AUTHORING_GUIDE](TOOL_AUTHORING_GUIDE.md#returning-images-from-a-tool). The camera tools (`camera_capture`,
-  `screenshot`, `capture_camera`) do this already; `CoreAi.OnToolExecuted` then receives the `LlmToolImageResult`
+  `screenshot`) do this already; `CoreAi.OnToolExecuted` then receives the `LlmToolImageResult`
   itself as `result` (cast it and read `.Images`), not a JSON string with a `dataUrl`.
 
 **Lifetime (no copies).** CoreAI keeps your list and your buffers as they are and reads them again for every provider

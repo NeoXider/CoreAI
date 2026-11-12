@@ -198,6 +198,7 @@ namespace CoreAI.Mods.Rbx.Instances
             Add(registry, "ScreenInsets", ("None", 0), ("DeviceSafeInsets", 1), ("CoreUISafeInsets", 2),
                 ("TopbarSafeInsets", 3));
             Add(registry, "SafeAreaCompatibility", ("None", 0), ("FullscreenExtension", 1));
+            Add(registry, "HighlightDepthMode", ("AlwaysOnTop", 0), ("Occluded", 1));
             Add(registry, "LineJoinMode", ("Round", 0), ("Bevel", 1), ("Miter", 2));
             Add(registry, "BorderStrokePosition", ("Outer", 0), ("Center", 1), ("Inner", 2));
             Add(registry, "ResamplerMode", ("Default", 0), ("Pixelated", 1));

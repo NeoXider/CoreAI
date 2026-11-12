@@ -1016,6 +1016,15 @@ namespace CoreAI.Ai
                         tools.AddRange(custom);
                     }
 
+                    // WHY: with no skill tool to reach, call_skill_tool was only a second door into the role's
+                    // own tools (a model used it to repeat a manage_mods call the duplicate guard had answered).
+                    // The proxy stays registered, so a skill with tools added later offers it again. A role that
+                    // authors skills keeps it: a skill it creates in this turn must be callable in this turn.
+                    if (!tools.Exists(tool => tool != null &&
+                                              string.Equals(tool.Name, "manage_skills", StringComparison.Ordinal)))
+                    {
+                        tools.RemoveAll(CallSkillToolLlmTool.OffersNoSkillTools);
+                    }
                     result = tools.Count > 0 ? tools : Array.Empty<ILlmTool>();
                 }
             }

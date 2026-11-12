@@ -89,6 +89,16 @@ namespace CoreAI.Ai.LuaCs
                 return SampleLight(light, propertyName);
             }
 
+            if (target is RbxSound || target is RbxSoundGroup)
+            {
+                return SampleSound(target, propertyName);
+            }
+
+            if (target is RbxParticleEmitter emitter)
+            {
+                return SampleParticle(emitter, propertyName);
+            }
+
             if (_registry != null
                 && LuaCsRbxGuiBindings.TrySampleTween(_registry.Catalog, target, propertyName,
                     out TweenPropertySample guiSample))
@@ -140,6 +150,18 @@ namespace CoreAI.Ai.LuaCs
             if (target is RbxLight light)
             {
                 WriteLight(light, propertyName, value);
+                return;
+            }
+
+            if (target is RbxSound || target is RbxSoundGroup)
+            {
+                WriteSound(target, propertyName, value);
+                return;
+            }
+
+            if (target is RbxParticleEmitter emitter)
+            {
+                WriteParticle(emitter, propertyName, value);
                 return;
             }
 
@@ -599,6 +621,149 @@ namespace CoreAI.Ai.LuaCs
             {
                 _registry.AdvanceRevision(light.Id);
             }
+        }
+
+        /// <summary>
+        /// The tweenable audio numbers (MVP17): <c>Sound.Volume</c> (the fade idiom), <c>PlaybackSpeed</c>,
+        /// <c>TimePosition</c> and the roll-off distances, and <c>SoundGroup.Volume</c>; the booleans and the id are
+        /// not interpolated, as everywhere.
+        /// </summary>
+        private static TweenPropertySample SampleSound(RbxInstance target, string propertyName)
+        {
+            if (target is RbxSoundGroup group)
+            {
+                return propertyName == "Volume"
+                    ? TweenPropertySample.SupportedValue((double)group.Volume, "number")
+                    : TweenPropertySample.Unknown();
+            }
+
+            RbxSound sound = (RbxSound)target;
+            switch (propertyName)
+            {
+                case "Volume":
+                    return TweenPropertySample.SupportedValue((double)sound.Volume, "number");
+                case "PlaybackSpeed":
+                    return TweenPropertySample.SupportedValue((double)sound.PlaybackSpeed, "number");
+                case "TimePosition":
+                    return TweenPropertySample.SupportedValue(sound.TimePosition, "number");
+                case "RollOffMinDistance":
+                    return TweenPropertySample.SupportedValue((double)sound.RollOffMinDistance, "number");
+                case "RollOffMaxDistance":
+                    return TweenPropertySample.SupportedValue((double)sound.RollOffMaxDistance, "number");
+                case "Looped":
+                case "Playing":
+                case "PlayOnRemove":
+                    return TweenPropertySample.Unsupported("boolean");
+                case "SoundId":
+                    return TweenPropertySample.Unsupported("string");
+                default:
+                    return TweenPropertySample.Unknown();
+            }
+        }
+
+        private void WriteSound(RbxInstance target, string propertyName, object value)
+        {
+            if (!(value is double number) || double.IsNaN(number) || double.IsInfinity(number))
+            {
+                return;
+            }
+
+            if (target is RbxSoundGroup group)
+            {
+                if (propertyName == "Volume" && !group.Volume.Equals((float)number))
+                {
+                    group.SetVolume(number);
+                    _registry.AdvanceRevision(group.Id);
+                }
+
+                return;
+            }
+
+            RbxSound sound = (RbxSound)target;
+            switch (propertyName)
+            {
+                case "Volume":
+                    sound.SetVolume(number);
+                    break;
+                case "PlaybackSpeed":
+                    sound.SetPlaybackSpeed(number);
+                    break;
+                case "TimePosition":
+                    // WHY no revision: TimePosition is not replicated (Sound.yaml NotReplicated) and not durable.
+                    sound.SetTimePosition(number);
+                    return;
+                case "RollOffMinDistance":
+                    sound.SetRollOffMinDistance(number);
+                    break;
+                case "RollOffMaxDistance":
+                    sound.SetRollOffMaxDistance(number);
+                    break;
+                default:
+                    return;
+            }
+
+            _registry.AdvanceRevision(sound.Id);
+        }
+
+        /// <summary>
+        /// A ParticleEmitter tweens its <c>Rate</c> and <c>Acceleration</c>; its ranges, sequences and the
+        /// <c>Vector2</c> spread are not interpolated (MVP17).
+        /// </summary>
+        private static TweenPropertySample SampleParticle(RbxParticleEmitter emitter, string propertyName)
+        {
+            switch (propertyName)
+            {
+                case "Rate":
+                    return TweenPropertySample.SupportedValue((double)emitter.Rate, "number");
+                case "SpreadAngle":
+                    return TweenPropertySample.Unsupported("Vector2");
+                case "Acceleration":
+                    return TweenPropertySample.SupportedValue(emitter.Acceleration, "Vector3");
+                case "Enabled":
+                    return TweenPropertySample.Unsupported("boolean");
+                case "Lifetime":
+                case "Speed":
+                    return TweenPropertySample.Unsupported("NumberRange");
+                case "Size":
+                case "Transparency":
+                    return TweenPropertySample.Unsupported("NumberSequence");
+                case "Color":
+                    return TweenPropertySample.Unsupported("ColorSequence");
+                case "Texture":
+                    return TweenPropertySample.Unsupported("string");
+                case "EmissionDirection":
+                    return TweenPropertySample.Unsupported("EnumItem");
+                default:
+                    return TweenPropertySample.Unknown();
+            }
+        }
+
+        private void WriteParticle(RbxParticleEmitter emitter, string propertyName, object value)
+        {
+            int before = emitter.StateVersion;
+            switch (propertyName)
+            {
+                case "Rate" when value is double rate && !double.IsNaN(rate) && !double.IsInfinity(rate):
+                    emitter.SetRate(rate);
+                    break;
+                case "Acceleration" when value is RbxVector3 acceleration && IsFinite(acceleration.X)
+                                                                        && IsFinite(acceleration.Y)
+                                                                        && IsFinite(acceleration.Z):
+                    emitter.SetAcceleration(acceleration);
+                    break;
+                default:
+                    return;
+            }
+
+            if (emitter.StateVersion != before)
+            {
+                _registry.AdvanceRevision(emitter.Id);
+            }
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
         }
     }
 }

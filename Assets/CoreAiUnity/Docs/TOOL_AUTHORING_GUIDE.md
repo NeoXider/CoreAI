@@ -309,7 +309,7 @@ render, a chart, a minimap) returns an `LlmToolImageResult`: `Text` is the tool 
 summary), `Images` are delivered to the model as image parts of a follow-up user message before the next
 request — *"Image returned by tool 'render_preview'. Inspect it and continue with the task."* Earlier images of
 other calls stay in the turn (a before/after comparison works; the newest 8 are kept). Only the camera tools
-(`camera_capture`, `screenshot`, `capture_camera`) replace their previous frame and use the camera prompt. No base64
+(`camera_capture`, `screenshot`) replace their previous frame and use the camera prompt. No base64
 anywhere — the encoder's bytes reach the provider serializer untouched, and each image is encoded once per turn.
 
 ```csharp
@@ -337,7 +337,7 @@ thread: do not `await` a thread-pool hop (`Task.Run`, `UniTask.SwitchToThreadPoo
 the capture. A tool that can also be invoked off the main thread (a custom host, a background agent) hops explicitly
 with `await UniTask.SwitchToMainThread(ct)` first, as `CameraLlmTool` does.
 
-The built-in `camera_capture` / `screenshot` and `capture_camera` tools use this path; an older tool that still
+The built-in `camera_capture` / `screenshot` functions use this path; an older tool that still
 returns a base64 `dataUrl` in its JSON is decoded once by the policy and delivered the same way. Hosts that observe
 tool calls (`CoreAi.OnToolExecuted`) receive the `LlmToolImageResult` itself as the result — read `.Images`;
 `ToString()` is only the summary.

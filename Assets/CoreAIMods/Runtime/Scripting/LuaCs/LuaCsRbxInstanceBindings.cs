@@ -216,6 +216,9 @@ namespace CoreAI.Ai.LuaCs
         /// <summary>The cloned-script note (SC-17) fires once per mod.</summary>
         public bool HasLoggedClonedScriptNote { get; set; }
 
+        /// <summary>The note that a Sound outside the game plays nothing fires once per mod (MVP17).</summary>
+        public bool HasLoggedSilentSoundNote { get; set; }
+
         public bool CanWorldEdit => (Capabilities & LuaCapabilities.WorldEdit) != 0;
 
         /// <summary>
@@ -890,6 +893,16 @@ namespace CoreAI.Ai.LuaCs
                     return lightValue;
                 }
 
+                if (TryReadSound(context, self, key, out LuaValue soundValue))
+                {
+                    return soundValue;
+                }
+
+                if (TryReadParticleEmitter(context, self, key, out LuaValue particleValue))
+                {
+                    return particleValue;
+                }
+
                 if (TryReadScript(context, self, key, out LuaValue scriptValue))
                 {
                     return scriptValue;
@@ -1053,6 +1066,16 @@ namespace CoreAI.Ai.LuaCs
             }
 
             if (TryWriteLight(context, self, key, value))
+            {
+                return LuaValue.Nil;
+            }
+
+            if (TryWriteSound(context, self, key, value))
+            {
+                return LuaValue.Nil;
+            }
+
+            if (TryWriteParticleEmitter(context, self, key, value))
             {
                 return LuaValue.Nil;
             }
@@ -1854,6 +1877,86 @@ namespace CoreAI.Ai.LuaCs
                 return LuaValue.Nil;
             }, "Tween");
 
+            // ---- Sound / SoundService (MVP17 local playback) ----
+            // WHY gated like Tween:Play: playing changes the sound's Playing and TimePosition, the same state a
+            // property write changes, so the same WorldEdit and write right apply.
+            Method("Play", (_, self) =>
+            {
+                RequirePlaybackControl(context, self, "Sound:Play");
+                NoteSilentSound(context, (RbxSound)self);
+                ((RbxSound)self).Play();
+                return LuaValue.Nil;
+            }, "Sound");
+            Method("Stop", (_, self) =>
+            {
+                RequirePlaybackControl(context, self, "Sound:Stop");
+                ((RbxSound)self).Stop();
+                return LuaValue.Nil;
+            }, "Sound");
+            Method("Pause", (_, self) =>
+            {
+                RequirePlaybackControl(context, self, "Sound:Pause");
+                ((RbxSound)self).Pause();
+                return LuaValue.Nil;
+            }, "Sound");
+            Method("Resume", (_, self) =>
+            {
+                RequirePlaybackControl(context, self, "Sound:Resume");
+                NoteSilentSound(context, (RbxSound)self);
+                ((RbxSound)self).Resume();
+                return LuaValue.Nil;
+            }, "Sound");
+            Method("PlayLocalSound", (ctx, self) =>
+            {
+                LuaValue argument = Arg(ctx, 1);
+                if (!TryGetInstance(argument, out LuaCsRbxInstanceProxy soundProxy)
+                    || !(soundProxy.Instance is RbxSound localSound))
+                {
+                    throw ExpectedArgument("SoundService:PlayLocalSound", "a Sound", argument, 1);
+                }
+
+                ThrowIfDestroyedForLua(localSound, "PlayLocalSound");
+                RbxSoundService soundService = (RbxSoundService)self;
+                if (soundService.PlayLocalSound(localSound) == null)
+                {
+                    NoteUnknownSoundId(context, soundService, localSound.SoundId);
+                }
+
+                return LuaValue.Nil;
+            }, "SoundService");
+            // WHY an extension (DEV-133): a model writing a mod must learn which sounds this host ships, and
+            // Roblox has no call that lists them.
+            Method("GetSoundIds", (_, self) =>
+            {
+                IReadOnlyList<string> ids = ((RbxSoundService)self).GetSoundIds();
+                LuaTable list = new();
+                for (int index = 0; index < ids.Count; index++)
+                {
+                    list[index + 1] = ids[index];
+                }
+
+                return new LuaValue(list);
+            }, "SoundService");
+            Method("Emit", (ctx, self) =>
+            {
+                RequirePlaybackControl(context, self, "ParticleEmitter:Emit");
+                double count = ReadDoubleOr(ctx, 1, 16d, "ParticleEmitter:Emit", 1);
+                if (double.IsNaN(count) || double.IsInfinity(count))
+                {
+                    throw RbxError.BadArgument("ParticleEmitter:Emit expects a finite particle count at argument 1",
+                        "pass a whole number, e.g. emitter:Emit(20)");
+                }
+
+                ((RbxParticleEmitter)self).Emit((int)Math.Max(0d, Math.Min(RbxParticleEmitter.MaxEmitCount, count)));
+                return LuaValue.Nil;
+            }, "ParticleEmitter");
+            Method("Clear", (_, self) =>
+            {
+                RequirePlaybackControl(context, self, "ParticleEmitter:Clear");
+                ((RbxParticleEmitter)self).Clear();
+                return LuaValue.Nil;
+            }, "ParticleEmitter");
+
             // ---- Attributes / tags ----
             Method("GetAttribute", (ctx, self) => AttributeToLua(
                 self.GetAttribute(ReadString(ctx, 1, "Instance:GetAttribute", 1))));
@@ -2397,6 +2500,12 @@ namespace CoreAI.Ai.LuaCs
                 "FogColor")),
             ("Light", Names("Brightness", "Color", "Enabled", "Shadows")),
             ("PointLight", Names("Range")),
+            ("Sound", Names("SoundId", "Volume", "Looped", "PlaybackSpeed", "TimePosition", "TimeLength", "Playing",
+                "IsPlaying", "IsPaused", "IsLoaded", "RollOffMinDistance", "RollOffMaxDistance", "RollOffMode",
+                "PlayOnRemove", "SoundGroup")),
+            ("SoundGroup", Names("Volume")),
+            ("ParticleEmitter", Names("Enabled", "Rate", "Lifetime", "Speed", "Color", "Size", "Transparency",
+                "Texture", "SpreadAngle", "Acceleration", "EmissionDirection")),
             ("BaseScript", Names("Enabled", "Disabled", "RunContext")),
             ("Script", Names("Source")),
             ("ModuleScript", Names("Source")),
@@ -2445,7 +2554,8 @@ namespace CoreAI.Ai.LuaCs
             "InputBegan", "InputEnded", "InputChanged", "TextBoxFocused", "TextBoxFocusReleased",
             "IsKeyDown", "GetKeysPressed", "GetMouseLocation", "GetMouseDelta", "Heartbeat", "Stepped", "RenderStepped", "PreAnimation",
             "PreSimulation", "PostSimulation", "PreRender", "MouseClick", "MouseHoverEnter",
-            "MouseHoverLeave", "Completed", "LightingChanged", "Event", "Invoke", "OnInvoke");
+            "MouseHoverLeave", "Completed", "LightingChanged", "Event", "Invoke", "OnInvoke", "Played", "Paused",
+            "Resumed", "Stopped", "Ended", "DidLoop");
 
         /// <summary>
         /// The names in <see cref="BoundNonProperties"/>; the drift guard in the acceptance tests
@@ -4336,6 +4446,379 @@ namespace CoreAI.Ai.LuaCs
                 case "Range" when light is RbxPointLight pointLight:
                     context.RequireWorldEditForWrite(self, key);
                     pointLight.SetRange(ReadAssignedNumber(value, self.ClassName, key));
+                    break;
+                default:
+                    return false;
+            }
+
+            context.RecordMutation(self);
+            return true;
+        }
+
+        // ---- Sound / SoundGroup (MVP17: clock in RbxSoundPlayback, output in the host's audio backend) ----------
+
+        /// <summary>The Sound and SoundGroup properties and the Sound events, each event passing the SoundId.</summary>
+        private static bool TryReadSound(LuaCsRbxModContext context, RbxInstance self, string key,
+            out LuaValue value)
+        {
+            value = LuaValue.Nil;
+            if (self is RbxSoundGroup group)
+            {
+                if (key == "Volume")
+                {
+                    value = (double)group.Volume;
+                    return true;
+                }
+
+                return false;
+            }
+
+            if (!(self is RbxSound sound))
+            {
+                return false;
+            }
+
+            switch (key)
+            {
+                case "SoundId":
+                    value = sound.SoundId;
+                    return true;
+                case "Volume":
+                    value = (double)sound.Volume;
+                    return true;
+                case "Looped":
+                    value = sound.Looped;
+                    return true;
+                case "PlaybackSpeed":
+                    value = (double)sound.PlaybackSpeed;
+                    return true;
+                case "TimePosition":
+                    value = sound.TimePosition;
+                    return true;
+                case "TimeLength":
+                    value = sound.TimeLength;
+                    return true;
+                case "Playing":
+                    value = sound.Playing;
+                    return true;
+                case "IsPlaying":
+                    value = sound.IsPlaying;
+                    return true;
+                case "IsPaused":
+                    value = sound.IsPaused;
+                    return true;
+                case "IsLoaded":
+                    value = sound.IsLoaded;
+                    return true;
+                case "RollOffMinDistance":
+                    value = (double)sound.RollOffMinDistance;
+                    return true;
+                case "RollOffMaxDistance":
+                    value = (double)sound.RollOffMaxDistance;
+                    return true;
+                case "RollOffMode":
+                    value = context.Bindings.Enums.TryGet("RollOffMode", out RbxEnum rollOffMode)
+                            && rollOffMode.TryGetItemByValue((int)sound.RollOffMode, out RbxEnumItem rollOffItem)
+                        ? LuaCsRbxDatatypeBindings.Wrap(rollOffItem)
+                        : LuaValue.Nil;
+                    return true;
+                case "PlayOnRemove":
+                    value = sound.PlayOnRemove;
+                    return true;
+                case "SoundGroup":
+                    value = context.WrapInstance(sound.SoundGroup);
+                    return true;
+                case "Played":
+                    value = LuaCsRbxDatatypeBindings.Wrap(sound.Played, context);
+                    return true;
+                case "Paused":
+                    value = LuaCsRbxDatatypeBindings.Wrap(sound.Paused, context);
+                    return true;
+                case "Resumed":
+                    value = LuaCsRbxDatatypeBindings.Wrap(sound.Resumed, context);
+                    return true;
+                case "Stopped":
+                    value = LuaCsRbxDatatypeBindings.Wrap(sound.Stopped, context);
+                    return true;
+                case "Ended":
+                    value = LuaCsRbxDatatypeBindings.Wrap(sound.Ended, context);
+                    return true;
+                case "Loaded":
+                    value = LuaCsRbxDatatypeBindings.Wrap(sound.Loaded, context);
+                    return true;
+                case "DidLoop":
+                    value = LuaCsRbxDatatypeBindings.Wrap(sound.DidLoop, context);
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// Sound and SoundGroup writes through the engine-free setters, WorldEdit and the world ACL applying as for
+        /// every property. Playing and TimePosition are not replicated (Sound.yaml: NotReplicated), so they advance
+        /// no revision; the read-only members raise Roblox's error.
+        /// </summary>
+        private static bool TryWriteSound(LuaCsRbxModContext context, RbxInstance self, string key, LuaValue value)
+        {
+            if (self is RbxSoundGroup group)
+            {
+                if (key != "Volume")
+                {
+                    return false;
+                }
+
+                context.RequireWorldEditForWrite(self, key);
+                group.SetVolume(ReadAssignedNumber(value, self.ClassName, key));
+                context.RecordMutation(self);
+                return true;
+            }
+
+            if (!(self is RbxSound sound))
+            {
+                return false;
+            }
+
+            switch (key)
+            {
+                case "TimeLength":
+                case "IsPlaying":
+                case "IsPaused":
+                case "IsLoaded":
+                    throw RbxError.BadArgument(
+                        "Unable to assign property " + key + ". Property is read only",
+                        "read Sound." + key + " instead; it follows the sound's playback and loading");
+                case "Playing":
+                    context.RequireWorldEditForWrite(self, key);
+                    bool playing = ReadAssignedBoolean(value, self.ClassName, key);
+                    if (playing)
+                    {
+                        NoteSilentSound(context, sound);
+                    }
+
+                    sound.SetPlaying(playing);
+                    return true;
+                case "TimePosition":
+                    context.RequireWorldEditForWrite(self, key);
+                    sound.SetTimePosition(ReadAssignedNumber(value, self.ClassName, key));
+                    return true;
+                case "SoundId":
+                    context.RequireWorldEditForWrite(self, key);
+                    sound.SetSoundId(ReadAssignedString(value, self.ClassName, key));
+                    NoteIfUnresolvable(context, sound);
+                    break;
+                case "Volume":
+                    context.RequireWorldEditForWrite(self, key);
+                    sound.SetVolume(ReadAssignedNumber(value, self.ClassName, key));
+                    break;
+                case "Looped":
+                    context.RequireWorldEditForWrite(self, key);
+                    sound.SetLooped(ReadAssignedBoolean(value, self.ClassName, key));
+                    break;
+                case "PlaybackSpeed":
+                    context.RequireWorldEditForWrite(self, key);
+                    sound.SetPlaybackSpeed(ReadAssignedNumber(value, self.ClassName, key));
+                    break;
+                case "RollOffMinDistance":
+                    context.RequireWorldEditForWrite(self, key);
+                    sound.SetRollOffMinDistance(ReadAssignedNumber(value, self.ClassName, key));
+                    break;
+                case "RollOffMaxDistance":
+                    context.RequireWorldEditForWrite(self, key);
+                    sound.SetRollOffMaxDistance(ReadAssignedNumber(value, self.ClassName, key));
+                    break;
+                case "RollOffMode":
+                    context.RequireWorldEditForWrite(self, key);
+                    sound.SetRollOffMode((RbxRollOffMode)ReadAssignedEnumItem(
+                        value, context.Bindings.Enums, "RollOffMode", self.ClassName, key).Value);
+                    break;
+                case "PlayOnRemove":
+                    context.RequireWorldEditForWrite(self, key);
+                    sound.SetPlayOnRemove(ReadAssignedBoolean(value, self.ClassName, key));
+                    break;
+                case "SoundGroup":
+                    context.RequireWorldEditForWrite(self, key);
+                    sound.SetSoundGroup(ReadAssignedOptionalInstance(value, self.ClassName, key));
+                    break;
+                default:
+                    return false;
+            }
+
+            context.RecordMutation(self);
+            return true;
+        }
+
+        private static void RequirePlaybackControl(LuaCsRbxModContext context, RbxInstance self, string what)
+        {
+            context.RequireWorldEdit(what);
+            context.RequireMutationTarget(self, what);
+        }
+
+        private static RbxSoundService FindSoundService(LuaCsRbxModContext context)
+        {
+            return context.Bindings.Game.FindFirstChildOfClass("SoundService") as RbxSoundService;
+        }
+
+        /// <summary>Logs, once per id in this world, why a SoundId loads nothing and how a host provides a sound.</summary>
+        private static void NoteUnknownSoundId(LuaCsRbxModContext context, RbxSoundService service, string soundId)
+        {
+            if (service != null && !string.IsNullOrWhiteSpace(soundId) && service.TryNoteUnknownId(soundId))
+            {
+                context.Bindings.LogSink?.Invoke(RbxSoundService.DescribeUnknownId(soundId, service.Library));
+            }
+        }
+
+        private static void NoteIfUnresolvable(LuaCsRbxModContext context, RbxSound sound)
+        {
+            string id = sound.SoundId;
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                return;
+            }
+
+            RbxSoundService service = FindSoundService(context);
+            if (service?.Library == null || !service.Library.TryResolve(id, out _))
+            {
+                NoteUnknownSoundId(context, service, id);
+            }
+        }
+
+        /// <summary>
+        /// Before a sound starts: a sound outside the game is told once per mod that it plays nothing, and an id that
+        /// resolves to nothing is noted once per id.
+        /// </summary>
+        private static void NoteSilentSound(LuaCsRbxModContext context, RbxSound sound)
+        {
+            if (!sound.IsDescendantOf(context.Bindings.Game) && !context.HasLoggedSilentSoundNote)
+            {
+                context.HasLoggedSilentSoundNote = true;
+                context.Bindings.LogSink?.Invoke(
+                    "[RbxApi] A Sound that is not inside the game plays nothing (its Parent is nil or outside game), "
+                    + "and it neither loads nor ends. | fix: parent it first: to a part in workspace to hear it "
+                    + "there, or to workspace or SoundService to hear it everywhere. (Logged once per mod.)");
+            }
+
+            if (!sound.IsLoaded)
+            {
+                NoteIfUnresolvable(context, sound);
+            }
+        }
+
+        // ---- ParticleEmitter (MVP17: drawn by the host's particle backend) ---------------------
+
+        /// <summary>The minimal ParticleEmitter's properties (ParticleEmitter.yaml).</summary>
+        private static bool TryReadParticleEmitter(LuaCsRbxModContext context, RbxInstance self, string key,
+            out LuaValue value)
+        {
+            value = LuaValue.Nil;
+            if (!(self is RbxParticleEmitter emitter))
+            {
+                return false;
+            }
+
+            switch (key)
+            {
+                case "Enabled":
+                    value = emitter.Enabled;
+                    return true;
+                case "Rate":
+                    value = (double)emitter.Rate;
+                    return true;
+                case "Lifetime":
+                    value = LuaCsRbxSequenceBindings.Wrap(emitter.Lifetime);
+                    return true;
+                case "Speed":
+                    value = LuaCsRbxSequenceBindings.Wrap(emitter.Speed);
+                    return true;
+                case "Color":
+                    value = LuaCsRbxSequenceBindings.Wrap(emitter.Color);
+                    return true;
+                case "Size":
+                    value = LuaCsRbxSequenceBindings.Wrap(emitter.Size);
+                    return true;
+                case "Transparency":
+                    value = LuaCsRbxSequenceBindings.Wrap(emitter.Transparency);
+                    return true;
+                case "Texture":
+                    value = emitter.Texture;
+                    return true;
+                case "SpreadAngle":
+                    value = LuaCsRbxDatatypeBindings.Wrap(emitter.SpreadAngle);
+                    return true;
+                case "Acceleration":
+                    value = LuaCsRbxDatatypeBindings.Wrap(emitter.Acceleration);
+                    return true;
+                case "EmissionDirection":
+                    value = context.Bindings.Enums.TryGet("NormalId", out RbxEnum normalId)
+                            && normalId.TryGetItemByValue((int)emitter.EmissionDirection, out RbxEnumItem face)
+                        ? LuaCsRbxDatatypeBindings.Wrap(face)
+                        : LuaValue.Nil;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool TryWriteParticleEmitter(LuaCsRbxModContext context, RbxInstance self, string key,
+            LuaValue value)
+        {
+            if (!(self is RbxParticleEmitter emitter))
+            {
+                return false;
+            }
+
+            switch (key)
+            {
+                case "Enabled":
+                    context.RequireWorldEditForWrite(self, key);
+                    emitter.SetEnabled(ReadAssignedBoolean(value, self.ClassName, key));
+                    break;
+                case "Rate":
+                    context.RequireWorldEditForWrite(self, key);
+                    emitter.SetRate(ReadAssignedNumber(value, self.ClassName, key));
+                    break;
+                case "Lifetime":
+                    context.RequireWorldEditForWrite(self, key);
+                    emitter.SetLifetime(LuaCsRbxSequenceBindings.ReadAssignedNumberRange(value, self.ClassName, key));
+                    break;
+                case "Speed":
+                    context.RequireWorldEditForWrite(self, key);
+                    emitter.SetSpeed(LuaCsRbxSequenceBindings.ReadAssignedNumberRange(value, self.ClassName, key));
+                    break;
+                case "Color":
+                    context.RequireWorldEditForWrite(self, key);
+                    emitter.SetColor(LuaCsRbxSequenceBindings.ReadAssignedColorSequence(value, self.ClassName, key));
+                    break;
+                case "Size":
+                    context.RequireWorldEditForWrite(self, key);
+                    emitter.SetSize(LuaCsRbxSequenceBindings.ReadAssignedNumberSequence(value, self.ClassName, key));
+                    break;
+                case "Transparency":
+                    context.RequireWorldEditForWrite(self, key);
+                    emitter.SetTransparency(
+                        LuaCsRbxSequenceBindings.ReadAssignedNumberSequence(value, self.ClassName, key));
+                    break;
+                case "Texture":
+                    context.RequireWorldEditForWrite(self, key);
+                    emitter.SetTexture(ReadAssignedString(value, self.ClassName, key));
+                    break;
+                case "SpreadAngle":
+                    context.RequireWorldEditForWrite(self, key);
+                    if (!TryUnbox(value, out RbxVector2 spread))
+                    {
+                        throw PropertyAssignmentError(self.ClassName, key, "a Vector2", value);
+                    }
+
+                    emitter.SetSpreadAngle(spread);
+                    break;
+                case "Acceleration":
+                    context.RequireWorldEditForWrite(self, key);
+                    emitter.SetAcceleration(ReadAssignedVector3(value, self.ClassName, key));
+                    break;
+                case "EmissionDirection":
+                    context.RequireWorldEditForWrite(self, key);
+                    emitter.SetEmissionDirection((RbxParticleFace)ReadAssignedEnumItem(
+                        value, context.Bindings.Enums, "NormalId", self.ClassName, key).Value);
                     break;
                 default:
                     return false;

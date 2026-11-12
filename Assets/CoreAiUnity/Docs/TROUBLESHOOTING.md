@@ -358,11 +358,12 @@ The list shows callable names: for a multi-function wrapper such as `camera` it 
 
 **Type 3: Missing or mistyped arguments**
 ```
-Error: Tool 'weather_command' is missing required argument(s): action. Retry the same tool call with JSON arguments matching this schema: {...}
-Error: Argument 'enabled' does not match the expected type for tool 'toggle_light': ...
+Error: Tool 'weather_command' is missing required argument(s): action. It was not run; send the call again with action (string: ...) set.
+Error: Argument 'enabled' does not match the expected type for tool 'toggle_light': it must be true or false, not "maybe". The tool was not run; send the call again with a valid value.
+Error: Tool 'manage_mods' was not run: it has no argument 'start_line'. Did you mean 'from_line' or 'line_count'? ...
 ```
 
-**Cause:** The model omitted a required argument, sent `null`, or sent a value that cannot bind to the parameter type. The tool body did not run and the model may retry. An empty string is **not** refused — validate it in the tool (see [TOOL_AUTHORING_GUIDE](TOOL_AUTHORING_GUIDE.md#required-arguments-null-is-missing-empty-is-present)).
+**Cause:** The model omitted a required argument, sent `null`, sent a value that cannot be read as the parameter type, or sent a key that resembles a parameter it left out. The tool body did not run and the model may retry. Values a model commonly gets wrong are accepted instead (`"True"` or `1` for a boolean, `"5"` for an integer, `modId` for `mod_id`), and an unknown key that resembles nothing is ignored with an `argument_note` in the result (see `Assets/CoreAI/Docs/LLM_TOOLS.md`, "Arguments, refusals and cut results"). An empty string is **not** refused — validate it in the tool (see [TOOL_AUTHORING_GUIDE](TOOL_AUTHORING_GUIDE.md#required-arguments-null-is-missing-empty-is-present)).
 
 **Type 4: The model repeats the same call**
 

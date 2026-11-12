@@ -298,8 +298,8 @@ namespace CoreAI.Tests.EditMode
                 "An exception escaping the invocation is an INVOKED call; a never-invoked verdict here would " +
                 "let the retry/fallback decorators execute the mutation a second time");
             Assert.IsTrue(LoggingLlmClientDecorator.TraceIndicatesInvocation(policy.ExecutedTraces[0]));
-            StringAssert.Contains("matching this schema", result.Result.Result.ToString(),
-                "The schema hint is still appended by exception shape — it is text for the model, not a verdict");
+            StringAssert.Contains("Expected parameters: count (integer, required)", result.Result.Result.ToString(),
+                "The parameter hint is still appended by exception shape — it is text for the model, not a verdict");
         }
 
         /// <summary>
@@ -334,7 +334,7 @@ namespace CoreAI.Tests.EditMode
                 "A structural rejection happens before invocation, so a retry cannot repeat a mutation.");
             string text = result.Result.Result.ToString();
             StringAssert.Contains("count", text);
-            StringAssert.Contains("matching this schema", text);
+            StringAssert.Contains("must be a whole number, not \"many\"", text);
         }
 
         /// <summary>
@@ -431,7 +431,9 @@ namespace CoreAI.Tests.EditMode
 
             string text = result.Result.Result.ToString();
             Assert.IsTrue(result.Succeeded);
-            StringAssert.StartsWith(new string('x', 100), text);
+            StringAssert.StartsWith("[Result cut: only the first 100 of 500 characters are below", text,
+                "The model reads the note before the cut text, not after it");
+            StringAssert.Contains("\n" + new string('x', 100) + "\n", text);
             StringAssert.Contains(ToolExecutionPolicy.TruncatedResultMarker, text);
             StringAssert.Contains("500 chars total -> 100 shown", text,
                 "The model must be told how much it is NOT seeing");

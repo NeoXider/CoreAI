@@ -99,8 +99,12 @@ namespace CoreAI.Ai
                 catch (Exception ex) when (ex is JsonException || ex is FormatException ||
                                             ex is InvalidCastException || ex is NotSupportedException)
                 {
+                    // WHY not ex.Message: the serializer's text names CLR types and byte positions, which a
+                    // model cannot act on; what the argument must be, and what was sent, it can.
                     bindingError =
-                        $"Argument '{name}' does not match the expected type for tool '{function.Name}': {ex.Message}";
+                        $"Argument '{name}' does not match the expected type for tool '{function.Name}': it must be " +
+                        $"{LlmToolArgumentRepair.DescribeExpected(parameter.ParameterType)}, not " +
+                        $"{LlmToolArgumentRepair.ShowValue(raw)}.";
                     return false;
                 }
                 catch (ArgumentException)

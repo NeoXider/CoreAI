@@ -1791,7 +1791,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
 
             JObject json = ParseJsonLiteral(await tool.ExecuteAsync());
 
-            CollectionAssert.AreEqual(new[] { "autosaves" }, PropertyNames(json));
+            CollectionAssert.AreEqual(new[] { "success", "count", "autosaves" }, PropertyNames(json));
+            Assert.IsTrue(json.Value<bool>("success"));
+            Assert.AreEqual(2, json.Value<int>("count"));
             JArray autosaves = (JArray)json["autosaves"];
             Assert.AreEqual(2, autosaves.Count);
             AssertAutosaveRow(

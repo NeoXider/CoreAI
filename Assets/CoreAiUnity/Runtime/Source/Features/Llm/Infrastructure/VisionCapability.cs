@@ -4,7 +4,7 @@ namespace CoreAI.Infrastructure.Llm
 {
     /// <summary>
     /// Model capability gate for vision / multimodal requests. Resolves whether images may be attached to
-    /// user messages and whether vision tools (e.g. <c>capture_camera</c>) should be registered, based on
+    /// user messages and whether vision tools (e.g. <c>camera</c>) should be registered, based on
     /// an explicit <see cref="VisionSupportMode"/> plus a model-name heuristic for the
     /// <see cref="VisionSupportMode.Auto"/> case.
     /// </summary>

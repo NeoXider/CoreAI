@@ -318,14 +318,14 @@ namespace CoreAI.Tests.EditMode
                 "The Programmer no longer builds via WorldEdit primitives; the metadata must not advertise them.");
             StringAssert.DoesNotContain("create_item", wrapper.Description,
                 "The generic execute_lua metadata must not advertise helper globals that many scenes do not provide.");
-            StringAssert.Contains("game.enemies", wrapper.Description,
-                "The generic execute_lua metadata should explicitly forbid common invented game globals.");
+            StringAssert.Contains("manage_mods", wrapper.Description,
+                "execute_lua should say that code which keeps running belongs in a mod.");
+            Assert.LessOrEqual(wrapper.Description.Length, AiToolContractPromptFormatter.ToolDescriptionMaxChars,
+                "P16: the description is sent on every request and must fit the tool contract limit.");
             StringAssert.Contains("\"code\"", wrapper.ParametersSchema,
                 "The JSON schema must describe the code parameter");
-            StringAssert.Contains("logic_define", wrapper.ParametersSchema,
-                "The code parameter schema should steer local models toward declared rule slots.");
-            StringAssert.Contains("coreai_world_find", wrapper.ParametersSchema,
-                "The code parameter schema should steer local models toward the read-only scene queries.");
+            StringAssert.Contains(LuaTool.ExecuteLuaCodeParameterDescription, wrapper.ParametersSchema,
+                "The text contract and the bound function describe the code parameter with one text.");
         }
 
         // ===================== Helpers =====================
@@ -421,10 +421,9 @@ namespace CoreAI.Tests.EditMode
     }
 
     /// <summary>
-    /// Drift guard (P3): the forbidden invented-API list must stay identical between the
-    /// <c>execute_lua</c> tool contract (<see cref="LuaTool.ExecuteLuaDescription"/>) and the Programmer
-    /// system prompt (<see cref="BuiltInAgentSystemPromptTexts.Programmer"/>), so the model gets one
-    /// consistent rule from both surfaces.
+    /// The forbidden invented-API list lives in ONE place, the Programmer system prompt
+    /// (<see cref="BuiltInAgentSystemPromptTexts.Programmer"/>). Until P16 the <c>execute_lua</c> description
+    /// (<see cref="LuaTool.ExecuteLuaDescription"/>) carried a copy, so every request paid for it twice.
     /// </summary>
     public sealed class ForbiddenLuaApiConsistencyEditModeTests
     {
@@ -434,14 +433,14 @@ namespace CoreAI.Tests.EditMode
         };
 
         [Test]
-        public void ForbiddenApiList_PresentInBothLuaToolDescriptionAndProgrammerPrompt()
+        public void ForbiddenApiList_LivesInTheProgrammerPrompt_AndNotInTheLuaToolDescription()
         {
             foreach (string api in ForbiddenApis)
             {
-                StringAssert.Contains(api, LuaTool.ExecuteLuaDescription,
-                    $"execute_lua description must forbid {api}");
                 StringAssert.Contains(api, BuiltInAgentSystemPromptTexts.Programmer,
                     $"Programmer prompt must forbid {api}");
+                StringAssert.DoesNotContain(api, LuaTool.ExecuteLuaDescription,
+                    $"the execute_lua description must not repeat the prompt's {api}");
             }
         }
     }

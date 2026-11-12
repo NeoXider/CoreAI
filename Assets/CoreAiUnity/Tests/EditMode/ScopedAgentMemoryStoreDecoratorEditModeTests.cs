@@ -645,7 +645,8 @@ namespace CoreAI.Tests.EditMode
 
             string[] names = policy.GetToolsForRole("trader").Select(tool => tool.Name).ToArray();
             CollectionAssert.Contains(names, "read_skill");
-            CollectionAssert.Contains(names, "call_skill_tool");
+            CollectionAssert.DoesNotContain(names, "call_skill_tool",
+                "an instruction-only skill gives call_skill_tool nothing to call, so it is not offered");
         }
     }
 }

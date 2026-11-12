@@ -1,11 +1,7 @@
 using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Threading;
-using System.Threading.Tasks;
 using CoreAI.Ai;
+using CoreAI.Infrastructure.Llm;
 using CoreAI.Vision;
-using Cysharp.Threading.Tasks;
 using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
 using UnityEngine;
@@ -13,132 +9,29 @@ using UnityEngine;
 namespace CoreAI.Infrastructure.World
 {
     /// <summary>
-    /// Scene-camera tool registered by <c>CoreAi.RegisterCameraVisionTool</c>: one native function,
-    /// <c>capture_camera</c>, that screenshots a named camera (or the main one). The frame is returned as an
-    /// <see cref="LlmToolImageResult"/> — a small JSON summary for the tool message plus the JPEG as an image
-    /// part — and the tool loop lifts it into the model's image channel automatically, like the agent-vision
-    /// <c>camera_capture</c> tool (<see cref="CoreAI.Vision.CameraLlmTool"/>).
+    /// Scene-camera helpers for hosts: resolve a camera by name, capture it as JPEG bytes or as a MEAI
+    /// <see cref="DataContent"/>, and read the legacy capture JSON that carried a base64 <c>dataUri</c>.
     /// <para>
-    /// Deprecated onto the agent-vision <c>camera</c> tool: <c>camera_tool</c> / <c>capture_camera</c> keep working
-    /// as an alias for one release and capture through the same implementation, the shared
-    /// <see cref="ICameraFrameReadback"/> (async GPU readback where the platform has it, the synchronous path on
-    /// WebGL). New hosts register <see cref="CoreAI.Vision.CameraLlmTool"/> instead, which adds the agent's own
-    /// camera, look, orbit and listing. Its name, parameters and summary shape are unchanged.
+    /// The LLM tool this class used to be (<c>camera_tool</c>, function <c>capture_camera</c>) was removed after its
+    /// release of aliasing; the agent-vision <c>camera</c> tool (<see cref="CoreAI.Vision.CameraLlmTool"/>:
+    /// <c>camera_capture</c>, <c>camera_look</c>, <c>camera_orbit</c>, <c>camera_list</c>) replaces it, and
+    /// <c>CoreAi.RegisterCameraVisionTool</c> registers that one. A request allowlist that still names
+    /// <c>camera_tool</c> or <c>capture_camera</c> reaches it (<c>AiOrchestrator</c> maps the old names).
     /// </para>
     /// </summary>
-    public sealed class CameraLlmTool : IAIFunctionsLlmTool
+    public static class CameraLlmTool
     {
-        private readonly ICameraFrameReadback _readback;
+        /// <summary>The removed tool's registered name; an allowlist entry with it is read as <c>camera</c>.</summary>
+        public const string RemovedToolName = "camera_tool";
 
-        /// <summary>Captures through <see cref="CameraFrameReadback.CreateDefault"/>.</summary>
-        public CameraLlmTool()
-            : this(null)
-        {
-        }
-
-        /// <summary>Captures through <paramref name="readback"/>; null picks <see cref="CameraFrameReadback.CreateDefault"/>.</summary>
-        public CameraLlmTool(ICameraFrameReadback readback)
-        {
-            _readback = readback ?? CameraFrameReadback.CreateDefault();
-        }
-
-        public string Name => "camera_tool";
-        public string Description => "Access scene cameras to take screenshots for visual analysis.";
-
-        public bool AllowDuplicates => false;
-
-        // WHY: This wrapper expands into native MEAI functions. The aggregate ILlmTool schema is intentionally
-        // empty because each AIFunction.JsonSchema from CreateAIFunctions is authoritative.
-        public string ParametersSchema => "{}";
-
-        public IEnumerable<AIFunction> CreateAIFunctions()
-        {
-            yield return AIFunctionFactory.Create(
-                (Func<string, int, int, CancellationToken, Task<object>>)CaptureCameraAsync,
-                new AIFunctionFactoryOptions
-                {
-                    Name = "capture_camera",
-                    Description =
-                        "Take a screenshot from a specific camera (or 'main') to SEE the scene. Returns a compact " +
-                        "JSON summary; the image itself is attached for you to look at.",
-                    MarshalResult = LlmToolImageResult.PreserveResult
-                }
-            );
-        }
-
-        /// <summary>
-        /// Captures the camera and returns an <see cref="LlmToolImageResult"/>: the tool message is only the JSON
-        /// summary (<c>success</c>, <c>resolution</c>, <c>camera</c>, <c>format</c>, <c>sizeBytes</c>,
-        /// <c>imageAttached</c>), the JPEG travels out-of-band. WHY: the former base64 <c>dataUri</c> inside the JSON
-        /// was never lifted, so the default result-size cut sent the model thousands of base64 characters and never
-        /// the picture. Failures stay plain JSON strings.
-        /// </summary>
-        private async Task<object> CaptureCameraAsync(
-            [Description("Camera GameObject name, or 'main' for the main camera. Default 'main'.")]
-            string cameraName = "main",
-            [Description("Screenshot width in pixels (clamped 64..1024). Default 512.")]
-            int width = 512,
-            [Description("Screenshot height in pixels (clamped 64..1024). Default 512.")]
-            int height = 512,
-            CancellationToken cancellationToken = default)
-        {
-            await UniTask.SwitchToMainThread(cancellationToken);
-            try
-            {
-                Camera targetCam = ResolveCamera(cameraName);
-                if (targetCam == null)
-                {
-                    return SerializeError(
-                        $"No camera perfectly matching '{cameraName}' and no active cameras found in the scene.");
-                }
-
-                // WHY: vision models rarely use more than 1024 px, and the clamp bounds memory per capture.
-                width = Mathf.Clamp(width, 64, 1024);
-                height = Mathf.Clamp(height, 64, 1024);
-
-                string targetName = targetCam.name;
-                CameraFrameReadbackResult frame = await _readback.CaptureAsync(targetCam, width, height,
-                    CaptureImageFormat.Jpeg, 75, cancellationToken);
-                byte[] jpgBytes = frame?.Bytes;
-                if (jpgBytes == null || jpgBytes.Length == 0)
-                {
-                    return SerializeError($"Failed to capture camera '{targetName}'.");
-                }
-
-                string summaryJson = JsonConvert.SerializeObject(new
-                {
-                    success = true,
-                    resolution = $"{width}x{height}",
-                    camera = targetName,
-                    format = "jpeg",
-                    sizeBytes = jpgBytes.Length,
-                    imageAttached = true
-                });
-                return new LlmToolImageResult(summaryJson, AiAttachment.Image(jpgBytes, "image/jpeg"));
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                return SerializeError(ex.Message);
-            }
-            finally
-            {
-#if !UNITY_WEBGL || UNITY_EDITOR
-                // WHY: WebGL has no ThreadPool, so awaiting SwitchToThreadPool there never resumes and the
-                // whole turn hangs until the request timeout.
-                await UniTask.SwitchToThreadPool();
-#endif
-            }
-        }
+        /// <summary>The removed tool's function name; an allowlist entry with it is read as <c>camera_capture</c>.</summary>
+        public const string RemovedFunctionName = "capture_camera";
 
         /// <summary>
         /// Renders <paramref name="targetCam"/> to an offscreen target at the given size (clamped to
         /// 64..1024) and returns the frame encoded as JPEG bytes. Restores the camera target texture and
-        /// the active render texture. Must run on the Unity main thread. Synchronous (one GPU stall);
-        /// <c>capture_camera</c> itself uses the non-blocking <see cref="ICameraFrameReadback"/>.
+        /// the active render texture. Must run on the Unity main thread. Synchronous (one GPU stall); the
+        /// <c>camera_capture</c> tool itself uses the non-blocking <see cref="CoreAI.Vision.ICameraFrameReadback"/>.
         /// </summary>
         public static byte[] CaptureCameraJpeg(Camera targetCam, int width, int height, int quality = 75)
         {
@@ -168,11 +61,6 @@ namespace CoreAI.Infrastructure.World
             int quality = 75)
         {
             return new DataContent(CaptureCameraJpeg(targetCam, width, height, quality), "image/jpeg");
-        }
-
-        private string SerializeError(string error)
-        {
-            return JsonConvert.SerializeObject(new { success = false, error });
         }
 
         /// <summary>
@@ -211,10 +99,7 @@ namespace CoreAI.Infrastructure.World
         /// Legacy helper: parses a camera result JSON that still carries a <c>data:image/...;base64,</c>
         /// <c>dataUri</c> (the shape <c>capture_camera</c> returned before it switched to
         /// <see cref="LlmToolImageResult"/>, or a host tool of the same shape) into a MEAI <see cref="DataContent"/>.
-        /// Today's <c>capture_camera</c> result has no <c>dataUri</c> — the tool loop delivers its image to the model
-        /// automatically, and <c>CoreAi.OnToolExecuted</c> hands hosts the <see cref="LlmToolImageResult"/> whose
-        /// <c>Images</c> hold the frame — so this returns <c>false</c> for it, as it does for non-image, failed or
-        /// unparseable results.
+        /// Returns <c>false</c> for non-image, failed or unparseable results.
         /// </summary>
         public static bool TryExtractImageContentFromResult(string toolResultJson, out DataContent imageContent)
         {
@@ -278,7 +163,7 @@ namespace CoreAI.Infrastructure.World
             }
         }
 
-        // WHY: Mirrors the shape serialized by CaptureCameraAsync; only fields needed for the lift.
+        // WHY: Mirrors the legacy capture shape; only the fields needed for the lift.
         private sealed class CaptureCameraResult
         {
             public bool success { get; set; }

@@ -171,4 +171,95 @@ namespace CoreAI.Mods.WorldPackages
             return AdorneeId.GetHashCode() ^ (Transparency.GetHashCode() * 397) ^ (Visible ? 1 : 2);
         }
     }
+
+    /// <summary>
+    /// The durable properties of one <c>Highlight</c> (the package's <c>highlight</c> block). The adornee is the id of an
+    /// instance of the same package, 0 for nil (which highlights the parent, as in Roblox).
+    /// </summary>
+    public readonly struct RbxWorldPackageHighlight : IEquatable<RbxWorldPackageHighlight>
+    {
+        public RbxWorldPackageHighlight(ulong adorneeId, RbxHighlightDepthMode depthMode, bool enabled,
+            RbxColor3 fillColor, float fillTransparency, RbxColor3 outlineColor, float outlineTransparency)
+        {
+            AdorneeId = adorneeId;
+            DepthMode = depthMode;
+            Enabled = enabled;
+            FillColor = fillColor;
+            FillTransparency = fillTransparency;
+            OutlineColor = outlineColor;
+            OutlineTransparency = outlineTransparency;
+        }
+
+        /// <summary>The adornee's instance id, 0 for nil.</summary>
+        public ulong AdorneeId { get; }
+
+        public RbxHighlightDepthMode DepthMode { get; }
+
+        public bool Enabled { get; }
+
+        public RbxColor3 FillColor { get; }
+
+        public float FillTransparency { get; }
+
+        public RbxColor3 OutlineColor { get; }
+
+        public float OutlineTransparency { get; }
+
+        /// <summary>The state of <paramref name="highlight"/> as it is now, its adornee as the live id (0 for nil).</summary>
+        public static RbxWorldPackageHighlight Of(RbxHighlight highlight)
+        {
+            if (highlight == null)
+            {
+                throw new ArgumentNullException(nameof(highlight));
+            }
+
+            return new RbxWorldPackageHighlight(highlight.Adornee?.Id.Value ?? 0UL, highlight.DepthMode,
+                highlight.Enabled, highlight.FillColor, highlight.FillTransparency, highlight.OutlineColor,
+                highlight.OutlineTransparency);
+        }
+
+        /// <summary>This state with another adornee id.</summary>
+        public RbxWorldPackageHighlight WithAdorneeId(ulong adorneeId)
+        {
+            return new RbxWorldPackageHighlight(adorneeId, DepthMode, Enabled, FillColor, FillTransparency,
+                OutlineColor, OutlineTransparency);
+        }
+
+        /// <summary>This state with other colours.</summary>
+        internal RbxWorldPackageHighlight WithColors(RbxColor3 fillColor, RbxColor3 outlineColor)
+        {
+            return new RbxWorldPackageHighlight(AdorneeId, DepthMode, Enabled, fillColor, FillTransparency,
+                outlineColor, OutlineTransparency);
+        }
+
+        /// <summary>Puts this state on <paramref name="highlight"/> without advancing its revision; the adornee is resolved by the caller.</summary>
+        public void ApplyTo(RbxHighlight highlight, RbxInstance adornee)
+        {
+            if (highlight == null)
+            {
+                throw new ArgumentNullException(nameof(highlight));
+            }
+
+            highlight.RestoreDurableState(adornee, DepthMode, Enabled, FillColor, FillTransparency, OutlineColor,
+                OutlineTransparency);
+        }
+
+        public bool Equals(RbxWorldPackageHighlight other)
+        {
+            return AdorneeId == other.AdorneeId && DepthMode == other.DepthMode && Enabled == other.Enabled
+                   && FillColor == other.FillColor && FillTransparency.Equals(other.FillTransparency)
+                   && OutlineColor == other.OutlineColor && OutlineTransparency.Equals(other.OutlineTransparency);
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is RbxWorldPackageHighlight other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return AdorneeId.GetHashCode() ^ (FillTransparency.GetHashCode() * 397) ^ (Enabled ? 1 : 2)
+                   ^ ((int)DepthMode << 3);
+        }
+    }
 }

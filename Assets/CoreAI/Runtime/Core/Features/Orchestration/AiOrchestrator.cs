@@ -2588,7 +2588,7 @@ namespace CoreAI.Ai
             {
                 if (!string.IsNullOrWhiteSpace(name))
                 {
-                    allowed.Add(name.Trim());
+                    allowed.Add(MapRemovedToolName(name.Trim()));
                 }
             }
 
@@ -2647,6 +2647,24 @@ namespace CoreAI.Ai
             }
 
             return filtered;
+        }
+
+        /// <summary>
+        /// The current name of a tool that was removed under an older one, so a saved allowlist keeps working: the
+        /// scene camera tool <c>camera_tool</c> and its function <c>capture_camera</c> became the agent-vision
+        /// <c>camera</c> tool and its <c>camera_capture</c>. Any other name is returned as it is.
+        /// </summary>
+        internal static string MapRemovedToolName(string name)
+        {
+            switch (name)
+            {
+                case "camera_tool":
+                    return "camera";
+                case "capture_camera":
+                    return "camera_capture";
+                default:
+                    return name;
+            }
         }
 
         private static bool IntersectsSkillToolAllowlist(ISkillSetMetaLlmTool skillMetaTool, HashSet<string> allowed)

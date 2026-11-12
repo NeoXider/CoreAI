@@ -11,7 +11,11 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
   data-driven class ancestry (`ClassCatalog`), tags (`InstanceTagStore` — CollectionService
   substrate), attributes (`AttributeContract`), the ownership ledger (`OriginTag`), stable-id
   snapshots (`InstanceSnapshot`/`InstanceTreeSerializer`), and the structured error surface
-  (`RbxError`, §5.2.7 format).
+  (`RbxError`, §5.2.7 format). `Audio/` (MVP17) holds `Sound`, `SoundGroup`, `SoundService`, the host's
+  `RbxSoundLibrary`, the scheduler-driven clock `RbxSoundPlayback` and the output reconciler
+  `RbxSoundReconciler` behind `IRbxAudioBackend` (the Unity backend is `../Binding/UnityRbxAudioBackend.cs`).
+  `Effects/` (MVP17) holds the minimal `ParticleEmitter` and `RbxParticleReconciler` behind `IRbxParticleBackend`
+  (Unity: `../Binding/UnityRbxParticleBackend.cs`); its datatypes live in `../Datatypes/RbxSequences.cs`.
 - **Unity adapter (NOT here)** — `InstanceGameObjectBinder` in `../Binding/` implements
   `IInstanceBackingBinder` and materializes instances as GameObjects; this slice ships only
   `InMemoryInstanceBackingBinder`, for engine-free tests.
@@ -66,7 +70,7 @@ Engine-free Instance/DataModel registry slice of MVP1 (`Docs/CoreAIMods/ROBLOX_A
   `ScaleTo(1.44)` makes a block-game character: 1.8 blocks tall, eyes at 1.62 blocks. Limbs are posed at
   PreRender, so a Heartbeat handler reads last frame's limb pose; a dead
   character holds its last pose (no BreakJointsOnDeath). Not implemented yet: `Motor6D`/`Weld`
-  joints, `Animator`/`Animation`/`AnimationTrack` and `Humanoid:LoadAnimation` (MVP17), seats,
+  joints, `Animator`/`Animation`/`AnimationTrack` and `Humanoid:LoadAnimation` (MVP17 step C), seats,
   appearance loading. The network transport is the optional `com.neoxider.coreaimirror` package, not
   this assembly.
 - `Clone()` copies external part state through the backing binder and removes partially created

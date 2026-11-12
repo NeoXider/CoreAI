@@ -24,7 +24,7 @@ namespace CoreAI.Infrastructure.Llm
 
     /// <summary>
     /// Vision / multimodal capability gate for the configured model. Controls whether CoreAI attaches
-    /// images to user messages and registers the <c>capture_camera</c> tool.
+    /// images to user messages and registers the <c>camera</c> tool.
     /// </summary>
     public enum VisionSupportMode
     {
@@ -121,7 +121,7 @@ namespace CoreAI.Infrastructure.Llm
         [Tooltip(
             "Vision / multimodal capability of the configured model.\n" +
             "Auto: infer from the model name (gpt-4o, gpt-4.1, o4, *vision*, *vl*, gemini, claude-3+, llava, etc.).\n" +
-            "On: force-enable image attachments + the capture_camera tool.\n" +
+            "On: force-enable image attachments + the camera tool.\n" +
             "Off: never attach images and never register vision tools (text-only model).")]
         [SerializeField]
         private VisionSupportMode visionSupport = VisionSupportMode.Auto;

@@ -195,10 +195,26 @@ namespace CoreAI.Ai
                 return "";
             }
 
+            // WHY: call_skill_tool is offered only while a skill has tools (AgentMemoryPolicy.GetToolsForRole),
+            // so a catalog of instruction-only skills must not send the model to it.
+            bool anyTools = false;
+            foreach (SkillSet skill in skills)
+            {
+                anyTools |= skill?.Tools != null && skill.Tools.Count > 0;
+            }
+
             System.Text.StringBuilder sb = new();
             sb.AppendLine("## Available Skills");
-            sb.AppendLine("Call `read_skill(skill_name)` to see full instructions and available tools.");
-            sb.AppendLine("Then call `call_skill_tool(tool_name, arguments_json)` to use a tool.");
+            if (anyTools)
+            {
+                sb.AppendLine("Call `read_skill(skill_name)` to see full instructions and available tools.");
+                sb.AppendLine("Then call `call_skill_tool(tool_name, arguments_json)` to use a tool.");
+            }
+            else
+            {
+                sb.AppendLine("Call `read_skill(skill_name)` to read a skill's instructions when the task needs them.");
+            }
+
             sb.AppendLine();
 
             foreach (SkillSet skill in skills)

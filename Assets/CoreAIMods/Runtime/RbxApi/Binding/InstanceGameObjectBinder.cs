@@ -344,6 +344,23 @@ namespace CoreAI.Mods.Rbx.Binding
             return false;
         }
 
+        /// <summary>
+        /// The renderer that draws part <paramref name="id"/> (its root, or the binder-owned shape child of a
+        /// Cylinder), for an overlay that draws the part's own mesh again, such as a Highlight. False for a
+        /// non-part, an unbound id or a renderer destroyed outside the binder.
+        /// </summary>
+        public bool TryGetPartRenderer(InstanceId id, out Renderer renderer)
+        {
+            if (TryGetLiveEntry(id, out BindingEntry entry) && entry.IsPart && entry.Renderer != null)
+            {
+                renderer = entry.Renderer;
+                return true;
+            }
+
+            renderer = null;
+            return false;
+        }
+
         /// <summary>Adopts an existing meter-authored host object as a Part backing without
         /// duplicating or taking ownership of it. Initial Part state is read through the inverse
         /// RbxSpace boundary so subsequent Lua reads and writes use the normal property sink.</summary>
@@ -1665,11 +1682,15 @@ namespace CoreAI.Mods.Rbx.Binding
             }
 
             GameObject cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            // WHY hidden before the deferred destroy: in Play Mode the templates would otherwise draw for one frame
+            // at the world origin.
+            cube.SetActive(false);
             _cubeMesh = cube.GetComponent<MeshFilter>().sharedMesh;
             _defaultMaterial = cube.GetComponent<MeshRenderer>().sharedMaterial;
             SafeDestroy(cube);
 
             GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            sphere.SetActive(false);
             _sphereMesh = sphere.GetComponent<MeshFilter>().sharedMesh;
             SafeDestroy(sphere);
 

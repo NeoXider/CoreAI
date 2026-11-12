@@ -30,7 +30,7 @@ namespace CoreAI.Tests.EditMode
             "Creator|tools=memory,world_command|skills=\n" +
             "Builder|tools=memory,world_command|skills=\n" +
             "Analyzer|tools=memory|skills=\n" +
-            "Programmer|tools=memory,camera,execute_lua,manage_mods,get_mod_logs,save_world,load_world,list_autosaves,load_autosave,read_skill,call_skill_tool|skills=Lua Modding,Rbx API,Full Lua\n" +
+            "Programmer|tools=memory,camera,execute_lua,manage_mods,get_mod_logs,save_world,load_world,list_autosaves,load_autosave,read_skill|skills=Lua Modding,Rbx API,Full Lua\n" +
             "AINpc|tools=memory|skills=\n" +
             "CoreMechanicAI|tools=memory|skills=\n" +
             "PlainChat|tools=|skills=\n" +

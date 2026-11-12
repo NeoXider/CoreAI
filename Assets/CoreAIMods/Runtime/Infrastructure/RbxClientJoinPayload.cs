@@ -199,6 +199,7 @@ namespace CoreAI.Mods.WorldPackages
             optional.Gui = KeepKeys(full.Gui, kept);
             optional.TextChatCommands = KeepKeys(full.TextChatCommands, kept);
             optional.SelectionBoxes = KeepKeys(full.SelectionBoxes, kept);
+            optional.Highlights = KeepKeys(full.Highlights, kept);
             return new RbxWorldPackagePayload(full.CapturedAtUtc, full.Settings, tree, KeepKeys(full.Parts, kept),
                 full.CameraCFrame, keptMods, Array.Empty<RbxWorldPackageDiagnostic>(), optional);
         }

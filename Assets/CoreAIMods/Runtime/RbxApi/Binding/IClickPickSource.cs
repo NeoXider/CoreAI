@@ -1,5 +1,7 @@
+using System;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Building;
 
 namespace CoreAI.Mods.Rbx.Binding
 {
@@ -21,5 +23,36 @@ namespace CoreAI.Mods.Rbx.Binding
         /// caller can gate on a ClickDetector's MaxActivationDistance.
         /// </summary>
         bool TryPick(RbxVector2 screenPositionTopLeft, out InstanceId hitId, out double distanceStuds);
+
+        /// <summary>
+        /// The richer pick behind the in-play tools and hover signals: the nearest part or Terrain hit through the
+        /// screen point within <paramref name="maxDistanceStuds"/>, skipping every instance
+        /// <paramref name="isEligible"/> refuses (the local character, a tool's own preview), with the hit point and
+        /// face normal. A source that predates it answers <see cref="TryPick"/>'s instance without a surface.
+        /// </summary>
+        bool TryPickWorld(RbxVector2 screenPositionTopLeft, Func<InstanceId, bool> isEligible,
+            double maxDistanceStuds, out RbxWorldPick pick)
+        {
+            if (TryPick(screenPositionTopLeft, out InstanceId hitId, out double distanceStuds)
+                && distanceStuds <= maxDistanceStuds && (isEligible == null || isEligible(hitId)))
+            {
+                pick = new RbxWorldPick(hitId, default, default, distanceStuds, false, false);
+                return true;
+            }
+
+            pick = RbxWorldPick.None;
+            return false;
+        }
+
+        /// <summary>
+        /// The camera ray through the screen point in Roblox space (origin in studs, unit direction); false where the
+        /// source has no camera. Tools use it to drag along an axis.
+        /// </summary>
+        bool TryGetRay(RbxVector2 screenPositionTopLeft, out RbxVector3 origin, out RbxVector3 direction)
+        {
+            origin = default;
+            direction = default;
+            return false;
+        }
     }
 }

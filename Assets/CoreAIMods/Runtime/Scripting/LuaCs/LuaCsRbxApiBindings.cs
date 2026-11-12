@@ -458,6 +458,10 @@ namespace CoreAI.Ai.LuaCs
         private volatile bool _disposed;
 
         private bool _mouseButton1Down;
+        private RbxClickDetector _hoveredDetector;
+        private ulong _hoverProbePartId;
+        private RbxClickDetector _hoverProbeDetector;
+        private int _hoverProbeAge;
 
         /// <summary>
         /// Creates the bindings over an existing world, or bootstraps a fresh MVP1 game tree when
@@ -527,6 +531,7 @@ namespace CoreAI.Ai.LuaCs
                              "the game tree has no Workspace child", nameof(game));
             _enums = enums ?? RbxEnumRegistry.CreateWithBuiltins();
             RbxGuiEnums.EnsureRegistered(_enums);
+            RbxAudioEnums.EnsureRegistered(_enums);
             _networkBridge = networkBridge ?? new NullNetworkBridge();
             _players = _game.FindFirstChildOfClass("Players") as RbxPlayers;
             if (_players == null && _registry.Catalog.TryGet("Players", out _))
@@ -657,6 +662,17 @@ namespace CoreAI.Ai.LuaCs
 
             _lighting?.LightingChanged.BindScheduler(_scheduler);
 
+            // WHY: same rationale as Lighting — a tree from before the MVP17 audio slice may lack SoundService; the
+            // library inside it stays whatever the host attached (RbxWorldHost attaches its Sounds).
+            if (!(_game.FindFirstChildOfClass("SoundService") is RbxSoundService)
+                && _registry.Catalog.TryGet("SoundService", out _))
+            {
+                RbxInstance soundService = _registry.Create("SoundService");
+                soundService.Parent = _game;
+            }
+
+            Sounds = new RbxSoundPlayback(_registry, _game, _scheduler, _log);
+
             // WHY constructed unconditionally, unlike the services above: world physics is not an
             // instance in the tree, and a world with no engine adapter still has to answer
             // workspace:Raycast (with a miss) and remember a scripted Workspace.Gravity until a host
@@ -754,6 +770,12 @@ namespace CoreAI.Ai.LuaCs
         /// <see cref="RbxCharacterRigs.Enabled"/>.
         /// </summary>
         public RbxCharacterRigs CharacterRigs { get; }
+
+        /// <summary>
+        /// The clock of every Sound in this world (MVP17): loads ids from the SoundService's library and advances,
+        /// loops and ends playing sounds at each Heartbeat.
+        /// </summary>
+        public RbxSoundPlayback Sounds { get; }
 
         /// <summary>The shared DataModel root exposed as the <c>game</c> global.</summary>
         public RbxDataModel Game => _game;
@@ -1919,6 +1941,7 @@ namespace CoreAI.Ai.LuaCs
             _registry.Registered -= OnInstanceRegisteredForCharacter;
             _registry.SceneMembershipChanged -= OnCharacterSceneMembershipChanged;
             CharacterRigs?.Dispose();
+            Sounds?.Dispose();
             // WHY: the motors leave this class's ownership before any host Release runs, so a
             // Release that throws is contained per motor and every later teardown step still runs.
             List<KeyValuePair<RbxHumanoid, IRbxCharacterMotor>> motors = new(_characterMotors);
@@ -3737,12 +3760,13 @@ namespace CoreAI.Ai.LuaCs
             bool down = input.IsMouseButtonDown(0);
             bool rising = down && !_mouseButton1Down;
             _mouseButton1Down = down;
+            RbxVector2 location = PointerPickLocation(input);
+            PumpHover(location);
             if (!rising)
             {
                 return;
             }
 
-            RbxVector2 location = input.GetMouseLocation();
             if (!_pickSource.TryPick(location, out InstanceId hitId, out double cameraDistanceStuds)
                 || !_registry.TryGet(hitId, out RbxInstance hit)
                 || hit.IsDestroyed)
@@ -3763,6 +3787,86 @@ namespace CoreAI.Ai.LuaCs
             {
                 detector.MouseClick.Fire(new object[] { player });
             }
+        }
+
+        /// <summary>
+        /// Where the pointer picks: the centre of the view while the mouse is locked to it (first person, where the
+        /// crosshair is), else the mouse location, as Roblox's Mouse.Hit does.
+        /// </summary>
+        private RbxVector2 PointerPickLocation(IInputSource input)
+        {
+            if (_userInputService.RequestedMouseLock == RbxMouseLock.LockCenter && _userInputService.IsPointerLocked)
+            {
+                RbxVector2 viewport = GetCameraViewportSize();
+                return new RbxVector2(viewport.X * 0.5f, viewport.Y * 0.5f);
+            }
+
+            return input.GetMouseLocation();
+        }
+
+        /// <summary>
+        /// Mirror <c>ClickDetector.MouseHoverEnter</c>/<c>MouseHoverLeave</c>: each frame the part under the pointer
+        /// (the crosshair in first person) names its deepest detector, as a click does; when that detector changes, the
+        /// one left fires MouseHoverLeave(player) and the one entered MouseHoverEnter(player), once each. A detector
+        /// farther than its MaxActivationDistance, one nobody listens to, and any while the pointer belongs to host UI
+        /// count as no hover.
+        /// </summary>
+        private void PumpHover(RbxVector2 location)
+        {
+            RbxClickDetector next = null;
+            if (!_userInputService.IsPointerInputProcessed
+                && _pickSource.TryPick(location, out InstanceId hitId, out double cameraDistanceStuds)
+                && _registry.TryGet(hitId, out RbxInstance hit) && !hit.IsDestroyed)
+            {
+                RbxClickDetector detector = ProbeHoverDetector(hit);
+                if (detector != null
+                    && (detector.MouseHoverEnter.HasConnections || detector.MouseHoverLeave.HasConnections)
+                    && MeasureClickDistance(ResolveClickingPlayer(), hit, cameraDistanceStuds)
+                    <= detector.MaxActivationDistance)
+                {
+                    next = detector;
+                }
+            }
+            else
+            {
+                _hoverProbePartId = 0UL;
+            }
+
+            if (ReferenceEquals(next, _hoveredDetector))
+            {
+                return;
+            }
+
+            RbxClickDetector previous = _hoveredDetector;
+            _hoveredDetector = next;
+            RbxPlayer player = ResolveClickingPlayer();
+            if (previous != null && !previous.IsDestroyed)
+            {
+                previous.MouseHoverLeave.Fire(new object[] { player });
+            }
+
+            next?.MouseHoverEnter.Fire(new object[] { player });
+        }
+
+        /// <summary>
+        /// <see cref="FindClickDetector"/> for the hovered part, searched again only when the part changes, its detector
+        /// went away, or every half second for a detector added meanwhile: the search copies child lists, and the pointer
+        /// rests on the same part for many frames.
+        /// </summary>
+        private RbxClickDetector ProbeHoverDetector(RbxInstance hit)
+        {
+            const int ResearchFrames = 30;
+            RbxClickDetector cached = _hoverProbeDetector;
+            if (_hoverProbePartId == hit.Id.Value && ++_hoverProbeAge < ResearchFrames
+                && (cached == null || (!cached.IsDestroyed && cached.Parent != null)))
+            {
+                return cached;
+            }
+
+            _hoverProbePartId = hit.Id.Value;
+            _hoverProbeAge = 0;
+            _hoverProbeDetector = FindClickDetector(hit);
+            return _hoverProbeDetector != null && !_hoverProbeDetector.IsDestroyed ? _hoverProbeDetector : null;
         }
 
         /// <summary>
@@ -4432,6 +4536,11 @@ namespace CoreAI.Ai.LuaCs
             luaRegistry.RegisterValue("Color3", LuaCsRbxDatatypeBindings.BuildColor3Global);
             luaRegistry.RegisterValue("UDim", LuaCsRbxDatatypeBindings.BuildUDimGlobal);
             luaRegistry.RegisterValue("UDim2", LuaCsRbxDatatypeBindings.BuildUDim2Global);
+            luaRegistry.RegisterValue("NumberRange", LuaCsRbxSequenceBindings.BuildNumberRangeGlobal);
+            luaRegistry.RegisterValue("NumberSequence", LuaCsRbxSequenceBindings.BuildNumberSequenceGlobal);
+            luaRegistry.RegisterValue("NumberSequenceKeypoint", LuaCsRbxSequenceBindings.BuildNumberKeypointGlobal);
+            luaRegistry.RegisterValue("ColorSequence", LuaCsRbxSequenceBindings.BuildColorSequenceGlobal);
+            luaRegistry.RegisterValue("ColorSequenceKeypoint", LuaCsRbxSequenceBindings.BuildColorKeypointGlobal);
             luaRegistry.RegisterValue("Random", LuaCsRbxDatatypeBindings.BuildRandomGlobal);
             luaRegistry.RegisterValue("Enum", () => LuaCsRbxDatatypeBindings.BuildEnumGlobal(_enums));
             luaRegistry.RegisterValue("TweenInfo",
@@ -4736,12 +4845,6 @@ namespace CoreAI.Ai.LuaCs
             {
                 UnimplementedGlobalMeta("BrickColor", backlog,
                     "use Color3.fromRGB(r, g, b) and assign it to part.Color"),
-                UnimplementedGlobalMeta("NumberSequence", backlog,
-                    "keep the keypoints in a Lua table; nothing CoreAI binds takes a NumberSequence yet"),
-                UnimplementedGlobalMeta("ColorSequence", backlog,
-                    "use a single Color3; nothing CoreAI binds takes a ColorSequence yet"),
-                UnimplementedGlobalMeta("NumberRange", backlog,
-                    "keep the minimum and maximum in two numbers and draw with Random:NextNumber(min, max)"),
                 UnimplementedGlobalMeta("Rect", backlog,
                     "keep the Min and Max corners as two Vector2 values"),
                 UnimplementedGlobalMeta("PhysicalProperties", backlog,

@@ -19,6 +19,10 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.Register(new ClassDescriptor("InstanceAdornment", "GuiBase3d", true, false, false));
             catalog.Register(new ClassDescriptor("SelectionBox", "InstanceAdornment", false, true, false,
                 descriptor => new CoreAI.Mods.Rbx.Instances.Adornments.RbxSelectionBox(descriptor)));
+            // WHY beside SelectionBox although Highlight derives from Instance: both are world adornments drawn by the
+            // same layer, and their members are answered by the same binding table.
+            catalog.Register(new ClassDescriptor("Highlight", "Instance", false, true, false,
+                descriptor => new CoreAI.Mods.Rbx.Instances.Adornments.RbxHighlight(descriptor)));
             catalog.Register(new ClassDescriptor("LayerCollector", "GuiBase2d", true, false, false));
             catalog.Register(new ClassDescriptor("ScreenGui", "LayerCollector", false, true, false,
                 descriptor => new RbxScreenGui(descriptor)));

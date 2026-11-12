@@ -38,8 +38,25 @@ namespace CoreAI.Ai
     /// one per call.
     /// </para>
     /// </summary>
-    public sealed class LuaModsLlmTool : LlmToolBase, IAIFunctionLlmTool, ILlmToolCallEffects
+    public sealed class LuaModsLlmTool : LlmToolBase, IAIFunctionLlmTool, ILlmToolCallEffects,
+        ILlmToolResultCutAdvice
     {
+        /// <inheritdoc />
+        public string AdviseOnCut(string functionName, IDictionary<string, object> arguments)
+        {
+            switch (LlmToolCallArguments.GetAction(arguments))
+            {
+                case "get_source":
+                    return "Call get_source again with a smaller line_count, then follow next_from_line.";
+                case "list":
+                    return "Pass folder to list one branch.";
+                case "export":
+                    return "A cut bundle cannot be imported; to change the mod use get_source and edit.";
+                default:
+                    return null;
+            }
+        }
+
         /// <summary>
         /// Most source characters one <c>get_source</c> page returns. The page is also kept under
         /// <see cref="ICoreAISettings.MaxToolResultChars"/> as serialized JSON, which is usually the tighter limit.
@@ -212,43 +229,16 @@ namespace CoreAI.Ai
         public override bool AllowDuplicates => false;
 
         /// <inheritdoc />
+        // WHY this short: the description is sent on every request. Folders, quarantine, export/import and the mod
+        // Lua API are in the Lua Modding skill; the callback-syntax and escaped-newline advice comes with the error
+        // of the load, reload or edit that trips on it (SourceHint).
         public override string Description =>
-            "Manage persistent Lua mods (long-lived scripts with hooks_on/hooks_every handlers). " +
-            "Actions: list (all loaded mods), get_source (read a mod's Lua in pages of whole lines; while " +
-            "next_from_line is set, call again with from_line=next_from_line), " +
-            "edit (replace old_text, copied exactly from get_source, with new_text, then reload; a failed edit " +
-            "changes nothing), " +
-            "load (install new mod), reload (replace a mod's WHOLE code keeping its permissions; by default the " +
-            "objects the previous run's main chunk built are removed first so the new code builds into a clean " +
-            "world, objects created later by handlers or players are kept, and a failed reload changes nothing; " +
-            "pass keep_objects=true to keep every object and build next to them), " +
-            "unload (remove a mod), export (get a shareable bundle of a mod to move it to another player), " +
-            "import (install a mod from a shareable bundle, passed in the 'bundle' or 'code' param), " +
-            "forget (unload a mod and delete it from persistent storage), " +
-            "versions (list a mod's saved revisions; revision 0 is the original, newest last), " +
-            "revert (roll a mod back to an earlier revision, passed in the 'revision' param), " +
-            "diagnostics (read recent runtime errors thrown by mod hooks/timers so you can repair the mod). " +
-            "Mods live in folders: a mod's folder is the 'category:' path in its @coreai header (category: Games/Arcade); " +
-            "no category = top level. load with 'folder' puts the new mod in that folder; move (mod_id + folder) moves a " +
-            "loaded mod without restarting it; create_folder, delete_folder (empty folders only), rename_folder (folder + " +
-            "target = new name) and move_folder (folder + target = new parent) manage folders; list shows each mod's " +
-            "folder and the folders, and with 'folder' only that branch. A refused folder call returns a code such as " +
-            "FOLDER_NOT_EMPTY or INVALID_CHARACTER. " +
-            "load/reload/edit auto-persist mods so they survive an app restart; export/import move mods between players. " +
-            "Each load/reload/edit records a new revision; use versions then revert to undo a bad edit. " +
-            "A hook or timer that starts throwing at runtime is reported via diagnostics (not as an error on the " +
-            "call that loaded it) - poll diagnostics, then fix the mod with edit. " +
-            "A mod that keeps failing is QUARANTINED, never auto-unloaded: it stays in list (quarantined=true) " +
-            "with its handlers/timers suspended, and a successful reload or edit clears the quarantine and resumes it. " +
-            "To change a mod: get_source, then edit; use reload only to replace a whole mod. " +
-            "Lua callback syntax: hooks_on('event', function(name, payload) ... end) " +
-            "and hooks_every(seconds, function() ... end). Do not write hooks_on('event') function() ... end. " +
-            "Extra globals inside mods: hooks_on('tick', fn) per-frame alias; store_set(key, value)/store_get(key) " +
-            "per-mod persistent strings; events_emit(name, payload) between mods; mods_export(name, valueOrFn), " +
-            "mods_get(modId, name), mods_call(modId, fnName, ...), mods_list_exports(modId) for cross-mod " +
-            "variables and function calls (by-value; nil/boolean/number/string/plain tables only); " +
-            "input_key/input_key_down/input_key_up/input_mouse_button/input_mouse_x/input_mouse_y/input_axis " +
-            "to read player input from timers.";
+            "Persistent Lua mods: scripts that keep running (hooks_on/hooks_every handlers) and are saved, so a " +
+            "loaded mod comes back after a restart. To change a mod: get_source (while next_from_line is set, call " +
+            "again with from_line=next_from_line), then edit (replace old_text, copied exactly from get_source, " +
+            "with new_text); use reload only to replace a whole mod. A hook that throws later shows in " +
+            "diagnostics; versions then revert undoes an edit. Other actions, mod Lua API: " +
+            "read_skill('Lua Modding').";
 
         /// <inheritdoc />
         public override string ParametersSchema => JsonParams(
@@ -273,16 +263,16 @@ namespace CoreAI.Ai
             "diagnostics, move, create_folder, rename_folder, move_folder, delete_folder";
 
         private const string ModIdDescription =
-            "Mod id (required for get_source, edit, load, reload, unload, export, forget, versions, revert; optional filter for diagnostics)";
+            "The mod, for every action on one mod; a filter for diagnostics.";
 
         private const string CodeDescription =
-            "Lua source for load/reload. Multi-line code is fully supported: write newlines as standard JSON \\n escapes inside this string (do not double-escape as \\\\n - that reaches Lua as a literal backslash and breaks parsing). Valid callbacks: hooks_on('event', function(name, payload) ... end); hooks_every(seconds, function() ... end). For import, the shareable bundle may be passed here if 'bundle' is omitted.";
+            "load/reload: the whole Lua source, newlines as \\n (never \\\\n).";
 
         private const string BundleDescription =
-            "Shareable mod bundle JSON (as returned by export) for the import action.";
+            "import: the bundle export returned.";
 
         private const string RevisionDescription =
-            "Revision index to roll back to for the revert action (as listed by versions; 0 is the original).";
+            "revert: a revision index from versions (0 = original).";
 
         private const string FromLineDescription =
             "get_source: first line, 1-based; pass the previous page's next_from_line.";
@@ -301,17 +291,14 @@ namespace CoreAI.Ai
             "edit: replace every occurrence of old_text.";
 
         private const string FolderDescription =
-            "Mod folder path like Games/Arcade (letters, digits, spaces and _ - . ( ) & + ! ' , #; up to 8 levels of " +
-            "64 characters). Empty = top level. load: the folder the new mod goes in (written into its header as " +
-            "category). move: the destination. list: only this branch. create_folder, delete_folder, rename_folder, " +
-            "move_folder: the folder acted on.";
+            "A folder path like Games/Arcade (empty = top level): where load puts the mod, where move moves it, the " +
+            "branch list shows, the folder a folder action acts on.";
 
         private const string TargetDescription =
-            "rename_folder: the new name (one folder name, no '/'). move_folder: the new parent folder (empty = top level).";
+            "rename_folder: the new name; move_folder: the new parent (empty = top level).";
 
         private const string KeepObjectsDescription =
-            "reload and edit only. false (default): the objects the previous run's main chunk built are removed " +
-            "before the new code runs. true: every object stays and the new code builds next to them.";
+            "reload/edit: true keeps the objects the old code built; false (default) removes them first.";
 
         /// <summary>Creates the MEAI function surface for <c>manage_mods</c>.</summary>
         public AIFunction CreateAIFunction()
@@ -450,9 +437,11 @@ namespace CoreAI.Ai
             }
             catch (Exception ex)
             {
-                result = Fail($"manage_mods '{normalized}' failed: {ex.Message}");
+                result = Fail($"manage_mods '{normalized}' failed: {ex.Message}" +
+                              (normalized == "load" || normalized == "reload" ? SourceHint(call.Code) : ""));
             }
 
+            result = WithIgnoredArgumentNote(result, normalized, call);
             if (_settings.LogToolCallResults)
             {
                 string preview = result.Length > 200 ? result.Substring(0, 200) : result;
@@ -460,6 +449,78 @@ namespace CoreAI.Ai
             }
 
             return result;
+        }
+
+        /// <summary>The arguments each action reads; any other argument the call set has no effect on it.</summary>
+        private static readonly Dictionary<string, string[]> ActionArguments = new(StringComparer.Ordinal)
+        {
+            ["list"] = new[] { "folder" },
+            ["get_source"] = new[] { "mod_id", "from_line", "line_count" },
+            ["edit"] = new[] { "mod_id", "old_text", "new_text", "replace_all", "keep_objects" },
+            ["load"] = new[] { "mod_id", "code", "folder" },
+            ["reload"] = new[] { "mod_id", "code", "keep_objects" },
+            ["unload"] = new[] { "mod_id" },
+            ["export"] = new[] { "mod_id" },
+            ["import"] = new[] { "bundle", "code" },
+            ["forget"] = new[] { "mod_id" },
+            ["versions"] = new[] { "mod_id" },
+            ["revert"] = new[] { "mod_id", "revision" },
+            ["diagnostics"] = new[] { "mod_id" },
+            ["move"] = new[] { "mod_id", "folder" },
+            ["create_folder"] = new[] { "folder" },
+            ["delete_folder"] = new[] { "folder" },
+            ["rename_folder"] = new[] { "folder", "target" },
+            ["move_folder"] = new[] { "folder", "target" }
+        };
+
+        /// <summary>
+        /// <paramref name="result"/> with an <c>argument_note</c> naming the arguments the call set that its action does
+        /// not read, so a model that sent <c>folder</c> to <c>get_source</c> learns it changed nothing.
+        /// </summary>
+        private static string WithIgnoredArgumentNote(string result, string action, ModsCall call)
+        {
+            if (!ActionArguments.TryGetValue(action, out string[] read))
+            {
+                return result;
+            }
+
+            List<string> ignored = new();
+            void Check(string name, bool sent)
+            {
+                if (sent && Array.IndexOf(read, name) < 0)
+                {
+                    ignored.Add(name);
+                }
+            }
+
+            Check("mod_id", !string.IsNullOrEmpty(call.ModId));
+            Check("code", call.Code != null);
+            Check("bundle", call.Bundle != null);
+            Check("revision", call.Revision >= 0);
+            Check("keep_objects", call.KeepObjects);
+            Check("folder", call.Folder != null);
+            Check("target", call.Target != null);
+            Check("from_line", call.FromLine > 0);
+            Check("line_count", call.LineCount > 0);
+            Check("old_text", call.OldText != null);
+            Check("new_text", call.NewText != null);
+            Check("replace_all", call.ReplaceAll);
+            if (ignored.Count == 0)
+            {
+                return result;
+            }
+
+            try
+            {
+                JObject parsed = JObject.Parse(result);
+                parsed["argument_note"] = $"{action} does not read {string.Join(", ", ignored)}; " +
+                                          (ignored.Count == 1 ? "it had" : "they had") + " no effect.";
+                return parsed.ToString(Formatting.None);
+            }
+            catch (JsonReaderException)
+            {
+                return result;
+            }
         }
 
         /// <inheritdoc />
@@ -654,7 +715,51 @@ namespace CoreAI.Ai
                 ? $"{items.Count} mod(s) loaded{scope}."
                 : $"{items.Count} mod(s) loaded{scope}; {quarantined} quarantined (still loaded, dispatch suspended " +
                   "after repeated errors - check diagnostics, fix the code, and reload to resume).";
-            return JsonConvert.SerializeObject(new { success = true, message, data = items, folders });
+            int shown = FitCount(items.Count, count => ListResult(message, items, count, folders));
+            return ListResult(message, items, shown, folders);
+        }
+
+        private static string ListResult(string message, List<object> items, int shown, List<object> folders)
+        {
+            string text = shown == items.Count
+                ? message
+                : message + $" Showing the first {shown} of {items.Count}; pass folder to list one branch.";
+            return JsonConvert.SerializeObject(new
+                { success = true, message = text, data = items.GetRange(0, shown), folders });
+        }
+
+        /// <summary>
+        /// The most items, from 0 to <paramref name="count"/>, whose result from <paramref name="render"/> fits
+        /// <see cref="ICoreAISettings.MaxToolResultChars"/>; all of them when the cap is off.
+        /// </summary>
+        /// <remarks>
+        /// WHY: a result over the cap reaches the model cut in the middle of its JSON. Fewer whole items with a
+        /// message that says how many are missing is a result the model can act on.
+        /// </remarks>
+        private int FitCount(int count, Func<int, string> render)
+        {
+            int cap = _settings.MaxToolResultChars;
+            if (cap <= 0 || render(count).Length <= cap)
+            {
+                return count;
+            }
+
+            int low = 0;
+            int high = count - 1;
+            while (low < high)
+            {
+                int middle = low + (high - low + 1) / 2;
+                if (render(middle).Length <= cap)
+                {
+                    low = middle;
+                }
+                else
+                {
+                    high = middle - 1;
+                }
+            }
+
+            return low;
         }
 
         private static List<ModFolderModEntry> ToFolderEntries(IReadOnlyList<LuaModInfo> mods)
@@ -1077,7 +1182,8 @@ namespace CoreAI.Ai
             catch (Exception ex)
             {
                 return Fail($"edit: the edited source of mod '{id}' failed to load, so nothing changed and the mod " +
-                            $"keeps running its previous source: {ex.Message} Fix new_text and call edit again.");
+                            $"keeps running its previous source: {ex.Message} Fix new_text and call edit again." +
+                            SourceHint(newText));
             }
 
             int revision = LatestRevision(actor, modId);
@@ -1229,9 +1335,18 @@ namespace CoreAI.Ai
                 });
             }
 
-            return Ok(
-                $"{items.Count} revision(s) of mod '{modId.Trim()}' (0 = original, newest last). Use revert with a revision index to roll back.",
-                items);
+            string id = modId.Trim();
+            int shown = FitCount(items.Count, count => VersionsResult(id, items, count));
+            return VersionsResult(id, items, shown);
+        }
+
+        private static string VersionsResult(string id, List<object> items, int shown)
+        {
+            string count = shown == items.Count
+                ? $"{items.Count} revision(s) of mod '{id}'"
+                : $"{items.Count} revision(s) of mod '{id}', the newest {shown} shown";
+            return Ok(count + " (0 = original, newest last). Use revert with a revision index to roll back.",
+                items.GetRange(items.Count - shown, shown));
         }
 
         private string Revert(ActorContext actor, string modId, int revision)
@@ -1284,12 +1399,23 @@ namespace CoreAI.Ai
             }
 
             string scope = string.IsNullOrWhiteSpace(modId) ? "all mods" : $"mod '{modId.Trim()}'";
-            string message = total == 0
-                ? $"No recent runtime handler errors for {scope}."
-                : $"{total} recent runtime handler error(s) for {scope} (newest last). Fix the mod and reload it. " +
-                  "A mod past its error threshold is quarantined (still loaded, dispatch suspended) - " +
-                  "reload clears the quarantine.";
-            return Ok(message, items);
+            int shown = FitCount(items.Count, count => DiagnosticsResult(scope, total, items, count));
+            return DiagnosticsResult(scope, total, items, shown);
+        }
+
+        private static string DiagnosticsResult(string scope, int total, List<object> items, int shown)
+        {
+            if (total == 0)
+            {
+                return Ok($"No recent runtime handler errors for {scope}.", items);
+            }
+
+            string count = shown == total
+                ? $"{total} recent runtime handler error(s) for {scope}"
+                : $"{total} recent runtime handler error(s) for {scope}, the newest {shown} shown";
+            return Ok(count + " (newest last). Fix the mod with edit; a mod past its error threshold is quarantined " +
+                      "(still loaded, dispatch suspended) until a successful edit or reload.",
+                items.GetRange(items.Count - shown, shown));
         }
 
         /// <summary>
@@ -1359,6 +1485,39 @@ namespace CoreAI.Ai
 
                 _runtime.UnloadMod(_actor, modId);
             }
+        }
+
+        private static readonly System.Text.RegularExpressions.Regex DetachedHandler = new(
+            @"hooks_(on|every)\s*\([^()]*\)\s*function\b", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// The fix for the two source mistakes a failed load, reload or edit is known to come from, as a sentence to
+        /// append to its error; empty when the source shows neither.
+        /// </summary>
+        /// <remarks>
+        /// WHY here and not in the description: the advice was paid on every request to prevent two failures; on
+        /// the failure itself it costs nothing until it is needed and names exactly what to change.
+        /// </remarks>
+        internal static string SourceHint(string source)
+        {
+            if (string.IsNullOrEmpty(source))
+            {
+                return "";
+            }
+
+            if (DetachedHandler.IsMatch(source))
+            {
+                return " The handler is outside the call: write hooks_on('event', function(name, payload) ... end) " +
+                       "or hooks_every(seconds, function() ... end), the function being the last argument.";
+            }
+
+            if (source.IndexOf('\n') < 0 && source.Contains("\\n"))
+            {
+                return " The source has no line breaks but literal \\n sequences: the newlines were escaped twice. " +
+                       "Send them as \\n in the JSON string, not \\\\n.";
+            }
+
+            return "";
         }
 
         private static string Ok(string message, object data = null)

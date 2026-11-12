@@ -141,6 +141,21 @@ namespace CoreAI.Ai
     }
 
     /// <summary>
+    /// A tool that can say what to ask for instead when one of its results is longer than
+    /// <see cref="ICoreAISettings.MaxToolResultChars"/> and reaches the model cut: a range, a filter, a smaller count.
+    /// The execution policy puts the advice in the line a cut result starts with; without it the line carries a
+    /// generic sentence.
+    /// </summary>
+    public interface ILlmToolResultCutAdvice
+    {
+        /// <summary>
+        /// One sentence for a cut result of <paramref name="functionName"/> called with <paramref name="arguments"/>,
+        /// or null for the generic advice.
+        /// </summary>
+        string AdviseOnCut(string functionName, IDictionary<string, object> arguments);
+    }
+
+    /// <summary>
     /// LLM tool that can be invoked by a skill proxy from raw JSON arguments without using reflection.
     /// This is the preferred runtime contract for tools that live behind <c>call_skill_tool</c>.
     /// </summary>

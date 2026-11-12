@@ -164,11 +164,11 @@ namespace CoreAI.Ai
 
             public override string Name => "read_skill";
 
+            // WHY no call_skill_tool sentence: that proxy is offered only while a skill has tools, and a skill that
+            // has them lists the call in its own result (usage).
             public override string Description =>
-                "Read the full instructions and tool list for a skill. Call this BEFORE using " +
-                "call_skill_tool so you know which tools are available and what parameters they need. " +
-                "Pass the skill name exactly as listed in the catalog. The default is the complete entry document " +
-                "and a reference index; use section for one reference or all=true for every document.";
+                "Read a skill's instructions (and its tools, if it has any) by the skill name your prompt or catalog " +
+                "gives. Returns the entry document and a list of sections; pass section for one, all=true for all.";
 
             // WHY cached: the schema is derived by reflection from a fixed delegate and never changes, yet
             // this property is read several times per request (token budgeting, logging, the text tool

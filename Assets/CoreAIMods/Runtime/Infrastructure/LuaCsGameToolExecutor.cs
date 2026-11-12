@@ -1424,8 +1424,12 @@ namespace CoreAI.Mods.WorldPackages
                 }));
             }
 
+            // WHY success and count: an empty list read as a failed call to a small model, and the count tells it
+            // how many names it may pass to load_autosave without counting rows.
             return Task.FromResult(Newtonsoft.Json.JsonConvert.SerializeObject(new
             {
+                success = true,
+                count = rows.Count,
                 autosaves = rows
             }));
         }

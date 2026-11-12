@@ -14,7 +14,7 @@ namespace CoreAI.Ai
     /// as image parts of a follow-up user message before the next request (tool messages cannot carry images
     /// on OpenAI-compatible APIs). The follow-up names the tool (<c>Image returned by tool 'render_preview'.</c>);
     /// earlier images of other calls stay in the turn so the model can compare them (the latest 8 such messages
-    /// are kept). Camera tools (<c>camera_capture</c>, <c>screenshot</c>, <c>capture_camera</c>) are the exception:
+    /// are kept). The camera tools (<c>camera_capture</c>, <c>screenshot</c>) are the exception:
     /// their frame replaces the previous frame.
     /// <para>
     /// The same object is what <c>CoreAi.OnToolExecuted</c> (and any <c>IToolExecutionNotifier</c>) receives

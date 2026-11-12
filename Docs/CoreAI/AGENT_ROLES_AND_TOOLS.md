@@ -51,9 +51,9 @@ these sources:
 4. **`AgentBuilder`-based custom/host-wired tools** — any role (built-in or custom) can additionally get
    tools the host wires by hand (`InventoryLlmTool`, `ComponentLlmTool`, `GameConfigLlmTool`, etc.) via
    `AgentBuilder.WithTool(...)` or `AgentMemoryPolicy.AddToolForRole`. Two facade helpers do the same:
-   `CoreAi.RegisterCameraVisionTool(roleId = SmartChat)` adds the older scene tool `camera_tool`
-   (function `capture_camera`, `CoreAI.Infrastructure.World.CameraLlmTool`) and only when
-   `CoreAi.IsVisionEnabled()` is true; `CoreAi.RegisterGameStateTool(roleId = SmartChat)` adds
+   `CoreAi.RegisterCameraVisionTool(roleId = SmartChat)` adds the agent-vision `camera` tool
+   (`camera_capture`, `camera_look`, `camera_orbit`, `camera_list`) and only when
+   `CoreAi.IsVisionEnabled()` is true (the older scene tool `camera_tool` / `capture_camera` was removed); `CoreAi.RegisterGameStateTool(roleId = SmartChat)` adds
    `game_state`. These are **not** part of the built-in wiring and are omitted from the table below
    unless a role's system prompt specifically references one (see Merchant).
 5. **A host role definition** — applying a `RoleDefinition` (code: `AgentMemoryPolicy.ApplyRoleDefinition`;
@@ -76,7 +76,7 @@ axis that shares one word: the agent role `Creator` below is the `world_command`
 | **AINpc** (`AiNpc`) | In-world NPC dialogue voice; stays in character, short lines. | `memory` only | No. | No. | Its definition lists the empty `npc` profile, which a game can fill once for all NPC roles. |
 | **CoreMechanicAI** (`CoreMechanic`) | Crafting/loot/compatibility numeric-outcome resolver. | `memory` only | No. | No. | `ToolResultMemoryPolicy.Full` (exact tool output kept across turns) like Programmer, set in its shipped definition. |
 | **PlainChat** | Simple player-facing assistant; no tool calls, no hidden reasoning. | none (`UseMemoryTool = false` explicitly) | No. | No. | Only built-in role with the memory tool off by default (its shipped definition); persistent chat history is on instead. |
-| **SmartChat** | Advanced player-facing assistant; may use tools including memory. | `memory` (+ `camera` when the chat panel attaches it, + `camera_tool` if the host calls `CoreAi.RegisterCameraVisionTool`) | No native world-edit tool by installer default. | Conditionally yes — not wired by an installer, but it is the usual active chat role, so the chat panel attaches `camera` (§1 item 3); `CoreAi.RegisterCameraVisionTool` also defaults to this role. | Persistent chat history on by default (its shipped definition). |
+| **SmartChat** | Advanced player-facing assistant; may use tools including memory. | `memory` (+ `camera` when the chat panel attaches it or the host calls `CoreAi.RegisterCameraVisionTool`) | No native world-edit tool by installer default. | Conditionally yes — not wired by an installer, but it is the usual active chat role, so the chat panel attaches `camera` (§1 item 3); `CoreAi.RegisterCameraVisionTool` also defaults to this role. | Persistent chat history on by default (its shipped definition). |
 | **Merchant** | Shopkeeper NPC; sells from an inventory. | `memory`, plus `get_inventory` when an inventory provider is registered. | No. | No. | Its definition lists the `npc` and `inventory` profiles; `WorldCommandsInstaller` registers `get_inventory` (`InventoryLlmTool`) into `inventory` when the container holds an `InventoryTool.IInventoryProvider`. The system prompt asks for `get_inventory` only when that tool is available. |
 
 A running chat-panel host can show more than this table: `camera` on Creator, Builder or SmartChat comes

@@ -722,6 +722,16 @@ namespace CoreAI.Mods.Rbx.Instances
             catalog.Register(new ClassDescriptor("Light", "Instance", true, false, false));
             catalog.Register(new ClassDescriptor("PointLight", "Light", false, true, false,
                 descriptor => new RbxPointLight(descriptor)));
+            // WHY SoundService a tree service and Sound/SoundGroup creatable: SoundService.yaml is a NotCreatable
+            // Service under game, Sound.yaml and SoundGroup.yaml are creatable (MVP17, local playback).
+            catalog.Register(new ClassDescriptor("Sound", "Instance", false, true, false,
+                descriptor => new RbxSound(descriptor)));
+            catalog.Register(new ClassDescriptor("SoundGroup", "Instance", false, true, false,
+                descriptor => new RbxSoundGroup(descriptor)));
+            catalog.Register(new ClassDescriptor("SoundService", "Instance", false, false, true,
+                descriptor => new RbxSoundService(descriptor)));
+            catalog.Register(new ClassDescriptor("ParticleEmitter", "Instance", false, true, false,
+                descriptor => new RbxParticleEmitter(descriptor)));
 
             const string chatMessages =
                 "the messaging half of TextChatService (channels, MessageReceived, bubbles) lands with P2; "
@@ -823,6 +833,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
                     "TopSurface", surfaceWorkaround));
             RegisterLightingKnownUnimplementedMembers(catalog);
+            RegisterAudioKnownUnimplementedMembers(catalog);
             RbxGuiCatalog.Register(catalog);
             catalog.RegisterKnownUnimplementedMembers("RunService",
                 RbxKnownUnimplementedMemberDescriptor.PlannedMethod(
@@ -1024,6 +1035,92 @@ namespace CoreAI.Mods.Rbx.Instances
                 RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty(
                     "PrioritizeLightingQuality", securityWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("Technology", securityWorkaround));
+        }
+
+        /// <summary>
+        /// The scriptable <c>Sound</c> and <c>SoundService</c> members the MVP17 local-playback slice does not answer:
+        /// regions, metering, the listener and the world's acoustics stay loud; the deprecated spellings name their
+        /// replacements.
+        /// </summary>
+        private static void RegisterAudioKnownUnimplementedMembers(ClassCatalog catalog)
+        {
+            const string regionWorkaround =
+                "play the whole clip: set TimePosition to start part-way, and Stop from task.delay to end early";
+            const string listenerWorkaround =
+                "the listener is the camera (workspace.CurrentCamera); move the camera to move the listener";
+            const string acousticsWorkaround =
+                "the world's acoustics are not simulated; set each Sound's Volume and roll-off instead";
+            catalog.RegisterKnownUnimplementedMembers("Sound",
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("PlaybackRegion", regionWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("LoopRegion", regionWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("PlaybackRegionsEnabled", regionWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("PlaybackLoudness",
+                    "playback is not metered; read Volume, IsPlaying and TimePosition"),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("AcousticSimulationEnabled", acousticsWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod("GetUnderlyingAudioPlayer",
+                    "the audio-instance API (AudioPlayer, Wire) is not implemented; use the Sound members"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("EmitterSize",
+                    "deprecated in Roblox; use RollOffMinDistance"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("MinDistance",
+                    "deprecated in Roblox; use RollOffMinDistance"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("MaxDistance",
+                    "deprecated in Roblox; use RollOffMaxDistance"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("Pitch",
+                    "deprecated in Roblox; use PlaybackSpeed"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("isPlaying",
+                    "deprecated in Roblox; use IsPlaying"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod("play", "deprecated in Roblox; use Play"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod("pause", "deprecated in Roblox; use Pause"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedMethod("stop", "deprecated in Roblox; use Stop"));
+            catalog.RegisterKnownUnimplementedMembers("SoundService",
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("ListenerType", listenerWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("ListenerCFrame", listenerWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("ListenerObject", listenerWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("DefaultListenerLocation", listenerWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod("SetListener", listenerWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod("GetListener", listenerWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("AmbientReverb", acousticsWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("AcousticSimulationEnabled", acousticsWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("DistanceFactor", acousticsWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("DopplerScale",
+                    "there is no Doppler effect; change PlaybackSpeed for a pitch shift"),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("RolloffScale",
+                    "set each Sound's RollOffMinDistance and RollOffMaxDistance instead"),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("RespectFilteringEnabled",
+                    "networked playback is the multiplayer half of MVP17; sounds play locally"),
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod("GetMixerTime",
+                    "time a sound with its TimePosition, or the game clock with os.clock()"));
+            const string particleWorkaround =
+                "the minimal emitter draws Rate, Lifetime, Speed, Color, Size, Transparency, Texture, SpreadAngle, "
+                + "Acceleration and EmissionDirection; shape the effect with those until this member lands";
+            catalog.RegisterKnownUnimplementedMembers("ParticleEmitter",
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("LightEmission", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("LightInfluence", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("Brightness", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("Drag", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("LockedToPart", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("VelocityInheritance", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("Orientation", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("Rotation", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("RotSpeed", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("Shape", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("ShapeInOut", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("ShapePartial", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("ShapeStyle", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("Squash", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("TimeScale", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("ZOffset", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("WindAffectsDrag", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("FlipbookLayout", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("FlipbookMode", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("FlipbookFramerate", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("FlipbookStartRandom", particleWorkaround),
+                RbxKnownUnimplementedMemberDescriptor.BacklogProperty("TextureContent",
+                    "assign Texture a registered key or a Resources path instead"),
+                RbxKnownUnimplementedMemberDescriptor.BacklogMethod("FastForward",
+                    "call Emit(count) for an effect that should start full"),
+                RbxKnownUnimplementedMemberDescriptor.UnsupportedProperty("VelocitySpread",
+                    "deprecated in Roblox; use SpreadAngle"));
         }
 
         /// <summary>
@@ -1262,7 +1359,7 @@ namespace CoreAI.Mods.Rbx.Instances
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
                     "EnableFluidForces", physicsWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.BacklogProperty(
-                    "AudioCanCollide", "positional audio is not implemented"),
+                    "AudioCanCollide", "sound is not occluded by parts; it is heard through walls"),
                 RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
                     "ApplyImpulse", physicsWorkaround),
                 RbxKnownUnimplementedMemberDescriptor.BacklogMethod(
@@ -1306,7 +1403,7 @@ namespace CoreAI.Mods.Rbx.Instances
         /// <summary>
         /// Real, script-creatable Roblox classes CoreAI does not implement yet (M1-05): Instance.new
         /// raises their loud stub. Planned rungs follow the roadmap's own class lists (MVP15 GUI
-        /// subset, MVP17 Sound/ParticleEmitter, P9 lighting, P10 asset classes); everything else is
+        /// subset, P9 lighting, P10 asset classes); everything else is
         /// backlog or deliberately unsupported. Services and NotCreatable classes are not listed: Instance.new refuses them
         /// with the Roblox "Unable to create" error, exactly as Roblox does.
         /// </summary>
@@ -1399,11 +1496,6 @@ namespace CoreAI.Mods.Rbx.Instances
                     "use Color and Material, or a MaterialVariant for a tiled texture"),
                 RbxKnownUnimplementedClassDescriptor.Planned("SurfaceAppearance", "P10",
                     "use a MaterialVariant for a custom surface"),
-                RbxKnownUnimplementedClassDescriptor.Backlog("Highlight", effectsWorkaround),
-                RbxKnownUnimplementedClassDescriptor.Planned("Sound", "MVP17",
-                    "play no audio from Lua until the audio rung lands"),
-                RbxKnownUnimplementedClassDescriptor.Planned("ParticleEmitter", "MVP17",
-                    effectsWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("Beam", effectsWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("Trail", effectsWorkaround),
                 RbxKnownUnimplementedClassDescriptor.Backlog("Fire", effectsWorkaround),

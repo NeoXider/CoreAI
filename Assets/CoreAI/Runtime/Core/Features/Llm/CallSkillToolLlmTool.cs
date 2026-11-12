@@ -91,6 +91,27 @@ namespace CoreAI.Ai
         }
 
         /// <summary>
+        /// True for a <c>call_skill_tool</c> proxy whose skills expose no tool at the moment. Such a proxy could only
+        /// forward to the role's own top-level tools, a second way to call what the role already calls directly,
+        /// so <c>AgentMemoryPolicy.GetToolsForRole</c> does not offer it. A live catalog that later gains a skill
+        /// with tools brings it back.
+        /// </summary>
+        internal static bool OffersNoSkillTools(ILlmTool tool)
+        {
+            return tool is CallSkillToolProxy proxy && !proxy.HasSkillTools;
+        }
+
+        /// <summary>The refusal of a <c>call_skill_tool</c> call while it is not offered, naming the direct tool.</summary>
+        internal static string DescribeNotOffered(string directToolName)
+        {
+            return string.IsNullOrEmpty(directToolName)
+                ? "call_skill_tool is not available: no skill here has tools of its own. Call the tools listed " +
+                  "under Available tools directly."
+                : $"call_skill_tool is not available: '{directToolName}' is one of your own tools. Call " +
+                  $"{directToolName} directly with the same arguments; nothing ran.";
+        }
+
+        /// <summary>
         /// Result text of a <c>call_skill_tool</c> call made by a request that carries no role id.
         /// </summary>
         internal const string MissingRoleError =
@@ -322,6 +343,9 @@ namespace CoreAI.Ai
                 return !string.IsNullOrWhiteSpace(toolName) && ResolveToolMap().ContainsKey(toolName.Trim());
             }
 
+            /// <summary>Whether a skill of the catalog exposes at least one tool the allowlist permits.</summary>
+            public bool HasSkillTools => ResolveToolMap().Count > 0;
+
             public ILlmTool RestrictTo(IReadOnlyCollection<string> allowedToolNames)
             {
                 return new CallSkillToolProxy(_skills,
@@ -373,6 +397,22 @@ namespace CoreAI.Ai
                     return false;
                 }
 
+                // WHY the direct path's repair, against the target's own function: a "True" for a boolean or a
+                // modId for mod_id must not fail here when the same call made directly would run.
+                if (descriptor.PreflightFunction != null)
+                {
+                    AIFunctionArguments repaired = SkillSetToolResolver.CreateArguments(parsed);
+                    LlmToolArgumentRepair.Outcome repair =
+                        LlmToolArgumentRepair.Repair(descriptor.PreflightFunction, repaired);
+                    if (!string.IsNullOrEmpty(repair.Refusal))
+                    {
+                        error = repair.Refusal + $" Retry call_skill_tool with tool_name=\"{descriptor.Name}\".";
+                        return false;
+                    }
+
+                    parsed = Rebuild(parsed, repaired);
+                }
+
                 // WHY before binding: a missing required parameter used to reach MEAI, which threw
                 // "The arguments dictionary is missing a value for the required parameter 'x'" from
                 // INSIDE the invocation boundary. The model got a bare binder message (no tool, no
@@ -402,6 +442,42 @@ namespace CoreAI.Ai
 
                 invocation = new ResolvedLlmToolInvocation(descriptor, parsed);
                 return true;
+            }
+
+            /// <summary>
+            /// The arguments object after a repair: every untouched value keeps its original token (a nested object
+            /// stays an object for a JSON-invocable tool), a renamed one moves with its token, a coerced scalar is
+            /// written as its new value.
+            /// </summary>
+            private static JObject Rebuild(JObject original, IDictionary<string, object> repaired)
+            {
+                JObject result = new();
+                foreach (KeyValuePair<string, object> pair in repaired)
+                {
+                    JToken token = original.TryGetValue(pair.Key, StringComparison.Ordinal, out JToken same) &&
+                                   Equals(LlmToolArgumentNormalizer.NormalizeValue(same), pair.Value)
+                        ? same
+                        : FindMoved(original, repaired, pair.Value);
+                    result[pair.Key] = token != null
+                        ? token.DeepClone()
+                        : pair.Value == null ? JValue.CreateNull() : new JValue(pair.Value);
+                }
+
+                return result;
+            }
+
+            private static JToken FindMoved(JObject original, IDictionary<string, object> repaired, object value)
+            {
+                foreach (JProperty property in original.Properties())
+                {
+                    if (!repaired.ContainsKey(property.Name) &&
+                        Equals(LlmToolArgumentNormalizer.NormalizeValue(property.Value), value))
+                    {
+                        return property.Value;
+                    }
+                }
+
+                return null;
             }
 
             private static bool TryReadString(IDictionary<string, object> arguments, string name, out string value)

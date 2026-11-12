@@ -29,8 +29,14 @@ namespace CoreAI.Ai.Logging
     /// <c>get_mod_logs</c> tool.
     /// </para>
     /// </summary>
-    public sealed class GetModLogsLlmTool : IAIFunctionLlmTool
+    public sealed class GetModLogsLlmTool : IAIFunctionLlmTool, ILlmToolResultCutAdvice
     {
+        /// <inheritdoc />
+        public string AdviseOnCut(string functionName, IDictionary<string, object> arguments)
+        {
+            return "Ask for fewer entries: level='warn', a smaller max_entries, or since_sequence for newer ones only.";
+        }
+
         /// <summary>Public tool name.</summary>
         public const string ToolName = "get_mod_logs";
 

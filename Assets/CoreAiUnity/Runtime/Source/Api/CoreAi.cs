@@ -292,18 +292,16 @@ namespace CoreAI
         }
 
         /// <summary>
-        /// Registers the scene-camera tool <c>capture_camera</c> (<see cref="Infrastructure.World.CameraLlmTool"/>)
-        /// on <paramref name="roleId"/> so a vision-capable model can autonomously request a screenshot — but only
-        /// when <see cref="IsVisionEnabled"/> is <c>true</c>. For text-only models this is a no-op (the tool is
-        /// omitted), satisfying the capability gate on the tool-registration side. Returns whether the tool
-        /// was registered.
+        /// Registers the agent-vision <c>camera</c> tool (<see cref="Vision.CameraLlmTool"/>: <c>camera_capture</c>,
+        /// alias <c>screenshot</c>, <c>camera_look</c>, <c>camera_orbit</c>, <c>camera_list</c>) on
+        /// <paramref name="roleId"/> so a vision-capable model can request a screenshot — but only when
+        /// <see cref="IsVisionEnabled"/> is <c>true</c>. For text-only models this is a no-op. Returns whether the
+        /// role has the tool afterwards (it may already have had it).
         /// <para>
         /// Nothing else is needed to show the model the picture: the tool returns an <see cref="LlmToolImageResult"/>
         /// and the tool loop lifts the frame into a user image message before the next request, automatically.
-        /// Naming: <c>capture_camera</c> is this scene tool; <c>camera_capture</c> (alias <c>screenshot</c>) is the
-        /// agent-vision tool of <see cref="Vision.CameraLlmTool"/>, added per role by
-        /// <see cref="CoreAiChatService.TryEnsureCameraToolForRole"/> (the chat panel calls it). Both deliver their
-        /// frames the same way.
+        /// The older scene tool <c>camera_tool</c> (<c>capture_camera</c>) this method used to register was removed
+        /// after its release of aliasing; a request allowlist that still names it reaches the <c>camera</c> tool.
         /// </para>
         /// </summary>
         public static bool RegisterCameraVisionTool(string roleId = BuiltInAgentRoleIds.SmartChat)
@@ -329,8 +327,10 @@ namespace CoreAI
                         return false;
                     }
 
-                    policy.AddToolForRole(roleId.Trim(), new Infrastructure.World.CameraLlmTool());
-                    return true;
+                    Vision.IAgentCameraService cameraService = ResolveCameraServiceOrDefault();
+                    string role = roleId.Trim();
+                    return CoreAiChatCameraTools.TryAttachCameraTool(policy, cameraService, role, true) ||
+                           RoleHasTool(policy, role, CoreAiChatCameraTools.CameraToolName);
                 }
                 catch (Exception ex)
                 {
@@ -338,6 +338,41 @@ namespace CoreAI
                     return false;
                 }
             }
+        }
+
+        /// <summary>
+        /// The scope's camera service, or a new <see cref="Vision.AgentCameraService"/> when the scope registers none
+        /// (a host without the world installer, which the removed scene tool served from <c>Camera.main</c>).
+        /// </summary>
+        private static Vision.IAgentCameraService ResolveCameraServiceOrDefault()
+        {
+            try
+            {
+                if (_scope.Container.Resolve(typeof(Vision.IAgentCameraService)) is Vision.IAgentCameraService service)
+                {
+                    return service;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogFacadeWarning($"[CoreAi] RegisterCameraVisionTool: no camera service registered ({ex.Message}); " +
+                                 "the camera tool uses its own.");
+            }
+
+            return new Vision.AgentCameraService();
+        }
+
+        private static bool RoleHasTool(AgentMemoryPolicy policy, string roleId, string toolName)
+        {
+            foreach (ILlmTool tool in policy.GetToolsForRole(roleId))
+            {
+                if (tool != null && string.Equals(tool.Name, toolName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -831,7 +866,7 @@ namespace CoreAI
         /// <param name="arguments">Model-provided arguments (optional).</param>
         /// <param name="result">
         /// The tool's own return value (optional). For a tool that shows the model images — the camera tools
-        /// <c>camera_capture</c>, <c>screenshot</c> and <c>capture_camera</c>, and any tool returning
+        /// <c>camera_capture</c> and <c>screenshot</c>, and any tool returning
         /// <see cref="LlmToolImageResult"/> — this is that <see cref="LlmToolImageResult"/>, not a JSON string: cast
         /// it and read <see cref="LlmToolImageResult.Images"/>; its <c>ToString()</c> is only the summary text
         /// (no <c>dataUrl</c>). The data-URL helpers (<c>CameraLlmTool.TryExtractImageContentFromResult</c>) apply to

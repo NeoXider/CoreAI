@@ -1166,7 +1166,7 @@ namespace CoreAI.Chat
         /// Legacy path: sends a separate one-shot USER message with the image carried by a camera result JSON that
         /// still has a base64 <c>dataUri</c> (extracted via <see cref="CameraLlmTool.TryExtractImageContentFromResult"/>)
         /// plus <paramref name="followUpPrompt"/>. Returns <c>null</c> when the JSON carries no usable image (today's
-        /// <c>capture_camera</c> summary has none: its frame reaches the model automatically inside the turn) or
+        /// <c>camera_capture</c> summary has none: its frame reaches the model automatically inside the turn) or
         /// vision is disabled. For an image you already hold, use
         /// <see cref="AskWithImageFollowUpAsync(string, AiAttachment, string, CancellationToken)"/>.
         /// </summary>

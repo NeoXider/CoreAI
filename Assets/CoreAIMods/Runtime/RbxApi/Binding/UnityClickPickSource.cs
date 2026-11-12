@@ -1,6 +1,7 @@
 using System;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
+using CoreAI.Mods.Rbx.Instances.Building;
 using CoreAI.Mods.Rbx.Spatial;
 using UnityEngine;
 
@@ -70,6 +71,115 @@ namespace CoreAI.Mods.Rbx.Binding
             hitId = id;
             distanceStuds = RbxSpace.LengthFromUnity(hit.distance);
             return true;
+        }
+
+        /// <summary>Resolves Terrain chunk hits to the Terrain instance; null picks parts only.</summary>
+        public Terrain.IRbxTerrainHitResolver TerrainHits { get; set; }
+
+        /// <inheritdoc />
+        public bool TryPickWorld(RbxVector2 screenPositionTopLeft, Func<InstanceId, bool> isEligible,
+            double maxDistanceStuds, out RbxWorldPick pick)
+        {
+            pick = RbxWorldPick.None;
+            if (_camera == null || maxDistanceStuds <= 0d)
+            {
+                return false;
+            }
+
+            Ray ray = ScreenRay(screenPositionTopLeft);
+            float reach = double.IsInfinity(maxDistanceStuds) || maxDistanceStuds > 1e6d
+                ? Mathf.Infinity
+                : RbxSpace.LengthToUnity((float)maxDistanceStuds);
+            if (TerrainHits is Terrain.IRbxTerrainColliderReadiness terrainColliders)
+            {
+                // WHY: a chunk whose collider is still queued behind the frame budget would let the pick pass through
+                // the ground; the walk is capped as for workspace:Raycast.
+                terrainColliders.EnsureCollidersAlong(ray.origin, ray.direction,
+                    float.IsInfinity(reach) ? RbxSpace.LengthToUnity(2048f) : reach,
+                    UnityRbxPhysicsPort.MaxColliderBuildsPerRay);
+            }
+
+            int count = Physics.RaycastNonAlloc(ray, _hits, reach, Physics.DefaultRaycastLayers,
+                QueryTriggerInteraction.Collide);
+            if (count == _hits.Length)
+            {
+                // WHY grown and cast again: a full buffer may have dropped hits nearer than those it kept.
+                _hits = new RaycastHit[_hits.Length * 2];
+                count = Physics.RaycastNonAlloc(ray, _hits, reach, Physics.DefaultRaycastLayers,
+                    QueryTriggerInteraction.Collide);
+            }
+            // WHY sorted: RaycastNonAlloc returns hits in no order, and the nearest eligible one is the pick.
+            System.Array.Sort(_hits, 0, count, HitDistanceComparer.Instance);
+            for (int index = 0; index < count; index++)
+            {
+                RaycastHit hit = _hits[index];
+                if (hit.collider == null)
+                {
+                    continue;
+                }
+
+                bool terrain = false;
+                InstanceId id;
+                RbxVector3 normal;
+                if (_binder.TryResolvePartInstanceId(hit.collider.gameObject, out id))
+                {
+                    normal = RbxSpace.DirectionFromUnity(hit.normal);
+                }
+                else if (TerrainHits != null && TerrainHits.TryResolveHit(hit.collider, hit.point, hit.normal, out id,
+                             out _, out normal))
+                {
+                    terrain = true;
+                }
+                else
+                {
+                    continue;
+                }
+
+                if (isEligible != null && !isEligible(id))
+                {
+                    continue;
+                }
+
+                pick = new RbxWorldPick(id, RbxSpace.FromUnity(hit.point), normal,
+                    RbxSpace.LengthFromUnity(hit.distance), terrain, true);
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <inheritdoc />
+        public bool TryGetRay(RbxVector2 screenPositionTopLeft, out RbxVector3 origin, out RbxVector3 direction)
+        {
+            if (_camera == null)
+            {
+                origin = default;
+                direction = default;
+                return false;
+            }
+
+            Ray ray = ScreenRay(screenPositionTopLeft);
+            origin = RbxSpace.FromUnity(ray.origin);
+            direction = RbxSpace.DirectionFromUnity(ray.direction);
+            return true;
+        }
+
+        private Ray ScreenRay(RbxVector2 screenPositionTopLeft)
+        {
+            return _camera.ScreenPointToRay(new Vector3(screenPositionTopLeft.X, Screen.height - screenPositionTopLeft.Y,
+                0f));
+        }
+
+        private RaycastHit[] _hits = new RaycastHit[32];
+
+        private sealed class HitDistanceComparer : System.Collections.Generic.IComparer<RaycastHit>
+        {
+            public static readonly HitDistanceComparer Instance = new();
+
+            public int Compare(RaycastHit x, RaycastHit y)
+            {
+                return x.distance.CompareTo(y.distance);
+            }
         }
     }
 }

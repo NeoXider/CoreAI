@@ -465,6 +465,13 @@ Conscious deviations (running list — additions require an entry here):
 | DEV-130 | `Script.Source` needs the `PluginOrOpenCloud` capability and `BaseScript.RunContext` is written at `PluginSecurity`, so no game script reads or writes either | `Source` is readable with the unrestricted tier, and `Source` and `RunContext` are written only by the host's console (`execute_lua`), inside its gate; a mod gets `NOT_AUTHORITY` (MVP4 SC-2, SC-4, design note SC-d; pinned by `SC_2_SourceRead_FromARestrictedMod_IsNotAuthority`, `SC_2_SourceWrite_FromAHostMod_IsNotAuthority_AndChangesNothing`, `SC_4_RunContextWrite_FromAMod_IsNotAuthority`) | the in-game creator is the console (DEV-12, DEV-14); a mod writing scripts would bypass the gate and the version grants |
 | DEV-131 | a `LocalScript` or client `Script` in `StarterPlayerScripts`/`StarterCharacterScripts` is copied into every player's `PlayerScripts` or character, and the copies run | a client `Script` there runs in place once per client (Roblox also runs the original); a `LocalScript` there is a template and does not run until MVP14 copies it (MVP4 SC-9, design note SC-e; pinned by the `ScriptRunRulesEditModeTests` container cases) | per-player copies need per-copy runs, MVP13/MVP14 work |
 | DEV-132 | a `PointLight` or `SpotLight` lights out to its `Range`; Roblox does not document the falloff inside it | on the Rbx materials (Terrain, parts, glass, water) the light is the engine's fade-to-zero window at `Range` times `1 / (1 + 2 (d / Range)^2)`, never brighter than the light's colour times its `Brightness`: 1 beside the light, 0.8 at a third of `Range`, 0.34 at two thirds, 0 at `Range`. Materials drawn with plain URP Lit keep the engine's inverse square (pinned by `RbxShaderRangeLightsEditModeTests` and the reach check of `BlockWorldScene_ATorchLightsACaveAtNoon`) |
+| DEV-133 | Roblox has no call that lists the sounds a place can play; sounds are found on the Creator Store | CoreAI-only `SoundService:GetSoundIds()` returns the keys the host registered, in ordinal order (an empty table when it ships none); `Resources` paths are not listed, as a built player cannot enumerate them (MVP17; pinned by `DEV133_GetSoundIds_ListsTheRegisteredKeysInOrdinalOrder_AndNothingWithoutALibrary` and `DEV133_GetSoundIds_ListsTheHostsKeysInOrder_FromLua`) | a model writing a mod must learn which sounds exist; the MVP13 export lint should flag the call |
+| DEV-134 | `Sound.SoundId` is an asset id (`rbxassetid://`) the client downloads; a failed load leaves the sound unloaded | `SoundId` names a key the host registered (`RbxWorldHost.Sounds`), else a path under a `Resources` folder; a Roblox asset id loads only when a host registered that exact id as a key, and is never downloaded; an id that loads nothing behaves like a failed Roblox load (`IsLoaded` false, `TimeLength` 0, `Loaded` never fires) and is logged once per id with both ways a host provides a sound (pinned by the `DEV134_` tests of `Mvp17SoundEngineFreeEditModeTests` and `Mvp17SoundLuaEditModeTests`) | the same rule as textures (DEV-76); CoreAI has no asset service, and the line is what a model reads when its sound is silent |
+| DEV-135 | a sound's `TimePosition` follows the audio engine | a sound's clock is the scheduler's scaled game time (`RbxSoundPlayback`, at each Heartbeat): `TimePosition`, `DidLoop` and `Ended` run the same whether anything is heard (a server, a muted tab, a WebGL page before its first click, a voice over the budget), and the output joins a sound where its clock is; a sound outside the DataModel neither loads nor advances (pinned by `MVP17_Playback_APlayingSoundAdvancesByScaledTimeAndSpeed_ThenEndsAtZeroWithEnded`, `MVP17_Playback_ASoundOutsideTheGame_NeitherLoadsNorAdvances_NegativeTwin` and `MVP17_Reconciler_OverBudget_TheLoudestAreHeard_AndTheBudgetIsReportedOnce`) | browsers start audio only after a user gesture; a timeline that waited for it would desynchronise every script that times itself by a sound |
+| DEV-136 | the audio engine plays `Volume` up to 10, `PlaybackSpeed` at any rate, with Doppler and occlusion, and RollOffMode.yaml prints Linear as `(max / distance) / (max - min)` | the Unity output clips the final volume to the clip's full level (above 1 sounds as 1) and the pitch to 3 (the timeline keeps the real speed), has no Doppler and no occlusion, attenuates by `RbxSoundRollOff` against the camera with Linear read as `(max - distance) / (max - min)`, and plays the loudest 32 sounds on desktop and 16 on WebGL, logging once when it silences the rest (pinned by `Backend_ReusesReleasedSources_ClipsVolumeAndPitch_AndReleasesOnANullClip`, `MVP17_RollOff_EveryModeFollowsRollOffModeYaml` and the budget test above) | Unity's `AudioSource` ranges; the printed Linear formula does not fall to 0 at `RollOffMaxDistance`; WebGL makes one Web Audio graph per voice |
+| DEV-137 | (not in the mirror) which playback changes fire `Changed`, and what `Pause`/`Resume` do on a sound already in that state | a script's own write, `Play` and `Stop` fire `Changed`/the property signal for `TimePosition`; the clock's advance, a loop wrap and the return to 0 at the end fire none; `Pause` on a sound that is not playing and `Resume` on a playing one fire nothing; `Stop` always fires `Stopped`; a natural end leaves `TimePosition` at 0 (pinned by `MVP17_GetPropertyChangedSignal_FiresForLoadingAndForAScriptsPlayheadMove_NotForTheClock` and `MVP17_Sound_PauseKeepsThePlayhead_ResumeContinues_AndEachFiresOnlyWhenItChangesSomething`) | a moving value is not watched through `Changed`, and a per-frame signal would cost every playing sound a deferred dispatch |
+| DEV-138 | (not in the mirror) how many keypoints a `NumberSequence`/`ColorSequence` holds and what a bad constructor call says | at most 20 keypoints; a call that breaks the yaml's rules (two or more, the first at time 0, the last at 1, non-descending, times in [0, 1], `NumberRange` minimum at or below maximum) raises `BAD_ARGUMENT` with CoreAI's wording and a fixed example (pinned by `MVP17_Sequences_FollowTheKeypointRules_AndEvaluateLinearly_NegativeTwin` and `MVP17_RangeAndSequenceDatatypes_RefuseBadInput_WithTheFix_NegativeTwin`) | the structured error of §5.2.7; Studio's keypoint editor stops at 20 |
+| DEV-139 | a `ParticleEmitter` draws every member (shapes, flipbooks, light emission, drag, rotation, squash, keypoint envelopes) and its `Texture` is a Roblox asset | the minimal emitter draws `Enabled`, `Rate`, `Lifetime`, `Speed`, `Color`, `Size`, `Transparency`, `Texture`, `SpreadAngle` (as a random-direction share: the larger angle over 180 degrees, so 360 sends particles every way), `Acceleration` and `EmissionDirection`, from the parent part's whole box; envelopes are ignored, a gradient of more than 8 keys is sampled at 8; `Texture` is a registered key or a `Resources` path, and an empty, Roblox or unresolved id (Roblox's default `sparkles_main.dds` included, which still reads back) draws CoreAI's soft dot; `Emit` asks for at most 1,000 at once, and `Emit`/`Clear` on an emitter that is not drawn (not the child of a part in the Workspace, or over the budget) are dropped; the nearest 64 emitters of at most 1,000 live particles are drawn on desktop, 16 of 200 on WebGL, logged once; the other members are loud stubs (pinned by `Mvp17ParticleEngineFreeEditModeTests`, `Mvp17ParticleLuaEditModeTests` and `Mvp17UnityParticleEditModeTests`) | the minimal slice MVP17 names, over one pooled Unity particle system per emitter; a WebGL tab needs a hard particle ceiling |
 
 ---
 
@@ -1811,8 +1818,63 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
 
 - **Order (2026-11-11)**: split. Local playback of sound, particles and the Animator-lite is M2; networked playback is M3.
 - **Goal**: presentation-layer breadth, networked.
-- **Done so far**: loud stubs only (`Sound`, `ParticleEmitter` in `ClassCatalog.cs`, `SoundService` in
-  `ServiceCatalog.cs`, all phased `MVP15`).
+- **Done so far**:
+  - **Local sound (step A, 2026-11-12)**: `Sound`, `SoundGroup` and `SoundService` are real classes
+    (`RbxApi/Instances/Audio/`). `Sound` has `SoundId`, `Volume`, `Looped`, `PlaybackSpeed`, `TimePosition`,
+    `TimeLength`, `Playing`, `IsPlaying`/`IsPaused`, `IsLoaded`, `RollOffMinDistance`/`RollOffMaxDistance`/
+    `RollOffMode`, `PlayOnRemove` and `SoundGroup`, `Play`/`Stop`/`Pause`/`Resume`, and `Played`/`Paused`/
+    `Resumed`/`Stopped`/`Ended`/`Loaded`/`DidLoop` (each passing the id), with the dump's defaults and Sound.yaml's
+    rules (Play from the last script-set position, Stop to 0, `Playing` writes without events, destroy fires no
+    `Stopped`). `SoundService` is a tree service under `game` with `PlayLocalSound` (a once-played copy) and the
+    extension `GetSoundIds()` (DEV-133). Ids: a host-registered key, else a `Resources` path; Roblox ids are never
+    downloaded (DEV-134). The clock is the scheduler's (`RbxSoundPlayback`, DEV-135); the output is
+    `RbxSoundReconciler` over `IRbxAudioBackend`, in Unity `UnityRbxAudioBackend` (pooled `AudioSource`s, 2D for a
+    global sound, 3D at the part for one parented to a part in the Workspace, roll-off from `RollOffMode` against the
+    camera, budget 32/16, DEV-136). `Volume`, `PlaybackSpeed`, `TimePosition` and the roll-off distances tween.
+    Tests: `Mvp17SoundEngineFreeEditModeTests`, `Mvp17SoundLuaEditModeTests`, `Mvp17UnityAudioEditModeTests`.
+  - **Minimal particles (step B, 2026-11-12)**: `ParticleEmitter` (`RbxApi/Instances/Effects/`) with `Enabled`, `Rate`,
+    `Lifetime`, `Speed`, `Color`, `Size`, `Transparency`, `Texture`, `SpreadAngle`, `Acceleration`,
+    `EmissionDirection`, `Emit(count = 16)` and `Clear()`, the dump's defaults; the datatypes `NumberRange`,
+    `NumberSequence`, `NumberSequenceKeypoint`, `ColorSequence` and `ColorSequenceKeypoint` (`RbxSequences.cs`, Lua in
+    `LuaCsRbxSequenceBindings.cs`; they were loud stub globals before). Drawn by `RbxParticleReconciler` over
+    `IRbxParticleBackend`, in Unity `UnityRbxParticleBackend` (a pooled `ParticleSystem` on the parent part, box shape
+    scaled by the part, world space, soft-dot default texture), DEV-138, DEV-139. `Rate` and `Acceleration` tween.
+    Fixtures: `Tests/EditMode/RbxApi/Acceptance/Mvp17EmitBurst.lua` and `Mvp17SoundOnTouch.lua`, run headless
+    (`MVP17_EmitBurstFixture_*`, `MVP17_SoundOnTouchFixture_*`).
+  - **Open (persistence)**: a saved world keeps every `Sound`/`SoundGroup`/`ParticleEmitter` (class, name, attributes,
+    tags), but their properties come back as class defaults until the persistence step adds their blocks.
+  - **Hand-over (campaign stopped 2026-11-12, after step B)**. Where the next agent starts:
+    1. **Persistence** (after the in-play-tools agent's `highlight` block is committed): additive blocks in a new
+       `Infrastructure/RbxWorldPackageEffects.cs` with a few lines in the serializer, contracts, world JSON (both the
+       one-block and the incremental encoder path), join payload and undo service, as `selection_box` and the lights
+       were added. `sound`: `sound_id`, `volume`, `looped`, `playback_speed`, `roll_off_min`, `roll_off_max`,
+       `roll_off_mode`, `play_on_remove`, `sound_group` (an instance id, remapped like an `ObjectValue`); `sound_group`:
+       `volume`; `particle_emitter`: `enabled`, `rate`, `lifetime`, `speed`, `color`, `size`, `transparency`, `texture`,
+       `spread_angle`, `acceleration`, `emission_direction`. Not saved: `Playing`, `TimePosition`, `IsLoaded`,
+       `TimeLength` (NotReplicated/runtime). Tests: a round trip of each field with a negative twin (defaults write no
+       block), a `sound_group` to an excluded node becomes nil with a diagnostic, non-finite and out-of-range values are
+       refused by validation, an older package without the blocks loads as before, undo restores a `Volume` change.
+    2. **Step C, Animator-lite, as approved** (nothing of it is in the tree): `Animation` (`AnimationId`), an `Animator`
+       under each spawned character's `Humanoid` (`RbxCharacterFactory`; created on demand by `Humanoid:LoadAnimation`)
+       with `LoadAnimation`, `GetPlayingAnimationTracks` and `AnimationPlayed`; `AnimationTrack` (NotCreatable) with
+       `Play(fadeTime = 0.1, weight = 1, speed = 1)`, `Stop(fadeTime = 0.1)`, `AdjustSpeed`, `AdjustWeight`, `Looped`,
+       `IsPlaying`, `Length`, `Speed`, `TimePosition`, `WeightCurrent`/`WeightTarget`, `Stopped` (playing finished),
+       `Ended` (fade-out at weight 0), `DidLoop`; the deprecated `Humanoid:LoadAnimation` answering the same; the
+       extensions `humanoid:PlayAnimationByName(name[, looped])` (returns the track) and `humanoid:GetAnimationIds()`
+       (one DEV item, symmetrical with `GetSoundIds`); `AnimationController` stays a loud stub naming the extension.
+       Clips are engine-free named keyframe data over the R6 poser's nine channels (arms, spread, legs, leg spread, lean,
+       bob, nod) with a channel mask, a small built-in set (wave, point, cheer, dance, nod, sit) and a C# registry; the
+       rig blends the playing tracks into the poser's targets before its rate limits, only on the channels a clip owns,
+       so a walking character's legs keep walking under any clip that does not own the legs (state it, pin it with a
+       test). A track whose id names no clip has `Length` 0 and stops on its next frame (`Stopped`, then `Ended`), noted
+       once per id. The clock is a scheduler-driven playback like `RbxSoundPlayback`; the rig reads it at PreRender.
+    3. **Play Mode**: the physics half of the sound-on-touch fixture (`Acceptance/Mvp17SoundOnTouch.lua`, a ball dropped
+       on the pad, `Played` fires once) and one captured frame of the emit burst (`Acceptance/Mvp17EmitBurst.lua`), a
+       crop around the part saved under `D:\Temp\coreai-agents\mvp17\` for the owner to look at.
+    4. **Skills and token tables, once**: `skill-sources/RbxApi/` must learn sound, particles and (after C) animations,
+       in the right sections within the 8,000-character cap per read (`00-core.md` still lists `NumberSequence`,
+       `ColorSequence` and `NumberRange` as stub globals, which they no longer are; dropping that frees room there);
+       regenerate with `tools/generate_skills.py` and `Assets/CoreAI/Docs/PROMPT_TOKEN_COSTS.md` with the tests' printers.
 - **To do**: `Sound` (`Play/Stop/Pause`, `Playing`, `Volume`, `Looped`, `Ended`) over the host audio
   manager; `SoundService:PlayLocalSound`; a minimal `ParticleEmitter` (`Enabled`, `Rate`, `Color`,
   `Emit(count)`) over a pooled Unity particle prefab; an Animator-lite so MVP7's characters animate
@@ -2414,6 +2476,68 @@ Mirror test ran), nothing ran in a WebGL player, and nothing was released.
     `Assets/CoreAI/Runtime/Core/Features/Chat/CoreAiChatOptions.cs:150`).
   - MVP12's design note stands: manual operations go through the same Instance operations and authority
     resolver as the AI and mods, so building by hand is a UI layer, not a new system.
+  - **Step 1 done (2026-11-12): `Highlight`, Roblox-shaped.** `RbxApi/Instances/Adornments/RbxHighlight.cs`: every
+    mirror member (`Adornee`, nil = the parent; `DepthMode` with `Enum.HighlightDepthMode`; `Enabled`;
+    `FillColor`/`FillTransparency` 0.5; `OutlineColor`/`OutlineTransparency` 0), a model drawn as all its parts, the
+    mirror's 255 limit (every live Highlight takes a slot in creation order). The replaceable port is
+    `IRbxHighlightBackend`, kept by `RbxHighlightReconciler` (part lists gathered again only after a Parent or
+    Adornee change); the Unity default `RbxApi/Binding/UnityRbxHighlightBackend.cs` draws each part's own mesh with
+    `Graphics.RenderMesh` and the stencil shader `RbxApi/Unity/Resources/CoreAIRbxAdornments/RbxHighlight.shader`
+    (fill marks stencil bit 64, the outline is the mesh grown by 3 screen pixels where the bit is unset; untagged
+    CG, so URP and built-in, no depth texture, WebGL 2 safe) and falls back to a wireframe box per part where the
+    shader is unsupported or `RbxWorldHost` **Highlight Wireframe** is on. Lua surface in the GUI binding table
+    (`LuaCsRbxGuiBindings.DeclareAdornments`), class row in `RbxGuiCatalog`, the backlog row removed. Package: an
+    optional `highlight` block mirroring `selection_box`, no format version change (WORLD_PACKAGE.md "Highlights").
+    Tests: `RbxHighlightEditModeTests` (PT), `HighlightLuaEditModeTests` and `WorldPackageAdornmentsEditModeTests`
+    `Highlight_*` (Lua tier), `UnityRbxHighlightBackendEditModeTests` (EM, the wireframe fallback proven),
+    `HighlightCapturePlayModeTests` (PM capture: Adornee = part draws next frame, nil removes it, AlwaysOnTop through
+    a wall, Occluded hidden, wireframe). The one-frame grey probe cube of the adornment backends and of the binder's
+    primitive cache is gone (`AdornmentProbePlayModeTests`).
+  - **Step 2 done (2026-11-12): the pick under the crosshair and hover signals.** `IClickPickSource` gained two
+    default-implemented members (additive): `TryPickWorld(screen, isEligible, maxDistance, out RbxWorldPick)` (the
+    nearest part or Terrain hit with point, face normal and distance, skipping refused instances such as the local
+    character) and `TryGetRay`. `RbxApi/Instances/Building/RbxWorldPick.cs` answers a Terrain hit's solid `Cell` and
+    empty `PlaceCell`. `UnityClickPickSource` implements both (sorted `RaycastNonAlloc`, grown when full; Terrain chunk
+    hits resolved through `TerrainHits`, which `RbxWorldHost` hands it, colliders ensured along the ray as
+    `workspace:Raycast` does). The pick pump (`LuaCsRbxApiBindings.PumpClicks`) now picks at the centre of the view while
+    the mouse is locked to it and fires `ClickDetector.MouseHoverEnter`/`MouseHoverLeave(player)` once per enter and
+    leave (range-gated, none over host UI, the detector search cached per hovered part). Tests:
+    `RbxWorldPickEditModeTests` (PT), `RbxClickDetectorLuaBindingsEditModeTests` hover rows (Lua tier),
+    `TerrainPickPlayModeTests` (PM).
+  - **Hand-over (2026-11-12): the campaign stopped after step 2; the next agent starts at step 3.** Approved plan
+    (steps in order, each compiles, passes its tests and is usable before the next): 3 build mode, the tool framework
+    and the first tools (hover outline at the crosshair, select, grab-move with a ghost and one intent on release, turn,
+    tilt, duplicate, delete, refusals on the HUD); 4 scale by faces, paint `Material`/`Color` (parts and Terrain cells),
+    insert from a parts palette, and `Highlight` tweening (open: `LuaCsTweenPropertyHost` waits for the sound agent's
+    change); 5 the per-player undo/redo stack (100 steps, Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z) merged with the P3 AI entries;
+    6 "this object" in the chat turn; 7 Block World wiring, README line, the DoD golden (50-part house, 50 undos, the
+    canonical tree compared without per-instance revisions). Decisions taken (D1-D5): **D1** B toggles build mode; while
+    on, mouse buttons and the wheel go to the tool through `InputFocusState.SetPointerOverUi` (WASD, jump, chat, F2 stay;
+    the locked first-person look keeps turning); keys in build mode: 1-6 pick Move, Turn, Scale, Paint, Insert, Delete,
+    R / Shift+R turn 90/15 degrees about up, **F / Shift+F tilt (T opens the chat)**, C duplicate, X delete, B or Esc leave;
+    Ctrl+Z / Ctrl+Y everywhere outside text fields (Ctrl also sprints for that moment, accepted); the module publishes
+    the Workspace attribute `CoreAIBuildTool` (the tool id while on), `blockworld_hud` reads it to ignore digits and to
+    show the build keys in its legend, `blockworld_build` to hide its cell outline and stop break/place; leaving build
+    mode restores the game exactly; outside the Block World the module's own UITK HUD shows the legend. **D2** the local
+    player is a restricted actor (the chat's actor id from `IActorIdentityProvider`, so `/undo` and Ctrl+Z share one
+    history) with a World-scope, all-actions `WriteGrantLedger` grant the host issues in a solo world; every tool edit is
+    a `MutationIntent` judged by `IntentGateway` and applied by a typed applier; tools also refuse mod-owned instances,
+    runtime infrastructure and characters. **D3** done (the `highlight` block). **D4** additive
+    `AgentMemoryPolicy.AddRuntimeContextProvider(roleId, provider)`, appended after the single provider; keep the "this
+    object" line short and absent when nothing is targeted. **D5** a "Build tools" slot on `CoreAiPlayWorldBootstrap`, set
+    by the setup menu and by `CoreAI.Demos.BlockWorld.BlockWorldDemoSceneBuilder.BuildScene` (never hand-edit the
+    scene; the lead rebuilds it); in the Block World block building stays the default. Step 5 may add an additive method
+    to `RbxWorldUndoService` that re-anchors an actor's newest AI entry once the stack has undone all its hand edits
+    above it and saw nothing else change. WebGL rule: nothing may need threads, compute or a stencil format the Mobile
+    pipeline lacks; prove fallbacks by tests. A step 3 draft (engine-free, never compiled or tested) is kept outside the
+    tree at `D:\Temp\coreai-agents\p5\step3-draft`: `RbxBuildSnap` (grid, place on a surface, turns, pull a face),
+    `RbxBuildWorld` (the script write path: sink, revision, `NotifyPartChanges`), `RbxBuildOperations` (set part,
+    delete as Parent = nil kept for undo, insert/duplicate, Terrain cell, each with Apply/Revert/IsStillApplied),
+    `RbxBuildAuthority` (ledger + gateway, the typed operation beside the intent), `RbxBuildTools` (input, preview,
+    palette, registry, the six tools) and `RbxBuildSession`; it was meant for `Assets/CoreAIMods/Runtime/Infrastructure/Building`
+    (namespace `CoreAI.Mods.Building`, compiled by the Lua tier) with the Unity module, input and HUD in
+    `Runtime/BuildTools`. Verification copy recipe: export HEAD of the six package folders, mirror them onto the copy,
+    put the P5 files on top, run Unity 6000.6.0f1 in batch mode only (Play Mode with graphics).
 - **To do**:
   - **`SelectionBox` and `Highlight`**, real and Roblox-shaped, rendered by a replaceable adornment port
     (an outline pass where the pipeline offers one, a wireframe box otherwise); the minimal
@@ -3726,8 +3850,34 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
     vision frames through an HDR target; the chat panel attaches the camera only when vision is on.
     EditMode green in Unity: `AgentCameraRig`, `CameraToolV2`, `AgentFreeCameraOwnership`; PlayMode
     `CameraFrameReadbackPlayModeTests` (5) green. Not run: `CameraCaptureFrameBudgetPlayModeTests`,
-    `AgentVisionLiveRoundTripPlayModeTests` (needs a vision model). Open: removing the `camera_tool` /
-    `capture_camera` alias, the tool-review half.
+    `AgentVisionLiveRoundTripPlayModeTests` (needs a vision model).
+  - **2026-11-12, the tool-review half written:** one argument step for every call, on the direct path
+    and for the target of `call_skill_tool` (`LlmToolArgumentRepair`): scalars of the wrong JSON kind are
+    coerced (`"True"`/`1` for a boolean, `"5"`/`5.0` for an integer, a number for a string), a key that
+    differs from a declared name only in case, `_` or `-` is renamed, a key that resembles a declared name
+    the call left out (`start_line` for `from_line`) is refused before the tool runs with that name, any
+    other unknown key is ignored and named in an `argument_note` of the result (`manage_mods` also names
+    the arguments its action does not read); missing and uncoercible arguments are refused in one sentence
+    (type, description, the value sent) instead of .NET text and a schema dump. A result over the cap
+    starts with a note and the tool's own advice (`ILlmToolResultCutAdvice`); `manage_mods`
+    `list`/`versions`/`diagnostics` and a `memory` read size themselves to the cap and say what is not
+    shown. A repeated read runs again once the tool loop has trimmed tool history. One door per tool:
+    `call_skill_tool` is not offered while the role's skills have no tools (the Programmer's) unless the
+    role authors skills, the skill catalog line goes with it, a call to it then names the direct tool, and
+    a direct tool wrapped in it shares the direct call's duplicate signature. Short contracts: every
+    Programmer tool description fits the 500-character limit (pinned over the whole play-world surface);
+    the callback-syntax and escaped-newline advice moved from the `manage_mods` description into the
+    error of the load/reload/edit that trips on it, the invented-API list lives only in the Programmer
+    prompt. Programmer tool definitions per request 4525 → 2874 tokens (`camera` 1352 → 1017,
+    `execute_lua` 457 → 194, `manage_mods` 1472 → 614, `read_skill` 208 → 171, `call_skill_tool` 158 →
+    not offered). The `camera_tool` / `capture_camera` alias is removed: `CoreAi.RegisterCameraVisionTool`
+    registers `camera`, an allowlist naming the old names reaches it, the static capture helpers stay.
+    Small result fixes: `list_autosaves` has `success` and `count`, `save_world` drops `"error":null`.
+    The neutral image-feedback wording for non-camera tools was already in the code
+    (`ToolCallHistoryTrimmer.ToolImageFeedbackPrompt`). EditMode green in Unity and on the portable tiers
+    (`ToolArgumentRepair`, `LuaModsLlmToolResults` and the policy, contract, camera, skill and token-cost
+    fixtures). Not run: a live small-model turn. Open: `world_command` (Creator, Builder) is still over the
+    description limit; `memory` parameters (302 tokens on every role) are not shortened; `world_query`.
   - *The survey this package started from (release 7.56.0); the lines above supersede it where they
     differ:*
   - Two camera tools. `CoreAI.Vision.CameraLlmTool`
@@ -4222,7 +4372,7 @@ Globals installed: `game`, `workspace` (== `game.Workspace`), `Instance`, `Vecto
 | `Lighting` | structural service/tree node | — | `ClockTime`, `Ambient`, `GeographicLatitude` | — |
 | `UserInputService` | `InputBegan`, `InputEnded`, `InputChanged`; `MouseBehavior`; `IsKeyDown`, `GetKeysPressed`, `GetMouseLocation`; signal `Wait` | — | — | — |
 | `RunService` | `PreAnimation`, `PreSimulation`, `PostSimulation`, `PreRender`; legacy `Heartbeat`, `Stepped`, `RenderStepped`; `IsServer`, `IsClient`, `IsRunning`, `IsStudio`; signal `Wait` | `BindToRenderStep`, `UnbindFromRenderStep` → MVP2 | — | — |
-| `ClickDetector` | `MouseClick`, `MaxActivationDistance`; signal `Wait` | — | `MouseHoverEnter`, `MouseHoverLeave` — they exist as signals but never fire: the click pump tracks no hovered part across frames | — |
+| `ClickDetector` | `MouseClick`, `MouseHoverEnter`, `MouseHoverLeave` (P5), `MaxActivationDistance`; signal `Wait` | — | — | — |
 | `InputObject` | read-only `KeyCode`, `UserInputType`, `UserInputState`, `Position`, `Delta` | — | — | — |
 | `RBXScriptSignal` | deferred `Connect`/`Once`/`Wait` on every shipped signal; handlers may yield with `task.wait` | — | — | — |
 | `RBXScriptConnection` | read-only `Connected`; `Disconnect()` | — | — | — |

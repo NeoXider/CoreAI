@@ -190,6 +190,9 @@ namespace CoreAI.Mods.Rbx.Binding
             if (_cube == null)
             {
                 GameObject probe = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                // WHY hidden before the deferred destroy: in Play Mode it would otherwise draw for one frame as a grey
+                // cube at the world origin.
+                probe.SetActive(false);
                 _cube = UnityEngine.Object.Instantiate(probe.GetComponent<MeshFilter>().sharedMesh);
                 _cube.name = "SelectionBox edge";
                 DestroyObject(probe);

@@ -1942,7 +1942,6 @@ namespace CoreAI.Tests.EditMode
         /// </summary>
         [TestCase("camera_capture")]
         [TestCase("screenshot")]
-        [TestCase("capture_camera")]
         public void CameraToolImage_KeepsTheCameraWording_AndReplacesThePreviousFrame(string toolName)
         {
             Assert.AreEqual(

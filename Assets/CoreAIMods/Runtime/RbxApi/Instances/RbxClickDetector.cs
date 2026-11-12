@@ -4,9 +4,9 @@ namespace CoreAI.Mods.Rbx.Instances
     /// Roblox ClickDetector: parented under a BasePart, a Model or a Folder, it fires MouseClick when
     /// the user clicks a part of that ancestor with the mouse (the host picks the part under the
     /// cursor each frame and fires the deepest detector above it — see the pick pump in the bindings
-    /// layer). MouseHoverEnter/MouseHoverLeave exist for parity; the pick pump leaves them unfired in
-    /// this slice. State is driven by the host: <see cref="MouseClick"/> is fired by C# and uses the
-    /// same deferred scheduler dispatch as every other signal.
+    /// layer), and MouseHoverEnter/MouseHoverLeave when the pointer (the crosshair in first person) enters
+    /// and leaves its parts. State is driven by the host: every signal is fired by C# and uses the same
+    /// deferred scheduler dispatch as every other signal.
     /// </summary>
     public sealed class RbxClickDetector : RbxInstance
     {
@@ -30,12 +30,12 @@ namespace CoreAI.Mods.Rbx.Instances
         /// </remarks>
         public RbxScriptSignal MouseClick => GetOrCreateSignal("MouseClick");
 
-        /// <summary>Fires when the cursor enters the owning part's hover range. Parity hook; the
-        /// MVP pick pump does not fire it yet.</summary>
+        /// <summary>Fires with <c>(playerWhoHovered)</c> once when the pointer enters a part under the
+        /// detector's parent within <see cref="MaxActivationDistance"/>.</summary>
         public RbxScriptSignal MouseHoverEnter => GetOrCreateSignal("MouseHoverEnter");
 
-        /// <summary>Fires when the cursor leaves the owning part's hover range. Parity hook; the
-        /// MVP pick pump does not fire it yet.</summary>
+        /// <summary>Fires with <c>(playerWhoHovered)</c> once when the pointer leaves the detector's parts
+        /// (or moves out of range, or onto host UI) after a MouseHoverEnter.</summary>
         public RbxScriptSignal MouseHoverLeave => GetOrCreateSignal("MouseHoverLeave");
 
         /// <summary>Roblox ClickDetector.MaxActivationDistance (studs, default 32): a click by a

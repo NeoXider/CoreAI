@@ -158,7 +158,7 @@ namespace CoreAI.Ai.LuaCs
         {
             return instance is RbxGuiBase2d || instance is RbxUiBase || instance is RbxBasePlayerGui
                    || instance is RbxTextChatCommand || instance is RbxTextChatService || instance is RbxTextSource
-                   || instance is RbxGuiBase3d;
+                   || instance is RbxGuiBase3d || instance is RbxHighlight;
         }
 
         /// <summary>
@@ -1061,6 +1061,17 @@ namespace CoreAI.Ai.LuaCs
                 (s, v) => ((RbxSelectionBox)s).SurfaceColor3 = v);
             Number("SelectionBox", "SurfaceTransparency", s => ((RbxSelectionBox)s).SurfaceTransparency,
                 (s, v) => ((RbxSelectionBox)s).SurfaceTransparency = (float)v);
+            Reference("Highlight", "Adornee", s => ((RbxHighlight)s).Adornee, (s, v) => ((RbxHighlight)s).Adornee = v);
+            EnumItem("Highlight", "DepthMode", "HighlightDepthMode", s => (int)((RbxHighlight)s).DepthMode,
+                (s, v) => ((RbxHighlight)s).DepthMode = (RbxHighlightDepthMode)v);
+            Bool("Highlight", "Enabled", s => ((RbxHighlight)s).Enabled, (s, v) => ((RbxHighlight)s).Enabled = v);
+            Color("Highlight", "FillColor", s => ((RbxHighlight)s).FillColor, (s, v) => ((RbxHighlight)s).FillColor = v);
+            Number("Highlight", "FillTransparency", s => ((RbxHighlight)s).FillTransparency,
+                (s, v) => ((RbxHighlight)s).FillTransparency = (float)v);
+            Color("Highlight", "OutlineColor", s => ((RbxHighlight)s).OutlineColor,
+                (s, v) => ((RbxHighlight)s).OutlineColor = v);
+            Number("Highlight", "OutlineTransparency", s => ((RbxHighlight)s).OutlineTransparency,
+                (s, v) => ((RbxHighlight)s).OutlineTransparency = (float)v);
         }
 
         private static void DeclareTextChat()

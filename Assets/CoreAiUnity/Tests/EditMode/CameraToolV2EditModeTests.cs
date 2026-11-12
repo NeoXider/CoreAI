@@ -15,7 +15,7 @@ namespace CoreAI.Tests.EditMode
 {
     /// <summary>
     /// The <c>camera</c> tool v2 through its MEAI functions: the action set and schemas, the description limit, the
-    /// unchanged capture summary shape, the deprecated <c>capture_camera</c> alias forwarding to the same readback,
+    /// unchanged capture summary shape, the removed <c>capture_camera</c> alias,
     /// and the replace-with-fake seams (<see cref="ICameraFrameReadback"/>, <see cref="IAgentCameraRig"/>). Captures
     /// use <see cref="FakeCameraFrameReadback"/>, so no render pipeline is needed; the GPU paths are PlayMode tests.
     /// </summary>
@@ -105,7 +105,7 @@ namespace CoreAI.Tests.EditMode
         public void EveryCameraToolDescription_FitsTheToolContractLimit()
         {
             int limit = AiToolContractPromptFormatter.ToolDescriptionMaxChars;
-            IAIFunctionsLlmTool[] tools = { new CameraLlmTool(new AgentCameraService(), Role), new WorldCameraTool() };
+            IAIFunctionsLlmTool[] tools = { new CameraLlmTool(new AgentCameraService(), Role) };
 
             foreach (IAIFunctionsLlmTool tool in tools)
             {
@@ -162,18 +162,13 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void WorldCameraTool_KeepsItsNameFunctionAndParameters()
+        public void RemovedSceneCameraTool_IsNoLongerATool_AndItsNamesReachTheCameraTool()
         {
-            WorldCameraTool tool = new();
-
-            AIFunction capture = Function(tool, "capture_camera");
-            string schema = capture.JsonSchema.ToString();
-
-            Assert.AreEqual("camera_tool", tool.Name);
-            Assert.AreEqual(1, tool.CreateAIFunctions().Count());
-            StringAssert.Contains("\"cameraName\"", schema);
-            StringAssert.Contains("\"width\"", schema);
-            StringAssert.Contains("\"height\"", schema);
+            Assert.IsFalse(typeof(ILlmTool).IsAssignableFrom(typeof(WorldCameraTool)),
+                "camera_tool / capture_camera were removed after their release of aliasing");
+            Assert.AreEqual("camera", AiOrchestrator.MapRemovedToolName(WorldCameraTool.RemovedToolName));
+            Assert.AreEqual("camera_capture", AiOrchestrator.MapRemovedToolName(WorldCameraTool.RemovedFunctionName));
+            Assert.AreEqual("execute_lua", AiOrchestrator.MapRemovedToolName("execute_lua"));
         }
 
         [Test]
@@ -230,33 +225,6 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse((bool)error["ok"]);
             Assert.AreEqual("capture_failed", (string)error["error"]);
             StringAssert.Contains("gpu lost", (string)error["message"]);
-        }
-
-        [Test]
-        public async Task WorldCaptureCamera_ForwardsToTheSharedReadback_AndKeepsItsSummaryShape()
-        {
-            Camera camera = NewCamera("WorldAliasCam");
-            FakeCameraFrameReadback readback = new();
-            WorldCameraTool tool = new(readback);
-
-            object result = await Invoke(tool, "capture_camera", new Dictionary<string, object>
-            {
-                ["cameraName"] = camera.name, ["width"] = 2000, ["height"] = 10
-            });
-
-            LlmToolImageResult image = result as LlmToolImageResult;
-            Assert.IsNotNull(image, $"capture_camera returns an image result, got: {result}");
-            Assert.AreEqual(1, readback.Calls, "the alias captures through the same readback seam");
-            Assert.AreSame(camera, readback.LastCamera);
-            Assert.AreEqual(1024, readback.LastWidth, "width clamped to 1024");
-            Assert.AreEqual(64, readback.LastHeight, "height clamped to 64");
-            JObject summary = JObject.Parse(image.Text);
-            Assert.IsTrue((bool)summary["success"]);
-            Assert.AreEqual("1024x64", (string)summary["resolution"]);
-            Assert.AreEqual(camera.name, (string)summary["camera"]);
-            Assert.AreEqual("jpeg", (string)summary["format"]);
-            Assert.AreEqual(FakeCameraFrameReadback.JpegBytes.Length, (int)summary["sizeBytes"]);
-            Assert.IsTrue((bool)summary["imageAttached"]);
         }
 
         [Test]

@@ -1038,6 +1038,18 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             }),
             ("Light", new[] { "Brightness", "Color", "Enabled", "Shadows" }),
             ("PointLight", new[] { "Range" }),
+            ("Sound", new[]
+            {
+                "SoundId", "Volume", "Looped", "PlaybackSpeed", "TimePosition", "TimeLength", "Playing", "IsPlaying",
+                "IsPaused", "IsLoaded", "RollOffMinDistance", "RollOffMaxDistance", "RollOffMode", "PlayOnRemove",
+                "SoundGroup"
+            }),
+            ("SoundGroup", new[] { "Volume" }),
+            ("ParticleEmitter", new[]
+            {
+                "Enabled", "Rate", "Lifetime", "Speed", "Color", "Size", "Transparency", "Texture", "SpreadAngle",
+                "Acceleration", "EmissionDirection"
+            }),
             ("BaseScript", new[] { "Enabled", "Disabled", "RunContext" }),
             ("Script", new[] { "Source" }),
             ("ModuleScript", new[] { "Source" }),
@@ -1064,7 +1076,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
             "IsKeyDown", "GetKeysPressed", "GetMouseLocation", "GetMouseDelta", "Heartbeat", "Stepped",
             "RenderStepped", "PreAnimation", "PreSimulation", "PostSimulation", "PreRender", "MouseClick",
             "MouseHoverEnter", "MouseHoverLeave", "Completed", "LightingChanged", "Event", "Invoke",
-            "OnInvoke"
+            "OnInvoke", "Played", "Paused", "Resumed", "Stopped", "Ended", "DidLoop"
         };
 
         /// <summary>One instance of every class that declares a row of the BoundProperties table.</summary>
@@ -1072,7 +1084,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         {
             "Part", "Model", "Workspace", "Camera", "Humanoid", "Player", "Players",
             "UserInputService", "StarterPlayer", "ClickDetector", "MaterialVariant", "Lighting",
-            "PointLight", "Script", "ModuleScript", "IntValue", "Tween"
+            "PointLight", "Sound", "SoundGroup", "ParticleEmitter", "Script", "ModuleScript", "IntValue", "Tween"
         };
 
         /// <summary>
@@ -1299,6 +1311,9 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
                     MaterialVariant = Instance.new('MaterialVariant'),
                     Lighting = game:GetService('Lighting'),
                     PointLight = Instance.new('PointLight'),
+                    Sound = Instance.new('Sound'),
+                    SoundGroup = Instance.new('SoundGroup'),
+                    ParticleEmitter = Instance.new('ParticleEmitter'),
                     Script = Instance.new('Script'),
                     ModuleScript = Instance.new('ModuleScript'),
                     IntValue = Instance.new('IntValue'),

@@ -35,13 +35,12 @@ namespace CoreAI.Infrastructure.Llm
 
         /// <summary>
         /// True for the tools whose typed images are delivered as a camera frame: the camera prompt, and each new
-        /// frame replacing the previous one. <see cref="IsCameraToolName"/> plus the scene tool <c>capture_camera</c>
-        /// (<c>CoreAi.RegisterCameraVisionTool</c>). Every other tool's images keep their own feedback message.
+        /// frame replacing the previous one. The names of <see cref="IsCameraToolName"/>; the removed scene tool
+        /// <c>capture_camera</c> is no longer one of them. Every other tool's images keep their own feedback message.
         /// </summary>
         internal static bool IsCameraFrameToolName(string name)
         {
-            return IsCameraToolName(name) ||
-                   string.Equals(name, "capture_camera", StringComparison.OrdinalIgnoreCase);
+            return IsCameraToolName(name);
         }
 
         /// <summary>
@@ -677,7 +676,7 @@ namespace CoreAI.Infrastructure.Llm
                 _removeFailedFeedback = false;
                 if (_owner._settings.MaxToolCallHistoryMessages > 0)
                 {
-                    _owner.TrimToolCallHistory(messages, _owner._settings.MaxToolCallHistoryMessages);
+                    _owner.TrimToolCallHistory(messages, _owner._settings.MaxToolCallHistoryMessages, _policy);
                 }
                 LiftCameraImages(messages, ref _liftedCameraCallIds);
 
@@ -1207,7 +1206,7 @@ namespace CoreAI.Infrastructure.Llm
                     int maxHistoryMsgs = _settings.MaxToolCallHistoryMessages;
                     if (maxHistoryMsgs > 0)
                     {
-                        TrimToolCallHistory(messages, maxHistoryMsgs);
+                        TrimToolCallHistory(messages, maxHistoryMsgs, policy);
                     }
                 }
             }
@@ -1487,9 +1486,11 @@ namespace CoreAI.Infrastructure.Llm
         /// loop in <c>MeaiLlmClient</c>) and logs the removal, keeping trim semantics identical
         /// across both tool-calling modes. See the trimmer for the pairing/ordering guarantees.
         /// </summary>
-        private void TrimToolCallHistory(List<MEAI.ChatMessage> messages, int maxToolMessages)
+        private void TrimToolCallHistory(List<MEAI.ChatMessage> messages, int maxToolMessages,
+            ToolExecutionPolicy policy)
         {
             int removed = ToolCallHistoryTrimmer.Trim(messages, maxToolMessages);
+            policy?.OnToolHistoryTrimmed(removed);
             if (removed > 0 && _settings.LogMeaiToolCallingSteps)
             {
                 _logger.Info(

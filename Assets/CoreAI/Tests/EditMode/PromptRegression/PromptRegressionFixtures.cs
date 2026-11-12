@@ -67,7 +67,7 @@ namespace CoreAI.Core.Tests.EditMode
         private static readonly string[] ProgrammerTools =
         {
             "memory", "camera", "execute_lua", "manage_mods", "get_mod_logs", "save_world", "load_world",
-            "list_autosaves", "load_autosave", "read_skill", "call_skill_tool"
+            "list_autosaves", "load_autosave", "read_skill"
         };
 
         private static readonly string[] MerchantTools = { "memory", "get_inventory" };
