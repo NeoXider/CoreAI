@@ -348,6 +348,82 @@ namespace CoreAI.Tests.EditMode.ChatOverlay
             Assert.IsFalse(harness.Controller.IsTurnActive);
         }
 
+        /// <summary>
+        /// A browser player read "Tool calls failed: execute_lua: NOT_IMPLEMENTED: Script.Source is planned for
+        /// MVP4. | fix: ..." as the AI's own line: the orchestrator's sentence for a turn of tool calls alone.
+        /// </summary>
+        [Test]
+        public void TurnOfFailedToolCallsAlone_ShowsThePlayersSentence_NotTheToolErrors()
+        {
+            using ChatOverlayHarness harness = new();
+            harness.Controller.Submit("change the hud");
+
+            harness.Sender.Stream("Tool calls failed: execute_lua: NOT_IMPLEMENTED: Script.Source; execute_lua: syntax error.");
+            harness.Sender.Complete();
+
+            IReadOnlyList<ChatFeedLine> assistant = LinesOf(harness, ChatFeedLineKind.Assistant);
+            Assert.AreEqual(1, assistant.Count);
+            Assert.AreEqual(harness.Options.ToolOnlyFailedText, assistant[0].Text);
+            Assert.AreEqual(0, LinesOf(harness, ChatFeedLineKind.System).Count, "the turn did answer");
+        }
+
+        [Test]
+        public void TurnOfSuccessfulToolCallsAlone_SaysDone()
+        {
+            using ChatOverlayHarness harness = new();
+            harness.Controller.Submit("build a tower");
+
+            harness.Sender.Stream("Tool call completed: execute_lua.");
+            harness.Sender.Complete();
+
+            Assert.AreEqual(harness.Options.ToolOnlyDoneText, LinesOf(harness, ChatFeedLineKind.Assistant)[0].Text);
+        }
+
+        [Test]
+        public void TurnOfToolCallsAlone_ThatThenFails_ShowsOnlyTheFailure()
+        {
+            using ChatOverlayHarness harness = new();
+            harness.Controller.Submit("change the hud");
+            harness.Sender.Stream("Tool calls failed: execute_lua: syntax error; execute_lua: invalid value.");
+
+            harness.Sender.Observer.OnChunk(new LlmStreamChunk
+            {
+                IsDone = true,
+                Error = "stream failed after 19 executed tool call(s): LLM total request timeout expired after 120s.",
+                ErrorCode = LlmErrorCode.Timeout
+            });
+
+            Assert.AreEqual(0, LinesOf(harness, ChatFeedLineKind.Assistant).Count,
+                "the failure line already says how the turn ended");
+            Assert.AreEqual(LlmErrorPresentation.ForErrorCode(LlmErrorCode.Timeout), harness.LastLine.Text);
+        }
+
+        [Test]
+        public void EmptyToolOnlyTexts_KeepTheOrchestratorsSentence()
+        {
+            using ChatOverlayHarness harness = new(new ChatOverlayOptions { ToolOnlyDoneText = "", ToolOnlyFailedText = "" });
+            harness.Controller.Submit("build a tower");
+
+            harness.Sender.Stream("Tool call completed: execute_lua.");
+            harness.Sender.Complete();
+
+            Assert.AreEqual("Tool call completed: execute_lua.", LinesOf(harness, ChatFeedLineKind.Assistant)[0].Text);
+        }
+
+        [Test]
+        public void AnswerThatOnlyMentionsAToolCall_IsShownAsWritten()
+        {
+            using ChatOverlayHarness harness = new();
+            harness.Controller.Submit("what happened");
+
+            harness.Sender.Stream("Earlier: ");
+            harness.Sender.Stream("Tool call failed: memory.");
+            harness.Sender.Complete();
+
+            Assert.AreEqual("Earlier: Tool call failed: memory.", LinesOf(harness, ChatFeedLineKind.Assistant)[0].Text,
+                "only a reply that IS the orchestrator's sentence is replaced");
+        }
+
         [Test]
         public void FailureChunk_EndsTheTurnWithAnErrorLine_AndCancelsTheRequest()
         {

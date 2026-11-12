@@ -87,6 +87,13 @@ command prefix, the status formats (`ThinkingText`, `RunningToolFormat`, `Retryi
 `RetryAttemptFormat`, `ElapsedFormat`), per-tool status texts (`ToolStatusTexts`, where `manage_mods` maps
 to `loading mod`), the input and line length limits and whether Enter closes the input.
 
+When the model answers with tool calls and no words, the orchestrator writes a sentence for developers
+("Tool calls failed: execute_lua: ..."). The overlay keeps it out of the feed: the agent's line is
+`ToolOnlyDoneText` ("Done.") when every call succeeded and `ToolOnlyFailedText` ("I could not do that. Ask
+again, or say it another way.") when one failed, the tool names and errors go to the log, and when the turn
+itself then fails (a timeout, a lost connection) only the failure line is shown. Set both texts to an empty
+string to show the orchestrator's sentence as it is.
+
 ## Commands from code
 
 Any package or game adds commands at runtime through `IChatCommandRegistry`; no package code changes.

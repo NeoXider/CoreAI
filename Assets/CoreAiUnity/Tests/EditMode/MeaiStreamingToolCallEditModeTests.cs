@@ -535,6 +535,46 @@ namespace CoreAI.Tests.EditMode
                 "The executed call's trace must ride the terminal chunk so the failure is graded, not retried blind.");
             Assert.That(logger.Warnings.Any(w => w.Contains("started mid-stream")), Is.True,
                 "Turn finalization must be logged when the stream dies after executed calls.");
+            Assert.AreEqual(LlmErrorCode.None, last.ErrorCode,
+                "An untyped transport exception names no category, so the chunk names none either.");
+        }
+
+        /// <summary>
+        /// A browser turn that the request deadline cut after nineteen tool calls reached the player as "the
+        /// assistant is unavailable": the terminal chunk had the text of the timeout and no code.
+        /// </summary>
+        [Test]
+        public async Task CompleteStreamingAsync_DeadlineCutsTheStreamAfterAToolCall_TerminalChunkSaysTimeout()
+        {
+            FlagTool tool = new("world_tool");
+            NativeToolCallScripted inner = new(() => tool.Executed)
+            {
+                ThrowAfterToolCall = new LlmClientException(
+                    "LLM total request timeout expired after 120s.", LlmErrorCode.Timeout,
+                    LlmTimeoutKind.TotalDeadline)
+            };
+            MeaiLlmClient client = new(inner, new RecordingLogger(), new StubSettings(), supportsNativeToolCalling: true, memoryStore: null);
+
+            List<LlmStreamChunk> chunks = new();
+            await foreach (LlmStreamChunk chunk in client.CompleteStreamingAsync(new LlmCompletionRequest
+                           {
+                               AgentRoleId = "Role",
+                               SystemPrompt = "sys",
+                               UserPayload = "go",
+                               Tools = new List<ILlmTool> { tool }
+                           }, CancellationToken.None))
+            {
+                chunks.Add(chunk);
+            }
+
+            LlmStreamChunk last = chunks.Last();
+            Assert.IsTrue(last.IsDone);
+            Assert.AreEqual(LlmErrorCode.Timeout, last.ErrorCode,
+                "The category of the failure rides the terminal chunk, so the player reads that the answer took " +
+                "too long instead of that the assistant is unavailable.");
+            Assert.That(last.Error, Does.Contain("timeout expired"));
+            Assert.IsTrue(last.ExecutedToolCalls.Any(t => t.Name == "world_tool" && t.Success),
+                "The executed call still rides the chunk: that is what keeps a retry or a fallback from replaying it.");
         }
 
         [Test]

@@ -2986,13 +2986,42 @@ namespace CoreAI.Ai
                 // tool name(s) and reason, not fall through to a generic "LLM request failed." even
                 // though the LLM itself succeeded and only the tool failed.
                 return failed.Count == 1
-                    ? "Tool call failed: " + failed[0] + "."
-                    : "Tool calls failed: " + string.Join("; ", failed) + ".";
+                    ? ToolCallFailedPrefix + failed[0] + "."
+                    : ToolCallsFailedPrefix + string.Join("; ", failed) + ".";
             }
 
             return succeeded.Count == 1
-                ? "Tool call completed: " + succeeded[0] + "."
-                : "Tool calls completed: " + string.Join(", ", succeeded) + ".";
+                ? ToolCallCompletedPrefix + succeeded[0] + "."
+                : ToolCallsCompletedPrefix + string.Join(", ", succeeded) + ".";
+        }
+
+        internal const string ToolCallFailedPrefix = "Tool call failed: ";
+        internal const string ToolCallsFailedPrefix = "Tool calls failed: ";
+        internal const string ToolCallCompletedPrefix = "Tool call completed: ";
+        internal const string ToolCallsCompletedPrefix = "Tool calls completed: ";
+
+        /// <summary>
+        /// True when <paramref name="text"/> is the sentence this orchestrator writes for a turn that ended on
+        /// tool calls alone, the model having said nothing: a list of tool names and their errors, written for a
+        /// developer. <paramref name="failed"/> tells the failure sentence from the completion one.
+        /// </summary>
+        public static bool IsToolOnlySummary(string text, out bool failed)
+        {
+            failed = false;
+            if (string.IsNullOrEmpty(text))
+            {
+                return false;
+            }
+
+            if (text.StartsWith(ToolCallFailedPrefix, StringComparison.Ordinal) ||
+                text.StartsWith(ToolCallsFailedPrefix, StringComparison.Ordinal))
+            {
+                failed = true;
+                return true;
+            }
+
+            return text.StartsWith(ToolCallCompletedPrefix, StringComparison.Ordinal) ||
+                   text.StartsWith(ToolCallsCompletedPrefix, StringComparison.Ordinal);
         }
 
         /// <summary>

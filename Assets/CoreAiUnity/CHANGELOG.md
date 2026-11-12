@@ -63,6 +63,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Fixed
 
+- LLM: a stream cut after tool calls already ran ends with the category of the failure (`LlmStreamChunk.ErrorCode`, for example `Timeout` when the request deadline fired), so the player reads "The assistant took too long to answer" instead of "The assistant is unavailable right now". The executed calls on that chunk still stop a retry or a fallback from running them again.
 - `CoreAiBackend.ListModelsAsync` (the Hub's Fetch models) used `System.Net.Http.HttpClient`, which a WebGL player cannot use; it goes through `UnityWebRequest` now and reports failures in the connection check's words.
 - The Hub's embedded chat left its input reported as typing or hovered after a tab change or a closed Hub, so a game's input stayed captured. The embedded `CoreAiChatPanel` clears its focus report when its host detaches, and `CoreAiHubWindow` blurs a focused field in its content before a page switch, a collapse or a disable.
 - **WebGL/IL2CPP: the in-world chat did not appear in a player built from the current tree.** The container did not see `[Inject]` on the audit writer's default constructor in the player, asked for a `string`, and the failed build callback stopped every callback after it. `AuditLogWriter`, `LlmAuditInterceptor` and `ToolCallAuditInterceptor` are now registered through factories (`AuditLogInstaller`), as `IAiGameCommandSink` already was.

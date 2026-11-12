@@ -63,6 +63,18 @@ namespace CoreAI.ChatOverlay
         /// <summary>Shown when a turn ends without visible text.</summary>
         public string NoResponseText { get; set; } = "The AI returned no answer.";
 
+        /// <summary>
+        /// The agent's line when it worked with tools, every call succeeded and the model said nothing. Empty
+        /// shows the orchestrator's own sentence with the tool names.
+        /// </summary>
+        public string ToolOnlyDoneText { get; set; } = "Done.";
+
+        /// <summary>
+        /// The agent's line when it worked with tools, at least one call failed and the model said nothing; the
+        /// tool names and errors go to the log. Empty shows the orchestrator's own sentence with them.
+        /// </summary>
+        public string ToolOnlyFailedText { get; set; } = "I could not do that. Ask again, or say it another way.";
+
         /// <summary>Put before every turn failure sentence.</summary>
         public string ErrorPrefix { get; set; } = "";
 

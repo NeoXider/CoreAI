@@ -1035,6 +1035,7 @@ namespace CoreAI.Infrastructure.Llm
                 await using IAsyncEnumerator<MEAI.ChatResponseUpdate> updateEnumerator =
                     updateStream.GetAsyncEnumerator(cancellationToken);
                 string? midStreamFailureMessage = null;
+                LlmErrorCode midStreamFailureCode = LlmErrorCode.None;
                 while (true)
                 {
                     MEAI.ChatResponseUpdate update;
@@ -1088,6 +1089,12 @@ namespace CoreAI.Infrastructure.Llm
                         // not as a retryable transport exception a caller might blindly replay.
                         midStreamFailureMessage =
                             $"stream failed after {streamedExecutedCallCount} executed tool call(s): {ex.Message}";
+                        // WHY: the category the transport named (a timeout, a rate limit) must reach the
+                        // consumer: without it a turn the request deadline cut reads as "the assistant is
+                        // unavailable". Replaying is still ruled out by the executed calls this chunk carries.
+                        midStreamFailureCode = ex is LlmClientException typedFailure
+                            ? typedFailure.ErrorCode
+                            : LlmErrorCode.None;
                         break;
                     }
 
@@ -1236,6 +1243,7 @@ namespace CoreAI.Infrastructure.Llm
                     {
                         IsDone = true,
                         Error = midStreamFailureMessage,
+                        ErrorCode = midStreamFailureCode,
                         ExecutedToolCalls = policy.ExecutedTraces.ToList()
                     };
                     ApplyStreamingUsageFields(streamFailChunk, turnUsage, streamModel);

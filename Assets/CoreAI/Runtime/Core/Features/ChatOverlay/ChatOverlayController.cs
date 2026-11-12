@@ -877,6 +877,8 @@ namespace CoreAI.ChatOverlay
             private ChatFeedLine _line;
             private bool _anyVisibleText;
             private bool _ended;
+            private string _heldToolSummary;
+            private bool _heldToolSummaryFailed;
 
             public TurnState(ChatOverlayController owner, string roleId, string traceId)
             {
@@ -934,6 +936,11 @@ namespace CoreAI.ChatOverlay
 
                 if (!string.IsNullOrEmpty(chunk.Text))
                 {
+                    if (TryHoldToolSummary(chunk.Text))
+                    {
+                        return;
+                    }
+
                     AppendVisible(_think.ProcessChunk(chunk.Text), chunk.StartsNewMessage);
                 }
                 else if (!string.IsNullOrEmpty(chunk.ReasoningText) || chunk.GenerationInProgress)
@@ -950,6 +957,7 @@ namespace CoreAI.ChatOverlay
                 }
 
                 AppendVisible(_think.Flush(), false);
+                ShowHeldToolSummary();
                 if (!_anyVisibleText)
                 {
                     _owner.Feed.Add(ChatFeedLineKind.System, "", _owner._options.NoResponseText,
@@ -957,6 +965,37 @@ namespace CoreAI.ChatOverlay
                 }
 
                 Finish(null);
+            }
+
+            // WHY held to the end of the turn: the orchestrator writes this sentence before it reports how the
+            // turn ended. When the turn then fails, the failure line alone tells the player what happened.
+            private bool TryHoldToolSummary(string text)
+            {
+                if (_anyVisibleText || _line != null || !AiOrchestrator.IsToolOnlySummary(text, out bool failed))
+                {
+                    return false;
+                }
+
+                _heldToolSummary = text;
+                _heldToolSummaryFailed = failed;
+                _owner._log.Info($"[ChatOverlay] A turn of tool calls alone, kept out of the feed: {text}",
+                    LogTag.Llm);
+                _owner.Status.MarkThinking();
+                return true;
+            }
+
+            private void ShowHeldToolSummary()
+            {
+                if (_heldToolSummary == null)
+                {
+                    return;
+                }
+
+                string sentence = _heldToolSummaryFailed
+                    ? _owner._options.ToolOnlyFailedText
+                    : _owner._options.ToolOnlyDoneText;
+                AppendVisible(string.IsNullOrEmpty(sentence) ? _heldToolSummary : sentence, false);
+                _heldToolSummary = null;
             }
 
             public void OnFailed(ChatOverlayTurnFailure failure)
