@@ -34,4 +34,18 @@ namespace CoreAI.Mcp.Tools
         /// </summary>
         bool TryCaptureBase64Png(string cameraName, int maxResolution, out string base64Png, out string error);
     }
+
+    /// <summary>
+    /// A screenshot source that can also capture the screen as the player sees it, screen-space UI included (the
+    /// chat, the HUD, the Hub), which a camera render leaves out. The capture happens at the end of a rendered
+    /// frame, so it answers through a callback; the <c>screenshot</c> tool's <c>screen</c> argument needs it.
+    /// </summary>
+    public interface IScreenCaptureSource
+    {
+        /// <summary>
+        /// Captures the displayed frame and calls <paramref name="done"/> exactly once on the main thread, with a raw
+        /// base64 PNG or with the reason it could not (no window in batch mode, not playing, no frame ended in time).
+        /// </summary>
+        void CaptureScreen(int maxResolution, System.Action<string, string> done);
+    }
 }

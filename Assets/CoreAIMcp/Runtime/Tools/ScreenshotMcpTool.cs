@@ -33,21 +33,27 @@ namespace CoreAI.Mcp.Tools
         public string Description =>
             "Capture the running game's main camera (or the camera named in 'camera') and return it as a PNG " +
             "image (base64). Use it to SEE the result of a spawn or edit. max_resolution caps the longer edge " +
-            "in pixels (default 1024) to keep the payload small. Screen-space overlay UI is not part of a " +
-            "camera render.";
+            "in pixels (default 1024) to keep the payload small. A camera render has no screen-space UI; " +
+            "screen=true captures the displayed frame with the UI instead (needs a drawn window).";
 
         /// <inheritdoc />
         public string InputSchemaJson =>
             "{\"type\":\"object\",\"properties\":{\"max_resolution\":{\"type\":\"integer\"," +
             "\"description\":\"Cap on the longer image edge in pixels (default 1024). 0 = no cap.\"}," +
             "\"camera\":{\"type\":\"string\",\"description\":\"Optional name of the camera GameObject to " +
-            "capture. Omit for the main camera. An unknown name fails and lists the active cameras.\"}}}";
+            "capture. Omit for the main camera. An unknown name fails and lists the active cameras.\"}," +
+            "\"screen\":{\"type\":\"boolean\",\"description\":\"Capture the screen as the player sees it, UI " +
+            "included, at the end of a frame. Not with camera; fails in batch mode (no window).\"}}}";
 
         /// <inheritdoc />
         public Task<McpToolResult> InvokeAsync(JObject arguments, CancellationToken cancellationToken)
         {
             int maxRes = McpArguments.Int(arguments, "max_resolution", DefaultMaxResolution);
             string cameraName = McpArguments.String(arguments, "camera")?.Trim();
+            if (McpArguments.Bool(arguments, "screen"))
+            {
+                return CaptureScreenAsync(maxRes, cameraName);
+            }
 
             string base64;
             string error;
@@ -83,6 +89,34 @@ namespace CoreAI.Mcp.Tools
             }
 
             return Task.FromResult(new McpToolResult(new[] { McpContent.CreateImage(base64, "image/png") }));
+        }
+
+        private Task<McpToolResult> CaptureScreenAsync(int maxResolution, string cameraName)
+        {
+            if (!string.IsNullOrEmpty(cameraName))
+            {
+                return Task.FromResult(McpToolResult.Failure(
+                    "screenshot: screen=true captures the whole displayed frame; omit 'camera' with it."));
+            }
+
+            if (!(_source is IScreenCaptureSource screen))
+            {
+                return Task.FromResult(McpToolResult.Failure(
+                    "screenshot: this game's capture source cannot capture the screen; omit 'screen' to render the " +
+                    "main camera."));
+            }
+
+            // WHY a completion source without RunContinuationsAsynchronously: the capture ends in an end-of-frame
+            // callback on the game thread, and in a WebGL player a pool-resumed continuation would never run.
+            TaskCompletionSource<McpToolResult> completion = new();
+            screen.CaptureScreen(maxResolution, (base64, error) =>
+            {
+                completion.TrySetResult(string.IsNullOrEmpty(base64)
+                    ? McpToolResult.Failure("screenshot: screen capture failed - " +
+                                            (string.IsNullOrEmpty(error) ? "the source reported no reason." : error))
+                    : new McpToolResult(new[] { McpContent.CreateImage(base64, "image/png") }));
+            });
+            return completion.Task;
         }
     }
 }

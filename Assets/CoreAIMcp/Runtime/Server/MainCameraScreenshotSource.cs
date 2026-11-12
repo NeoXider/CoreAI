@@ -19,8 +19,110 @@ namespace CoreAI.Mcp.Server
     /// <c>tools/list</c> for the whole session.
     /// </para>
     /// </summary>
-    public sealed class MainCameraScreenshotSource : ICameraScreenshotSource
+    public sealed class MainCameraScreenshotSource : ICameraScreenshotSource, IScreenCaptureSource
     {
+        /// <summary>Seconds a screen capture waits for a frame to end before it fails.</summary>
+        public const float ScreenCaptureTimeoutSeconds = 5f;
+
+        private readonly MonoBehaviour _coroutineHost;
+
+        /// <summary>A source that renders cameras only (no screen capture).</summary>
+        public MainCameraScreenshotSource() : this(null)
+        {
+        }
+
+        /// <param name="coroutineHost">
+        /// The component whose coroutines wait for the end of a frame for <see cref="CaptureScreen"/> (the MCP server
+        /// component); null leaves screen capture unavailable.
+        /// </param>
+        public MainCameraScreenshotSource(MonoBehaviour coroutineHost)
+        {
+            _coroutineHost = coroutineHost;
+        }
+
+        /// <summary>
+        /// Captures the displayed frame, screen-space UI included, with <c>ScreenCapture.CaptureScreenshotAsTexture</c>
+        /// after <c>WaitForEndOfFrame</c>. Refuses at once where no frame is drawn (batch mode, <c>-nographics</c>, edit
+        /// mode) and fails after <see cref="ScreenCaptureTimeoutSeconds"/> when no frame ends (a paused game).
+        /// </summary>
+        public void CaptureScreen(int maxResolution, Action<string, string> done)
+        {
+            if (done == null) throw new ArgumentNullException(nameof(done));
+            if (Application.isBatchMode || SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null)
+            {
+                done(null, "this run draws no screen (batch mode or -nographics), so there is nothing to capture; omit " +
+                           "'screen' to render a camera offscreen.");
+                return;
+            }
+
+            if (!Application.isPlaying)
+            {
+                done(null, "the screen is captured only in play mode and in players.");
+                return;
+            }
+
+            if (_coroutineHost == null || !_coroutineHost.isActiveAndEnabled)
+            {
+                done(null, "no active component can wait for the end of a frame.");
+                return;
+            }
+
+            ScreenCaptureRequest request = new(Math.Max(0, maxResolution), done);
+            _coroutineHost.StartCoroutine(CaptureAtEndOfFrame(request));
+            _coroutineHost.StartCoroutine(FailAfterDeadline(request));
+        }
+
+        private static System.Collections.IEnumerator CaptureAtEndOfFrame(ScreenCaptureRequest request)
+        {
+            yield return new WaitForEndOfFrame();
+            if (request.Finished) yield break;
+            Texture2D shot = null;
+            try
+            {
+                shot = ScreenCapture.CaptureScreenshotAsTexture();
+                byte[] png = shot.ToAiAttachment(request.MaxResolution, CaptureImageFormat.Png).Data;
+                request.Finish(png == null || png.Length == 0 ? null : Convert.ToBase64String(png),
+                    "the screen capture produced no bytes.");
+            }
+            catch (Exception ex)
+            {
+                Log.Instance.Error($"[CoreAI MCP] screen capture failed: {ex}");
+                request.Finish(null, $"screen capture failed: {ex.GetType().Name}: {ex.Message}");
+            }
+            finally
+            {
+                if (shot != null) UnityEngine.Object.Destroy(shot);
+            }
+        }
+
+        private static System.Collections.IEnumerator FailAfterDeadline(ScreenCaptureRequest request)
+        {
+            yield return new WaitForSecondsRealtime(ScreenCaptureTimeoutSeconds);
+            request.Finish(null, $"no frame ended within {ScreenCaptureTimeoutSeconds:0} s (the game is paused, or " +
+                                 "its window is not drawn).");
+        }
+
+        private sealed class ScreenCaptureRequest
+        {
+            private readonly Action<string, string> _done;
+
+            public ScreenCaptureRequest(int maxResolution, Action<string, string> done)
+            {
+                MaxResolution = maxResolution;
+                _done = done;
+            }
+
+            public int MaxResolution { get; }
+
+            public bool Finished { get; private set; }
+
+            public void Finish(string base64, string error)
+            {
+                if (Finished) return;
+                Finished = true;
+                _done(base64, base64 == null ? error : null);
+            }
+        }
         /// <inheritdoc />
         public bool TryCaptureBase64Png(int maxResolution, out string base64Png, out string error)
         {

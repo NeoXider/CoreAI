@@ -11,7 +11,8 @@ namespace CoreAI.Diagnostics
     /// <see cref="ProfilerRecorder"/>.
     /// <para>
     /// What a build provides is detected when the counters are read, never assumed: a recorder that is not valid,
-    /// or has no sample yet, is listed as unavailable instead of reported as zero. Unity documents the render
+    /// has no sample yet, or (for a per-frame counter) read 0 because nothing was rendered, is listed as unavailable
+    /// instead of reported as zero. Unity documents the render
     /// counters (draw calls, batches, SetPass calls, triangles, vertices) as readable in release players, and the
     /// frame-time counters as starting the frame timing manager themselves, also in release players; WebGL gives no
     /// GPU time. The object counts (textures, meshes) are development-build only and are not read.
@@ -92,23 +93,37 @@ namespace CoreAI.Diagnostics
 
             List<EngineCounterValue> values = new();
             List<string> unavailable = new();
+            bool zeroes = false;
             foreach (CounterReader counter in _counters)
             {
-                if (counter.TryRead(out double value))
+                CounterReading reading = counter.TryRead(out double value);
+                if (reading == CounterReading.Value)
                 {
                     values.Add(new EngineCounterValue(counter.Name, value, counter.Unit));
                 }
                 else
                 {
                     unavailable.Add(counter.Name);
+                    zeroes |= reading == CounterReading.Zero;
                 }
             }
 
             values.Add(new EngineCounterValue("managed_heap", GC.GetTotalMemory(false), "bytes"));
-            string note = justStarted && unavailable.Count > 0
-                ? "counters started now; per-frame counters report from the next call"
-                : "";
-            return new EngineCounterSnapshot(values, unavailable, note);
+            List<string> notes = new();
+            if (justStarted && unavailable.Count > 0)
+            {
+                notes.Add("counters started now; per-frame counters report from the next call");
+            }
+
+            if (zeroes)
+            {
+                // WHY: a render or frame-time counter that reads 0 was not measured (nothing was drawn: batch mode,
+                // no camera); reporting it as 0 draw calls would look like a measurement.
+                notes.Add("a per-frame counter that read 0 is listed as unavailable: nothing was rendered" +
+                          (Application.isBatchMode ? " (batch mode draws nothing)" : ""));
+            }
+
+            return new EngineCounterSnapshot(values, unavailable, string.Join("; ", notes));
         }
 
         private void DisposeCounters()
@@ -118,6 +133,13 @@ namespace CoreAI.Diagnostics
             _counters = null;
             if (counters == null) return;
             foreach (CounterReader counter in counters) counter.Dispose();
+        }
+
+        private enum CounterReading
+        {
+            Value,
+            Missing,
+            Zero
         }
 
         private sealed class CounterReader : IDisposable
@@ -164,25 +186,27 @@ namespace CoreAI.Diagnostics
                 };
             }
 
-            public bool TryRead(out double value)
+            public CounterReading TryRead(out double value)
             {
                 value = 0d;
                 if (!_recorder.Valid)
                 {
-                    return false;
+                    return CounterReading.Missing;
                 }
 
                 if (_perFrame)
                 {
-                    if (_recorder.Count == 0) return false;
-                    value = _recorder.LastValue * _scale;
-                    return true;
+                    if (_recorder.Count == 0) return CounterReading.Missing;
+                    long last = _recorder.LastValue;
+                    if (last <= 0) return CounterReading.Zero;
+                    value = last * _scale;
+                    return CounterReading.Value;
                 }
 
                 long current = _recorder.CurrentValue;
-                if (current <= 0) return false;
+                if (current <= 0) return CounterReading.Missing;
                 value = current * _scale;
-                return true;
+                return CounterReading.Value;
             }
 
             public void Dispose()

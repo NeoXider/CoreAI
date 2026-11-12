@@ -124,6 +124,31 @@ namespace CoreAI.Mcp.Tests
                 "a headless player started with the variable still starts");
         }
 
+        [Test]
+        public void Token_IsMaskedInTheLogUnlessTheDeveloperAsks()
+        {
+            Assert.IsFalse(CoreAiMcpDebugOptions.Read(new[] { "-coreaiMcp" }, null, null).PrintToken);
+            Assert.IsTrue(CoreAiMcpDebugOptions.Read(new[] { "-coreaiMcp", "-coreaiMcpPrintToken" }, null, null).PrintToken);
+            Assert.IsTrue(CoreAiMcpDebugOptions.Read(null, Environment(("COREAI_MCP", "1"), ("COREAI_MCP_PRINT_TOKEN", "1")),
+                null).PrintToken);
+        }
+
+        [Test]
+        public void BridgeHost_ComesFromTheEnvironment_OrTheHub()
+        {
+            CoreAiMcpDebugOptions fromEnvironment = CoreAiMcpDebugOptions.Read(null,
+                Environment(("COREAI_MCP_BRIDGE", "8591"), ("COREAI_MCP_BRIDGE_HOST", "192.168.1.20")), null);
+            CoreAiMcpDebugOptions fromHub = CoreAiMcpDebugOptions.ForBridge(" 10.0.0.5 ", 9000, " key ", false);
+
+            Assert.AreEqual("192.168.1.20", fromEnvironment.BridgeHost);
+            Assert.AreEqual(CoreAiMcpDebugMode.Bridge, fromHub.Mode);
+            Assert.AreEqual("10.0.0.5", fromHub.BridgeHost);
+            Assert.AreEqual(9000, fromHub.Port);
+            Assert.AreEqual("key", fromHub.BridgeKey);
+            Assert.IsFalse(fromHub.HostAdmin);
+            Assert.AreEqual(CoreAiMcpDebugOptions.DefaultBridgePort, CoreAiMcpDebugOptions.ForBridge(null, 0, null, true).Port);
+        }
+
         private static Func<string, string> Environment(params (string Name, string Value)[] variables)
         {
             Dictionary<string, string> values = new(StringComparer.Ordinal);

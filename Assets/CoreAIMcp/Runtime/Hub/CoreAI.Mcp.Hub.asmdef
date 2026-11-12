@@ -1,0 +1,27 @@
+{
+  "name": "CoreAI.Mcp.Hub",
+  "rootNamespace": "CoreAI.Mcp.Hub",
+  "references": [
+    "CoreAI.Core",
+    "CoreAI.Source",
+    "CoreAI.Mcp",
+    "CoreAI.Hub.UI"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "COREAI_HAS_HUB"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.neoxider.coreaihub",
+      "expression": "",
+      "define": "COREAI_HAS_HUB"
+    }
+  ],
+  "noEngineReferences": false
+}

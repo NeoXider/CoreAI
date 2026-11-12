@@ -175,6 +175,36 @@ namespace CoreAI.Hub.UI
             return captureWhileExpanded && uiReady && !collapsed;
         }
 
+        /// <summary>
+        /// Raised whenever a Hub window is enabled, after it subscribed to its registry. Lets an optional package the
+        /// Hub cannot reference (the MCP package, a host game) add its own tab to every Hub without a scene edit;
+        /// such a subscriber should add a component to the window's GameObject and register its page from that
+        /// component's <c>Start</c>, when the window's registry is settled.
+        /// </summary>
+        public static event Action<CoreAiHubWindow> AnyWindowEnabled;
+
+        private static void RaiseAnyWindowEnabled(CoreAiHubWindow window)
+        {
+            Action<CoreAiHubWindow> handlers = AnyWindowEnabled;
+            if (handlers == null)
+            {
+                return;
+            }
+
+            foreach (Delegate handler in handlers.GetInvocationList())
+            {
+                // WHY: one optional package's failure must not break the Hub or the other subscribers.
+                try
+                {
+                    ((Action<CoreAiHubWindow>)handler)(window);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogException(ex);
+                }
+            }
+        }
+
         protected virtual void OnEnable()
         {
             // WHY: OnDisable unsubscribes from the registry, but the Registry setter's
@@ -183,6 +213,7 @@ namespace CoreAI.Hub.UI
             // symmetrically here (unsubscribe first so a handler is never added twice).
             UnsubscribeRegistry();
             SubscribeRegistry();
+            RaiseAnyWindowEnabled(this);
 
             _document = GetComponent<UIDocument>();
             VisualElement uiRoot = _document != null ? _document.rootVisualElement : null;

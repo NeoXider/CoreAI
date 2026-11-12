@@ -121,12 +121,16 @@ namespace CoreAI.Mcp.Server
         private McpRpcDispatcher _dispatcher;
         private string _transportKind = "http";
         private bool _hostAdminFromComposition;
+        private bool _bridgeMode;
 
         /// <summary>The router of the running server (request counters, sessions); null while stopped.</summary>
         public McpRpcDispatcher Dispatcher => _server != null ? _dispatcher : null;
 
         /// <summary><c>http</c> for the loopback listener, <c>bridge</c> for the outbound WebGL link.</summary>
         public string TransportKind => _transportKind;
+
+        /// <summary>The transport's own last link problem (the bridge: refused or unreachable); null when none.</summary>
+        public string LinkError => (_server as IMcpTransportDiagnostics)?.LastLinkError;
 
         /// <summary>Live session ids of the running server; 0 while stopped.</summary>
         public int SessionCount => _server != null && _sessions != null ? _sessions.Count : 0;
@@ -279,8 +283,18 @@ namespace CoreAI.Mcp.Server
             if (_active == this) _active = null;
         }
 
+        /// <summary>
+        /// Advances a transport that polls from the game loop (the bridge link). Called from <c>Update</c>; public for a
+        /// host that drives its own loop, next to <see cref="PumpMainThreadQueue()"/> and <see cref="MonitorComposition"/>.
+        /// </summary>
+        public void TickTransport()
+        {
+            (_server as IMcpTickingTransport)?.Tick();
+        }
+
         private void Update()
         {
+            TickTransport();
             PumpMainThreadQueue();
             MonitorComposition(Time.realtimeSinceStartupAsDouble);
             if (_automaticHost != this || _server != null) return;
@@ -429,14 +443,15 @@ namespace CoreAI.Mcp.Server
                 return;
             }
 
-            if (IsWebGlPlayer)
+            if (IsWebGlPlayer && !_bridgeMode)
             {
                 // WHY: HttpListener cannot bind a loopback socket from inside the browser sandbox, so
                 // the dev-time MCP server can never come up in a WebGL player; degrade to a logged
                 // no-op instead of shipping the listener and Task.Run accept loop there.
                 Log.Instance.Warn(
-                    "[CoreAI MCP] The MCP server is not available in WebGL builds (a browser page cannot open " +
-                    "a listening socket); server not started. Connect MCP clients to an editor or desktop build.");
+                    "[CoreAI MCP] The MCP server cannot listen in a WebGL player (a browser page cannot open a " +
+                    "listening socket); server not started. Link the page to the local MCP bridge instead: open it " +
+                    "with ?coreaiMcp=8591 (see the CoreAI MCP README, \"Connect to a WebGL build\").");
                 return;
             }
 
@@ -477,12 +492,17 @@ namespace CoreAI.Mcp.Server
                 Log.Instance.Info("[CoreAI MCP] No CoreAI scope is built yet; the tools appear when one is.");
             }
 
-            string token = ResolveAuthToken();
+            // WHY no token and an inline dispatcher on the bridge: the bridge authenticates the client, and every
+            // bridge request already arrives on the game thread (a UnityWebRequest callback), where the queue's
+            // pool-resumed continuation would never come back in a WebGL player.
+            bool bridge = _bridgeMode;
+            string token = bridge ? null : ResolveAuthToken();
             RedactFromRuntimeLog(token);
             _sessions = new McpSessionStore();
-            McpRpcDispatcher dispatcher = new(registry, _sessions, this) { Instructions = _instructions };
+            IMainThreadDispatcher mainThread = bridge ? new InlineMainThreadDispatcher() : this;
+            McpRpcDispatcher dispatcher = new(registry, _sessions, mainThread) { Instructions = _instructions };
             _dispatcher = dispatcher;
-            _transportKind = transportFactory == null ? "http" : _transportKind;
+            _transportKind = bridge ? "bridge" : "http";
             IMcpServerTransport transport = null;
             try
             {
@@ -498,6 +518,7 @@ namespace CoreAI.Mcp.Server
                 if (!ReferenceEquals(_server, transport)) return;
                 _activeAuthToken = token;
                 _active = this;
+                LastStartError = null;
                 LogAccessInstructions(token);
             }
             catch (Exception ex)
@@ -517,6 +538,7 @@ namespace CoreAI.Mcp.Server
                 }
                 finally
                 {
+                    LastStartError = $"Failed to start on port {listeningPort}: {ex.Message}";
                     // WHY: A reentrant restart may change the component's port while the failed transport is disposed.
                     Log.Instance.Error(
                         $"[CoreAI MCP] Failed to start on port {listeningPort}: {ex.Message}. " +
@@ -573,6 +595,14 @@ namespace CoreAI.Mcp.Server
 
         private void LogAccessInstructions(string token)
         {
+            if (_transportKind == "bridge")
+            {
+                Log.Instance.Info(
+                    $"[CoreAI MCP] Linking to the MCP bridge; clients connect to {_server.Url} with the token the " +
+                    "bridge printed when it started.");
+                return;
+            }
+
             if (token == null)
             {
                 Log.Instance.Warn(
@@ -582,12 +612,26 @@ namespace CoreAI.Mcp.Server
                 return;
             }
 
+            // WHY masked unless asked: a player's log file outlives the session and is collected by crash
+            // reporters and bug reports; the developer gets the full token from where they asked for it.
+            string shown = PrintFullToken ? token : McpConnectCommand.Mask(token);
             Log.Instance.Info(
-                $"[CoreAI MCP] Auth token: {token}\n" +
-                $"  claude mcp add --transport http coreai {_server.Url} --header \"Authorization: Bearer {token}\"\n" +
-                $"  Set {AuthTokenEnvironmentVariable} (or the Auth Token field) to keep the token stable " +
-                "across runs; otherwise a new one is generated every start.");
+                $"[CoreAI MCP] Auth token: {shown}\n" +
+                $"  {McpConnectCommand.Build(_server.Url, shown)}\n" +
+                (PrintFullToken
+                    ? ""
+                    : $"  The full token: the Hub MCP tab (Copy command), CoreAiMcpServer.ActiveAuthToken, or start " +
+                      $"with {CoreAiMcpDebugOptions.PrintTokenSwitch} to print it here.\n") +
+                $"  Set {AuthTokenEnvironmentVariable} (or the Auth Token field) to choose the token and keep it " +
+                "stable across runs; otherwise a new one is generated every start.");
         }
+
+        /// <summary>
+        /// Print the bearer token in full in the start line (and so in the log file). Off by default: the line shows
+        /// its first characters only. The debug start-up turns it on for <c>-coreaiMcpPrintToken</c> or
+        /// <c>COREAI_MCP_PRINT_TOKEN=1</c>. Read at start.
+        /// </summary>
+        public bool PrintFullToken { get; set; }
 
         private void FailPendingMainThreadCalls()
         {
@@ -644,7 +688,7 @@ namespace CoreAI.Mcp.Server
             // WHY: register screenshot unconditionally. Probing for a camera at START-UP made the tool
             // vanish from tools/list for the whole session when the server booted from a bootstrap scene;
             // the source now reports a missing camera per call instead.
-            IScreenshotSource screenshot = new MainCameraScreenshotSource();
+            IScreenshotSource screenshot = new MainCameraScreenshotSource(this);
             IReadOnlyList<IMcpTool> diagnostics = BuildDiagnosticsTools(resolver, modRuntime);
 
             return CoreAiMcpToolProvider.BuildWithModFolders(
@@ -664,7 +708,9 @@ namespace CoreAI.Mcp.Server
                 BuildWorldPackageTools(resolver, modActorIdentityProvider),
                 modRateLimiter,
                 modFolderList,
-                diagnostics);
+                diagnostics,
+                // WHY only in WebGL: there Task.Delay never fires, so get_mod_logs' wait needs the frame-driven one.
+                IsWebGlPlayer ? settings?.ToolInvocationMarshaler : null);
         }
 
         private IReadOnlyList<IMcpTool> BuildDiagnosticsTools(IObjectResolver resolver, ILuaModRuntime modRuntime)
@@ -960,6 +1006,7 @@ namespace CoreAI.Mcp.Server
             }
 
             CoreAiMcpServer instance = AcquireAutomaticHost();
+            instance._bridgeMode = false;
             instance.port = port;
             instance.StartListening(registry, null, transportFactory);
             return instance;
@@ -971,10 +1018,11 @@ namespace CoreAI.Mcp.Server
         /// <paramref name="hostAdmin"/> is false, grants <c>manage_mods</c> and <c>save_world</c> to the composition's
         /// unrestricted actor (<see cref="ConfigureHostAdminModManagementFromComposition"/>). Main thread only.
         /// </summary>
-        public static CoreAiMcpServer StartDebugServer(int port = 8590, bool hostAdmin = true) =>
-            StartDebugServer(port, hostAdmin, null);
+        public static CoreAiMcpServer StartDebugServer(int port = 8590, bool hostAdmin = true,
+            bool printToken = false) =>
+            StartDebugServer(port, hostAdmin, printToken, null);
 
-        internal static CoreAiMcpServer StartDebugServer(int port, bool hostAdmin,
+        internal static CoreAiMcpServer StartDebugServer(int port, bool hostAdmin, bool printToken,
             Func<int, McpRpcDispatcher, string, IMcpServerTransport> transportFactory)
         {
             if (_active != null && _active.IsRunning)
@@ -984,23 +1032,56 @@ namespace CoreAI.Mcp.Server
 
             CoreAiMcpServer instance = AcquireAutomaticHost();
             instance.PrepareDebugStart(port, hostAdmin);
+            instance.PrintFullToken = printToken;
             instance.StartListening(null, null, transportFactory);
             return instance;
         }
 
         /// <summary>
-        /// Links the automatic host to a local MCP bridge process on <paramref name="bridgePort"/> instead of listening
-        /// (the only way in a WebGL player). See the package README, "Connect to a WebGL build".
+        /// Links the automatic host to an MCP bridge process instead of listening: the only way in a WebGL player,
+        /// and the way a phone reaches the developer's machine. <paramref name="bridgeHost"/> null or empty means
+        /// <c>127.0.0.1</c> (WebGL, desktop, an Android phone behind <c>adb reverse</c>); a LAN address reaches a
+        /// bridge started with <c>--lan</c>. See the package README, "Connect to a WebGL build" and "Phones".
         /// </summary>
-        public static CoreAiMcpServer StartDebugBridge(int bridgePort, string bridgeKey, bool hostAdmin)
+        public static CoreAiMcpServer StartDebugBridge(int bridgePort, string bridgeKey, bool hostAdmin,
+            string bridgeHost = null) =>
+            StartDebugBridge(bridgeHost, bridgePort, bridgeKey, hostAdmin, null);
+
+        internal static CoreAiMcpServer StartDebugBridge(string bridgeHost, int bridgePort, string bridgeKey,
+            bool hostAdmin, IMcpBridgeHttp http)
         {
-            Log.Instance.Warn("[CoreAI MCP] The bridge link is not available in this version yet; port " + bridgePort +
-                              " ignored.");
-            return null;
+            if (_active != null && _active.IsRunning)
+            {
+                return _active;
+            }
+
+            CoreAiMcpServer instance = AcquireAutomaticHost();
+            instance.PrepareDebugStart(bridgePort, hostAdmin);
+            instance._bridgeMode = true;
+            IMcpBridgeHttp bridgeHttp = http ?? new UnityWebRequestBridgeHttp();
+            instance.StartListening(null, null, (listenPort, dispatcher, _) => new McpBridgeTransport(
+                new McpBridgeLink(bridgeHost, listenPort, bridgeKey, dispatcher, bridgeHttp, DescribeGameForBridge(),
+                    () => Time.realtimeSinceStartupAsDouble, line => Log.Instance.Info(line))));
+            return instance;
+        }
+
+        private static JObject DescribeGameForBridge()
+        {
+            // WHY no page URL: it may carry the bridge key in its fragment.
+            return new JObject
+            {
+                ["name"] = Application.productName,
+                ["platform"] = Application.platform.ToString(),
+                ["unity"] = Application.unityVersion,
+                ["app_version"] = Application.version,
+                ["coreai"] = Protocol.McpServerInfo.Version
+            };
         }
 
         private void PrepareDebugStart(int listenPort, bool hostAdmin)
         {
+            _bridgeMode = false;
+            PrintFullToken = false;
             port = listenPort;
             WaitForComposition = true;
             if (hostAdmin)
@@ -1030,6 +1111,9 @@ namespace CoreAI.Mcp.Server
 
         /// <summary>The server started through the static API or the debug start-up, or null.</summary>
         public static CoreAiMcpServer Active => _active;
+
+        /// <summary>Why the last start of any host failed; null after a successful start.</summary>
+        public static string LastStartError { get; private set; }
 
         /// <summary>Stops the active server started via the static API (or any tracked instance).</summary>
         public static void StopServer()

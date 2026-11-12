@@ -91,7 +91,8 @@ namespace CoreAI.Mcp.Server
             IReadOnlyList<IMcpTool> brokeredTools,
             LuaGenerationRateLimiter modRateLimiter,
             CoreAI.Mods.Folders.IModFolderListStore modFolderList,
-            IReadOnlyList<IMcpTool> nativeTools = null)
+            IReadOnlyList<IMcpTool> nativeTools = null,
+            ILlmAsyncMarshaler logWaitMarshaler = null)
         {
             List<IMcpTool> tools = new();
 
@@ -119,7 +120,7 @@ namespace CoreAI.Mcp.Server
 
             if (logService != null)
             {
-                tools.Add(new GetModLogsMcpTool(logService));
+                tools.Add(new GetModLogsMcpTool(logService, logWaitMarshaler));
             }
 
             if (worldTool != null)

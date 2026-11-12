@@ -1,0 +1,34 @@
+{
+  "name": "CoreAI.Mcp.Hub.Tests",
+  "rootNamespace": "CoreAI.Mcp.Hub.Tests",
+  "references": [
+    "CoreAI.Mcp",
+    "CoreAI.Mcp.Hub",
+    "CoreAI.Hub.UI",
+    "CoreAI.Core",
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS",
+    "COREAI_HAS_HUB"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.neoxider.coreaihub",
+      "expression": "",
+      "define": "COREAI_HAS_HUB"
+    }
+  ],
+  "noEngineReferences": false
+}

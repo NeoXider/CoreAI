@@ -54,13 +54,14 @@ namespace CoreAI.Mcp.Server
                 int bridgePort = options.Mode == CoreAiMcpDebugMode.Bridge
                     ? options.Port
                     : CoreAiMcpDebugOptions.DefaultBridgePort;
-                return CoreAiMcpServer.StartDebugBridge(bridgePort, options.BridgeKey, options.HostAdmin);
+                return CoreAiMcpServer.StartDebugBridge(bridgePort, options.BridgeKey, options.HostAdmin,
+                    options.BridgeHost);
             }
 
             int serverPort = options.Mode == CoreAiMcpDebugMode.Server
                 ? options.Port
                 : CoreAiMcpDebugOptions.DefaultServerPort;
-            return CoreAiMcpServer.StartDebugServer(serverPort, options.HostAdmin);
+            return CoreAiMcpServer.StartDebugServer(serverPort, options.HostAdmin, options.PrintToken);
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
@@ -79,14 +80,26 @@ namespace CoreAI.Mcp.Server
             CoreAiMcpDebugOptions options = LastOptions ?? ReadOptions();
             if (!options.ShouldStart(Application.isEditor, Application.isBatchMode, ReadEditorToggle()))
             {
-                return;
+                // WHY: a phone has no command line; a bridge the developer chose to remember in the Hub MCP tab is
+                // the only switch it has, and only when nothing else was asked and this is not an automated run.
+                McpBridgeEndpoint remembered = Application.isEditor || Application.isBatchMode
+                    ? null
+                    : CoreAiMcpLinkControl.Shared.RememberedBridge;
+                if (remembered == null)
+                {
+                    return;
+                }
+
+                options = CoreAiMcpDebugOptions.ForBridge(remembered.Host, remembered.Port, remembered.Key,
+                    remembered.HostAdmin);
             }
 
             try
             {
                 CoreAiMcpServer server = Start(options);
                 Log.Instance.Info("[CoreAI MCP] Debug start-up (" +
-                                  (options.Requested ? options.Source : "editor menu") + "): " +
+                                  (options.Requested ? options.Source == "hub" ? "remembered bridge" : options.Source
+                                      : "editor menu") + "): " +
                                   (server != null && server.IsRunning ? server.TransportKind + " " + server.Url : "not running"));
             }
             catch (Exception ex)

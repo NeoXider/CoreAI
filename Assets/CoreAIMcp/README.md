@@ -75,8 +75,13 @@ the tools stay absent and the console says why. Withhold that with the no-admin 
 | In-game server (editor, desktop players) | `-coreaiMcp [port]` | `COREAI_MCP=1` or `COREAI_MCP=<port>` | — |
 | Bridge link (WebGL; desktop for testing it) | `-coreaiMcpBridge [port]` | `COREAI_MCP_BRIDGE=<port>` | `?coreaiMcp=<port>` |
 | Bridge key | — | `COREAI_MCP_BRIDGE_KEY` | fragment `#coreaiMcpKey=<key>` only |
+| Bridge address (default `127.0.0.1`) | — | `COREAI_MCP_BRIDGE_HOST` | — |
 | No `manage_mods` / `save_world` | `-coreaiMcpNoAdmin` | `COREAI_MCP_ADMIN=0` | `coreaiMcpNoAdmin` |
 | Bearer token of the in-game server | — | `COREAI_MCP_TOKEN` | — |
+| Print that token in full in the log | `-coreaiMcpPrintToken` | `COREAI_MCP_PRINT_TOKEN=1` | — |
+
+A phone has neither a command line nor an environment the developer controls: there the
+[Hub MCP tab](#the-hub-mcp-tab) is the switch (see [Phones](#d-a-phone-android-ios)).
 
 Default ports: server **8590**, bridge **8591**. The command line wins over the URL, which wins over
 the environment. In the editor the menu **CoreAI > MCP > Debug Server In Play Mode** (stored in
@@ -88,9 +93,10 @@ servers of their own.
 
 ### (a) The editor in Play Mode
 
-Tick **CoreAI > MCP > Debug Server In Play Mode**, enter Play Mode, and copy the
-`claude mcp add ...` line the console prints. For a token that stays the same across sessions, start the
-editor with it (PowerShell):
+Tick **CoreAI > MCP > Debug Server In Play Mode**, enter Play Mode, and open the Hub's MCP tab:
+**Copy command** puts the full `claude mcp add ...` line on the clipboard (the console line shows the
+token masked). For a token you choose and that stays the same across sessions, start the editor with it
+(PowerShell):
 
 ```powershell
 $env:COREAI_MCP_TOKEN = 'dev-0123456789abcdef'
@@ -108,9 +114,10 @@ $env:COREAI_MCP_TOKEN = 'dev-0123456789abcdef'
 & D:\Builds\BlockWorld\CoreAI.exe -coreaiMcp 8590
 ```
 
-Then the same `claude mcp add` line. Without `COREAI_MCP_TOKEN` the player generates a token and prints
-it, with the ready command, to `Player.log`
-(`%USERPROFILE%\AppData\LocalLow\<Company>\<Product>\Player.log`, line `[CoreAI MCP] Auth token:`); a game
+Then the same `claude mcp add` line. Without `COREAI_MCP_TOKEN` the player generates a token for the run
+and prints it **masked** to `Player.log`
+(`%USERPROFILE%\AppData\LocalLow\<Company>\<Product>\Player.log`, line `[CoreAI MCP] Auth token: Qk3x****`);
+take the full one from the Hub's MCP tab, or add `-coreaiMcpPrintToken` to print it in full there. A game
 whose log settings drop Info lines hides that line, so prefer the variable. Smoke test:
 
 ```powershell
@@ -119,6 +126,91 @@ curl.exe -s http://127.0.0.1:8590/mcp -H "Authorization: Bearer dev-0123456789ab
 
 Windows may ask for a URL reservation the first time a player listens; the console line names the
 exact `netsh http add urlacl` command (see [Install / enable](#install--enable)).
+
+### (c) A WebGL build
+
+A browser page cannot listen, so the game links out to a small local bridge
+(`tools/McpBridge/coreai_mcp_bridge.py`, Python standard library) that offers the usual MCP endpoint to the
+client. With the build served on `http://localhost:8777/`:
+
+```powershell
+python tools/McpBridge/coreai_mcp_bridge.py --page-url http://localhost:8777/
+```
+
+Open the `game page` link it prints (`...?coreaiMcp=8591#coreaiMcpKey=<key>`), then run the `client`
+line it prints (`claude mcp add --transport http coreai http://127.0.0.1:8591/mcp --header "Authorization: Bearer <token>"`).
+Details, flags and the curl checks: [the bridge README](../../tools/McpBridge/README.md) and
+[Connect to a WebGL build](#connect-to-a-webgl-build). The same path works from the editor or a desktop
+player for testing: `-coreaiMcpBridge 8591` with `COREAI_MCP_BRIDGE_KEY` set to the bridge's key.
+
+### (d) A phone (Android, iOS)
+
+A phone's loopback is not the developer's machine, and a phone build has no command line, so a phone links
+out to the bridge on the developer's machine, switched on from the Hub's MCP tab:
+
+1. Build with **Player Settings > Other Settings > Allow downloads over HTTP** set to *Allowed in
+   development builds* (the bridge speaks plain HTTP; Unity refuses it otherwise) and, on Android,
+   **Internet Access** *Require* (Unity's default for development builds).
+2. Start the bridge on the computer, with a key you will type on the phone:
+
+   ```powershell
+   $env:COREAI_MCP_BRIDGE_KEY = 'phone-key-0123456789'
+   python tools/McpBridge/coreai_mcp_bridge.py                       # Android over USB (next step)
+   python tools/McpBridge/coreai_mcp_bridge.py --lan 192.168.1.20     # iOS, or Android without adb
+   ```
+
+3. **Android with USB debugging:** `adb reverse tcp:8591 tcp:8591`, so the phone's `127.0.0.1:8591` is the
+   computer's loopback bridge and nothing is opened on the network. Keep the bridge address `127.0.0.1`.
+   **iOS, or Android without adb:** `--lan <the computer's LAN address>` adds a second listener on that
+   address that serves only the game routes (never `/mcp`), and refuses a key shorter than 16 characters;
+   type that address on the phone. Anyone on that network who has the key can attach as the game and
+   answer the client's requests, so use it on a network you trust and a key you generated for the session.
+4. On the phone open the Hub (its MCP tab), type the address, port `8591` and the key, and press
+   **Connect to bridge**. The state row says attached, or why not (bridge unreachable, key refused, another
+   game attached).
+5. On the computer run the `client` line the bridge printed (`http://127.0.0.1:8591/mcp`).
+
+Nothing is remembered across launches unless **Remember on this device and reconnect at launch** is
+ticked: then the address, port, key and the mod-management choice are stored in `PlayerPrefs` (plain text
+on the device) and the next launch reconnects by itself; unticking forgets them at once. The editor never
+reconnects from `PlayerPrefs`; it has its menu.
+
+The other Android route is the in-game listener itself: start it from the tab's switch and run
+`adb forward tcp:8590 tcp:8590` on the computer, then connect the client to `http://127.0.0.1:8590/mcp`
+with the token from the tab. Whether `HttpListener` works under IL2CPP on Android or iOS is not stated in
+Unity's documentation (the IL2CPP scripting restrictions and .NET profile pages are silent on
+`System.Net`), and it has not been run on a device here, so the bridge is the documented route.
+Android can also pass `-coreaiMcp` to a player: `adb shell am start -n "<package>/com.unity3d.player.UnityPlayerActivity" -e unity "-coreaiMcp"`
+(Unity's "Specify Android Player command-line arguments"); whether those arguments reach
+`Environment.GetCommandLineArgs()`, which the start-up reads, is not stated there and was not tried.
+
+### Support per platform
+
+| Platform | How | Status |
+|---|---|---|
+| Editor, Play Mode (GUI or batch) | in-game listener (`-coreaiMcp`, the menu, `COREAI_MCP`) | verified live by the lead on Block World in a batch-mode editor (tools/list, game_status, get_performance, get_unity_logs, execute_lua, manage_mods, get_mod_logs, screenshot) |
+| Windows player | in-game listener | written; to be verified by the lead on a Windows build |
+| WebGL player | outbound bridge | the C# link and dispatcher answered real MCP requests through the real Python bridge in a .NET harness (initialize, tools/list over SSE, tools/call, an expired session); the `UnityWebRequest` adapter and a browser run are to be verified by the lead |
+| Android player | outbound bridge over `adb reverse`, or `--lan`; the in-game listener with `adb forward` | written, not run on a device |
+| iOS player | outbound bridge over `--lan` | written, not run on a device |
+| macOS, Linux players | in-game listener | written, not run |
+
+### The Hub MCP tab
+
+With the Hub package installed, every Hub window gets an **MCP** tab (`HubMcpPage`, registered by
+`CoreAiMcpHubBinder`, which attaches itself to each `CoreAiHubWindow` through
+`CoreAiHubWindow.AnyWindowEnabled`; no scene edit). It shows whether the in-game server or the bridge
+link runs, the address a client connects to, sessions, requests and tool calls served, whether
+`manage_mods` is granted and the last error (a failed start, a tool error, a bridge refusal); a switch
+starts and stops the link the way the debug start-up would; the client command is drawn with the token
+cut to its first four characters, **Copy command** puts the full command on the clipboard, and the
+token is drawn in clear only after **Show token**. In a WebGL player it says why the link is the bridge.
+The **Bridge link** section takes the bridge address (default `127.0.0.1`), port (default `8591`), key
+(drawn as a password field), whether to grant `manage_mods`, and **Remember on this device and reconnect
+at launch** (off by default); **Connect to bridge** replaces a running link with that bridge. In a WebGL
+player **Copy command** may stay inside the page (browsers limit clipboard writes from the canvas); the
+bridge's own console has the command. `HubMcpPage` takes an `IMcpLinkControl`, so a host can point it at
+its own server.
 
 ### What to call first
 
@@ -135,11 +227,13 @@ or repair a mod. `read_skill` with `Lua Modding` documents the mod API.
   write that bridge yourself — this package will not do it for you.
 - **HTTP only, loopback only.** One `HttpListener` bound to `127.0.0.1`. No stdio and no WebSocket
   transport; stdio-only clients go through an external bridge such as `npx mcp-remote`.
-- **Not available in a WebGL player.** A browser page cannot open a listening socket. There
-  `StartListening` logs a warning naming the reason and does not start the listener, and a hand-built
-  `McpHttpServer.Start()` throws `PlatformNotSupportedException` with the same explanation instead of
-  failing inside the socket layer (`McpHttpServer.IsSupportedOnThisPlatform` is `false`). The typed live
-  catalog (`McpToolRegistry`) itself needs neither Unity nor sockets.
+- **A WebGL player cannot listen; it links out to a local bridge instead.** A browser page cannot open
+  a listening socket. There `StartListening` logs a warning naming the reason and does not start the
+  listener, and a hand-built `McpHttpServer.Start()` throws `PlatformNotSupportedException` with the same
+  explanation (`McpHttpServer.IsSupportedOnThisPlatform` is `false`). The debug start-up links such a
+  player to `tools/McpBridge/coreai_mcp_bridge.py` instead; see
+  [Connect to a WebGL build](#connect-to-a-webgl-build). The typed live catalog (`McpToolRegistry`)
+  itself needs neither Unity nor sockets.
 - **The catalog is per-composition.** A tool appears only when its backing service resolves, so
   `tools/list` describes *this* game, not the package. `manage_mods` and `save_world` additionally
   require explicit host-admin configuration (below) and are **absent by default**.
@@ -187,16 +281,21 @@ The token is resolved at start, in this order:
 2. the **`COREAI_MCP_TOKEN`** environment variable;
 3. otherwise a fresh random token, generated per start.
 
-However it was obtained, it is printed to the game console together with a ready-to-paste command:
+The start line prints it **masked** (its first four characters), with the command and where the full
+token is:
 
 ```
-[CoreAI MCP] Auth token: 7Qk3…
-  claude mcp add --transport http coreai http://127.0.0.1:8590/mcp --header "Authorization: Bearer 7Qk3…"
+[CoreAI MCP] Auth token: Qk3x****
+  claude mcp add --transport http coreai http://127.0.0.1:8590/mcp --header "Authorization: Bearer Qk3x****"
+  The full token: the Hub MCP tab (Copy command), CoreAiMcpServer.ActiveAuthToken, or start with -coreaiMcpPrintToken to print it here.
 ```
 
-It is also readable from code as the instance property `AuthToken` (or the static
-`CoreAiMcpServer.ActiveAuthToken` of the active server), which is what an in-editor automation script
-should use.
+The full token is shown only where the developer asks for it: they set it themselves
+(`COREAI_MCP_TOKEN`, the inspector field), the Hub MCP tab copies it (and draws it after **Show token**),
+code reads the instance property `AuthToken` (or the static `CoreAiMcpServer.ActiveAuthToken`), and
+`-coreaiMcpPrintToken` / `COREAI_MCP_PRINT_TOKEN=1` (or `PrintFullToken` on the component) prints it in the
+start line. WHY masked by default: a player's log file outlives the session and travels with crash reports
+and bug reports.
 
 > **Set `COREAI_MCP_TOKEN` (or the inspector field) if you want a stable client config.** With the
 > random default, the token changes on every play session and the client must be re-pointed each time.
@@ -206,8 +305,8 @@ that on a machine you fully trust — the server logs a warning at every start w
 
 The token line also reaches the captured Unity log that `get_unity_logs` and the in-game
 `get_mod_logs source=unity` read; the server registers the token for redaction before printing it, so
-there the line reads `Auth token: <redacted>` (an in-game agent's prompt may go to a cloud provider).
-The console and `Player.log` keep the full line for the developer.
+there the line reads `Auth token: <redacted>` even when it was printed in full (an in-game agent's
+prompt may go to a cloud provider).
 
 The [debug start-up](#debugging-a-running-game) grants `manage_mods` and `save_world` by default, so a
 build started with `-coreaiMcp` hands whoever holds the token the right to write mods that survive a
@@ -438,6 +537,57 @@ The current MCP revision, `2026-07-28`, is stateless (no `initialize`, per-reque
 request receives that plain-text `400` — not a modern JSON-RPC error — and falls back to `initialize`,
 which is the interoperability path the revision defines.
 
+## Connect to a WebGL build
+
+A WebGL player runs in the browser sandbox, which has no listening sockets, so the MCP link is inverted:
+the game is the HTTP client. `McpBridgeLink` attaches to the bridge, long-polls `POST /bridge/next` for
+the next MCP request, routes it through the same `McpRpcDispatcher` the loopback server uses (session and
+`MCP-Protocol-Version` checks included, `McpTransportRules`) and posts the answer to `/bridge/reply`; the
+bridge relays it to the client with the client's framing. The commands are in
+[Debugging a running game](#c-a-webgl-build) and [the bridge README](../../tools/McpBridge/README.md).
+
+**Why long polling and not a WebSocket.** It needs nothing but `UnityWebRequest`, which a WebGL player
+has without a JavaScript plugin; the same code runs, and is tested, in the editor and on desktop; and the
+bridge stays a standard-library script. A WebSocket would need a `.jslib` for the browser and a socket
+library or a hand-written framing for the bridge, for a debugging session that sends a few requests a
+second. The cost is one request held open at a time.
+
+**How it runs in the browser.** The link is advanced from the server component's `Update`
+(`TickTransport`) and from `UnityWebRequest` completion callbacks; it starts no thread and waits on
+nothing, and its retry delays are counted on the game clock. In bridge mode the dispatcher runs tool
+bodies inline, since every request already arrives on the game thread; the queue of the loopback server
+resumes its callers through the thread pool, which a WebGL player does not have. `get_mod_logs`'
+`wait_seconds` uses the frame-driven `ICoreAISettings.ToolInvocationMarshaler` there. The bridge does not
+relay `notifications/tools/list_changed` (it answers `GET /mcp` with `405`, and `initialize` says
+`listChanged` is off): re-read `tools/list` after a scene load. The page should stay in the foreground;
+a hidden tab runs one or two frames a second.
+
+**Turning it on.** The page URL asks: `?coreaiMcp=<bridge port>` (a non-secret switch, fine in the query)
+and `#coreaiMcpKey=<key>` in the fragment. Nothing happens without the query key. A key found in the
+query string is ignored with a warning.
+
+### Threat model of the bridge
+
+The bridge is a second door to the game, so it repeats the in-game server's defences and adds two for the
+browser side:
+
+| Threat | Defence |
+|---|---|
+| Another machine | binds `127.0.0.1` only, unless `--lan` adds the game-only listener below |
+| DNS rebinding (a page whose name resolves to 127.0.0.1) | the `Host` header must name a loopback host on the bridge's port, else `403` |
+| A web page driving the client endpoint | `/mcp` refuses any request with an `Origin` header (`403`); MCP clients send none |
+| A web page from another site using the game endpoints | `/bridge/*` answers CORS only for `http://localhost:*`, `http://127.0.0.1:*` and `http://[::1]:*` pages; any other `Origin` gets `403` without CORS headers, so the browser neither sends the authorized request nor shows the answer |
+| Another page on localhost (any local dev server), or a fake game | the game key: `Authorization: Bearer <key>` on every `/bridge/*` call, a header a page can only send after a CORS preflight the bridge refuses to foreign origins |
+| Another local process driving the game | the client token on `/mcp`, as for the in-game server; a fake game would only receive the client's requests, not drive the game |
+| The key leaking | it travels in the URL fragment, which the browser never sends to the page server, so it is in no server log and no `Referer`; it does stay in the address bar and the browser history, so it is generated per bridge run unless pinned with `COREAI_MCP_BRIDGE_KEY` |
+| The token leaking into a model's context | the game never holds the client token in bridge mode; on the in-game server the token is redacted from the captured Unity log |
+| A second game confusing the session | one game at a time; a second one is refused with the attached one's name until the first is gone, or replaced only with `--takeover` |
+| The LAN listener for a phone (`--lan ADDRESS`) | off unless asked; serves the game routes only (`/mcp` and `/bridge/status` answer `403` there), so nobody on the network can drive the game; refuses a key under 16 characters; **anyone on that network who has the key can attach as the game** and see and answer the client's requests, so use it on a trusted network with a key made for the session. `adb reverse` avoids opening anything on the network |
+
+The page is not trusted with anything the bridge does not already give it: a page holding the key can
+attach and answer the client's requests, so treat the page link like the token. The bridge prints both
+to its own console only.
+
 ## Tools
 
 Tools are registered **only when their backing service resolves** in the current composition, so
@@ -453,7 +603,7 @@ Tools are registered **only when their backing service resolves** in the current
 | `get_performance` | an `IRuntimePerformanceSource` resolves (the CoreAI scope registers the monitor) | Frame rate over `window_seconds` (default 5, at most 60): `fps_avg`, `fps_min` (the slowest frame), `frame_ms_avg`/`p95`/`max`, `slow_frames` (over 50 ms); with `counters` (default true) the engine counters the build provides, and `unavailable` naming the ones it does not. See [Engine counters per build and platform](#engine-counters-per-build-and-platform). |
 | `read_skill` | the Programmer role has skills | Returns a registered skill by `name` (e.g. `Lua Modding`, `Rbx API`) — the same reference the on-board agent reads. A multi-document skill returns its entry document and a section index; `section` reads one document, `all: true` reads all of them. |
 | `world_command` | a world-command executor resolves | Spawn / move / edit scene objects (meters; Euler degrees). |
-| `screenshot` | always | Captures the main camera — or the active camera named in `camera` — to a PNG (base64), downscaled to `max_resolution` (default 1024, `0` = no cap). An unknown camera name fails and lists the active cameras; it never falls back to another camera. Missing camera / capture failure is reported per call, with the real reason. Screen-space overlay UI is not part of a camera render. |
+| `screenshot` | always | Captures the main camera — or the active camera named in `camera` — to a PNG (base64), downscaled to `max_resolution` (default 1024, `0` = no cap). An unknown camera name fails and lists the active cameras; it never falls back to another camera. Missing camera / capture failure is reported per call, with the real reason. A camera render has no screen-space UI; **`screen: true`** captures the displayed frame as the player sees it, UI Toolkit panels and overlay canvases included (see [Screen capture](#screen-capture-with-the-ui)). |
 | `list_autosaves` | an `IRbxWorldRuntimeService` and an actor identity resolve; **brokered** | Lists the autosave ring (name, trigger, UTC timestamp, size). Read-only. |
 | `load_world` / `load_autosave` | as above; **brokered** | Requests loading a manual slot / a listed autosave. Nothing is applied until the player confirms in the game UI: a staged request is `isError: false` with status `player_confirmation_required` and a `request_id`; a missing or unreadable package is `isError: true`. |
 | `save_world` | as above **and** host-admin authority; **brokered** — **absent by default** | Saves the live world to a new create-once manual slot that survives a restart. |
@@ -464,7 +614,9 @@ Tools are registered **only when their backing service resolves** in the current
 Frame times come from `Time.unscaledDeltaTime` and work everywhere, editor, Windows, WebGL, development
 or release. The counters are read through `ProfilerRecorder`, started on the first `get_performance`
 call (the first answer says so and lists the per-frame ones as unavailable until the next call), and
-whatever a build does not provide is listed in `unavailable`, never reported as zero. Unity's manual
+whatever a build does not provide is listed in `unavailable`, never reported as zero. A per-frame
+counter (render counts, frame times) that reads 0 is listed there too, with a note: it means nothing was
+rendered (a batch-mode editor draws nothing), not zero draw calls. Unity's manual
 documents draw calls, batches, SetPass calls, triangles and vertices as readable in release players, and
 the frame-time counters (`main_thread_ms` from "CPU Main Thread Frame Time", `gpu_ms` from "GPU Frame
 Time") as switching on the frame timing manager themselves, also in release players; WebGL gives no GPU
@@ -473,6 +625,25 @@ time. The manual does not say which memory counters a release player provides, s
 gives a value; `managed_heap` (`GC.GetTotalMemory`) is always there. Object counts (textures, meshes) are
 development-build only and are not read. None of this has been measured per platform in this
 repository yet; the `unavailable` list of a real build is the answer.
+
+### Screen capture with the UI
+
+`screenshot` with `screen: true` waits for the end of a rendered frame (`WaitForEndOfFrame` on the server
+component) and reads the back buffer with `ScreenCapture.CaptureScreenshotAsTexture`, so the chat, the HUD
+and the Hub are in the picture, as the player sees them. It cannot be combined with `camera`.
+
+| Where | What happens |
+|---|---|
+| Editor Play Mode with a Game view | the Game view's frame |
+| Windowed or full-screen desktop player | the window's frame |
+| WebGL player | the canvas's frame; expected to work, to be verified by the lead in a browser |
+| Phones | the screen; written, not run on a device |
+| Batch-mode editor or player, `-nographics` | refused at once: nothing is drawn, so nothing can be captured (use the camera capture) |
+| A paused game, or a window that draws no frames | fails after 5 s (`MainCameraScreenshotSource.ScreenCaptureTimeoutSeconds`) |
+
+Unity's reference for the method asks for exactly this end-of-frame call and says nothing about platforms
+or batch mode; the batch-mode refusal is this package's, because `WaitForEndOfFrame` does not arrive
+there (two batch-mode cases of this repository's own PlayMode suite are skipped for that reason).
 
 ### The same readers for in-game agents
 
@@ -676,6 +847,11 @@ particular varies between client versions — check yours if the connection retu
 | The debug switches, their precedence, the key from the fragment only, the batch-mode rule | `CoreAiMcpDebugOptionsEditModeTests` |
 | Listening before a scope exists, host admin from the composition, the token kept out of the captured log | `CoreAiMcpDebugStartEditModeTests` |
 | `get_mod_logs source=unity` is offered only with the engine log | `GetModLogsUnitySourceEditModeTests` (CoreAI Mods) |
+| The bridge link: attach, poll, answers through the dispatcher, session and version checks, link errors and their retries, a LAN address | `McpBridgeLinkEditModeTests` (fake bridge) |
+| The bridge script: round trip, framing, refusals, rebinding, CORS, second game, LAN listener | `python tools/McpBridge/test_coreai_mcp_bridge.py` |
+| The Hub tab: token masked, copy, switch, bridge fields, remember | `HubMcpPageEditModeTests` (`CoreAI.Mcp.Hub.Tests`) |
+| `screenshot screen=true` | `ScreenshotScreenModeEditModeTests` |
+| The masked command | `McpConnectCommandEditModeTests` |
 
 ## Worked example session
 
@@ -720,9 +896,17 @@ assemblies; this section is the recorded justification that
 [ARCHITECTURE_RULES §1](../../Docs/ARCHITECTURE_RULES.md#1-layering-assemblies-not-folders) requires
 for skipping a layer. Instead the protocol + routing core (`Protocol/*`, `McpToolRegistry`,
 `McpArguments`, `McpRpcDispatcher`, `McpSessionStore`, `McpRequestGuard`, `IMainThreadDispatcher`, and
-the `IMcpTool` / `IScreenshotSource` interfaces) is kept **engine-free** and unit-tested
-without Unity; only the adapters (`McpHttpServer`, `MainCameraScreenshotSource`, `CoreAiMcpServer`)
-touch `UnityEngine` / `HttpListener`. `McpArchitectureFitnessEditModeTests` enforces that split by
+the `IMcpTool` / `IScreenshotSource` interfaces), the debug tools (`GetUnityLogsMcpTool`,
+`GetPerformanceMcpTool`, `GameStatusMcpTool`, `McpDiagnosticsTools`), the debug switches
+(`CoreAiMcpDebugOptions`), the link-control contract (`IMcpLinkControl`) and the bridge link
+(`McpBridgeLink`, `McpBridgeTransport`, `McpTransportRules`) are kept **engine-free** and unit-tested
+without Unity; only the adapters (`McpHttpServer`, `MainCameraScreenshotSource`, `CoreAiMcpServer`,
+`CoreAiMcpDebugBootstrap`, `CoreAiGameStatusSources`, `CoreAiMcpLinkControl`,
+`UnityWebRequestBridgeHttp`) touch `UnityEngine` / `HttpListener`, and the Hub tab lives in its own
+assembly (`CoreAI.Mcp.Hub`, compiled only with the Hub package) so neither the Hub nor this package's
+runtime depends on the other. The engine readers the debug tools read (`IRuntimeLogSource`,
+`IRuntimePerformanceSource`) are CoreAI services, engine-free in CoreAI Core with their Unity adapters in
+CoreAI Unity, so in-game agents read them too. `McpArchitectureFitnessEditModeTests` enforces that split by
 checking that none of those core files references `UnityEngine` (grep-based, per
 [§5](../../Docs/ARCHITECTURE_RULES.md#5-testing-rules)). Coupling to the
 world/screenshot services is soft: those tools register only when their services resolve at runtime

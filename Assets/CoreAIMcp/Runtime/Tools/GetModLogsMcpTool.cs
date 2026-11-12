@@ -18,15 +18,24 @@ namespace CoreAI.Mcp.Tools
         private readonly GetModLogsLlmTool _inner;
 
         /// <param name="logService">The Lua log ring-buffer service.</param>
-        public GetModLogsMcpTool(ILuaLogService logService)
+        public GetModLogsMcpTool(ILuaLogService logService) : this(logService, null)
+        {
+        }
+
+        /// <param name="logService">The Lua log ring-buffer service.</param>
+        /// <param name="waitMarshaler">
+        /// Schedules <c>wait_seconds</c>. Null uses <c>Task.Delay</c>, which is right for the loopback server on a
+        /// desktop host; a WebGL player linked through the bridge passes its frame-driven marshaler, because
+        /// <c>Task.Delay</c> never fires there.
+        /// </param>
+        public GetModLogsMcpTool(ILuaLogService logService, ILlmAsyncMarshaler waitMarshaler)
         {
             if (logService == null)
             {
                 throw new ArgumentNullException(nameof(logService));
             }
 
-            // WHY: the MCP server runs on the host's own threads, never in a WebGL player, so Task.Delay may pace a wait.
-            _inner = new GetModLogsLlmTool(logService, PassThroughLlmAsyncMarshaler.Instance);
+            _inner = new GetModLogsLlmTool(logService, waitMarshaler ?? PassThroughLlmAsyncMarshaler.Instance);
         }
 
         /// <inheritdoc />

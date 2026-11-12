@@ -41,6 +41,12 @@ namespace CoreAI.Mcp.Server
         /// <summary>Command-line switch that withholds host-admin mod management.</summary>
         public const string NoAdminSwitch = "-coreaiMcpNoAdmin";
 
+        /// <summary>Command-line switch that prints the bearer token in full in the start line.</summary>
+        public const string PrintTokenSwitch = "-coreaiMcpPrintToken";
+
+        /// <summary>Environment variable that prints the bearer token in full when <c>1</c> or <c>true</c>.</summary>
+        public const string PrintTokenVariable = "COREAI_MCP_PRINT_TOKEN";
+
         /// <summary>Environment variable that starts the in-game server (<c>1</c>, <c>true</c> or a port).</summary>
         public const string ServerVariable = "COREAI_MCP";
 
@@ -82,6 +88,12 @@ namespace CoreAI.Mcp.Server
 
         /// <summary>The key the bridge expects from the game; null when none was given.</summary>
         public string BridgeKey { get; private set; }
+
+        /// <summary>The bridge's address; null means <c>127.0.0.1</c> (a LAN address comes from the Hub MCP tab).</summary>
+        public string BridgeHost { get; private set; }
+
+        /// <summary>Print the bearer token in full in the start line (default false: masked).</summary>
+        public bool PrintToken { get; private set; }
 
         /// <summary>True when a bridge key was found in the query string, where it is ignored.</summary>
         public bool BridgeKeyInQueryIgnored { get; private set; }
@@ -142,7 +154,24 @@ namespace CoreAI.Mcp.Server
 
             string key = environment(BridgeKeyVariable);
             if (!string.IsNullOrWhiteSpace(key)) BridgeKey = key.Trim();
+            string host = environment(BridgeHostVariable);
+            if (!string.IsNullOrWhiteSpace(host)) BridgeHost = host.Trim();
             if (IsOff(environment(AdminVariable))) HostAdmin = false;
+            if (IsOn(environment(PrintTokenVariable))) PrintToken = true;
+        }
+
+        /// <summary>Environment variable naming the bridge's address (default <c>127.0.0.1</c>).</summary>
+        public const string BridgeHostVariable = "COREAI_MCP_BRIDGE_HOST";
+
+        /// <summary>Options for a bridge link the developer typed in (the Hub MCP tab on a phone).</summary>
+        public static CoreAiMcpDebugOptions ForBridge(string host, int port, string key, bool hostAdmin)
+        {
+            CoreAiMcpDebugOptions options = new();
+            options.Set(CoreAiMcpDebugMode.Bridge, port > 1 && port <= 65535 ? port : DefaultBridgePort, "hub");
+            options.BridgeHost = string.IsNullOrWhiteSpace(host) ? null : host.Trim();
+            options.BridgeKey = string.IsNullOrWhiteSpace(key) ? null : key.Trim();
+            options.HostAdmin = hostAdmin;
+            return options;
         }
 
         private void ApplyUrl(string url)
@@ -192,6 +221,10 @@ namespace CoreAI.Mcp.Server
                 else if (string.Equals(argument, NoAdminSwitch, StringComparison.Ordinal))
                 {
                     HostAdmin = false;
+                }
+                else if (string.Equals(argument, PrintTokenSwitch, StringComparison.Ordinal))
+                {
+                    PrintToken = true;
                 }
             }
         }

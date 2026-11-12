@@ -430,25 +430,11 @@ namespace CoreAI.Mcp.Server
                 return true;
             }
 
-            string sessionId = request.Headers[McpServerInfo.SessionHeader];
-            if (sessionId != null && !_dispatcher.IsKnownSession(sessionId))
+            int status = McpTransportRules.Check(_dispatcher, request.Headers[McpServerInfo.SessionHeader],
+                request.Headers[McpServerInfo.ProtocolVersionHeader], out string rejection);
+            if (status != 0)
             {
-                await DenyAsync(context, 404, "The MCP session expired or was removed; initialize again without Mcp-Session-Id.",
-                    cancellationToken).ConfigureAwait(false);
-                return true;
-            }
-            // WHY: an absent header is legal only for clients older than the header itself (2025-03-26).
-            // The rejection stays plain text: a dual-era client probing with a modern request reads a 400
-            // without a modern JSON-RPC error body as "legacy server" and falls back to initialize.
-            string protocolVersion = request.Headers[McpServerInfo.ProtocolVersionHeader];
-            if (protocolVersion != null && !McpServerInfo.IsAcceptedProtocolVersionHeader(protocolVersion))
-            {
-                await DenyAsync(context, 400,
-                    $"Unsupported MCP-Protocol-Version '{protocolVersion}'. This server negotiates " +
-                    string.Join(", ", McpServerInfo.NegotiatedProtocolVersions) +
-                    " through initialize (and serves " + McpServerInfo.HeaderlessProtocolVersion +
-                    " clients that send no header); initialize again and send the version it returns.",
-                    cancellationToken).ConfigureAwait(false);
+                await DenyAsync(context, status, rejection, cancellationToken).ConfigureAwait(false);
                 return true;
             }
 
@@ -569,7 +555,7 @@ namespace CoreAI.Mcp.Server
             string sessionId = context.Request.Headers[McpServerInfo.SessionHeader];
             if (string.IsNullOrEmpty(sessionId))
             {
-                await DenyAsync(context, 400, "DELETE terminates a session: send its Mcp-Session-Id.", cancellationToken)
+                await DenyAsync(context, 400, McpTransportRules.DeleteNeedsSessionMessage, cancellationToken)
                     .ConfigureAwait(false);
                 return;
             }
