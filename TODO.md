@@ -786,6 +786,14 @@ Owner's questions and decisions on the Block World (2026-11-11):
         `BlockWorldSpawn` at every start (owner: "местоположение тоже сбрасывается"). A Lua fix: keep the last
         position in the world (an attribute written when the player stops, not every frame, so it does not keep the
         record busy) and spawn there.
+      - **Seen by the owner in build 11 (2026-11-13):** the Hub MCP page's "Bridge link" field labels and check
+        boxes ("Bridge address", "Port", "Allow mod management...", "Remember on this device...") are dark text on
+        the dark panel, unreadable; a villager's speech bubble ("Tobin ...") stays on screen; hovering an NPC shows
+        its collider box (the block outline drawn around a character).
+      - **A refused pointer lock kills the WebGL player:** `requestPointerLock` rejected with "WrongDocumentError:
+        The root document of this element is not valid for pointer lock" (an automated lock in a background tab)
+        reached Unity's error handler, which stops the content with an alert. Catch the rejection in the template /
+        jslib and simply stay unlocked; a player clicking while switching tabs could hit it too.
       - **Swimming: Space does not lift the player in water** (owner, build 11: "в воде плавать невозможно, на
         пробел не поднимается"); `SwimmingInTerrainWaterPlayModeTests` passes, so the test does not cover going up.
       - **MCP `screenshot screen:true` never answers in a WebGL player** (seen in build 10, in a headless Chrome and in the owner's Chrome;
