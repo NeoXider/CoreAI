@@ -771,16 +771,32 @@ namespace CoreAI.Ai.LuaCs
         internal ILuaCsScriptSourceHost ScriptSourceHost { get; set; }
 
         /// <summary>
-        /// The side-only members (MVP4 SC-13) every server and client script is checked against; frozen, the defaults
-        /// of <see cref="ScriptContextRuleTable.CreateDefault"/>.
+        /// The side-only members (MVP4 SC-13) every server and client script is checked against: the defaults of
+        /// <see cref="ScriptContextRuleTable.CreateDefault"/> plus the rows a package adds with
+        /// <see cref="AddContextRule"/>; frozen when the first script registers.
         /// </summary>
-        internal ScriptContextRuleTable ContextRules { get; } = CreateFrozenContextRules();
+        internal ScriptContextRuleTable ContextRules { get; } = ScriptContextRuleTable.CreateDefault();
 
-        private static ScriptContextRuleTable CreateFrozenContextRules()
+        /// <summary>
+        /// Adds a side-only member of a package's own surface (for example P18's <c>UxmlService</c> or P2's
+        /// <c>TextChannel</c> members) to the SC-13 table. Call it at composition, before the first script registers;
+        /// afterwards the table is frozen and this throws, so no script is ever checked against two tables.
+        /// </summary>
+        public void AddContextRule(ScriptContextRule rule)
         {
-            ScriptContextRuleTable rules = ScriptContextRuleTable.CreateDefault();
-            rules.Freeze();
-            return rules;
+            if (rule == null)
+            {
+                throw new ArgumentNullException(nameof(rule));
+            }
+
+            if (ContextRules.IsFrozen)
+            {
+                throw new InvalidOperationException(
+                    "The script context rules are frozen once the first script registered; add '" + rule.Member
+                    + "' at composition, before any mod loads.");
+            }
+
+            ContextRules.Add(rule);
         }
 
         private readonly Dictionary<string, ScriptContext> _scriptContextByMod = new(StringComparer.Ordinal);
@@ -805,7 +821,8 @@ namespace CoreAI.Ai.LuaCs
             _scriptContextByMod[ownerModId] = context;
         }
 
-        private ScriptContext ScriptContextOf(string ownerModId)
+        /// <summary>The script context the current build of <paramref name="ownerModId"/> runs with; legacy when none.</summary>
+        internal ScriptContext ScriptContextOf(string ownerModId)
         {
             return !string.IsNullOrWhiteSpace(ownerModId)
                    && _scriptContextByMod.TryGetValue(ownerModId, out ScriptContext context)
@@ -4387,6 +4404,11 @@ namespace CoreAI.Ai.LuaCs
             {
                 context = new LuaCsRbxModContext(
                     this, capabilities, ownerModId, originTag);
+            }
+
+            if (!ContextRules.IsFrozen)
+            {
+                ContextRules.Freeze();
             }
 
             context.Context = ScriptContextOf(ownerModId);

@@ -74,8 +74,12 @@ tags: movement, camera
     that declares nothing counts as the server side) — scripts of the two sides talk through remotes only;
   - a legacy script keeps every pre-MVP4 rule: its side comes from the machine and the actor's grant, and a
     wrong-side remote member raises `NOT_AUTHORITY` as before.
-  TODO: `logic_define`, `logic_reset`, `events_emit` across sides and `FindFirstChild` on `game` are not
-  checked yet (design note, C3 entry).
+  `logic_define` and `logic_reset` are server-side too, and so are `ServerStorage` and `ServerScriptService`
+  found from `game` with `FindFirstChild`, `FindFirstChildOfClass`, `FindFirstChildWhichIsA` or `WaitForChild`.
+  An event a `server` or `client` script sends with `events_emit` reaches only the mods on its own side (a mod
+  that declares nothing counts as the server side); an event a legacy mod or the host sends reaches every mod.
+  A package adds the side-only members of its own surface with `LuaCsRbxApiBindings.AddContextRule` at
+  composition, before the first mod loads.
 - `parent` — optional, the `/`-separated instance path from `game` where the mod's script lives, such
   as `Workspace/Door` (a leading `@game/` is accepted). The path must exist when the mod loads and must not
   lie inside an instance a mod made; otherwise the load fails with `BAD_ARGUMENT` naming the missing

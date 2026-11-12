@@ -1038,6 +1038,7 @@ namespace CoreAI.Ai.LuaCs
                 // into the handler-error channel makes it visible to diagnostics/auto-repair instead of
                 // the old silent revert-to-vanilla.
                 _logicSlots.OverrideFailed += OnLogicSlotOverrideFailed;
+                _logicSlots.ContextGuard = LogicSlotContextRefusal;
                 _logicSlots.SetInvocationScope(EnterLogicSlotFormula, ExitLogicSlotFormula);
             }
 
@@ -2770,6 +2771,30 @@ namespace CoreAI.Ai.LuaCs
             {
                 throw new RbxError(violation.Code, violation.RawMessage, violation.Fix, mod.Id);
             }
+        }
+
+        /// <summary>
+        /// SC-13 for <c>logic_define</c> and <c>logic_reset</c>, which <see cref="LuaCsLogicSlots"/> registers and which know
+        /// only the owning mod: a formula is authoritative state, so a client script defining or resetting one raises
+        /// CONTEXT_VIOLATION; a legacy mod, a server script and the console keep today's rules.
+        /// </summary>
+        private Exception LogicSlotContextRefusal(string ownerModId, string member)
+        {
+            if (_rbxApi == null || string.IsNullOrWhiteSpace(ownerModId))
+            {
+                return null;
+            }
+
+            ScriptContext context = _rbxApi.ScriptContextOf(Normalize(ownerModId));
+            if (context != ScriptContext.Server && context != ScriptContext.Client)
+            {
+                return null;
+            }
+
+            RbxError violation = _rbxApi.ContextRules.Check(member, context);
+            return violation == null
+                ? null
+                : new RbxError(violation.Code, violation.RawMessage, violation.Fix, Normalize(ownerModId));
         }
 
         /// <summary>
@@ -5933,11 +5958,22 @@ namespace CoreAI.Ai.LuaCs
                 ? subscribers
                 : Array.Empty<Mod>();
 
+            // WHY (SC-13): an event a declared script emits reaches only runs on its own side, as a BindableEvent never
+            // crosses the client-server boundary; scripts of the two sides talk through remotes. A legacy sender and a
+            // host event keep reaching every run.
+            bool sameSideOnly = sender != null
+                                && (sender.Context == ScriptContext.Server || sender.Context == ScriptContext.Client);
             int touched = 0;
             for (int i = 0; i < subscriberSnapshot.Length; i++)
             {
                 Mod subscriber = subscriberSnapshot[i];
                 if (ReferenceEquals(subscriber, sender))
+                {
+                    continue;
+                }
+
+                if (sameSideOnly && subscriber.Context != ScriptContext.Shared
+                                 && !ScriptContexts.SameSide(sender.Context, subscriber.Context))
                 {
                     continue;
                 }

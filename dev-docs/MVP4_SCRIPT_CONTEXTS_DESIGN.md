@@ -1,14 +1,15 @@
 # MVP4 — Script contexts and the client runtime: design note
 
-Status (2026-11-12): **steps A1–A3, B1, B2, C1 (C1-1 to C1-6), C2, C3, C4 and C5 written; C6 not started.**
-C3 left a few SC-13 rows unbound (listed in its entry, moved to C6). Next: C6 (fits, skill, docs, acceptance).
+Status (2026-11-12): **steps A1–A3, B1, B2, C1 (C1-1 to C1-6), C2 to C5 written, and C6 except one item**: the
+console `Source` write on an unbound instance (SC-2). Next: that item; start at the "Start here" block of the C6 entry.
 A1–A3 are green in Unity 6000.6 EditMode; B1 (the script instance classes and `Enum.RunContext`), B2 (the package v2
 reader), C1 (declared mods get durable bound script instances, saved in format version 2; C1-6 registers sources
 without a run and gates a start by the SC-9 predicate), C2 (`Enabled`, `Disabled`, `RunContext`, `Source` in Lua; a
 running script stops and starts as its instance changes) and C3 (the side a script runs as comes from its context;
 CONTEXT_VIOLATION for side-only members; no Player minting on a replica; client scripts wait for the local player)
 have passed their portable tests only, and so have C4 (`require`, dependents restarting, `mod:<id>` chunk names and
-attribution) and C5 (the join payload and the client composition); see their entries in §5.
+attribution), C5 (the join payload and the client composition) and C6 (the remaining SC-13 rows, the acceptance
+fixture, the corpus gate, P1 as a client script, the skill text); see their entries in §5.
 Written 2026-11-11 for the rung "MVP4 — Script contexts & client
 runtime" (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md:929-977`) and the open item "Design note for plan
 decision D1 (c) before any code" (`TODO.md:557-561`). Plan decision D1 (c) — "instances are views over
@@ -1259,7 +1260,66 @@ The plan entry:
   `CaptureForRecipient` never writes one. Test: `Mvp4_ClientComposition_RefusesAPayloadWithALegacySource` beside
   `Mvp4_ClientComposition_RefusesAPayloadWithAServerSource`.
 
-### C6 (S) — Fits, skill, docs, acceptance
+### C6 (S) — Fits, skill, docs, acceptance — done 2026-11-12 except one item (below)
+
+**Start here (hand-over, 2026-11-12): the one item left is the console `Source` write on an unbound instance.** What
+is in the tree for it:
+
+- The refusal is `LuaCsRbxInstanceBindings.TryWriteScript`, key `Source`, branch `!container.IsBound` (NOT_IMPLEMENTED
+  "a later MVP4 step"); the console check before it (`RequireScriptConsole`) already admits only the unrestricted
+  console. The bound branch calls `ILuaCsScriptSourceHost.WriteScriptSource`, implemented in `LuaCsModRuntime`.
+- What it needs (SC-2): a new seam member, for example `string CreateScriptSource(ActorContext caller,
+  RbxLuaSourceContainer script, string source)`, that picks the id from the instance `Name` by the rule `manage_mods`
+  uses, made unique (`Name`, `Name_2`, ...), checks `ILuaModSourceAdmission.CanAdmit` when the store has it (the
+  session's `SessionSourceStore` does), takes the context from the class and `RunContext`
+  (`ScriptContexts.TryGetEffective(className, runContext, Legacy, ...)`), binds THAT instance and loads the source for
+  the caller's actor. `IScriptInstanceHost` has no "bind this existing instance" member yet: `Place` binds the instance
+  the planner chooses (header `parent:`, the bound instance, the default placement, or the unbound script of the same
+  name at the placement it adopts), so add one (binding index plus undo on a failed load) rather than setting
+  `SourceId` directly, which leaves the index stale.
+- Open point to settle first: "the session facade's undo". The console runs inside `execute_lua`'s confirmed-world
+  gate; check what `/undo` restores after a console call that created a store entry (a `manage_mods load` records its
+  own undo step through the facade, which the bindings cannot reach) and pin it with a test before choosing where the
+  load runs.
+- Tests to write: `SourceWrite_FromConsole_OnUnboundScript_CreatesEntryAndRevision` and its twin
+  `SourceWrite_FromHostMod_IsNotAuthority` (exists as `SC_2_SourceWrite_FromAHostMod_IsNotAuthority_AndChangesNothing`).
+
+**Built** (portable Lua tier: `Tests/EditMode/RbxApi/ScriptsLua/Mvp4ScriptContextsAcceptanceEditModeTests.cs`; the
+corpus gate in `TierACorpusEditModeTests`; Unity EditMode not run):
+
+- **SC-13 rows C3 left**: `logic_define`/`logic_reset` from a declared client script raise CONTEXT_VIOLATION
+  (`LuaCsLogicSlots.ContextGuard`, installed by the runtime, reads the build's context through
+  `LuaCsRbxApiBindings.ScriptContextOf`); `FindFirstChild`, `FindFirstChildOfClass`, `FindFirstChildWhichIsA` on
+  `game` (and so `WaitForChild`, whose bridge looks up through `FindFirstChild`) reaching ServerStorage or
+  ServerScriptService, or with a recursive search something inside them, check the context
+  (`RequireFoundFromGame`); an event a declared script emits reaches only runs on its side (`RouteEvent`).
+- **The hook**: `LuaCsRbxApiBindings.AddContextRule(ScriptContextRule)` adds a package's row until the first script
+  registers, when `RegisterCore` freezes the table; afterwards it throws.
+- **Acceptance**: DoD 1 (FireAllClients from a client script, and the twin), DoD 2 (one solo process: a server
+  script, a client script and a shared module talk through the loopback `NullNetworkBridge` remotes, and a direct
+  `mods_call` across is CONTEXT_VIOLATION), DoD 3 (a Script with `parent: Workspace/Pad` has the pad as
+  `script.Parent` and its `Touched` fires; twin: a default server script's parent is ServerScriptService). DoD 4 is
+  C1-4's `Mvp4_PackageV1WithoutContexts_LoadsAsLegacyScripts_GoldenTree`. DoD 5:
+  `TierACorpus_Mvp4Gate_AtLeastHalf_NoFixtureRegresses` (that no fixture regressed stays
+  `Fixture_ExecutesWithRecordedClassification`).
+- **P1**: `coreai_player_controls` 1.1.0 declares `context: client` (the seeder updates installed copies by version)
+  and reads `Players.LocalPlayer` only; DEV-22 retired. It is now a durable `Script` (RunContext Client) at
+  `ReplicatedStorage/System/coreai_player_controls`, so a world that holds it saves as package version 2.
+- **Skill text**: Rbx API section `scripting` gains contexts, `parent:` and `require`; the Lua Modding core no longer
+  says `require` is missing. Regenerated with `tools/generate_skills.py`; `PROMPT_TOKEN_COSTS.md`'s first generated
+  block from `PromptTokenCostTableEditModeTests.PrintCurrentTables` (the scripting section read is 7,526 of 8,000).
+- **DEV ids**: DEV-128 (SC-b), DEV-129 (SC-c), DEV-130 (SC-d), DEV-131 (SC-e); DEV-22 retired.
+
+**Where C6 differs from the plan, and what stays open:**
+
+- **A host event still reaches every run.** The SC-13 row "host `EmitEvent` reaches server-side and legacy runs" is not
+  built: in Solo and Host the client scripts share the runtime with the host, and the shipped host events (and the
+  client scripts that may listen to them) were not audited; only a declared script's `events_emit` is limited.
+- **Not bound**: `HttpService` requests (no request member is bound) and `BindToRenderStep` (not bound) keep their
+  rows unused until they are bound; P2 and P18 add their rows through `AddContextRule`.
+- **TAC-020** stays Failing: the corpus does not yet run it as a client script.
+
+The plan entry:
 
 - Carried over from C2: a console `Source` write on an unbound instance (SC-2's "creates a store entry"), through the
   session facade's admission and undo; today it is NOT_IMPLEMENTED.

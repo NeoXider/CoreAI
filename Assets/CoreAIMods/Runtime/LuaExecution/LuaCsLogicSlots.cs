@@ -244,6 +244,21 @@ namespace CoreAI.Ai.LuaCs
         }
 
         /// <summary>
+        /// MVP4 SC-13: answers whether the mod <c>(ownerModId, member)</c> may use a side-only global, as the exception to
+        /// raise (CONTEXT_VIOLATION) or null. The mod runtime installs it; without one, nothing is checked.
+        /// </summary>
+        internal Func<string, string, Exception> ContextGuard { get; set; }
+
+        private void RequireContext(string ownerModId, string member)
+        {
+            Exception refusal = ContextGuard?.Invoke(ownerModId, member);
+            if (refusal != null)
+            {
+                throw refusal;
+            }
+        }
+
+        /// <summary>
         /// Registers <c>logic_define(name, fn)</c>, <c>logic_reset(name)</c> and <c>logic_list()</c> on
         /// the sandbox registry. <paramref name="ownerModId"/> stamps every override defined through
         /// this registry with the owning mod, so <see cref="ClearOwnedBy"/> can remove them when the
@@ -271,6 +286,7 @@ namespace CoreAI.Ai.LuaCs
             // call the override back under the guard.
             registry.RegisterVarArgs("logic_define", call =>
             {
+                RequireContext(owner, "logic_define");
                 string name = call.GetString(0);
                 object fn = call.GetKind(1) == ScriptValueKind.Function ? call.GetArgument(1) : null;
                 bool defined = Define(name, fn, call.State, owner);
@@ -281,6 +297,7 @@ namespace CoreAI.Ai.LuaCs
             // formula and from which state, so a failed build can put back what its own chunk reset.
             registry.RegisterVarArgs("logic_reset", call =>
             {
+                RequireContext(owner, "logic_reset");
                 ResetFromScript(call.GetString(0), call.State, owner);
                 return ScriptCallResult.Return(ResetResult);
             });

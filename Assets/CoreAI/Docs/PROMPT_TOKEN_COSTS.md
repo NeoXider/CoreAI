@@ -48,19 +48,19 @@ Counter: BpeTokenCounter fallback estimator
 
 | Skill text | Characters | UTF-8 bytes | Tokens |
 |---|---|---|---|
-| Lua Modding instructions (Resources) | 11880 | 11880 | 2970 |
-| Lua Modding instructions (C# literal) | 11880 | 11880 | 2970 |
-| Lua Modding read_skill result | 5084 | 5084 | 1271 |
+| Lua Modding instructions (Resources) | 11938 | 11938 | 2985 |
+| Lua Modding instructions (C# literal) | 11938 | 11938 | 2985 |
+| Lua Modding read_skill result | 5143 | 5143 | 1286 |
 | Lua Modding read_skill result, section loops | 1824 | 1824 | 456 |
 | Lua Modding read_skill result, section events | 1963 | 1963 | 491 |
 | Lua Modding read_skill result, section full | 992 | 992 | 248 |
 | Lua Modding read_skill result, section example | 1951 | 1951 | 488 |
 | Lua Modding read_skill result, section errors | 1502 | 1502 | 376 |
 | Lua Modding catalog entry | 253 | 253 | 64 |
-| Rbx API instructions (Resources) | 86192 | 86294 | 21548 |
-| Rbx API instructions (C# literal) | 86192 | 86294 | 21548 |
+| Rbx API instructions (Resources) | 87209 | 87311 | 21803 |
+| Rbx API instructions (C# literal) | 87209 | 87311 | 21803 |
 | Rbx API read_skill result | 7996 | 7996 | 1999 |
-| Rbx API read_skill result, section scripting | 6495 | 6505 | 1624 |
+| Rbx API read_skill result, section scripting | 7526 | 7536 | 1882 |
 | Rbx API read_skill result, section datatypes | 4948 | 4950 | 1237 |
 | Rbx API read_skill result, section instances | 6214 | 6216 | 1554 |
 | Rbx API read_skill result, section attributes | 3904 | 3918 | 976 |

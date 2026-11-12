@@ -670,6 +670,26 @@ namespace CoreAI.Tests.EditMode.RbxApi.CompatibilityCorpus
                 + string.Join(", ", modifiedOrFailing));
         }
 
+        /// <summary>
+        /// MVP4 DoD row 5 (roadmap §6.4): at least half of Tier A runs unmodified after script contexts. That no fixture
+        /// regressed is <see cref="Fixture_ExecutesWithRecordedClassification"/>, which runs every fixture against the
+        /// classification recorded here; a mod that declares no context keeps every pre-MVP4 rule (SC-8).
+        /// </summary>
+        [Test]
+        public void TierACorpus_Mvp4Gate_AtLeastHalf_NoFixtureRegresses()
+        {
+            int unmodified = 0;
+            List<string> shortfall = new();
+            foreach (TierAFixtureSpec fixture in TierACorpusCatalog.Fixtures)
+            {
+                Count(fixture, ref unmodified, shortfall);
+            }
+
+            Assert.GreaterOrEqual(unmodified * 2, TierACorpusCatalog.Fixtures.Length,
+                $"MVP4 requires half of Tier A to run unmodified; {unmodified} of {TierACorpusCatalog.Fixtures.Length} "
+                + "do. Not unmodified: " + string.Join(", ", shortfall));
+        }
+
         [TestCaseSource(nameof(TierBFixtureCases))]
         public void TierBFixture_RunsUnmodifiedWithNoStubHits(object fixtureValue)
         {

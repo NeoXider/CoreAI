@@ -1,12 +1,13 @@
 --[[@coreai
 id: coreai_player_controls
 name: Player Controls (system)
-version: 1.0.0
+version: 1.1.0
+context: client
 active: true
 capabilities: All
 category: System
 author: CoreAI
-description: Default character controls, the CoreAI counterpart of Roblox's PlayerModule ControlModule. WASD or the arrow keys (or the gamepad left thumbstick or D-pad) walk relative to the camera, Space (or gamepad A) jumps, and a double-tapped jump toggles free flight, where Space rises and Left Shift descends. Input the engine consumed (the chat or the Hub has focus) is ignored. Turn it off with StarterPlayer.DevComputerMovementMode = Enum.DevComputerMovementMode.Scriptable, or unload this mod and ship your own. Written as the client-side script it becomes once script contexts land.
+description: Default character controls, the CoreAI counterpart of Roblox's PlayerModule ControlModule. WASD or the arrow keys (or the gamepad left thumbstick or D-pad) walk relative to the camera, Space (or gamepad A) jumps, and a double-tapped jump toggles free flight, where Space rises and Left Shift descends. Input the engine consumed (the chat or the Hub has focus) is ignored. Turn it off with StarterPlayer.DevComputerMovementMode = Enum.DevComputerMovementMode.Scriptable, or unload this mod and ship your own. A client script (context: client): it runs on this machine's client, never on a dedicated server, and drives Players.LocalPlayer's character.
 ]]
 
 local Players = game:GetService("Players")
@@ -44,9 +45,7 @@ local lastJumpPress = -math.huge
 local wasControlling = false
 
 local function getHumanoid()
-	-- WHY the fallback: until script contexts land, a solo world may run this as a server-side mod,
-	-- where LocalPlayer is nil and the one connected player is the person at this screen.
-	local player = Players.LocalPlayer or Players:GetPlayers()[1]
+	local player = Players.LocalPlayer
 	local character = player and player.Character
 	if not character then
 		return nil

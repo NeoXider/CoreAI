@@ -1596,16 +1596,17 @@ namespace CoreAI.Ai.LuaCs
             }
 
             // ---- Navigation ----
-            Method("FindFirstChild", (ctx, self) => context.WrapInstance(self.FindFirstChild(
-                ReadString(ctx, 1, "Instance:FindFirstChild", 1),
-                LuaCsRbxDatatypeBindings.ReadOptionalBoolean(ctx, 2, "Instance:FindFirstChild", 2))));
-            Method("FindFirstChildOfClass", (ctx, self) => context.WrapInstance(
+            Method("FindFirstChild", (ctx, self) => context.WrapInstance(RequireFoundFromGame(context, self,
+                self.FindFirstChild(
+                    ReadString(ctx, 1, "Instance:FindFirstChild", 1),
+                    LuaCsRbxDatatypeBindings.ReadOptionalBoolean(ctx, 2, "Instance:FindFirstChild", 2)))));
+            Method("FindFirstChildOfClass", (ctx, self) => context.WrapInstance(RequireFoundFromGame(context, self,
                 self.FindFirstChildOfClass(
-                    ReadString(ctx, 1, "Instance:FindFirstChildOfClass", 1))));
-            Method("FindFirstChildWhichIsA", (ctx, self) => context.WrapInstance(
+                    ReadString(ctx, 1, "Instance:FindFirstChildOfClass", 1)))));
+            Method("FindFirstChildWhichIsA", (ctx, self) => context.WrapInstance(RequireFoundFromGame(context, self,
                 self.FindFirstChildWhichIsA(
                     ReadString(ctx, 1, "Instance:FindFirstChildWhichIsA", 1),
-                    LuaCsRbxDatatypeBindings.ReadOptionalBoolean(ctx, 2, "Instance:FindFirstChildWhichIsA", 2))));
+                    LuaCsRbxDatatypeBindings.ReadOptionalBoolean(ctx, 2, "Instance:FindFirstChildWhichIsA", 2)))));
             Method("FindFirstAncestor", (ctx, self) => context.WrapInstance(
                 self.FindFirstAncestor(ReadString(ctx, 1, "Instance:FindFirstAncestor", 1))));
             Method("FindFirstAncestorOfClass", (ctx, self) => context.WrapInstance(
@@ -4481,6 +4482,31 @@ namespace CoreAI.Ai.LuaCs
             }
 
             return service;
+        }
+
+        /// <summary>
+        /// SC-13 for the finders on <c>game</c> (<c>FindFirstChild</c>, <c>FindFirstChildOfClass</c>,
+        /// <c>FindFirstChildWhichIsA</c>, and <c>WaitForChild</c>, whose bridge looks up through <c>FindFirstChild</c>): a
+        /// client script that finds ServerStorage or ServerScriptService, or with a recursive search something inside
+        /// them, raises CONTEXT_VIOLATION as <c>game.ServerStorage</c> does.
+        /// </summary>
+        private static RbxInstance RequireFoundFromGame(LuaCsRbxModContext context, RbxInstance self, RbxInstance found)
+        {
+            if (!(self is RbxDataModel) || found == null)
+            {
+                return found;
+            }
+
+            for (RbxInstance node = found; node != null && !ReferenceEquals(node, self); node = node.Parent)
+            {
+                if (node.ClassName == "ServerStorage" || node.ClassName == "ServerScriptService")
+                {
+                    context.RequireContext(node.ClassName);
+                    break;
+                }
+            }
+
+            return found;
         }
 
         /// <summary>

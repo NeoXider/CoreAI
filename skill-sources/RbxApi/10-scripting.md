@@ -68,3 +68,13 @@
   row quarantine the mod and keep it from starting with the next game.
 - A player who leaves takes the mods loaded for them along: they are unloaded (after their running
   code returns) and start again on the next world load.
+- Script contexts: an `@coreai` header line `context: server|client|shared` (none = legacy: the old rules).
+  A `server` script is the server whoever wrote it (`RunService:IsServer()`, `LocalPlayer` nil,
+  FireClient, ServerStorage, store_*); a `client` script is this screen's player (`LocalPlayer`, FireServer,
+  UserInputService, the camera) and starts once that player exists. The other side's members raise
+  CONTEXT_VIOLATION; the sides talk through RemoteEvents only (mods_call, events_emit stay on one side).
+  `parent: Workspace/Door` puts the mod's `script` in that instance (`script.Parent` is the door).
+- `shared` makes a ModuleScript in ReplicatedStorage: `require(game.ReplicatedStorage.Name)`,
+  `require("./Name")` or `require("@game/ReplicatedStorage/Name")` runs it once per script and returns its
+  one non-nil value (every script gets its own copy). require never waits for a missing module (use
+  WaitForChild first); a cycle raises CYCLIC_REQUIRE; a module error is raised at the require line.

@@ -36,8 +36,9 @@ use a feature it names a section for, read that section, and read only the secti
   INVALID_CHARACTER: fix that argument and retry. Moving changes only the `category:` line.
 - In the `code` JSON string write newlines as standard \n escapes. Never double-escape (\\n
   reaches Lua as a literal backslash and the whole source collapses into one broken line).
-- Sandbox: no io/os/require/load/debug. Instruction and time budgets apply; a handler burning
-  >100 ms is reported as an error. Keep per-tick work small.
+- Sandbox: no io/os/load/debug (`require` loads `context: shared` modules: Rbx API, scripting).
+  Instruction and time budgets apply; a handler burning >100 ms is reported as an error. Keep per-tick
+  work small.
 - Syntax: Luau is accepted and auto-downleveled to Lua 5.2 before compiling - `+=` (and the other
   compound assignments), `continue`, `` `str{}` `` string interpolation, if-then-else expressions,
   and type annotations/casts all work. Plain Lua 5.2 is unaffected.
