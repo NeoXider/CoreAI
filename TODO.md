@@ -576,6 +576,13 @@ Owner's questions and decisions on the Block World (2026-11-11):
       in a WebGL player against Minecraft's basics (walk, stop, step up, fall, sprint, jump while sprinting,
       swim), with every difference written down; then the fixes in the engine's character body and the control
       script, each proven by playing, not only by a test.
+      A controller to learn from (the owner pointed at it, 2026-11-12: "может он пригодиться на потом"): his
+      game `D:\Git\DiveForBrainrots`, `Assets/Scripts/Player/PlayerLocomotion.cs` (1,345 lines),
+      `LocomotionRules.cs` (the water states as plain rules) and `PlayerMovementSettings.cs`: ground
+      acceleration and deceleration (35 and 45), a step height, ground snap, coyote time (0.12 s) and a jump
+      buffer (0.15 s), a slope limit, a frictionless material, swimming on the surface and under water and
+      climbing out onto a ledge. It is a Unity component of another game, not read in detail yet: what to take
+      is the rules and the numbers, into CoreAI's engine-free character body, not the component itself.
 - [ ] **Block World: chunks load badly** (the same play: "под водой да и в целом чанки плохо грузятся"). Land
       comes in slowly and with holes: a bay with nothing past its near shore, a flat sea floor with no further
       terrain. Not measured. To measure in a WebGL player in a foreground tab: the time to fill the view radius
