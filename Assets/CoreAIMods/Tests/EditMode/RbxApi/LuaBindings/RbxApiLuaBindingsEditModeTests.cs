@@ -1126,6 +1126,30 @@ namespace CoreAI.Tests.EditMode.RbxApi.LuaBindings
         }
 
         [Test]
+        public void Lua_GameLowercaseWorkspace_IsTheWorkspace_AsRobloxsDeprecatedProperty()
+        {
+            LuaCsRbxApiBindings roblox = new();
+            LuaCsModStack stack = BuildStack(roblox);
+            stack.Runtime.LoadMod("m", @"
+                assert(game.workspace == workspace)
+                assert(game.workspace == game.Workspace)
+                workspace:SetAttribute('Mark', 1)
+                assert(game.workspace:GetAttributes().Mark == 1)");
+
+            Assert.IsTrue(stack.Runtime.IsLoaded("m"));
+        }
+
+        [Test]
+        public void Lua_GameLowercaseOtherService_IsStillNotAMember_NegativeTwin()
+        {
+            LuaCsRbxApiBindings roblox = new();
+            LuaCsModStack stack = BuildStack(roblox);
+
+            Exception error = Assert.Catch(() => stack.Runtime.LoadMod("m", "local l = game.lighting"));
+            StringAssert.Contains("lighting is not a valid member of DataModel", error.Message);
+        }
+
+        [Test]
         public void Lua_InstanceNew_DeprecatedParentArgument_WorksAndLogsOnce()
         {
             List<string> log = new();

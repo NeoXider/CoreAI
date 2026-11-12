@@ -766,6 +766,17 @@ namespace CoreAI.Ai.LuaCs
                         context);
                 }
 
+                // WHY the lowercase name: DataModel.workspace is Roblox's read-only property next to DataModel.Workspace,
+                // deprecated (PreferredDescriptorName Workspace) but working, and scripts still write game.workspace.
+                if (key == "workspace" && self is RbxDataModel)
+                {
+                    RbxInstance workspaceService = self.FindFirstChildOfClass("Workspace");
+                    if (workspaceService != null)
+                    {
+                        return context.WrapInstance(workspaceService);
+                    }
+                }
+
                 if (TryReadCamera(context, self, key, out LuaValue cameraValue))
                 {
                     return cameraValue;
