@@ -116,7 +116,7 @@ Counter: BpeTokenCounter fallback estimator
 | `camera` | 4065 | 4065 | 1017 |
 | `execute_lua` | 776 | 776 | 194 |
 | `manage_mods` | 2453 | 2453 | 614 |
-| `get_mod_logs` | 1087 | 1087 | 272 |
+| `get_mod_logs` | 1198 | 1198 | 300 |
 | `save_world` | 326 | 326 | 82 |
 | `load_world` | 347 | 347 | 87 |
 | `list_autosaves` | 220 | 220 | 55 |
@@ -133,7 +133,7 @@ history and the user message come on top.
 
 | Role | Tools offered | Tool definitions | Prefix + role prompt | Total |
 |---|---|---|---|---|
-| Programmer | memory, camera, execute_lua, manage_mods, get_mod_logs, save_world, load_world, list_autosaves, load_autosave, read_skill | 2874 | 1036 | 3910 |
+| Programmer | memory, camera, execute_lua, manage_mods, get_mod_logs, save_world, load_world, list_autosaves, load_autosave, read_skill | 2902 | 1036 | 3938 |
 | Creator | memory, world_command | 1771 | 385 | 2156 |
 | Builder | memory, world_command | 1771 | 337 | 2108 |
 | Merchant | memory, get_inventory | 357 | 302 | 659 |

@@ -6,12 +6,15 @@ using CoreAI;
 using CoreAI.Ai;
 using CoreAI.Ai.Logging;
 using CoreAI.Authority;
+using CoreAI.Diagnostics;
 using CoreAI.Infrastructure.Llm;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.World;
 using CoreAI.Logging;
 using CoreAI.Mcp.Tools;
+using CoreAI.Mods.Rbx.Binding;
 using CoreAI.Mods.WorldPackages;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 using VContainer;
 using VContainer.Unity;
@@ -115,6 +118,26 @@ namespace CoreAI.Mcp.Server
         public int AdmittedMainThreadCalls { get { lock (_callsGate) return _mainThreadQueue.Count + _runningCalls; } }
         private IMcpServerTransport _server;
         private McpSessionStore _sessions;
+        private McpRpcDispatcher _dispatcher;
+        private string _transportKind = "http";
+        private bool _hostAdminFromComposition;
+
+        /// <summary>The router of the running server (request counters, sessions); null while stopped.</summary>
+        public McpRpcDispatcher Dispatcher => _server != null ? _dispatcher : null;
+
+        /// <summary><c>http</c> for the loopback listener, <c>bridge</c> for the outbound WebGL link.</summary>
+        public string TransportKind => _transportKind;
+
+        /// <summary>Live session ids of the running server; 0 while stopped.</summary>
+        public int SessionCount => _server != null && _sessions != null ? _sessions.Count : 0;
+
+        /// <summary>
+        /// When true and no CoreAI scope is built yet, <see cref="StartListening()"/> starts with an empty catalog and
+        /// publishes the composition's tools as soon as a scope is built (searched every
+        /// <see cref="CompositionProbeIntervalSeconds"/>), instead of refusing to start. The debug start-up uses it, so
+        /// a client can connect before the first scene has composed CoreAI.
+        /// </summary>
+        public bool WaitForComposition { get; set; }
 
         /// <summary>Live host catalog while listening. AddOrReplace, Remove and Replace take effect without restarting.</summary>
         public McpToolRegistry Registry { get; private set; }
@@ -213,6 +236,24 @@ namespace CoreAI.Mcp.Server
 
             _hostAdminActorIdentityProvider = actorIdentityProvider;
             hostAdminActorId = actor.ActorId;
+            enableHostAdminModManagement = true;
+        }
+
+        /// <summary>
+        /// Enables MCP mod management with the actor the CoreAI composition provides (its
+        /// <see cref="IActorIdentityProvider"/>), resolved every time the catalog is built, so it follows scene loads.
+        /// The actor must still be trusted and unrestricted, and must match <see cref="HostAdminActorId"/> when one is
+        /// set. The debug start-up (<see cref="CoreAiMcpDebugBootstrap"/>) uses it unless told not to.
+        /// </summary>
+        public void ConfigureHostAdminModManagementFromComposition()
+        {
+            if (IsRunning)
+            {
+                throw new InvalidOperationException(
+                    "Stop the MCP server before changing host-admin mod authority.");
+            }
+
+            _hostAdminFromComposition = true;
             enableHostAdminModManagement = true;
         }
 
@@ -408,26 +449,40 @@ namespace CoreAI.Mcp.Server
             }
 
             bool followsComposition = registry == null;
+            bool waitingForComposition = false;
             IObjectResolver compositionResolver = null;
             LifetimeScope compositionScope = null;
             if (followsComposition)
             {
                 compositionResolver = ResolveComposition(out compositionScope);
-                if (compositionResolver == null)
+                if (compositionResolver == null && !WaitForComposition)
                 {
                     Log.Instance.Warn("[CoreAI MCP] No built CoreAI LifetimeScope; server not started.");
                     return;
                 }
-                registry = BuildRegistry(compositionResolver);
+
+                waitingForComposition = compositionResolver == null;
+                registry = waitingForComposition
+                    ? new McpToolRegistry(null, null, true)
+                    : BuildRegistry(compositionResolver);
             }
             if (listenPort.HasValue) port = listenPort.Value;
             int listeningPort = port;
             Registry = registry;
             TrackComposition(followsComposition, compositionResolver, compositionScope);
+            if (waitingForComposition)
+            {
+                // WHY: the probe in MonitorComposition publishes the tools once a scope is built.
+                _compositionWithdrawn = true;
+                Log.Instance.Info("[CoreAI MCP] No CoreAI scope is built yet; the tools appear when one is.");
+            }
 
             string token = ResolveAuthToken();
+            RedactFromRuntimeLog(token);
             _sessions = new McpSessionStore();
             McpRpcDispatcher dispatcher = new(registry, _sessions, this) { Instructions = _instructions };
+            _dispatcher = dispatcher;
+            _transportKind = transportFactory == null ? "http" : _transportKind;
             IMcpServerTransport transport = null;
             try
             {
@@ -509,6 +564,13 @@ namespace CoreAI.Mcp.Server
             return McpRequestGuard.GenerateToken();
         }
 
+        // WHY: the start line prints the token for the developer, and the captured Unity log is readable by in-game
+        // agents whose prompts may go to a cloud provider; the capture keeps the line with the token blanked.
+        private static void RedactFromRuntimeLog(string token)
+        {
+            if (token != null) UnityRuntimeLogCapture.Shared.Buffer.AddRedaction(token);
+        }
+
         private void LogAccessInstructions(string token)
         {
             if (token == null)
@@ -583,6 +645,7 @@ namespace CoreAI.Mcp.Server
             // vanish from tools/list for the whole session when the server booted from a bootstrap scene;
             // the source now reports a missing camera per call instead.
             IScreenshotSource screenshot = new MainCameraScreenshotSource();
+            IReadOnlyList<IMcpTool> diagnostics = BuildDiagnosticsTools(resolver, modRuntime);
 
             return CoreAiMcpToolProvider.BuildWithModFolders(
                 luaExecutor,
@@ -600,7 +663,50 @@ namespace CoreAI.Mcp.Server
                 null,
                 BuildWorldPackageTools(resolver, modActorIdentityProvider),
                 modRateLimiter,
-                modFolderList);
+                modFolderList,
+                diagnostics);
+        }
+
+        private IReadOnlyList<IMcpTool> BuildDiagnosticsTools(IObjectResolver resolver, ILuaModRuntime modRuntime)
+        {
+            IRuntimeLogSource logs = resolver.ResolveOrDefault<IRuntimeLogSource>();
+            IRuntimePerformanceSource performance = resolver.ResolveOrDefault<IRuntimePerformanceSource>();
+            IActorIdentityProvider identity = resolver.ResolveOrDefault<IActorIdentityProvider>();
+            RbxWorldHost worldHost = null;
+            try
+            {
+                worldHost = resolver.ResolveOrDefault<RbxWorldHost>();
+            }
+            catch (VContainerException)
+            {
+            }
+
+            GameStatusSources status = new()
+            {
+                Engine = CoreAiGameStatusSources.Engine,
+                Mods = modRuntime != null && identity != null
+                    ? () => CoreAiGameStatusSources.Mods(modRuntime, identity)
+                    : null,
+                World = worldHost != null ? () => CoreAiGameStatusSources.World(worldHost) : null,
+                Server = DescribeTransport
+            };
+            return McpDiagnosticsTools.Create(logs, performance, status);
+        }
+
+        /// <summary>What <c>game_status</c> reports about the MCP link itself.</summary>
+        internal JObject DescribeTransport()
+        {
+            McpRpcDispatcher dispatcher = Dispatcher;
+            return new JObject
+            {
+                ["transport"] = _server != null ? _transportKind : "stopped",
+                ["url"] = Url,
+                ["auth"] = _activeAuthToken != null,
+                ["host_admin_mods"] = Registry != null && Registry.Contains("manage_mods"),
+                ["requests"] = dispatcher?.RequestCount ?? 0,
+                ["tool_calls"] = dispatcher?.ToolCallCount ?? 0,
+                ["queued_or_running"] = AdmittedMainThreadCalls
+            };
         }
 
         private static IReadOnlyList<IMcpTool> BuildWorldPackageTools(IObjectResolver resolver,
@@ -640,7 +746,7 @@ namespace CoreAI.Mcp.Server
             }
 
             string actorId = HostAdminActorId;
-            if (actorId.Length == 0)
+            if (actorId.Length == 0 && !_hostAdminFromComposition)
             {
                 Log.Instance.Warn(
                     "[CoreAI MCP] manage_mods omitted: Host Admin Mod Management is enabled but Host " +
@@ -665,7 +771,11 @@ namespace CoreAI.Mcp.Server
                 return null;
             }
 
-            if (!string.Equals(actor.ActorId, actorId, StringComparison.Ordinal))
+            if (actorId.Length == 0)
+            {
+                actorId = actor.ActorId;
+            }
+            else if (!string.Equals(actor.ActorId, actorId, StringComparison.Ordinal))
             {
                 Log.Instance.Warn(
                     $"[CoreAI MCP] manage_mods omitted: configured Host Admin Actor Id '{actorId}' does not " +
@@ -849,6 +959,63 @@ namespace CoreAI.Mcp.Server
                 return _active;
             }
 
+            CoreAiMcpServer instance = AcquireAutomaticHost();
+            instance.port = port;
+            instance.StartListening(registry, null, transportFactory);
+            return instance;
+        }
+
+        /// <summary>
+        /// Starts (or reuses) the automatic host the way the debug start-up does: it listens at once and publishes the
+        /// composition's tools when a CoreAI scope is built (<see cref="WaitForComposition"/>), and, unless
+        /// <paramref name="hostAdmin"/> is false, grants <c>manage_mods</c> and <c>save_world</c> to the composition's
+        /// unrestricted actor (<see cref="ConfigureHostAdminModManagementFromComposition"/>). Main thread only.
+        /// </summary>
+        public static CoreAiMcpServer StartDebugServer(int port = 8590, bool hostAdmin = true) =>
+            StartDebugServer(port, hostAdmin, null);
+
+        internal static CoreAiMcpServer StartDebugServer(int port, bool hostAdmin,
+            Func<int, McpRpcDispatcher, string, IMcpServerTransport> transportFactory)
+        {
+            if (_active != null && _active.IsRunning)
+            {
+                return _active;
+            }
+
+            CoreAiMcpServer instance = AcquireAutomaticHost();
+            instance.PrepareDebugStart(port, hostAdmin);
+            instance.StartListening(null, null, transportFactory);
+            return instance;
+        }
+
+        /// <summary>
+        /// Links the automatic host to a local MCP bridge process on <paramref name="bridgePort"/> instead of listening
+        /// (the only way in a WebGL player). See the package README, "Connect to a WebGL build".
+        /// </summary>
+        public static CoreAiMcpServer StartDebugBridge(int bridgePort, string bridgeKey, bool hostAdmin)
+        {
+            Log.Instance.Warn("[CoreAI MCP] The bridge link is not available in this version yet; port " + bridgePort +
+                              " ignored.");
+            return null;
+        }
+
+        private void PrepareDebugStart(int listenPort, bool hostAdmin)
+        {
+            port = listenPort;
+            WaitForComposition = true;
+            if (hostAdmin)
+            {
+                ConfigureHostAdminModManagementFromComposition();
+            }
+            else
+            {
+                _hostAdminFromComposition = false;
+                enableHostAdminModManagement = false;
+            }
+        }
+
+        private static CoreAiMcpServer AcquireAutomaticHost()
+        {
             CoreAiMcpServer instance = _automaticHost;
             if (instance == null)
             {
@@ -858,10 +1025,11 @@ namespace CoreAI.Mcp.Server
                 _automaticHost = instance;
             }
 
-            instance.port = port;
-            instance.StartListening(registry, null, transportFactory);
             return instance;
         }
+
+        /// <summary>The server started through the static API or the debug start-up, or null.</summary>
+        public static CoreAiMcpServer Active => _active;
 
         /// <summary>Stops the active server started via the static API (or any tracked instance).</summary>
         public static void StopServer()

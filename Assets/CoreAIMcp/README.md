@@ -5,10 +5,14 @@ CoreAI game session** — Editor play mode or a shipped build — so an external
 game over a standard protocol instead of editing files and restarting.
 
 It is the in-game Command Bar surfaced over MCP: `execute_lua`, `get_mod_logs`, `read_skill`,
-`world_command`, `screenshot`, the world save/load tools (`list_autosaves`, `load_world`,
-`load_autosave`, reached through `coreai_tools`) and, with explicit host-admin configuration,
-`manage_mods` and `save_world`. Each tool is registered only when the current composition provides its
-backing service (see [Tools](#tools)).
+`world_command`, `screenshot`, the debug tools `game_status`, `get_unity_logs` and `get_performance`, the
+world save/load tools (`list_autosaves`, `load_world`, `load_autosave`, reached through `coreai_tools`)
+and, with host-admin configuration, `manage_mods` and `save_world`. Each tool is registered only when
+the current composition provides its backing service (see [Tools](#tools)).
+
+To debug a game without touching a scene, start it with `-coreaiMcp` (or tick
+**CoreAI > MCP > Debug Server In Play Mode** in the editor): see
+[Debugging a running game](#debugging-a-running-game).
 
 ## Who this is for
 
@@ -56,6 +60,73 @@ server.StartListening(registry, listenPort: 8590);
 > [Security model](#security-model) — loopback alone is not a boundary, and the bearer token is the
 > layer that stops another local process.
 
+## Debugging a running game
+
+The debug start-up (`CoreAiMcpDebugBootstrap`) starts an MCP link when one of the switches below asks
+for it, and does nothing otherwise. No scene needs the component. It starts the Unity log capture
+before the first scene, so start-up errors are kept, and it starts listening at once: the tools appear
+(`notifications/tools/list_changed`) as soon as a CoreAI scope is built. It grants `manage_mods` and
+`save_world` to the composition's own actor (the local host identity of a single-player game), so a
+client can make, read and edit mods; the composed actor must be trusted and unrestricted, otherwise
+the tools stay absent and the console says why. Withhold that with the no-admin switch.
+
+| Switch | Command line | Environment | WebGL page URL |
+|---|---|---|---|
+| In-game server (editor, desktop players) | `-coreaiMcp [port]` | `COREAI_MCP=1` or `COREAI_MCP=<port>` | — |
+| Bridge link (WebGL; desktop for testing it) | `-coreaiMcpBridge [port]` | `COREAI_MCP_BRIDGE=<port>` | `?coreaiMcp=<port>` |
+| Bridge key | — | `COREAI_MCP_BRIDGE_KEY` | fragment `#coreaiMcpKey=<key>` only |
+| No `manage_mods` / `save_world` | `-coreaiMcpNoAdmin` | `COREAI_MCP_ADMIN=0` | `coreaiMcpNoAdmin` |
+| Bearer token of the in-game server | — | `COREAI_MCP_TOKEN` | — |
+
+Default ports: server **8590**, bridge **8591**. The command line wins over the URL, which wins over
+the environment. In the editor the menu **CoreAI > MCP > Debug Server In Play Mode** (stored in
+EditorPrefs) starts the server on 8590 in every Play Mode session, and toggling it during Play Mode
+starts or stops it at once. An editor running in batch mode (the test runner) honours only an explicit
+`-coreaiMcp` on its command line, so an inherited `COREAI_MCP` or the menu never binds the port during
+automated runs. Turn the menu off before running the MCP PlayMode tests in an open editor: they start
+servers of their own.
+
+### (a) The editor in Play Mode
+
+Tick **CoreAI > MCP > Debug Server In Play Mode**, enter Play Mode, and copy the
+`claude mcp add ...` line the console prints. For a token that stays the same across sessions, start the
+editor with it (PowerShell):
+
+```powershell
+$env:COREAI_MCP_TOKEN = 'dev-0123456789abcdef'
+& "C:\Program Files\Unity\Hub\Editor\6000.6.0f1\Editor\Unity.exe" -projectPath D:\Git\CoreAI -coreaiMcp
+```
+
+```powershell
+claude mcp add --transport http coreai http://127.0.0.1:8590/mcp --header "Authorization: Bearer dev-0123456789abcdef"
+```
+
+### (b) A Windows build
+
+```powershell
+$env:COREAI_MCP_TOKEN = 'dev-0123456789abcdef'
+& D:\Builds\BlockWorld\CoreAI.exe -coreaiMcp 8590
+```
+
+Then the same `claude mcp add` line. Without `COREAI_MCP_TOKEN` the player generates a token and prints
+it, with the ready command, to `Player.log`
+(`%USERPROFILE%\AppData\LocalLow\<Company>\<Product>\Player.log`, line `[CoreAI MCP] Auth token:`); a game
+whose log settings drop Info lines hides that line, so prefer the variable. Smoke test:
+
+```powershell
+curl.exe -s http://127.0.0.1:8590/mcp -H "Authorization: Bearer dev-0123456789abcdef" -H "Content-Type: application/json" -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"game_status\"}}'
+```
+
+Windows may ask for a URL reservation the first time a player listens; the console line names the
+exact `netsh http add urlacl` command (see [Install / enable](#install--enable)).
+
+### What to call first
+
+`game_status` (platform, build type, versions, scenes, fps, log totals, mods and their errors, world
+size), then `get_unity_logs` with the returned cursor, `get_performance` while reproducing a stutter,
+`get_mod_logs` for what a mod printed, and `manage_mods` (`list`, `get_source`, `edit`, `load`) to make
+or repair a mod. `read_skill` with `Lua Modding` documents the mod API.
+
 ## Scope and boundaries — read this before designing around it
 
 - **This package is a server, not a client.** There is no outbound MCP client in it: no stdio spawn, no
@@ -97,7 +168,7 @@ So the server enforces all of the following, in this order, on every request:
 
 | Layer | Rule | Stops |
 |-------|------|-------|
-| **Off by default** | nothing starts until **Start On Enable** is ticked or `StartListening()` / `StartServer()` is called | everything, until you opt in |
+| **Off by default** | nothing starts until **Start On Enable** is ticked, `StartListening()` / `StartServer()` is called, or a [debug switch](#debugging-a-running-game) asks | everything, until you opt in |
 | **Loopback bind + `IsLocal`** | listener bound to `127.0.0.1`; a non-local request → `403` | off-box callers |
 | **`Host` check** | must be `127.0.0.1`/`localhost`/`[::1]` on the server's port → else `403` | DNS rebinding |
 | **`Origin` check** | absent (a real MCP client) or loopback-on-this-port → else `403` | browser CSRF |
@@ -132,6 +203,15 @@ should use.
 
 Unticking **Require Auth Token** disables token auth (the `Origin`/`Host`/loopback checks stay). Only do
 that on a machine you fully trust — the server logs a warning at every start when you do.
+
+The token line also reaches the captured Unity log that `get_unity_logs` and the in-game
+`get_mod_logs source=unity` read; the server registers the token for redaction before printing it, so
+there the line reads `Auth token: <redacted>` (an in-game agent's prompt may go to a cloud provider).
+The console and `Player.log` keep the full line for the developer.
+
+The [debug start-up](#debugging-a-running-game) grants `manage_mods` and `save_world` by default, so a
+build started with `-coreaiMcp` hands whoever holds the token the right to write mods that survive a
+restart. Pass `-coreaiMcpNoAdmin` when that is not wanted.
 
 ## Install / enable
 
@@ -368,6 +448,9 @@ Tools are registered **only when their backing service resolves** in the current
 | `execute_lua` | the Lua mod stack is installed (an `ILuaExecutor` resolves) | Runs a one-off `code` snippet in the sandboxed Lua 5.2 VM and returns the executor result as JSON: `Success`, `Output` (the chunk's returned value) and `Error`. |
 | `manage_mods` | the mod runtime resolves **and** host-admin authority is configured (see below) — **absent by default** | list / get_source / edit / load / reload / unload / export / import / forget / versions / revert / diagnostics on persistent mods; `get_source` returns pages of whole lines (`from_line`, `line_count`; each page names `next_from_line` until the end), `edit` replaces `old_text` with `new_text` (`replace_all` for every occurrence) and reloads the mod; `reload` and `edit` take an optional `keep_objects` (default `false`: the objects the previous run's main chunk built are removed first). |
 | `get_mod_logs` | an `ILuaLogService` resolves | Reads mod `print`/`warn`/`error`/runtime-error output, independent of the Unity console. Optional `mod_id`, `level` (minimum severity), `since_sequence` and `max_entries` (default 50). |
+| `game_status` | always | One-call overview: platform, editor or player, development build, Unity and CoreAI versions, product and app version, scenes, uptime, time scale, frame settings, fps over 5 s, Unity log totals, mods (`state` running or quarantined, `errors`, handlers, timers), world instance and bound-object counts, and the MCP link (`transport`, `url`, request and tool-call counters). A section whose service is missing is left out; one that throws reports `{"error": ...}` in place. |
+| `get_unity_logs` | an `IRuntimeLogSource` resolves (the CoreAI scope registers the Unity log capture) | The Unity log, not only mods: every `Debug.Log`, warning, error and exception since start-up, from a ring of 1000 entries. `since_sequence` cursor (answer carries `next_sequence`, `missed` for entries evicted before the cursor, `cursor_reset` for a cursor from another process), `level` minimum (`info`, `warning`, `error`, `exception`), `contains`, `max_entries` (50, at most 500), `stack` (8 frames of warnings and errors). Repeats fold into one line `(xN)`. |
+| `get_performance` | an `IRuntimePerformanceSource` resolves (the CoreAI scope registers the monitor) | Frame rate over `window_seconds` (default 5, at most 60): `fps_avg`, `fps_min` (the slowest frame), `frame_ms_avg`/`p95`/`max`, `slow_frames` (over 50 ms); with `counters` (default true) the engine counters the build provides, and `unavailable` naming the ones it does not. See [Engine counters per build and platform](#engine-counters-per-build-and-platform). |
 | `read_skill` | the Programmer role has skills | Returns a registered skill by `name` (e.g. `Lua Modding`, `Rbx API`) — the same reference the on-board agent reads. A multi-document skill returns its entry document and a section index; `section` reads one document, `all: true` reads all of them. |
 | `world_command` | a world-command executor resolves | Spawn / move / edit scene objects (meters; Euler degrees). |
 | `screenshot` | always | Captures the main camera — or the active camera named in `camera` — to a PNG (base64), downscaled to `max_resolution` (default 1024, `0` = no cap). An unknown camera name fails and lists the active cameras; it never falls back to another camera. Missing camera / capture failure is reported per call, with the real reason. Screen-space overlay UI is not part of a camera render. |
@@ -375,6 +458,33 @@ Tools are registered **only when their backing service resolves** in the current
 | `load_world` / `load_autosave` | as above; **brokered** | Requests loading a manual slot / a listed autosave. Nothing is applied until the player confirms in the game UI: a staged request is `isError: false` with status `player_confirmation_required` and a `request_id`; a missing or unreadable package is `isError: true`. |
 | `save_world` | as above **and** host-admin authority; **brokered** — **absent by default** | Saves the live world to a new create-once manual slot that survives a restart. |
 | `coreai_tools` | always (see [Tool residency](#tool-residency-what-the-model-pays-for)) | Broker over Dynamic tools: `list`, `describe`, `call`. |
+
+### Engine counters per build and platform
+
+Frame times come from `Time.unscaledDeltaTime` and work everywhere, editor, Windows, WebGL, development
+or release. The counters are read through `ProfilerRecorder`, started on the first `get_performance`
+call (the first answer says so and lists the per-frame ones as unavailable until the next call), and
+whatever a build does not provide is listed in `unavailable`, never reported as zero. Unity's manual
+documents draw calls, batches, SetPass calls, triangles and vertices as readable in release players, and
+the frame-time counters (`main_thread_ms` from "CPU Main Thread Frame Time", `gpu_ms` from "GPU Frame
+Time") as switching on the frame timing manager themselves, also in release players; WebGL gives no GPU
+time. The manual does not say which memory counters a release player provides, so `total_used_memory`,
+`gc_used_memory`, `gfx_used_memory`, `system_used_memory` and the rest are reported when the build
+gives a value; `managed_heap` (`GC.GetTotalMemory`) is always there. Object counts (textures, meshes) are
+development-build only and are not read. None of this has been measured per platform in this
+repository yet; the `unavailable` list of a real build is the answer.
+
+### The same readers for in-game agents
+
+The log capture and the performance monitor are services of the CoreAI scope
+(`IRuntimeLogSource`, `IRuntimePerformanceSource`, registered by `RegisterCore` unless the host
+registered its own), not part of this package. The in-game Programmer reads them through its existing
+`get_mod_logs` tool: when the composition provides the engine log, the tool gains one argument,
+`source` (`unity`: engine warnings and errors, two stack frames each, and a five-second fps summary).
+That costs the Programmer 28 tokens per request (`get_mod_logs` 272 → 300, measured with
+`PromptTokenCostMeter` like `Assets/CoreAI/Docs/PROMPT_TOKEN_COSTS.md`), instead of a separate
+definition. A bearer token the MCP server prints is registered for redaction in the capture first, so
+the line an in-game agent can read shows `<redacted>`.
 
 **Brokered** tools are Dynamic by default: they cost no `tools/list` context and are reached through
 `coreai_tools` (`list`, `describe`, then `call`) or by direct name. `COREAI_MCP_NATIVE=save_world,...`
@@ -410,7 +520,12 @@ distinct warning naming the reason whenever one does not:
 ```csharp
 server.ConfigureHostAdminModManagement("studio-host");            // explicit id
 server.ConfigureHostAdminModManagement(actorIdentityProvider);    // id taken from the composed actor; throws unless it is trusted and unrestricted
+server.ConfigureHostAdminModManagementFromComposition();          // the composition's own actor, re-read at every catalog build (what the debug start-up uses)
 ```
+
+With `ConfigureHostAdminModManagementFromComposition` a blank **Host Admin Actor Id** adopts the composed
+actor's id; a non-blank one must still match it. Rules 3 and 4 apply unchanged, so a composition whose
+actor is restricted gets no `manage_mods`.
 
 Turning it on logs a warning at start, and the warning is the accurate description of the risk:
 **every client holding the MCP bearer token receives this authority.**
@@ -557,6 +672,10 @@ particular varies between client versions — check yours if the connection retu
 | WebGL refuses the listener with an actionable reason | `McpHttpServerPlatformEditModeTests`, `CoreAiMcpServerWebGlEditModeTests` |
 | World tools: honest `isError`, `save_world` only with host-admin authority | `WorldPackageMcpToolsEditModeTests` |
 | `screenshot` captures a named camera exactly or fails listing the cameras; no error log outside play mode | `ScreenshotMcpToolEditModeTests`, `MainCameraScreenshotSourceEditModeTests` |
+| `get_unity_logs`, `get_performance`, `game_status` and the request counters | `McpDiagnosticsToolsEditModeTests` (engine-free), `RuntimeDiagnosticsEditModeTests` (the log ring, formatter and frame window, CoreAI Core) |
+| The debug switches, their precedence, the key from the fragment only, the batch-mode rule | `CoreAiMcpDebugOptionsEditModeTests` |
+| Listening before a scope exists, host admin from the composition, the token kept out of the captured log | `CoreAiMcpDebugStartEditModeTests` |
+| `get_mod_logs source=unity` is offered only with the engine log | `GetModLogsUnitySourceEditModeTests` (CoreAI Mods) |
 
 ## Worked example session
 

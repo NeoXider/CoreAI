@@ -741,11 +741,15 @@ namespace CoreAI.Composition
                         rateLimiter: limiter,
                         folderList: folders));
                     // WHY the marshaler: without a host scheduler the tool's wait_seconds answers at once.
+                    // WHY the engine readers here and not a tool of their own: one extra argument costs the
+                    // Programmer a few tokens per request, a separate diagnostics tool a whole definition.
                     policy.AddToolToProfile(luaBuilder,
                         new GetModLogsLlmTool(
                             container.Resolve<ILuaLogService>(),
                             container.ResolveOrDefault<ICoreAISettings>()?.ToolInvocationMarshaler,
-                            container.ResolveOrDefault<CoreAiModSelfRepairEntryPoint>()?.Lifecycle));
+                            container.ResolveOrDefault<CoreAiModSelfRepairEntryPoint>()?.Lifecycle,
+                            container.ResolveOrDefault<CoreAI.Diagnostics.IRuntimeLogSource>(),
+                            container.ResolveOrDefault<CoreAI.Diagnostics.IRuntimePerformanceSource>()));
                     IRbxWorldRuntimeService worldRuntime = container.Resolve<IRbxWorldRuntimeService>();
                     policy.AddToolToProfile(luaBuilder, "save_world",
                         roleId => new SaveWorldLlmTool(worldRuntime, actorIdentityProvider, roleId));

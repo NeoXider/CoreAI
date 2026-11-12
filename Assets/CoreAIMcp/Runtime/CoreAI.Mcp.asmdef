@@ -6,6 +6,8 @@
     "CoreAI.Source",
     "CoreAI.Mods",
     "CoreAI.Mods.Folders",
+    "CoreAI.RbxApi.Instances",
+    "CoreAI.RbxApi.Binding",
     "VContainer"
   ],
   "includePlatforms": [],

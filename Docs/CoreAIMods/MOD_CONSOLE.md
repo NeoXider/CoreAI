@@ -198,10 +198,12 @@ every request; the extension costs 33 tokens, 239 to 272):
 | `since_reload` | With `mod_id`: only entries since the mod's latest load or reload. For a gated load (the AI's `manage_mods`) the cursor sits before the new main chunk ran, so what it printed counts. |
 | `wait_seconds` | 0 to 10: when nothing at warning level or worse is there yet, wait for it and answer as soon as one arrives, otherwise after the wait. The wait is scheduled by the host's `ILlmAsyncMarshaler.DelayAsync`, frame-driven in Unity, so it never blocks and runs in a WebGL player; its length is measured in time, so a hidden browser tab that runs one or two frames a second still answers after `wait_seconds`; a tool built without one answers at once instead of waiting. |
 | `next_sequence` (result) | The cursor for the next call: pass it as `since_sequence`. |
+| `source` | Offered only when the composition provides the engine log (`IRuntimeLogSource`, registered by the CoreAI scope). `unity` reads the Unity log instead of the mod log: warnings and errors unless `level` says otherwise, two stack frames each, its own `next_sequence` cursor, and `fps` (average, slowest frame, frame times over the last five seconds). `mod_id`, `since_reload` and `wait_seconds` do not apply there. 28 tokens per request (272 to 300). |
 
 `LuaModLifecycleLog` writes `loaded`, `reloaded` and `unloaded` lines into the mod log (script name `coreai:lifecycle`,
 which a mod cannot forge) and remembers each mod's latest load. The repair loop's own lines go to the same log (script
-name `coreai:repair`), so the model sees earlier attempts. The MCP `get_mod_logs` forwards both parameters.
+name `coreai:repair`), so the model sees earlier attempts. The MCP `get_mod_logs` forwards both parameters; it has no
+`source`, because MCP clients read the engine log through `get_unity_logs` (`Assets/CoreAIMcp/README.md`).
 
 ## The mod console
 

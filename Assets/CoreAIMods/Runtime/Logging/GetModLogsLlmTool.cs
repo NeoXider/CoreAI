@@ -52,10 +52,44 @@ namespace CoreAI.Ai.Logging
         /// <summary>How often a wait checks whether a warning or error arrived.</summary>
         public const int WaitStepMilliseconds = 100;
 
+        /// <summary>Value of <c>source</c> that reads the Unity log instead of the mod log.</summary>
+        public const string UnitySource = "unity";
+
+        /// <summary>Seconds of frames the <c>source=unity</c> answer summarizes.</summary>
+        public const double UnityFrameRateWindowSeconds = 5d;
+
+        /// <summary>Stack frames kept per warning or error in a <c>source=unity</c> answer.</summary>
+        public const int UnityStackFrames = 2;
+
+        private const string SourceDescription = "unity: engine errors and fps instead (default mods).";
+
         private readonly ILuaLogService _logService;
         private readonly ILlmAsyncMarshaler _asyncMarshaler;
         private readonly LuaModLifecycleLog _lifecycle;
         private readonly Func<double> _elapsedMilliseconds;
+        private readonly CoreAI.Diagnostics.IRuntimeLogSource _runtimeLogs;
+        private readonly CoreAI.Diagnostics.IRuntimePerformanceSource _performance;
+
+        /// <param name="logService">The mod log.</param>
+        /// <param name="asyncMarshaler">Schedules <c>wait_seconds</c>; null answers at once.</param>
+        /// <param name="lifecycle">The recorded load of every mod for <c>since_reload</c>; null scans the log.</param>
+        /// <param name="runtimeLogs">
+        /// The engine log. When present the tool also offers <c>source=unity</c>, which reads it (warnings and errors
+        /// by default) together with a frame-rate summary from <paramref name="performance"/>; null keeps the
+        /// definition without <c>source</c>, so a host without the readers pays nothing for it.
+        /// </param>
+        /// <param name="performance">Frame rate for the <c>source=unity</c> answer; null leaves the fps out.</param>
+        public GetModLogsLlmTool(ILuaLogService logService, ILlmAsyncMarshaler asyncMarshaler,
+            LuaModLifecycleLog lifecycle, CoreAI.Diagnostics.IRuntimeLogSource runtimeLogs,
+            CoreAI.Diagnostics.IRuntimePerformanceSource performance)
+            : this(logService, asyncMarshaler, lifecycle, null)
+        {
+            _runtimeLogs = runtimeLogs;
+            _performance = performance;
+        }
+
+        /// <summary>True when the definition offers <c>source=unity</c>.</summary>
+        public bool OffersUnitySource => _runtimeLogs != null;
 
         public GetModLogsLlmTool(ILuaLogService logService)
             : this(logService, null, null)
@@ -119,6 +153,7 @@ namespace CoreAI.Ai.Logging
             "\"max_entries\":{\"type\":\"integer\",\"description\":\"Most entries (default 50).\"}," +
             "\"since_reload\":{\"type\":\"boolean\",\"description\":\"With mod_id: only entries since its latest load or reload.\"}," +
             "\"wait_seconds\":{\"type\":\"integer\",\"description\":\"Wait up to N seconds (max 10) for a new warning or error.\"}" +
+            (OffersUnitySource ? ",\"source\":{\"type\":\"string\",\"description\":\"" + SourceDescription + "\"}" : "") +
             "}}";
 
         /// <summary>Creates the MEAI function surface for <c>get_mod_logs</c>.</summary>
@@ -127,13 +162,100 @@ namespace CoreAI.Ai.Logging
             // WHY: System.Threading.Tasks.Task is banned by ARCHITECTURE_RULES §3, but this is a
             // framework-boundary exception — MEAI's AIFunctionFactory.Create binds a delegate whose
             // contract is Task<string>; it does not accept UniTask.
-            Func<string, string, long, int, bool, int, CancellationToken, Task<string>> func = ExecuteAsync;
             AIFunctionFactoryOptions options = new()
             {
                 Name = Name,
                 Description = Description
             };
+            if (OffersUnitySource)
+            {
+                // WHY a second method instead of a parameter on ExecuteAsync: the definition must not show source
+                // where the host has no engine log, and the schema comes from the bound method's own parameters.
+                Func<string, string, long, int, bool, int, string, CancellationToken, Task<string>> withSource =
+                    ExecuteWithSourceAsync;
+                return AIFunctionFactory.Create(withSource, options);
+            }
+
+            Func<string, string, long, int, bool, int, CancellationToken, Task<string>> func = ExecuteAsync;
             return AIFunctionFactory.Create(func, options);
+        }
+
+        /// <summary>
+        /// <see cref="ExecuteAsync(string,string,long,int,bool,int,CancellationToken)"/> with a log source:
+        /// <c>mods</c> (default) reads the mod log, <c>unity</c> the engine log (warnings and errors unless
+        /// <c>level</c> says otherwise; <c>mod_id</c>, <c>since_reload</c> and <c>wait_seconds</c> do not apply) plus a
+        /// five-second frame-rate summary.
+        /// </summary>
+        public Task<string> ExecuteWithSourceAsync(
+            [Description("Only this mod.")]
+            string mod_id = null,
+            [Description("Minimum: print, warn, error, runtime_error.")]
+            string level = null,
+            [Description("Only entries after this sequence.")]
+            long since_sequence = 0,
+            [Description("Most entries (default 50).")]
+            int max_entries = DefaultMaxEntries,
+            [Description("With mod_id: only entries since its latest load or reload.")]
+            bool since_reload = false,
+            [Description("Wait up to N seconds (max 10) for a new warning or error.")]
+            int wait_seconds = 0,
+            [Description(SourceDescription)]
+            string source = null,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string chosen = string.IsNullOrWhiteSpace(source) ? "mods" : source.Trim().ToLowerInvariant();
+            if (chosen == "mods" || chosen == "mod")
+            {
+                return ExecuteAsync(mod_id, level, since_sequence, max_entries, since_reload, wait_seconds,
+                    cancellationToken);
+            }
+
+            if (chosen != UnitySource)
+            {
+                return Task.FromResult(Fail($"Unknown source '{source}'. Valid: mods, unity."));
+            }
+
+            if (_runtimeLogs == null)
+            {
+                return Task.FromResult(Fail("This game captures no Unity log; use source=mods."));
+            }
+
+            return Task.FromResult(ReadUnityLog(level, since_sequence, max_entries));
+        }
+
+        private string ReadUnityLog(string level, long sinceSequence, int maxEntries)
+        {
+            if (!CoreAI.Diagnostics.RuntimeLogLevels.TryParse(level, CoreAI.Diagnostics.RuntimeLogLevel.Warning,
+                    out CoreAI.Diagnostics.RuntimeLogLevel minLevel))
+            {
+                return Fail($"Unknown level '{level}'. Valid: print, warn, error, runtime_error.");
+            }
+
+            long latest = _runtimeLogs.LatestSequence;
+            long since = sinceSequence > latest || sinceSequence < 0 ? 0 : sinceSequence;
+            IReadOnlyList<CoreAI.Diagnostics.RuntimeLogEntry> entries = _runtimeLogs.Read(
+                new CoreAI.Diagnostics.RuntimeLogQuery
+                {
+                    SinceSequence = since,
+                    MinLevel = minLevel,
+                    MaxCount = maxEntries > 0 ? maxEntries : DefaultMaxEntries
+                });
+            Newtonsoft.Json.Linq.JObject result = new()
+            {
+                ["success"] = true,
+                ["source"] = UnitySource,
+                ["count"] = entries.Count,
+                ["next_sequence"] = Math.Max(since, latest)
+            };
+            if (_performance != null)
+            {
+                result["fps"] = CoreAI.Diagnostics.RuntimeDiagnosticsJson.FrameRate(
+                    _performance.GetFrameRate(UnityFrameRateWindowSeconds));
+            }
+
+            result["logs"] = CoreAI.Diagnostics.RuntimeLogFormatter.Format(entries, MaxPromptChars, UnityStackFrames);
+            return result.ToString(Formatting.None);
         }
 
         /// <summary>Executes a <c>get_mod_logs</c> query without waiting and returns a JSON result for the model.</summary>

@@ -78,6 +78,23 @@ namespace CoreAI.Mcp.Server
         /// </summary>
         public string Instructions { get; set; }
 
+        private long _requestCount;
+        private long _toolCallCount;
+        private long _toolErrorCount;
+        private string _lastError;
+
+        /// <summary>JSON-RPC messages routed since this dispatcher was created, notifications included.</summary>
+        public long RequestCount => Interlocked.Read(ref _requestCount);
+
+        /// <summary><c>tools/call</c> requests routed.</summary>
+        public long ToolCallCount => Interlocked.Read(ref _toolCallCount);
+
+        /// <summary><c>tools/call</c> requests that ended in a protocol error or an <c>isError</c> result.</summary>
+        public long ToolErrorCount => Interlocked.Read(ref _toolErrorCount);
+
+        /// <summary>The last failure text (a tool's <c>isError</c> text or a protocol error), at most 300 characters.</summary>
+        public string LastError => Volatile.Read(ref _lastError);
+
         /// <summary>Number of <c>tools/call</c> requests that can currently be cancelled by id.</summary>
         public int CancellableCallCount { get { lock (_inFlightGate) return _inFlight.Count; } }
 
@@ -101,6 +118,7 @@ namespace CoreAI.Mcp.Server
         public async Task<McpDispatchResult> DispatchAsync(JObject request, string sessionId,
             CancellationToken cancellationToken)
         {
+            Interlocked.Increment(ref _requestCount);
             JToken id = request?["id"];
             JToken version = request?["jsonrpc"];
             JToken methodToken = request?["method"];
@@ -149,7 +167,11 @@ namespace CoreAI.Mcp.Server
                     }));
 
                 case McpMethods.ToolsCall:
-                    return await HandleToolsCallAsync(id, request, sessionId, cancellationToken).ConfigureAwait(false);
+                    Interlocked.Increment(ref _toolCallCount);
+                    McpDispatchResult called = await HandleToolsCallAsync(id, request, sessionId, cancellationToken)
+                        .ConfigureAwait(false);
+                    NoteFailure(called.Response);
+                    return called;
 
                 default:
                     return McpDispatchResult.Reply(JsonRpc.Error(id, JsonRpcErrorCodes.MethodNotFound,
@@ -273,6 +295,24 @@ namespace CoreAI.Mcp.Server
                     lock (_inFlightGate) _inFlight.Remove(key);
                 }
             }
+        }
+
+        private void NoteFailure(JObject response)
+        {
+            string text = null;
+            if (response?["error"] is JObject error)
+            {
+                text = (string)error["message"];
+            }
+            else if (response?["result"] is JObject result && result["isError"]?.Type == JTokenType.Boolean &&
+                     (bool)result["isError"])
+            {
+                text = (result["content"] as JArray)?.First?["text"]?.ToString() ?? "isError";
+            }
+
+            if (text == null) return;
+            Interlocked.Increment(ref _toolErrorCount);
+            Volatile.Write(ref _lastError, text.Length > 300 ? text.Substring(0, 300) : text);
         }
 
         private void CancelInFlight(string sessionId, JToken requestId)

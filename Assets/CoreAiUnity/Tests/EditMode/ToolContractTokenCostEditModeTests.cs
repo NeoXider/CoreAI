@@ -51,7 +51,9 @@ namespace CoreAI.Tests.EditMode
                 new LuaLlmTool(Inert<LuaTool.ILuaExecutor>(), settings, NullLog.Instance),
                 new LuaModsLlmTool(Inert<ILuaModRuntime>(), settings, NullLog.Instance, LuaCapabilities.All, true,
                     identity, role, Inert<IConfirmedWorldMutationGate>(), null),
-                new GetModLogsLlmTool(Inert<ILuaLogService>()),
+                // WHY with the engine readers: the shipped Programmer definition carries the source argument.
+                new GetModLogsLlmTool(Inert<ILuaLogService>(), null, null,
+                    Inert<CoreAI.Diagnostics.IRuntimeLogSource>(), Inert<CoreAI.Diagnostics.IRuntimePerformanceSource>()),
                 new SaveWorldLlmTool(Inert<IRbxWorldRuntimeService>(), identity, role),
                 new LoadWorldLlmTool(Inert<IRbxWorldRuntimeService>(), identity, role),
                 new ListAutoSavesLlmTool(Inert<IRbxWorldRuntimeService>(), identity, role),

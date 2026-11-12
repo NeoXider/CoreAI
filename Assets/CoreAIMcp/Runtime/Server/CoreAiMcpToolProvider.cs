@@ -90,7 +90,8 @@ namespace CoreAI.Mcp.Server
             Action<string> warningSink,
             IReadOnlyList<IMcpTool> brokeredTools,
             LuaGenerationRateLimiter modRateLimiter,
-            CoreAI.Mods.Folders.IModFolderListStore modFolderList)
+            CoreAI.Mods.Folders.IModFolderListStore modFolderList,
+            IReadOnlyList<IMcpTool> nativeTools = null)
         {
             List<IMcpTool> tools = new();
 
@@ -134,6 +135,14 @@ namespace CoreAI.Mcp.Server
             if (screenshotSource != null)
             {
                 tools.Add(new ScreenshotMcpTool(screenshotSource));
+            }
+
+            if (nativeTools != null)
+            {
+                foreach (IMcpTool tool in nativeTools)
+                {
+                    if (tool != null) tools.Add(tool);
+                }
             }
 
             HashSet<string> brokeredByDefault = new(StringComparer.Ordinal);

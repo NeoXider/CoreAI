@@ -1,5 +1,6 @@
 ﻿using CoreAI.Audit;
 using CoreAI.Authority;
+using CoreAI.Diagnostics;
 using CoreAI.Features.Audit;
 using CoreAI.Infrastructure.Logging;
 using CoreAI.Infrastructure.Messaging;
@@ -40,6 +41,25 @@ namespace CoreAI.Composition
             builder.Register<FilteringGameLogger>(Lifetime.Singleton).As<IGameLogger>();
 
             builder.Register<UnityLog>(Lifetime.Singleton).As<ILog>();
+
+            // WHY host-first: a host that registered its own log or performance source keeps it; otherwise the
+            // process-wide Unity readers serve every scope, so their history survives scene loads.
+            if (!builder.Exists(typeof(IRuntimeLogSource), true))
+            {
+                builder.RegisterInstance<IRuntimeLogSource>(UnityRuntimeLogCapture.Shared);
+            }
+
+            if (!builder.Exists(typeof(IRuntimePerformanceSource), true))
+            {
+                builder.RegisterInstance<IRuntimePerformanceSource>(UnityRuntimePerformanceMonitor.Shared);
+            }
+
+            builder.RegisterBuildCallback(static resolver =>
+            {
+                (resolver.ResolveOrDefault<IRuntimeLogSource>() as UnityRuntimeLogCapture)?.EnsureStarted();
+                (resolver.ResolveOrDefault<IRuntimePerformanceSource>() as UnityRuntimePerformanceMonitor)
+                    ?.EnsureStarted();
+            });
 
             MessagePipeOptions opts = builder.RegisterMessagePipe();
             builder.RegisterMessageBroker<ApplyAiGameCommand>(opts);
