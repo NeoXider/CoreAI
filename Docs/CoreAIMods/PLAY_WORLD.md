@@ -91,14 +91,23 @@ after a page reload unless the player once loaded a save. **Keep World Between S
 on) keeps it:
 
 - The default world becomes the world that opens on the next start, recorded as a whole world package (tree, Terrain
-  cells, the exact mod sources) as it changes: a mod source change at once, a Terrain write or an AI change to the
-  world tree at most once a minute (`RbxWorldRuntimeSessionController.KeptWorldRefreshInterval`, unless the host set
-  `StartupRefreshInterval`), the first change after a quiet interval at once. Nothing is recorded while nothing
-  changes. A record captures and encodes the whole world on the main thread, so it is a short hitch; `/save` is
-  the way to record at once.
+  cells, the exact mod sources) once it stopped changing: 3 s after the last change
+  (`RbxWorldRuntimeSessionController.KeptWorldQuietTime`), and at the latest 60 s after the first change of a burst
+  (`KeptWorldRefreshInterval`) for a player who never stops. A change is a Terrain write, an AI change, a mod source
+  change, an instance of the world added or removed outside the AI's calls, or a change of the Workspace number
+  `CoreAIWorldEdits` (a mod raises it for what it keeps itself, such as the Block World's torch list). Nothing is
+  recorded while nothing changes. A record captures and encodes the whole world on the main thread, a hitch of about
+  120-190 ms at a Block World's radius 8 in the editor; `/save` records at once.
 - A world generator marks its own Terrain writes by setting the workspace attribute `CoreAITerrainGenerating` to
   true around them: cells made from a seed come back from it, so streaming alone records nothing. A Terrain write
   made while it is false (a player's block, a falling block) marks the world for its next record.
+- A mod's own instances are never stored in a world package (the mod makes them again); a mod that keeps
+  something of its own across a restart lists it in a Workspace attribute, which the package keeps, and raises
+  `CoreAIWorldEdits` when it changes.
+- A mod the AI (or any trusted host actor) loaded starts after a restart with the host's rights it had then;
+  a mod a restricted actor loaded stays restricted (`LuaModManifest.OwnerHadHostAuthority`, written only when
+  true). A mod that throws while the kept world restores stays stopped and is reported; the rest of the world
+  opens.
 - `/save` records the world now. In a browser the page stores it a moment later: Unity persists the storage on its
   own since 6.3 and gives no completion signal.
 - A restored world takes a strictly newer version of a bundled sample, by the seeder's rule (a bundle whose

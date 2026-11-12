@@ -58,7 +58,7 @@ Sections (read_skill('Rbx API', section='<name>')):
 - Signals are DEFERRED: handlers run at the next script-resumption point, not where the signal fires,
   and the order of several connections is NOT guaranteed. A handler may `task.wait()`. A one-off
   execute_lua chunk has no owning mod: Connect/Once/ConnectParallel/Wait there raise CONTEXT_VIOLATION,
-  so put listeners, UI and AI agents in a mod. Its `report()`/`print()` lines come back as `Printed`.
+  so put listeners, UI and AI agents in a mod.
 - Budgets are per resume: loop forever only if the loop yields (`while true do task.wait() end`). A
   resume that never yields, or keeps too much memory alive, is cut with BUDGET_EXCEEDED, and the cut
   CANNOT be caught (`pcall`/`xpcall` let it through): fix the loop, do not wrap it.
@@ -131,6 +131,8 @@ scene load, domain reload, leaving play mode): report it, do not retry, until th
 - `typeof(v)` returns Roblox type names (""Instance"", ""Vector3"", ""EnumItem"", ...). `warn(...)`
   writes to the mod log at Warn level (get_mod_logs shows it). Errors of a one-off execute_lua
   chunk carry no `[mod:...]` prefix.
+- What an execute_lua chunk writes with `report()` or `print()` comes back in its result as `Printed`
+  (the last 600 characters), next to `Output`, the chunk's return value.
 - Signals: `:Connect()`, `:Once()`, and `:Wait()` work; firing queues handlers, and the queue flushes
   at every script-resumption point of the frame loop. `:ConnectParallel()` is `:Connect()` (runs
   serially, logs once per mod). Each handler gets its own copy of a table argument (no metatable).

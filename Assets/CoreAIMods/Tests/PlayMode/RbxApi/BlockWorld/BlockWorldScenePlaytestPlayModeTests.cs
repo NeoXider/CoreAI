@@ -8,6 +8,7 @@ using CoreAI.Mods.Rbx.Instances.Terrain;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
+using VContainer;
 
 namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
 {
@@ -746,6 +747,35 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
 
         // ---- the body: 1.8 blocks, steps, a jump, a sprint, flight, a villager, a crown overhead ----------------------
 
+        /// <summary>
+        /// The Terrain renderer's state of the chunk holding <paramref name="studs"/>: queued for a rebuild (pending) or
+        /// built, and whether its view has a collider with a mesh. Read through reflection: a diagnostic of the trace.
+        /// </summary>
+        private string ChunkStatus(RbxVector3 studs)
+        {
+            object renderer = _bootstrap.Composition.ModsScope.Container
+                .ResolveOrDefault<CoreAI.Mods.Rbx.Binding.RbxWorldHost>()?.TerrainPresenter?.Renderer;
+            if (renderer == null)
+            {
+                return "no renderer";
+            }
+
+            System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.NonPublic
+                                                   | System.Reflection.BindingFlags.Instance;
+            System.Collections.IDictionary dirty =
+                renderer.GetType().GetField("_dirtyFull", flags)?.GetValue(renderer) as System.Collections.IDictionary;
+            System.Collections.IDictionary views =
+                renderer.GetType().GetField("_views", flags)?.GetValue(renderer) as System.Collections.IDictionary;
+            TerrainChunkCoord coord = new(Mathf.FloorToInt(studs.X / Cell) >> TerrainChunkCoord.Shift,
+                Mathf.FloorToInt(studs.Y / Cell) >> TerrainChunkCoord.Shift,
+                Mathf.FloorToInt(studs.Z / Cell) >> TerrainChunkCoord.Shift);
+            bool pending = dirty != null && dirty.Contains(coord.Key) && Equals(dirty[coord.Key], true);
+            object view = views != null && views.Contains(coord.Key) ? views[coord.Key] : null;
+            MeshCollider collider = view?.GetType().GetProperty("Collider")?.GetValue(view) as MeshCollider;
+            bool hasCollider = collider != null && collider.enabled && collider.sharedMesh != null;
+            return (pending ? "pending" : "built") + (hasCollider ? " with collider" : " without collider");
+        }
+
         private float HeadTopY()
         {
             RunOnce("test_head_top_", "local c = game:GetService('Players'):GetPlayers()[1].Character local high = -math.huge "
@@ -797,20 +827,66 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
                 .Append(((top - feet) / Cell).ToString("0.00")).Append(" blocks), eyes ")
                 .Append((EyePosition().Y - feet).ToString("0.00")).Append(" over the feet | ");
 
-            // Onto the one-block step: walk at it from the cell next to it and jump, seen from the side, three frames.
-            // WHY the cell next to it: from two cells away the jump peaks before the step, as a player's would.
+            // Onto the one-block step as a player does it: forward held all the way (a mod that moves the character
+            // every Heartbeat, as a held W does) and Space pressed once, seen from the side, three frames. Every frame of
+            // the jump is traced: the root, its velocity, MoveDirection, the state and the physics port's held steps.
             StandOnCell(startX + sx, ground, startZ + sz);
             yield return Frames(20);
             float startY = RootY();
-            RunOnce("test_walk_step_", "local h = game:GetService('Players'):GetPlayers()[1].Character.Humanoid "
-                                       + "h:Move(Vector3.new(" + Lua(flat.X) + ", 0, " + Lua(flat.Z) + "), false) h.Jump = true");
+            RbxVector3 jumpFrom = RootPosition(Humanoid());
+            CoreAI.Mods.Rbx.Binding.UnityRbxPhysicsPort port = _bootstrap.Composition.ModsScope.Container
+                .ResolveOrDefault<CoreAI.Mods.Rbx.Binding.RbxWorldHost>()?.PhysicsPort;
+            long heldBefore = port?.HeldCharacterSteps ?? -1;
+            long forcedBefore = port?.ForcedCharacterBuilds ?? -1;
+            RunAsPlayer("test_hold_forward", "local h = game:GetService('Players'):GetPlayers()[1].Character.Humanoid "
+                                             + "game:GetService('RunService').Heartbeat:Connect(function() "
+                                             + "h:Move(Vector3.new(" + Lua(flat.X) + ", 0, " + Lua(flat.Z) + "), false) end)");
+            yield return Frames(2);
+            Press(_keyboard.spaceKey);
             float jumpStart = Time.time;
             int jumpShot = 1;
             float highest = startY;
+            System.Text.StringBuilder trace = new();
+            RbxVector3 previous = RootPosition(Humanoid());
+            float previousTime = Time.time;
+            int traced = 0;
+            bool stoodOnTop = false;
             while (Time.time - jumpStart < 1.2f)
             {
                 yield return null;
+                if (traced == 3)
+                {
+                    Release(_keyboard.spaceKey);
+                }
+
+                RbxVector3 now = RootPosition(Humanoid());
+                float dt = Mathf.Max(Time.time - previousTime, 0.0001f);
+                RbxVector3 velocity = (now - previous) / dt;
+                previous = now;
+                previousTime = Time.time;
+                RbxVector3 move = Humanoid().MoveDirection;
+                RbxVector3 along = now - jumpFrom;
+                trace.Append((Time.time - jumpStart).ToString("0.000")).Append(" s: up ")
+                    .Append((now.Y - startY).ToString("0.00")).Append(" forward ")
+                    .Append((along.X * flat.X + along.Z * flat.Z).ToString("0.00")).Append(" v (")
+                    .Append(velocity.X.ToString("0.0")).Append(", ").Append(velocity.Y.ToString("0.0")).Append(", ")
+                    .Append(velocity.Z.ToString("0.0")).Append(") move (").Append(move.X.ToString("0.00")).Append(", ")
+                    .Append(move.Z.ToString("0.00")).Append(") ").Append(Humanoid().GetState()).Append(" held ")
+                    .Append(port != null ? port.HeldCharacterSteps - heldBefore : -1).Append(" forced ")
+                    .Append(port != null ? port.ForcedCharacterBuilds - forcedBefore : -1).Append(" | feet chunk ")
+                    .Append(ChunkStatus(new RbxVector3(now.X, now.Y - 4f, now.Z))).Append(", step chunk ")
+                    .Append(ChunkStatus(new RbxVector3((startX + sx * 2 + 0.5f) * Cell, (ground + 1.5f) * Cell,
+                        (startZ + sz * 2 + 0.5f) * Cell))).Append('\n');
+                traced++;
                 highest = Mathf.Max(highest, RootY());
+                // WHY forward stops on top: the step is one block wide, and a player who keeps walking steps off its
+                // far side, as the first trace showed (on top, Running at 4 studs up, then off the far edge).
+                if (!stoodOnTop && now.Y - startY > 3.5f && Humanoid().GetState() == RbxHumanoidState.Running)
+                {
+                    stoodOnTop = true;
+                    Session().CurrentConcreteRuntime.UnloadMod(PlayerActor(), "test_hold_forward");
+                    RunOnce("test_stop_on_top_", "game:GetService('Players'):GetPlayers()[1].Character.Humanoid:Move(Vector3.zero, false)");
+                }
                 if (jumpShot <= 3 && Time.time - jumpStart >= new[] { 0.05f, 0.3f, 1.1f }[jumpShot - 1])
                 {
                     yield return ShootWithUi("body_jump_" + jumpShot + ".png");
@@ -818,11 +894,20 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
                 }
             }
 
+            if (!stoodOnTop)
+            {
+                Session().CurrentConcreteRuntime.UnloadMod(PlayerActor(), "test_hold_forward");
+            }
+
             RunOnce("test_stop_", "game:GetService('Players'):GetPlayers()[1].Character.Humanoid:Move(Vector3.zero, false)");
             yield return Frames(20);
             float onStep = RootY() - startY;
+            System.IO.File.WriteAllText(System.IO.Path.Combine(_outputFolder, "jump_trace.txt"), trace.ToString());
             body.Append("walking at the one-block step with a jump: rose ").Append((highest - startY).ToString("0.0"))
-                .Append(", ended ").Append(onStep.ToString("0.0")).Append(" studs up (on it: ").Append(onStep > 3f).Append(") | ");
+                .Append(", ended ").Append(onStep.ToString("0.0")).Append(" studs up (on it: ").Append(onStep > 3f)
+                .Append("); held steps ").Append(port != null ? port.HeldCharacterSteps - heldBefore : -1)
+                .Append(", forced builds ").Append(port != null ? port.ForcedCharacterBuilds - forcedBefore : -1)
+                .Append(" (trace in jump_trace.txt) | ");
 
             // Sprint: W alone, then Left Control and W, each 0.6 s from the same place.
             StandOnCell(startX - sx * 1, ground, startZ - sz * 1 - pz * 3 + pz * 3);
@@ -909,13 +994,17 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
             yield return Frames(30);
             RbxVector3 fastFrom = RootPosition(Humanoid());
             Press(_keyboard.leftCtrlKey);
-            yield return Hold(_keyboard.wKey, 0.4f);
+            Press(_keyboard.wKey);
+            yield return Frames(6);
+            object flySprintSpeed = Humanoid().WalkSpeed;
+            yield return Hold(_keyboard.wKey, 0.3f);
             Release(_keyboard.leftCtrlKey);
             float flownFast = (new RbxVector3(RootPosition(Humanoid()).X - fastFrom.X, 0f, RootPosition(Humanoid()).Z - fastFrom.Z)).Magnitude;
             body.Append("flight: after Space twice ").Append(flightState).Append("; from a hover Space 0.5 s rose ")
                 .Append((hoverB - hoverA).ToString("0.0")).Append(", Left Shift 0.5 s sank ").Append((hoverB - hoverC).ToString("0.0"))
                 .Append("; W 0.4 s flew ").Append(flown.ToString("0.0")).Append(", Left Control and W 0.4 s ")
-                .Append(flownFast.ToString("0.0")).Append(" | ");
+                .Append(flownFast.ToString("0.0")).Append(" (WalkSpeed with Left Control in flight ").Append(flySprintSpeed)
+                .Append(") | ");
             Press(_keyboard.spaceKey);
             yield return Frames(3);
             Release(_keyboard.spaceKey);

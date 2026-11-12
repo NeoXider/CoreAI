@@ -1845,7 +1845,11 @@ namespace CoreAI.Mods.WorldPackages
             Array.Empty<CoreAI.Infrastructure.Lua.IBundledModSource>();
         private RbxTerrain _watchedTerrain;
         private RbxInstance _watchedWorkspace;
+        private InstanceRegistry _watchedKeptRegistry;
         private Action<TerrainChangeSet> _onWatchedTerrainChanged;
+        private Action<InstanceRecord> _onKeptInstanceAddedOrRemoved;
+        private object _lastWorldEdits;
+        private bool _worldEditsSeen;
         private string _lastKeptRecord = "";
 
         public RbxWorldRuntimeSessionController(
@@ -2043,18 +2047,41 @@ namespace CoreAI.Mods.WorldPackages
             {
                 _keepWorld = true;
                 _bundledForRestore = bundled ?? Array.Empty<CoreAI.Infrastructure.Lua.IBundledModSource>();
-                // WHY a longer interval unless the host chose one: a record captures and encodes the whole world on
-                // the main thread (measured 40 ms with 26 Terrain chunks in the editor), so a player who keeps
-                // building would get that hitch every 5 s; /save records at once.
+                // WHY a debounce unless the host chose its own: a record captures and encodes the whole world on the
+                // main thread (about 120 ms at radius 8 in the editor), so it waits until the player stopped changing
+                // the world for a moment, and one who never stops gets a record a minute; /save records at once.
                 if (_startupRefreshInterval == DefaultStartupRefreshInterval)
                 {
                     _startupRefreshInterval = KeptWorldRefreshInterval;
                 }
+
+                // WHY at least the quiet time: the instant edit loop sets a shorter debounce for the AI's bursts, and a
+                // kept world's player must have stopped building before the hitch of a record.
+                if (_startupRefreshDebounce < KeptWorldQuietTime)
+                {
+                    _startupRefreshDebounce = KeptWorldQuietTime;
+                }
             }
         }
 
-        /// <summary>The <see cref="StartupRefreshInterval"/> a kept world uses unless the host set its own: 60 s.</summary>
+        /// <summary>
+        /// The longest a kept world's change waits for its record while the world keeps changing: 60 s (the
+        /// <see cref="StartupRefreshInterval"/> unless the host set its own).
+        /// </summary>
         public static readonly TimeSpan KeptWorldRefreshInterval = TimeSpan.FromSeconds(60d);
+
+        /// <summary>
+        /// How long a kept world must stay unchanged before its changes are recorded: 3 s (the
+        /// <see cref="StartupRefreshDebounce"/> of a kept world is at least this).
+        /// </summary>
+        public static readonly TimeSpan KeptWorldQuietTime = TimeSpan.FromSeconds(3d);
+
+        /// <summary>
+        /// A number on the Workspace a mod raises after a change the world should keep that is neither a Terrain write
+        /// nor an instance of the world (a torch a mod rebuilds from its own attribute): a kept world is then recorded
+        /// like after a block.
+        /// </summary>
+        public const string WorldEditsAttribute = "CoreAIWorldEdits";
 
         /// <summary>
         /// After a start that restored nothing: makes the default world the world that opens on the next start, when
@@ -2127,6 +2154,8 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             RbxInstance workspace = session?.RbxApi?.Game?.FindFirstChildOfClass("Workspace");
+            WatchWorldEditsOf(workspace);
+            WatchInstancesOf(session?.RbxApi?.Registry);
             RbxTerrain terrain = workspace != null ? RbxTerrainBootstrap.Find(workspace) : null;
             if (ReferenceEquals(terrain, _watchedTerrain))
             {
@@ -2156,12 +2185,56 @@ namespace CoreAI.Mods.WorldPackages
                 return;
             }
 
-            lock (_gate)
+            DebounceStartupRefresh(true);
+        }
+
+        /// <summary>Marks a kept world when <see cref="WorldEditsAttribute"/> changed since the last frame.</summary>
+        private void WatchWorldEditsOf(RbxInstance workspace)
+        {
+            object edits = workspace?.GetAttribute(WorldEditsAttribute);
+            if (!_worldEditsSeen || !ReferenceEquals(workspace, _watchedWorkspace))
             {
-                if (_liveStartupSource != null && !_disposed)
-                {
-                    _worldRefreshDeferred = true;
-                }
+                _worldEditsSeen = true;
+                _lastWorldEdits = edits;
+                return;
+            }
+
+            if (!Equals(edits, _lastWorldEdits))
+            {
+                _lastWorldEdits = edits;
+                DebounceStartupRefresh(true);
+            }
+        }
+
+        /// <summary>Follows the registry, so an instance of the world added or removed outside the gate marks it.</summary>
+        private void WatchInstancesOf(InstanceRegistry registry)
+        {
+            if (ReferenceEquals(registry, _watchedKeptRegistry))
+            {
+                return;
+            }
+
+            _onKeptInstanceAddedOrRemoved ??= OnKeptInstanceAddedOrRemoved;
+            if (_watchedKeptRegistry != null)
+            {
+                _watchedKeptRegistry.Registered -= _onKeptInstanceAddedOrRemoved;
+                _watchedKeptRegistry.Unregistered -= _onKeptInstanceAddedOrRemoved;
+            }
+
+            _watchedKeptRegistry = registry;
+            if (registry != null)
+            {
+                registry.Registered += _onKeptInstanceAddedOrRemoved;
+                registry.Unregistered += _onKeptInstanceAddedOrRemoved;
+            }
+        }
+
+        private void OnKeptInstanceAddedOrRemoved(InstanceRecord record)
+        {
+            // WHY only the world's own instances: a mod's are rebuilt by the mod and never stored in the package.
+            if (record != null && IsWorldOwned(record) && !(record.Instance is RbxTerrain))
+            {
+                DebounceStartupRefresh(true);
             }
         }
 
@@ -2974,10 +3047,25 @@ namespace CoreAI.Mods.WorldPackages
                 // WHY the package's format decides: in a version 1 world every active mod starts at its legacy
                 // placement or gets its script instance there, while in version 2 a declared mod whose instance the
                 // world does not hold is detached and does not start (MVP4 rule R3).
+                // WHY a kept world's startup keeps going past a failing mod: the player's world is worth more than
+                // one mod, which stays stopped and is reported; a load the player confirmed stays all or nothing.
+                bool keepGoing = restoredStartup != null && KeepsWorldBetweenStarts;
                 int started = stagedStack.Runtime.RehydrateExactOrThrow(
                     _hostGrant, _allowFull,
                     payload.FormatVersion < RbxWorldPackageSerializer.ScriptBindingsFormatVersion,
+                    keepGoing,
                     out IReadOnlyList<string> notStarted);
+                if (keepGoing)
+                {
+                    foreach (string skipped in notStarted)
+                    {
+                        if (skipped.Contains("(failed: "))
+                        {
+                            ReportDiagnostic("The kept world opened without mod " + skipped
+                                             + "; the rest of the world runs.");
+                        }
+                    }
+                }
                 int expected = CountActive(payload.Mods) - notStarted.Count;
                 if (started != expected)
                 {

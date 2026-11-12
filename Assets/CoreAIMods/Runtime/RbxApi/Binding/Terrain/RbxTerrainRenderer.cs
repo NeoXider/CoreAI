@@ -440,6 +440,43 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             return _buildScratch.Count > 0;
         }
 
+        /// <inheritdoc />
+        public bool IsColliderMissingIn(Bounds unityBounds, out Vector3 nearestCentre)
+        {
+            nearestCentre = default;
+            if (_disposed || _dirtyFull.Count == 0)
+            {
+                return false;
+            }
+
+            CollectPendingIn(unityBounds, _buildScratch);
+            double best = double.MaxValue;
+            bool missing = false;
+            Vector3 centre = unityBounds.center;
+            double cell = TerrainBoxRasterizer.CellStuds;
+            for (int index = 0; index < _buildScratch.Count; index++)
+            {
+                TerrainChunkCoord coord = _buildScratch[index];
+                if (_views.ContainsKey(coord.Key))
+                {
+                    continue;
+                }
+
+                float half = TerrainChunkCoord.Size * 0.5f;
+                Vector3 chunkCentre = RbxSpace.ToUnity(new RbxVector3((float)((coord.MinCellX + half) * cell),
+                    (float)((coord.MinCellY + half) * cell), (float)((coord.MinCellZ + half) * cell)));
+                double distance = (chunkCentre - centre).sqrMagnitude;
+                if (distance < best)
+                {
+                    best = distance;
+                    nearestCentre = chunkCentre;
+                    missing = true;
+                }
+            }
+
+            return missing;
+        }
+
         private void CollectPendingIn(Bounds unityBounds, List<TerrainChunkCoord> into)
         {
             into.Clear();

@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_survival
 name: Block World 8 - Survival
-version: 1.1.0
+version: 1.1.1
 active: false
 capabilities: All
 category: Samples/Block World
@@ -10,7 +10,7 @@ description: Part of the Block World demo. Survival as a small loop on the Human
 ]]
 
 -- A fall is measured from the highest point of the Humanoid's Freefall to where it lands (Landed or Running), so a
--- jump that lands higher costs nothing and flying (the Flying state) never counts. Humanoid.StateChanged says when a
+-- jump that lands higher costs nothing, and flying or a fall into water (Flying, Swimming) never counts. StateChanged says when a
 -- fall starts and ends; while one lasts, Heartbeat follows the root up to its highest point. The damage goes through
 -- Humanoid:TakeDamage, so Health, HealthChanged and Died are Roblox's own; the respawn is the Players service's
 -- (CharacterAutoLoads after RespawnTime), and blockworld_world puts the new character at the spawn.
@@ -27,6 +27,7 @@ local RESPAWN_SECONDS = 3
 
 local FREEFALL = Enum.HumanoidStateType.Freefall
 local FLYING = Enum.HumanoidStateType.Flying
+local SWIMMING = Enum.HumanoidStateType.Swimming
 local LANDED = Enum.HumanoidStateType.Landed
 local RUNNING = Enum.HumanoidStateType.Running
 
@@ -86,7 +87,9 @@ local function follow(character)
     connections[#connections + 1] = humanoid.StateChanged:Connect(function(_, new)
         if new == FREEFALL then
             peak = rootHeight(humanoid)
-        elseif new == FLYING then
+        elseif new == FLYING or new == SWIMMING then
+            -- WHY water ends the fall: a fall into deep water goes Freefall to Swimming with no Landed between, and
+            -- climbing out later must not count the old height as a fall.
             peak = nil
         elseif peak and (new == LANDED or new == RUNNING) then
             landed(humanoid)

@@ -3665,6 +3665,7 @@ namespace CoreAI.Mods.WorldPackages
                 SeededHash = source.SeededHash ?? "",
                 Author = source.Author ?? "",
                 OwnerActorId = source.OwnerActorId ?? "",
+                OwnerHadHostAuthority = source.OwnerHadHostAuthority,
                 Capabilities = source.Capabilities ?? "",
                 Active = source.Active,
                 UpdateAvailable = source.UpdateAvailable,

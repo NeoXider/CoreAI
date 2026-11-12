@@ -63,6 +63,14 @@ namespace CoreAI.Ai
         public string OwnerActorId = "";
 
         /// <summary>
+        /// True when <see cref="OwnerActorId"/> loaded this mod with the host's authority (an unrestricted, trusted
+        /// actor). A restore gives the mod that authority back only when its owner is still the composition's
+        /// trusted host actor; the flag alone never grants anything. Written only when true.
+        /// </summary>
+        [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
+        public bool OwnerHadHostAuthority;
+
+        /// <summary>
         /// The granted <see cref="LuaCapabilities"/> flag set as a string (round-trips via
         /// <c>Enum.Parse</c>). Treated as a request only; never trusted to escalate on load.
         /// </summary>

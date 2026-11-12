@@ -97,6 +97,7 @@
     <Compile Include="$(TestsRoot)/LuaCsSecureSandboxEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaCsSecureSandboxEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaCsTableSummaryEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaCsTableSummaryEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaCsExecuteLuaPrintedEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaCsExecuteLuaPrintedEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/LuaModHostAuthorityRestoreEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaModHostAuthorityRestoreEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaCsWithheldApiStubEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaCsWithheldApiStubEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/LuaGenerationRateLimiterEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/LuaGenerationRateLimiterEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/P3InstantEditFixtures.cs" Link="Assets/CoreAIMods/Tests/EditMode/P3InstantEditFixtures.cs" />

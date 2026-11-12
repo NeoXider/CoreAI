@@ -314,6 +314,83 @@ namespace CoreAI.Tests.PlayMode.RbxApi.Terrain
             Assert.Less(blocked.Root.X, 40f, "a one-block-high gap stops it");
         }
 
+        // ---- queued chunks ----------------------------------------------------------------------------------------
+
+        [UnityTest]
+        public IEnumerator AJumpOntoAStep_WhileTheChunksAroundAreQueuedForARemeshEveryStep_IsAsFastAsWithAnIdleQueue()
+        {
+            yield return CornerLayout();
+            Walker idle = Spawn(new RbxVector3(50f, 0f, 63f), 1f, 64f);
+            float idleTime = idle.JumpOntoStep(DefaultJumpHeight, 64f, 68f, out float _, "corner step, idle queue");
+            float idleHighest = idle.HighestFeet;
+            idle.Despawn();
+            yield return null;
+
+            Walker busy = Spawn(new RbxVector3(50f, 0f, 63f), 1f, 64f);
+            busy.EveryStep = ChurnCornerChunks;
+            float busyTime = busy.JumpOntoStep(DefaultJumpHeight, 64f, 68f, out float _,
+                "corner step, eight chunks re-queued every step");
+            Record("held steps " + _port.HeldCharacterSteps + ", built past the cap " + _port.ForcedCharacterBuilds);
+
+            Assert.LessOrEqual(busyTime, idleTime + 0.1f, "a busy queue does not slow the jump onto the step");
+            Assert.AreEqual(idleHighest, busy.HighestFeet, 0.1f, "and never shortens it");
+        }
+
+        [UnityTest]
+        public IEnumerator WalkingOntoGroundThatWasNeverBuilt_BuildsItOutOfTurn_AndWalksOn()
+        {
+            yield return Layout(stepBlocks: 0, stepFrom: 10);
+            Fill(10, -2, 0, 40, 4, 40, TerrainMaterials.Air);
+            Walker walker = Spawn(new RbxVector3(30f, 0f, 32f), 1f);
+            walker.Settle(0.3f);
+            TerrainMaterials.TryGetSlot("Grass", out byte grass);
+            Fill(10, -2, 0, 40, 4, 40, grass);
+            walker.Run(3f, new RbxVector3(1f, 0f, 0f), false, "onto ground written a moment ago");
+
+            Assert.AreEqual(FloorTop, walker.Feet, 0.05f, "it never falls through the new ground");
+            Assert.Greater(walker.Root.X, 30f + 0.8f * (float)WalkSpeed * 3f - 4f, "and walks on");
+        }
+
+        /// <summary>
+        /// A Grass floor with its top at 64 studs, the bottom of chunk row 1, and a step one block high from x 64 (a
+        /// chunk border); every chunk round the corner at x 64, z 64 holds a cell, so each has been built.
+        /// </summary>
+        private IEnumerator CornerLayout()
+        {
+            TerrainMaterials.TryGetSlot("Grass", out byte grass);
+            Fill(0, 10, 0, 40, 16, 40, grass);
+            Fill(0, 16, 0, 40, 26, 40, TerrainMaterials.Air);
+            Fill(16, 16, 0, 40, 17, 40, grass);
+            ChurnCornerChunks();
+            RbxTerrainRenderer renderer = (RbxTerrainRenderer)_presenter.Renderer;
+            while (renderer.PendingChunkCount > 0)
+            {
+                renderer.ProcessDirty(int.MaxValue, double.MaxValue);
+            }
+
+            yield return null;
+        }
+
+        private bool _churnFlip;
+
+        /// <summary>Re-writes one cell in each of the eight chunks round the corner, so each is queued for a remesh.</summary>
+        private void ChurnCornerChunks()
+        {
+            TerrainMaterials.TryGetSlot(_churnFlip ? "Rock" : "Brick", out byte material);
+            _churnFlip = !_churnFlip;
+            for (int cx = 0; cx <= 1; cx++)
+            {
+                for (int cy = 0; cy <= 1; cy++)
+                {
+                    for (int cz = 3; cz <= 4; cz++)
+                    {
+                        _terrain.Store.SetCell(cx * 16 + 2, cy * 16 + (cy == 0 ? 12 : 14), cz * 16 - 40 + 2, material,
+                            TerrainOccupancy.Full);
+                    }
+                }
+            }
+        }
+
         // ---- character against character ----------------------------------------------------------------------------
 
         [UnityTest]
@@ -559,6 +636,12 @@ namespace CoreAI.Tests.PlayMode.RbxApi.Terrain
 
             public RbxCharacterBodyShape Shape { get; }
 
+            /// <summary>Runs before every fixed step (a world change the step should see).</summary>
+            public Action EveryStep { get; set; }
+
+            /// <summary>The highest the feet got during the last <see cref="JumpOntoStep"/>.</summary>
+            public float HighestFeet { get; private set; }
+
             public UnityRbxCharacterMotor Motor => _motor;
 
             public RbxVector3 Root => RbxSpace.FromUnity(_body.position);
@@ -637,6 +720,7 @@ namespace CoreAI.Tests.PlayMode.RbxApi.Terrain
                     walkedOnPerSecond = Root.X - from;
                 }
 
+                HighestFeet = maxFeet;
                 Record(name + ": on top after " + (float.IsPositiveInfinity(onTop) ? "never (3 s)" : F(onTop) + " s")
                        + ", highest feet " + F(maxFeet) + " (top " + F(top) + "), final x " + F(Root.X)
                        + ", walked on " + F(walkedOnPerSecond * 2f) + " studs/s");
@@ -716,6 +800,7 @@ namespace CoreAI.Tests.PlayMode.RbxApi.Terrain
 
             private void Tick(RbxVector3 direction, bool jump)
             {
+                EveryStep?.Invoke();
                 _world._port.ApplyGravity();
                 _motor.Move(direction);
                 if (jump && _motor.IsGrounded)

@@ -233,6 +233,34 @@ Instance.new('PointLight').Parent = flame");
         }
 
         [Test]
+        public void P6_Torches_AreListedOnTheWorkspace_AndAWorldWithTheListAndNoTorches_GetsThemBack()
+        {
+            _world.Load(Mod);
+            PointAtFloor(2, 2);
+            _world.Click(RightButton);
+            PointAtFloor(6, 6);
+            _world.Click(RightButton);
+            string listed = (string)_world.Attribute("BlockWorldTorchCells");
+            object edits = _world.Attribute("CoreAIWorldEdits");
+
+            // A restored world: the Workspace keeps the list, the mod's own parts are gone.
+            _world.Stack.Runtime.UnloadMod(Mod);
+            RbxInstance folder = _world.Workspace.FindFirstChild("BlockWorldTorches");
+            folder?.Destroy();
+            _world.SetAttribute("BlockWorldTorchCells", listed);
+            _world.Load(Mod);
+
+            Assert.AreEqual("2,1,2,0,1,0;6,1,6,0,1,0", listed, "each torch's cell and the face it stands on");
+            Assert.AreEqual(2d, System.Convert.ToDouble(edits), "each torch tells a kept world it changed");
+            Assert.IsNotNull(Folder.FindFirstChild("Torch_2_1_2"), "the torches come back from the list");
+            Assert.IsNotNull(Folder.FindFirstChild("Torch_6_1_6"));
+            Assert.AreEqual(2, Lights().Count, "lit");
+            Assert.AreEqual(2d, System.Convert.ToDouble(_world.Attribute("CoreAIWorldEdits")),
+                "putting them back is no new change of the world");
+            _world.AssertHealthy(Mod);
+        }
+
+        [Test]
         public void P6_Torches_ACeiling_IsRefused_NegativeTwin()
         {
             _world.Load(Mod);

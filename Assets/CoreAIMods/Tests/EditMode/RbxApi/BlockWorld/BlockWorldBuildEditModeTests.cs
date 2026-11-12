@@ -121,6 +121,32 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         }
 
         [Test]
+        public void P6_Build_Here_IsTheCrosshairsPlaceCell_WhenItHasATarget()
+        {
+            AimAtTopOf(3, 3);
+            _world.Frame(20);
+
+            Assert.AreEqual(Cell(3, 1, 3), _world.Attribute("BuildHereCell"), "the empty cell over the outlined block");
+            Assert.AreEqual(_world.Attribute("CrosshairPlaceCell"), _world.Attribute("BuildHereCell"));
+            Assert.AreEqual("crosshair", _world.Attribute("BuildHereFrom"));
+        }
+
+        [Test]
+        public void P6_Build_Here_WithoutATarget_IsTheGroundThreeCellsAhead_Twin()
+        {
+            _world.ConnectLocalPlayer();
+            _world.LoadSource("test_stand", "game:GetService('Players'):GetPlayers()[1].Character:PivotTo(CFrame.new(10, 12, 10))");
+            _world.Aim(new RbxVector3(10, 14, 10), new RbxVector3(10, 30, 50));
+            _world.Frame(20);
+
+            Assert.AreEqual(false, _world.Attribute("CrosshairHasTarget"), "the crosshair points at the sky");
+            Assert.AreEqual(Cell(2, 1, 5), _world.Attribute("BuildHereCell"),
+                "the first empty cell over the ground three cells ahead along the level look (+Z)");
+            Assert.AreEqual("ahead", _world.Attribute("BuildHereFrom"));
+            _world.AssertHealthy(Mod);
+        }
+
+        [Test]
         public void P6_Build_ALeftClick_BreaksExactlyTheOutlinedCell_InTheFrameOfTheClick()
         {
             AimAtTopOf(1, 1);

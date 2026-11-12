@@ -195,6 +195,14 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             return Renderer is IRbxTerrainColliderReadiness readiness && readiness.IsGeometryPendingIn(unityBounds);
         }
 
+        /// <inheritdoc />
+        public bool IsColliderMissingIn(Bounds unityBounds, out Vector3 nearestCentre)
+        {
+            nearestCentre = default;
+            return Renderer is IRbxTerrainColliderReadiness readiness
+                   && readiness.IsColliderMissingIn(unityBounds, out nearestCentre);
+        }
+
         /// <summary>
         /// True (the default) while the per-frame build budget follows the last frames (<see cref="TerrainFrameBudget"/>);
         /// setting <see cref="MaxMillisecondsPerFrame"/> fixes it instead.

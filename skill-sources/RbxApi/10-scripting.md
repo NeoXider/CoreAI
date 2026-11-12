@@ -7,6 +7,8 @@
 - `typeof(v)` returns Roblox type names ("Instance", "Vector3", "EnumItem", ...). `warn(...)`
   writes to the mod log at Warn level (get_mod_logs shows it). Errors of a one-off execute_lua
   chunk carry no `[mod:...]` prefix.
+- What an execute_lua chunk writes with `report()` or `print()` comes back in its result as `Printed`
+  (the last 600 characters), next to `Output`, the chunk's return value.
 - Signals: `:Connect()`, `:Once()`, and `:Wait()` work; firing queues handlers, and the queue flushes
   at every script-resumption point of the frame loop. `:ConnectParallel()` is `:Connect()` (runs
   serially, logs once per mod). Each handler gets its own copy of a table argument (no metatable).

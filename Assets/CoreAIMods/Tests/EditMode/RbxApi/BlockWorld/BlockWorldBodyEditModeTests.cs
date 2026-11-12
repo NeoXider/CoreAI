@@ -1,5 +1,6 @@
 using System.Threading;
 using CoreAI.Mods.Rbx.Datatypes;
+using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Terrain;
 using NUnit.Framework;
 
@@ -140,6 +141,56 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
 
             Assert.AreEqual(17d, standing, 0.01d, "no sprint without going forward");
             Assert.AreEqual(17d, swimming, 0.01d, "no sprint in water");
+            _world.AssertHealthy("blockworld_build");
+        }
+
+        /// <summary>A motor in deep water, off the ground: its Humanoid swims.</summary>
+        private sealed class SwimmingMotor : IRbxCharacterMotor
+        {
+            public RbxVector3 Position => RbxVector3.Zero;
+
+            public RbxVector3 MoveDirection => RbxVector3.Zero;
+
+            public bool IsGrounded => false;
+
+            public RbxWaterContact Water => new(true, true, 100d);
+
+            public bool SetSwimming(bool swimming)
+            {
+                return true;
+            }
+
+            public void SetWalkSpeed(double studsPerSecond)
+            {
+            }
+
+            public void Jump(double jumpPower, double jumpHeight, bool useJumpPower)
+            {
+            }
+
+            public void MoveTo(RbxVector3? targetStuds)
+            {
+            }
+        }
+
+        [Test]
+        public void P6_Body_LeftControlAndW_WhileSwimming_DoesNotSprint()
+        {
+            _world = new BlockWorldTestWorld();
+            _world.Roblox.AttachCharacterMotorFactory(_ => new SwimmingMotor());
+            _world.ConnectLocalPlayer();
+            _world.Load("blockworld_build");
+            Probe("game:GetService('Players'):GetPlayers()[1].Character.Humanoid.WalkSpeed = 17");
+            _world.Frame(3);
+            Probe("workspace:SetAttribute('TestState', game:GetService('Players'):GetPlayers()[1].Character.Humanoid:GetState().Name)");
+            object state = _world.Attribute("TestState");
+            _world.Input.PressKey(KeyW);
+            _world.Input.PressKey(KeyLeftControl);
+            _world.Frame(2);
+
+            Assert.AreEqual("Swimming", state, "the character swims");
+            Assert.AreEqual(17d, WalkSpeed(), 0.01d, "no sprint while swimming");
+            Assert.AreEqual(false, _world.Attribute("BlockWorldSprinting"));
             _world.AssertHealthy("blockworld_build");
         }
     }

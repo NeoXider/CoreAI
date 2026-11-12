@@ -1,12 +1,12 @@
 --[[@coreai
 id: blockworld_build
 name: Block World 2 - Build
-version: 1.3.0
+version: 1.4.0
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo. Breaking and placing blocks at the crosshair: a thin outline shows the block you look at, left click breaks it, right click places the hotbar block on the face you look at, holding a button repeats, and nothing happens beyond a reach of five blocks. Bedrock cannot be broken and a block is never placed inside you. G switches between creative (endless blocks) and survival (you place what you broke, and a tree trunk gives planks); you start in first person, as in Minecraft, and V switches to third person behind your character and back. Left Control held, or W tapped twice, sprints while you walk forward (1.3 times the walk; twice the flying speed in the air), never while flying down, in water or with the chat open. Publishes the crosshair cell as workspace attributes (CrosshairCell, CrosshairPlaceCell, CrosshairNormal) so the AI and other mods build where you look.
+description: Part of the Block World demo. Breaking and placing blocks at the crosshair: a thin outline shows the block you look at, left click breaks it, right click places the hotbar block on the face you look at, holding a button repeats, and nothing happens beyond a reach of five blocks. Bedrock cannot be broken and a block is never placed inside you. G switches between creative (endless blocks) and survival (you place what you broke, and a tree trunk gives planks); you start in first person, as in Minecraft, and V switches to third person behind your character and back. Left Control held, or W tapped twice, sprints while you walk forward (1.3 times the walk; twice the flying speed in the air), never while flying down, in water or with the chat open. Publishes the crosshair cell as workspace attributes (CrosshairCell, CrosshairPlaceCell, CrosshairNormal) so the AI and other mods build where you look, and BuildHereCell: the cell "here" is, the crosshair's place cell or, when it points at nothing within reach, the ground three cells ahead.
 ]]
 
 -- The target is found once per frame: a ray from the camera along its look direction (the crosshair is the
@@ -18,8 +18,8 @@ description: Part of the Block World demo. Breaking and placing blocks at the cr
 --
 -- Reads: BlockWorldSelected (the hotbar item; set by blockworld_hud, Grass when nobody set it).
 -- Writes: CrosshairHasTarget, CrosshairCell, CrosshairPlaceCell, CrosshairNormal, CrosshairPartName, CrosshairModelName,
---         BlockWorldCreative, BlockWorldPlaced, BlockWorldBroken, BlockWorldCount_<Material>, BlockWorldNotice,
---         BlockWorldSprinting.
+--         BuildHereCell, BuildHereFrom, BlockWorldCreative, BlockWorldPlaced, BlockWorldBroken, BlockWorldCount_<Material>,
+--         BlockWorldNotice, BlockWorldSprinting.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -200,6 +200,73 @@ local function refreshTarget()
     end
 end
 
+-- ---- "here" for the AI ------------------------------------------------------------------------------
+-- WHY always a cell: a request to build "here" while the crosshair points past the reach (at the sky, at far land) had
+-- no cell, and a model then surveyed the land for many tool rounds. BuildHereCell is the crosshair's place cell when
+-- there is a target (BuildHereFrom "crosshair"), else the first empty cell over the ground HERE_AHEAD cells in front of
+-- the player along the camera's level look (BuildHereFrom "ahead"); it is kept fresh every HERE_SECONDS.
+local HERE_AHEAD = 3
+local HERE_SECONDS = 0.25
+local HERE_ABOVE, HERE_BELOW = 8, 16    -- rows over and under the player's own searched for the ground
+local hereClock = HERE_SECONDS
+local hereKey = nil
+
+local function groundAhead()
+    local camera = workspace.CurrentCamera
+    if not camera then
+        return nil
+    end
+    local character = localCharacter()
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    local from = root and root.Position or camera.CFrame.Position
+    local look = camera.CFrame.LookVector
+    local level = Vector3.new(look.X, 0, look.Z)
+    if level.Magnitude < 0.1 then
+        local facing = root and root.CFrame.LookVector or Vector3.new(0, 0, -1)
+        level = Vector3.new(facing.X, 0, facing.Z)
+    end
+    if level.Magnitude < 0.1 then
+        return nil
+    end
+    local cell = terrain:WorldToCell(from + level.Unit * (HERE_AHEAD * CELL))
+    local top = cell.Y + HERE_ABOVE
+    local bottom = math.max(BEDROCK_ROW, cell.Y - HERE_BELOW)
+    local corner = terrain:CellCornerToWorld(cell.X, bottom, cell.Z)
+    local materials, occupancy = terrain:ReadVoxels(
+        Region3.new(corner, corner + Vector3.new(CELL, (top - bottom + 1) * CELL, CELL)), 4)
+    for index = top - bottom + 1, 1, -1 do
+        local material = materials[1][index][1]
+        if occupancy[1][index][1] > 0 and material ~= Enum.Material.Air and material ~= Enum.Material.Water then
+            return Vector3.new(cell.X, bottom + index, cell.Z)
+        end
+    end
+    return nil
+end
+
+local function publishHere(cell, from)
+    local key = cell and (from .. cellKey(cell)) or ""
+    if key == hereKey then
+        return
+    end
+    hereKey = key
+    workspace:SetAttribute("BuildHereCell", cell)
+    workspace:SetAttribute("BuildHereFrom", cell and from or "")
+end
+
+local function refreshHere(dt)
+    if target and target.kind == "Terrain" then
+        publishHere(target.place, "crosshair")
+        hereClock = HERE_SECONDS
+        return
+    end
+    hereClock = hereClock + dt
+    if hereClock < HERE_SECONDS then
+        return
+    end
+    hereClock = 0
+    publishHere(groundAhead(), "ahead")
+end
+
 -- ---- breaking and placing --------------------------------------------------------------------------
 
 local function readCell(cell)
@@ -368,9 +435,10 @@ local function updateSprint()
     if humanoid ~= sprintHumanoid then
         sprintHumanoid, sprintSpeed = humanoid, nil
     end
-    local flying = humanoid:GetState() == Enum.HumanoidStateType.Flying
+    local state = humanoid:GetState()
+    local flying = state == Enum.HumanoidStateType.Flying
     local sprinting = (sprintKeyHeld or sprintTapped) and forwardHeld and not (flying and shiftHeld)
-        and not inWater(root)
+        and state ~= Enum.HumanoidStateType.Swimming and not inWater(root)
     if sprinting then
         if not sprintSpeed then
             baseSpeed = humanoid.WalkSpeed
@@ -446,6 +514,7 @@ end)
 
 RunService.Heartbeat:Connect(function(dt)
     refreshTarget()
+    refreshHere(dt)
     updateSprint()
     if breakHeld or placeHeld then
         repeatTimer = repeatTimer - dt

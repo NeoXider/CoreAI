@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_torches
 name: Block World 5 - Torches
-version: 1.1.0
+version: 1.2.0
 active: false
 capabilities: All
 category: Samples/Block World
@@ -54,8 +54,23 @@ if not folder then
     folder.Parent = workspace
 end
 
+-- WHY the cells on the Workspace: a saved world keeps the Workspace's attributes but not a mod's parts, so the torches
+-- come back from this list (BlockWorldTorchCells, "x,y,z,nx,ny,nz;..."), and CoreAIWorldEdits tells a world kept between
+-- starts that a torch changed, as a block does.
+local restoring = false
+
 local function publish()
     workspace:SetAttribute("BlockWorldTorches", #torches)
+    local cells = {}
+    for index, torch in ipairs(torches) do
+        local normal = torch.cell - torch.support
+        cells[index] = torch.cell.X .. "," .. torch.cell.Y .. "," .. torch.cell.Z .. ","
+            .. normal.X .. "," .. normal.Y .. "," .. normal.Z
+    end
+    workspace:SetAttribute("BlockWorldTorchCells", table.concat(cells, ";"))
+    if not restoring then
+        workspace:SetAttribute("CoreAIWorldEdits", (workspace:GetAttribute("CoreAIWorldEdits") or 0) + 1)
+    end
 end
 
 local function readOccupancy(cell)
@@ -203,6 +218,7 @@ RunService.Heartbeat:Connect(function(dt)
     end
 end)
 
+restoring = true
 if adopting then
     for _, stick in ipairs(folder:GetChildren()) do
         local cell, support = stick:GetAttribute("TorchCell"), stick:GetAttribute("TorchSupport")
@@ -214,5 +230,19 @@ if adopting then
     end
 end
 
+-- A saved world's torches: placed again from the list the last session published (a reload of this mod keeps its
+-- folder and adopts it instead).
+local saved = workspace:GetAttribute("BlockWorldTorchCells")
+if not adopting and type(saved) == "string" then
+    for entry in string.gmatch(saved, "[^;]+") do
+        local x, y, z, nx, ny, nz = string.match(entry, "^(-?%d+),(-?%d+),(-?%d+),(-?%d+),(-?%d+),(-?%d+)$")
+        if x then
+            placeTorch(Vector3.new(tonumber(x), tonumber(y), tonumber(z)),
+                Vector3.new(tonumber(nx), tonumber(ny), tonumber(nz)))
+        end
+    end
+end
+
 publish()
+restoring = false
 print("[blockworld] torches ready - choose slot 9 and right click a floor or a wall (budget " .. MAX_LIT .. ").")

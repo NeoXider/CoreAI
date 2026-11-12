@@ -9,8 +9,8 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
     /// <summary>
     /// P6, the Block World's survival mod (<c>blockworld_survival</c>) on the Humanoid's own health, with a character
     /// motor the test lifts off the ground and sets down again: a fall of more than three blocks costs health in
-    /// survival, a long one kills and the player comes back at the spawn, and the HUD's attributes follow. Twins: a
-    /// short fall costs nothing, and creative takes no damage at all.
+    /// survival, a long one kills and the player comes back at the spawn, and the HUD's attributes follow; a fall into
+    /// deep water costs nothing. Twins: a short fall costs nothing, and creative takes no damage at all.
     /// </summary>
     [TestFixture]
     public sealed class BlockWorldSurvivalEditModeTests
@@ -23,10 +23,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
         private FallingMotor _motor;
         private int _moves;
 
-        /// <summary>A motor whose ground contact the test switches; the root's height is set with PivotTo.</summary>
+        /// <summary>
+        /// A motor whose ground contact and water the test switches; the root's height is set with PivotTo.
+        /// </summary>
         private sealed class FallingMotor : IRbxCharacterMotor
         {
             public bool Grounded { get; set; } = true;
+
+            public RbxWaterContact Water { get; set; } = RbxWaterContact.Dry;
+
+            public bool SetSwimming(bool swimming)
+            {
+                return true;
+            }
 
             public RbxVector3 Position => RbxVector3.Zero;
 
@@ -100,6 +109,26 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
             Assert.AreEqual(30d, System.Convert.ToDouble(_world.Attribute("BlockWorldHealth")), 0.01d);
             Assert.AreEqual(100d, System.Convert.ToDouble(_world.Attribute("BlockWorldMaxHealth")), 0.01d);
             StringAssert.Contains("fall of 10 blocks", (string)_world.Attribute("BlockWorldNotice"));
+            _world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_Survival_AFallIntoDeepWater_CostsNothing_EvenAfterClimbingOutOntoTheBank()
+        {
+            PlaceAt(100);
+            _world.Frame(2);
+            _motor.Grounded = false;
+            _world.Frame(3);
+            PlaceAt(60);
+            _motor.Water = new RbxWaterContact(true, true, 70d);
+            _world.Frame(3);
+            object swimming = Humanoid.GetState();
+            _motor.Water = RbxWaterContact.Dry;
+            _motor.Grounded = true;
+            _world.Frame(3);
+
+            Assert.AreEqual(RbxHumanoidState.Swimming, swimming, "a fall into deep water swims");
+            Assert.AreEqual(100d, Humanoid.Health, 0.01d, "water breaks the fall, also once the player climbs out");
             _world.AssertHealthy(Mod);
         }
 

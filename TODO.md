@@ -555,6 +555,15 @@ Owner's questions and decisions on the Block World (2026-11-11):
       the client composition (MVP4 C5), and a Mirror run under `MIRROR` on 96.11.4.
 - [ ] **WebGL build of the Block World with a launcher and fps numbers** (owner request), after the visual
       fixes and after the Lua VM update to 0.5.8 is in.
+- [ ] **A world kept between starts: on by default?** `CoreAiModsLifetimeScope.keepWorldBetweenStarts` is off
+      by default and on in the Block World (2026-11-12). Decide whether every play world keeps itself, and do
+      the chunked encode first: one record of a radius-8 Block World takes about 120 ms on the main thread
+      (measured 119 to 330 ms under load, 156 to 174 KB on disk), which is why it is recorded 3 s after the
+      last change and not while the player builds. In a WebGL player a record can also be refused by the
+      package's work-budget check ("Startup world not updated: ...").
+- [ ] **Remember an API key on the device?** The Hub's AI Settings remember the server's address and model
+      and never the key (project rule), so a paid API needs its key typed again after every restart. Owner
+      decision; in a browser it would be browser storage.
 - [ ] **Paste an image from the clipboard into the chat with the agent** (owner request, 2026-11-12, "not
       now"): Ctrl+V in the Hub chat and in the in-world chat attaches the clipboard's picture to the message, for
       something copied from the web or a screenshot just taken. Needs: a clipboard image reader per platform (the

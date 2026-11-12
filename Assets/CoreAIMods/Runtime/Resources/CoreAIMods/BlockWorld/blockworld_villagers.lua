@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_villagers
 name: Block World 6 - Villagers
-version: 1.5.0
+version: 1.5.1
 active: false
 capabilities: All
 category: Samples/Block World
@@ -154,7 +154,7 @@ local function buildBody(villager)
         extra.offset = CFrame.new(extra.offset.Position * scale)
     end
     model.Parent = workspace
-    villager.model, villager.root = model, root
+    villager.model, villager.root, villager.humanoid = model, root, humanoid
 end
 
 -- The hair and the eyes are not R6 parts, so the rig leaves them alone: they follow the Head from RenderStepped,
@@ -292,6 +292,81 @@ local function levelSpot(spot)
         end
     end
     return nil
+end
+
+-- ---- around another character -----------------------------------------------------------------------
+-- WHY a step aside: characters block each other, and the platform ends a walk that one blocks after a second
+-- (MoveToFinished with false). Sent at the same point again, the villager would stand against the player; it steps
+-- a block and a half aside instead (away from whoever is nearest, the other side on the next try), and after two
+-- tries it waits for its brain's next decision. NpcDetour on the Model is the step's point while it lasts.
+local DETOUR_STUDS = 6
+local DETOUR_TRIES = 2
+local CROWD_STUDS = 10
+
+local function nearestOther(villager)
+    local at = villager.root.Position
+    local best, bestDistance = nil, CROWD_STUDS
+    local function consider(position)
+        local distance = (Vector3.new(position.X, at.Y, position.Z) - at).Magnitude
+        if distance < bestDistance then
+            best, bestDistance = position, distance
+        end
+    end
+    local playerRoot = rootOf(localPlayer())
+    if playerRoot then
+        consider(playerRoot.Position)
+    end
+    for _, other in ipairs(VILLAGERS) do
+        if other ~= villager and other.root and other.root.Parent then
+            consider(other.root.Position)
+        end
+    end
+    return best
+end
+
+local function stepAside(villager)
+    local at = villager.root.Position
+    local blocker = nearestOther(villager)
+    local away
+    if blocker then
+        away = Vector3.new(at.X - blocker.X, 0, at.Z - blocker.Z)
+    else
+        local look = villager.root.CFrame.LookVector
+        away = Vector3.new(-look.X, 0, -look.Z)
+    end
+    away = away.Magnitude > 0.1 and away.Unit or Vector3.new(1, 0, 0)
+    local side = Vector3.new(-away.Z, 0, away.X)
+    if villager.detourTries % 2 == 0 then
+        side = -side
+    end
+    for _, direction in ipairs({ side, (side + away).Unit, away }) do
+        local spot = at + direction * DETOUR_STUDS
+        if standable(spot) then
+            villager.detour = Vector3.new(spot.X, at.Y, spot.Z)
+            villager.model:SetAttribute("NpcDetour", villager.detour)
+            villager.humanoid:MoveTo(villager.detour)
+            return
+        end
+    end
+    villager.detour = nil
+    villager.model:SetAttribute("NpcDetour", nil)
+end
+
+local function onWalkEnded(villager, reached)
+    if reached or villager.detourTries >= DETOUR_TRIES then
+        villager.detourTries, villager.detour = 0, nil
+        villager.model:SetAttribute("NpcDetour", nil)
+        return
+    end
+    villager.detourTries = villager.detourTries + 1
+    stepAside(villager)
+end
+
+for _, villager in ipairs(VILLAGERS) do
+    villager.detourTries = 0
+    villager.humanoid.MoveToFinished:Connect(function(reached)
+        onWalkEnded(villager, reached)
+    end)
 end
 
 -- WHY one search a frame: a search can cost a hundred ground probes, and three in one Heartbeat would crowd the

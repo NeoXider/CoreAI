@@ -2115,7 +2115,7 @@ namespace CoreAI.Ai.LuaCs
                 EnsureModCapacity(modId, ownerActorId);
             }
 
-            PersistMod(modId, luaCode, capabilities, ownerActorId, true);
+            PersistMod(modId, luaCode, capabilities, ownerActorId, true, built.OwnerHasHostAuthority);
             try
             {
                 demandSourceKept(modId);
@@ -5728,9 +5728,10 @@ namespace CoreAI.Ai.LuaCs
                     // holds the mod's declared capabilities. Overwriting it with the masked tier would
                     // permanently strip Full from the store, so a later allowFull rehydrate could not
                     // restore it.
+                    bool hostAuthority = RestoresHostAuthority(ownerActorId, stored ?? manifest);
                     Action load = () => LoadModInternal(
                         modId, source, ownerActorId, effectiveCaps, false,
-                        ownerActorId.Length == 0, storedContext: storedContext);
+                        hostAuthority, storedContext: storedContext);
                     if (start == RestoreStart.AfterTheServerSide)
                     {
                         (clientSide ??= new List<Action>()).Add(() =>
@@ -5770,6 +5771,52 @@ namespace CoreAI.Ai.LuaCs
             }
 
             return loaded;
+        }
+
+        /// <summary>
+        /// The trusted host actor of this composition (the identity the AI's tools load mods as), read when a stored mod
+        /// is restored; null restores every owned mod without the host's authority.
+        /// </summary>
+        public Func<ActorContext> TrustedHostResolver { get; set; }
+
+        /// <summary>
+        /// Whether a stored mod starts with the host's authority: a mod without an owner always does; an owned one only
+        /// when it was loaded with that authority (<see cref="LuaModManifest.OwnerHadHostAuthority"/>) and its owner is
+        /// still this composition's trusted, unrestricted host actor. A mod a restricted actor loaded never gains it.
+        /// </summary>
+        private bool RestoresHostAuthority(string ownerActorId, LuaModManifest stored)
+        {
+            if (string.IsNullOrEmpty(ownerActorId))
+            {
+                return true;
+            }
+
+            if (stored == null || !stored.OwnerHadHostAuthority || TrustedHostResolver == null)
+            {
+                return false;
+            }
+
+            ActorContext host;
+            try
+            {
+                host = TrustedHostResolver();
+            }
+            catch (Exception ex)
+            {
+                _log?.Warn($"[LuaCsModRuntime] Reading the trusted host actor failed: {ex.Message}");
+                return false;
+            }
+
+            return host.IsTrusted && host.Grants.IsUnrestricted
+                                  && string.Equals(host.ActorId, ownerActorId, StringComparison.Ordinal);
+        }
+
+        private bool LoadedWithHostAuthority(string modId)
+        {
+            lock (_gate)
+            {
+                return _mods.TryGetValue(Normalize(modId), out Mod mod) && mod.OwnerHasHostAuthority;
+            }
         }
 
         /// <summary>One deferred rehydrate load, with the quiet skip of <see cref="RehydrateFromStore"/>.</summary>
@@ -5815,6 +5862,18 @@ namespace CoreAI.Ai.LuaCs
         internal int RehydrateExactOrThrow(LuaCapabilities hostGrant, bool allowFull, bool legacyScriptPlacement,
             out IReadOnlyList<string> notStarted)
         {
+            return RehydrateExactOrThrow(hostGrant, allowFull, legacyScriptPlacement, false, out notStarted);
+        }
+
+        /// <summary>
+        /// <see cref="RehydrateExactOrThrow(LuaCapabilities, bool, bool, out IReadOnlyList{string})"/> that, with
+        /// <paramref name="keepGoingPastFailingMods"/>, starts the rest of the world when a mod throws while it starts:
+        /// that mod stays stopped (its source and manifest are kept) and is named in <paramref name="notStarted"/> as
+        /// <c>id (failed: message)</c>. A missing or inconsistent package still fails the whole candidate.
+        /// </summary>
+        internal int RehydrateExactOrThrow(LuaCapabilities hostGrant, bool allowFull, bool legacyScriptPlacement,
+            bool keepGoingPastFailingMods, out IReadOnlyList<string> notStarted)
+        {
             ThrowIfShutdown();
             IReadOnlyList<LuaModManifest> manifests = _sourceStore.List()
                 ?? throw new InvalidOperationException(
@@ -5823,6 +5882,7 @@ namespace CoreAI.Ai.LuaCs
             ordered.Sort(CompareRestoreOrder);
             int loaded = 0;
             List<Action> clientSide = new();
+            List<string> clientSideIds = new();
             List<string> skipped = new();
             for (int index = 0; index < ordered.Count; index++)
             {
@@ -5868,32 +5928,61 @@ namespace CoreAI.Ai.LuaCs
                     continue;
                 }
 
+                bool hostAuthority = RestoresHostAuthority(ownerActorId, stored);
                 Action load = () => LoadModInternal(
                     modId,
                     source,
                     ownerActorId,
                     effectiveCaps,
                     false,
-                    ownerActorId.Length == 0,
+                    hostAuthority,
                     storedContext: stored.Context);
                 if (start == RestoreStart.AfterTheServerSide)
                 {
                     clientSide.Add(load);
+                    clientSideIds.Add(modId);
                     continue;
                 }
 
-                load();
-                loaded++;
+                if (StartRestored(modId, load, keepGoingPastFailingMods, skipped))
+                {
+                    loaded++;
+                }
             }
 
             for (int index = 0; index < clientSide.Count; index++)
             {
-                clientSide[index]();
-                loaded++;
+                if (StartRestored(clientSideIds[index], clientSide[index], keepGoingPastFailingMods, skipped))
+                {
+                    loaded++;
+                }
             }
 
             notStarted = skipped;
             return loaded;
+        }
+
+        /// <summary>Starts one restored mod; with <paramref name="keepGoing"/> a throw is noted instead of rethrown.</summary>
+        private bool StartRestored(string modId, Action load, bool keepGoing, List<string> skipped)
+        {
+            if (!keepGoing)
+            {
+                load();
+                return true;
+            }
+
+            try
+            {
+                load();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                string message = (ex.Message ?? "").Replace("\r", " ").Replace("\n", " ");
+                _log?.Warn($"[LuaCsModRuntime] Restore did not start mod '{modId}'; the rest of the world starts: {message}");
+                skipped.Add(modId + " (failed: " + message + ")");
+                return false;
+            }
         }
 
         /// <summary>
@@ -6091,7 +6180,7 @@ namespace CoreAI.Ai.LuaCs
         /// stored one, and is stamped like a first load only when the store holds no manifest for it.
         /// </summary>
         private void PersistMod(string modId, string source, LuaCapabilities caps, string ownerActorId,
-            bool firstLoad)
+            bool firstLoad, bool? ownerHasHostAuthority = null)
         {
             if (!_autoPersistMods)
             {
@@ -6114,6 +6203,10 @@ namespace CoreAI.Ai.LuaCs
                 }
 
                 LuaModManifest manifest = BuildManifest(modId, source ?? "", caps, true, existing, ownerActorId);
+                // WHY kept with an owner only: a mod without one is the host's already, and a restore reads the flag
+                // together with the owner (RestoresHostAuthority).
+                manifest.OwnerHadHostAuthority = manifest.OwnerActorId.Length > 0
+                                                 && (ownerHasHostAuthority ?? LoadedWithHostAuthority(modId));
                 // WHY no lock: two first loads racing may read the same maximum and share a value;
                 // CompareRestoreOrder breaks such a tie by id.
                 manifest.LoadOrder = firstLoad || existing == null

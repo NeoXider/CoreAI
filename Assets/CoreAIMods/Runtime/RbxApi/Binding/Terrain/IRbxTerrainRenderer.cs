@@ -49,6 +49,13 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
 
         /// <summary>True while a chunk overlapping <paramref name="unityBounds"/> waits for its faces or collider.</summary>
         bool IsGeometryPendingIn(Bounds unityBounds);
+
+        /// <summary>
+        /// True while a chunk overlapping <paramref name="unityBounds"/> has never been built, so it has no collider at
+        /// all; <paramref name="nearestCentre"/> is the centre of the one nearest the box's centre. A chunk that has a
+        /// collider and only waits for a rebuild does not count: its old collider holds for one more step.
+        /// </summary>
+        bool IsColliderMissingIn(Bounds unityBounds, out Vector3 nearestCentre);
     }
 
     /// <summary>

@@ -617,6 +617,7 @@ namespace CoreAI.Ai.Hub
                 manifest.SeededHash = existing.SeededHash;
                 manifest.Entry = string.IsNullOrEmpty(existing.Entry) ? manifest.Entry : existing.Entry;
                 manifest.OwnerActorId = existing.OwnerActorId ?? "";
+                manifest.OwnerHadHostAuthority = existing.OwnerHadHostAuthority;
                 manifest.LoadOrder = existing.LoadOrder;
             }
             else
@@ -802,6 +803,7 @@ namespace CoreAI.Ai.Hub
                 SeededHash = source.SeededHash,
                 Author = source.Author,
                 OwnerActorId = source.OwnerActorId,
+                OwnerHadHostAuthority = source.OwnerHadHostAuthority,
                 Capabilities = source.Capabilities,
                 Active = source.Active,
                 UpdateAvailable = source.UpdateAvailable,

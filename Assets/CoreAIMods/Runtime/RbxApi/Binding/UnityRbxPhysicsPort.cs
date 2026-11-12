@@ -107,27 +107,49 @@ namespace CoreAI.Mods.Rbx.Binding
                 if (terrain != null)
                 {
                     terrain.EnsureColliders(SweptBounds(body), MaxColliderBuildsPerBody);
-                    // WHY a character waits: past the cap its own next step may still lie in a queued chunk, and a
-                    // body moved into a chunk whose collider appears a step later ends up inside the block.
+                    // WHY only a chunk with no collider at all: a chunk that has one and only waits for a rebuild
+                    // (the land streaming in, a block placed or broken) keeps its old collider for one more step;
+                    // holding for it stopped every jump near a busy chunk. A missing collider past the cap would let
+                    // the body into a block whose collider appears a step later, so only the horizontal motion into it
+                    // waits; the vertical motion, a jump or a fall, is never touched.
                     if (UnityRbxCharacterMotor.TryGetFeet(body, out float _)
-                        && terrain.IsGeometryPendingIn(NextStepBounds(body)))
+                        && terrain.IsColliderMissingIn(NextStepBounds(body), out Vector3 missingCentre))
                     {
                         _heldSeconds.TryGetValue(body, out float held);
                         if (held < MaxCharacterHoldSeconds)
                         {
                             _heldSeconds[body] = held + Time.fixedDeltaTime;
-                            body.linearVelocity = Vector3.zero;
+                            Vector3 velocity = body.linearVelocity;
+                            Vector3 toward = missingCentre - body.position;
+                            toward.y = 0f;
+                            float length = Mathf.Sqrt(toward.sqrMagnitude);
+                            if (length > 1e-4f)
+                            {
+                                toward /= length;
+                                float into = velocity.x * toward.x + velocity.z * toward.z;
+                                if (into > 0f)
+                                {
+                                    velocity.x -= toward.x * into;
+                                    velocity.z -= toward.z * into;
+                                    body.linearVelocity = velocity;
+                                }
+                            }
+
                             HeldCharacterSteps++;
-                            continue;
                         }
-
-                        // WHY build past the cap after the hold: a queue starved by a burst must never freeze a
-                        // player; after a quarter second its next step's chunks are built now, whatever they cost.
-                        terrain.EnsureColliders(NextStepBounds(body));
-                        ForcedCharacterBuilds++;
+                        else
+                        {
+                            // WHY build past the cap after the hold: a queue starved by a burst must never freeze a
+                            // player; after a quarter second its next step's chunks are built now, whatever they cost.
+                            terrain.EnsureColliders(NextStepBounds(body));
+                            ForcedCharacterBuilds++;
+                            _heldSeconds.Remove(body);
+                        }
                     }
-
-                    _heldSeconds.Remove(body);
+                    else
+                    {
+                        _heldSeconds.Remove(body);
+                    }
                 }
 
                 if (TerrainHits is CoreAI.Mods.Rbx.Binding.Terrain.IRbxTerrainSolidCells cells)

@@ -451,6 +451,9 @@ namespace CoreAI.Ai.LuaCs
                 engine.CoroutineResumeBudget);
             executor.LocalActorResolver = options.LocalActorResolver;
             executor.FrameYielder = options.FrameYielder;
+            // WHY the same resolver: the actor the plain execute seam trusts is the host whose mods a restore may
+            // start with the host's authority again (LuaCsModRuntime.RestoresHostAuthority).
+            runtime.TrustedHostResolver = options.LocalActorResolver;
 
             return new LuaCsModStack(runtime, executor, bindings);
         }

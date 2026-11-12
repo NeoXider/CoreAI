@@ -39,11 +39,12 @@ namespace CoreAI.Demos.BlockWorld
         /// </summary>
         public const string HereContext =
             "This game is the Block World: a voxel world in workspace.Terrain, in cells of 4 studs. \"Here\" is the "
-            + "workspace attribute CrosshairPlaceCell: a Vector3 of whole cell numbers, the empty cell in front of the "
-            + "block the player looks at; build up from it. CrosshairCell is the block looked at, CrosshairHasTarget "
-            + "is false for the sky or beyond reach. A build here is a Terrain write starting at CrosshairPlaceCell "
-            + "(Terrain:FillBlock or FillRegion over the cells, or WriteVoxels); there is no need to read the land "
-            + "first. The RbxApi skill's building section builds a watchtower this way.";
+            + "workspace attribute BuildHereCell: a Vector3 of whole cell numbers, always set - the empty cell in front "
+            + "of the block the player looks at (CrosshairPlaceCell), or, when the crosshair points at nothing within "
+            + "reach, the first empty cell on the ground three cells in front of the player. Build up from it. A build "
+            + "here is a Terrain write starting at that cell (Terrain:FillBlock or FillRegion over the cells, or "
+            + "WriteVoxels); there is no need to survey or read the land first. The RbxApi skill's building section "
+            + "builds a watchtower this way.";
 
         [Tooltip("Mod folder switched on in this scene's mods store at every start; its sub-folders are included.")]
         [SerializeField]
@@ -233,7 +234,25 @@ namespace CoreAI.Demos.BlockWorld
         }
 
         /// <summary>
-        /// The Programmer's world state in this scene: <see cref="HereContext"/> and the crosshair cell as it is now.
+        /// The line about "here" right now: the cell (<c>BuildHereCell</c>) and where it comes from (<c>BuildHereFrom</c>:
+        /// <c>crosshair</c> or <c>ahead</c>); a line that says so when the build mod has published no cell yet.
+        /// </summary>
+        public static string DescribeHere(object cell, object from)
+        {
+            if (!(cell is RbxVector3 here))
+            {
+                return "Right now there is no BuildHereCell yet (the land in front of the player is still being made).";
+            }
+
+            string at = "(" + (int)here.X + ", " + (int)here.Y + ", " + (int)here.Z + ")";
+            return Equals(from, "crosshair")
+                ? "Right now \"here\" is BuildHereCell " + at + ", the empty cell in front of the block the player looks at."
+                : "Right now \"here\" is BuildHereCell " + at + ", on the ground three cells in front of the player: the "
+                  + "crosshair points at nothing within reach. Build there; do not survey the land.";
+        }
+
+        /// <summary>
+        /// The Programmer's world state in this scene: <see cref="HereContext"/> and the "here" cell as it is now.
         /// </summary>
         /// <remarks>
         /// WHY copied on the main thread: a turn's prompt is built off it, and the world is read only from Unity's
@@ -243,23 +262,21 @@ namespace CoreAI.Demos.BlockWorld
         {
             private volatile string _now = "";
             private object _lastCell;
-            private object _lastHasTarget;
+            private object _lastFrom;
 
-            /// <summary>Copies the crosshair attributes of <paramref name="workspace"/> when they changed.</summary>
+            /// <summary>Copies the "here" attributes of <paramref name="workspace"/> when they changed.</summary>
             public void Observe(RbxInstance workspace)
             {
-                object cell = workspace?.GetAttribute("CrosshairPlaceCell");
-                object hasTarget = workspace?.GetAttribute("CrosshairHasTarget");
-                if (Equals(cell, _lastCell) && Equals(hasTarget, _lastHasTarget))
+                object cell = workspace?.GetAttribute("BuildHereCell");
+                object from = workspace?.GetAttribute("BuildHereFrom");
+                if (Equals(cell, _lastCell) && Equals(from, _lastFrom))
                 {
                     return;
                 }
 
                 _lastCell = cell;
-                _lastHasTarget = hasTarget;
-                _now = cell is RbxVector3 place && Equals(hasTarget, true)
-                    ? "Right now CrosshairPlaceCell is (" + (int)place.X + ", " + (int)place.Y + ", " + (int)place.Z + ")."
-                    : "Right now the crosshair has no target.";
+                _lastFrom = from;
+                _now = DescribeHere(cell, from);
             }
 
             /// <inheritdoc />

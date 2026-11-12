@@ -272,6 +272,51 @@ workspace:SetAttribute('TestHairHeld', body.Hair.Anchored and not body.Hair.CanC
             _world.AssertHealthy(Mod);
         }
 
+        private static double Flat(RbxVector3 a, RbxVector3 b)
+        {
+            return new RbxVector3(a.X - b.X, 0f, a.Z - b.Z).Magnitude;
+        }
+
+        [Test]
+        public void P6_Villagers_AWalkABodyBlocks_StepsAsideAndThenToTheOtherSide_ThenWaitsForTheBrain()
+        {
+            StartOnGround(pitUnderTobin: false);
+            RbxVector3 at = TobinStands();
+            RbxInstance tobin = Body("Tobin");
+            RbxHumanoid humanoid = (RbxHumanoid)tobin.FindFirstChildOfClass("Humanoid");
+
+            humanoid.MoveToFinished.Fire(false);
+            _world.Frame(2);
+            object first = tobin.GetAttribute("NpcDetour");
+            humanoid.MoveToFinished.Fire(false);
+            _world.Frame(2);
+            object second = tobin.GetAttribute("NpcDetour");
+            humanoid.MoveToFinished.Fire(false);
+            _world.Frame(2);
+            object third = tobin.GetAttribute("NpcDetour");
+
+            Assert.IsInstanceOf<RbxVector3>(first, "a blocked walk sends Tobin a step aside");
+            Assert.AreEqual(6d, Flat((RbxVector3)first, at), 0.75d, "a block and a half from where he stood");
+            Assert.IsInstanceOf<RbxVector3>(second, "blocked again, he tries once more");
+            Assert.Greater(Flat((RbxVector3)first, (RbxVector3)second), 9d, "to the other side");
+            Assert.IsNull(third, "after two tries he waits for his brain's next decision");
+            _world.AssertHealthy(Mod);
+        }
+
+        [Test]
+        public void P6_Villagers_AWalkThatArrives_SendsNoStepAside_NegativeTwin()
+        {
+            StartOnGround(pitUnderTobin: false);
+            TobinStands();
+            RbxInstance tobin = Body("Tobin");
+
+            ((RbxHumanoid)tobin.FindFirstChildOfClass("Humanoid")).MoveToFinished.Fire(true);
+            _world.Frame(2);
+
+            Assert.IsNull(tobin.GetAttribute("NpcDetour"), "a walk that arrived needs no detour");
+            _world.AssertHealthy(Mod);
+        }
+
         private int _probes;
 
         private bool RootHeld()
