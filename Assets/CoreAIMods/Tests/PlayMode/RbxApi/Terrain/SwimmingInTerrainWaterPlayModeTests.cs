@@ -199,7 +199,9 @@ namespace CoreAI.Tests.PlayMode.RbxApi.Terrain
             yield return null;
 
             Assert.IsTrue(_presenter.Underwater.IsUnderwater, "the eye is in a water cell");
-            Assert.AreEqual(RbxUnderwaterView.FogColor, RenderSettings.fogColor);
+            Record("under water: light level " + F(_presenter.Underwater.LightLevel) + ", fog " + RenderSettings.fogColor);
+            Assert.AreEqual(RbxUnderwaterView.FogColorAt(_presenter.Underwater.LightLevel), RenderSettings.fogColor,
+                "the water's colour, as bright as the light on the water");
             Color under = Shoot(camera, "eye_under_water.png");
             Record("eye under water: mean " + Describe(under));
             Assert.Greater(under.b + under.g, under.r * 2f, "blue-green");

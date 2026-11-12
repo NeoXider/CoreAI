@@ -131,6 +131,32 @@ written again at once, outside its turn. Without this, a character back from a c
 stayed black on its shaded side until the sweep reached it. Only Terrain cells block the sky: a roof built of
 Parts does not darken what is under it.
 
+## Point and spot lights reach their Range
+
+A Roblox `PointLight` or `SpotLight` lights what lies within its `Range`, brightest beside it and gone at the
+Range. URP's inverse square left all but the first metre or two of a long Range dark: a Block World torch of
+Range 26 studs lit one block. The Rbx shaders (`RbxTexturedSurface`, `RbxProceduralSurface`,
+`RbxProceduralTransparent`, `RbxWater`) shade through `RbxFragmentPBR` (`RbxRangeLights.hlsl`), URP 17's
+`UniversalFragmentPBR` with each point and spot light's distance term replaced: URP's own range window over a
+softened inverse square, `1 / (1 + 2 (d / Range)^2)`. That is 1 beside the light, 0.8 at a third of the Range,
+0.34 at two thirds and 0 at the Range, and never more than the light's colour times its `Brightness`, so the
+block a torch stands on is not burnt out. Cones, light layers, the sun, the ambient and the reflections stay
+URP's; no keyword is added. A material drawn with another shader (URP Lit) and URP's per-vertex additional
+lights (no CoreAI pipeline asset uses them) keep the inverse square.
+
+On the WebGL tier (the Mobile pipeline asset, Forward rendering) a renderer takes at most four additional
+lights (its Per Object Limit), and a Terrain chunk is one renderer 16 cells a side: where more than four
+torches reach one chunk, the engine leaves the rest out of that chunk's light, so their blocks there stay dark.
+The desktop tier renders Forward+, which has no such limit.
+
+## Under water
+
+With the eye in a water cell, `RbxUnderwaterView` claims the fog: `FogColor`, whole at 28 studs, its light
+scaled by the light on the water there. That light is the sky's ambient plus the sun on level ground where the
+eye's cell sees the sky (its sky exposure), `Lighting.Ambient` (`_RbxOccludedAmbient`) where it does not, over
+`DaylightLuminance`. Open water by day keeps the colour, at midnight it is darker, and a flooded cave is near
+black at noon and at midnight alike (the fog is drawn unlit, so a fixed colour made it glow).
+
 ## Colliders a body or a ray needs are built first
 
 The per-frame re-mesh budget (`RbxTerrainPresenter.MaxChunksPerFrame`, `MaxMillisecondsPerFrame`) draws a

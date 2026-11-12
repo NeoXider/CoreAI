@@ -63,6 +63,7 @@ Shader "CoreAI/Rbx/Procedural Transparent"
             #endif
             #include "RbxProceduralCommon.hlsl"
             #include "RbxSkyExposure.hlsl"
+            #include "RbxRangeLights.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
@@ -263,7 +264,7 @@ Shader "CoreAI/Rbx/Procedural Transparent"
                 inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);
                 inputData.shadowMask = half4(1.0h, 1.0h, 1.0h, 1.0h);
 
-                half4 color = UniversalFragmentPBR(inputData, surfaceData);
+                half4 color = RbxFragmentPBR(inputData, surfaceData);
                 color.rgb = MixFog(color.rgb, inputData.fogCoord);
                 color.a = saturate(surfaceData.alpha);
                 #if defined(_RBX_SCENE_TEXTURES)

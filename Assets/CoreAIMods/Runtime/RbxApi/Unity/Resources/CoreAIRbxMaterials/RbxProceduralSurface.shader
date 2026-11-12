@@ -64,6 +64,7 @@ Shader "CoreAI/Rbx/Procedural Surface"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             #include "RbxProceduralCommon.hlsl"
             #include "RbxSkyExposure.hlsl"
+            #include "RbxRangeLights.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
@@ -173,7 +174,7 @@ Shader "CoreAI/Rbx/Procedural Surface"
                 inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);
                 inputData.shadowMask = half4(1.0h, 1.0h, 1.0h, 1.0h);
 
-                half4 color = UniversalFragmentPBR(inputData, surfaceData);
+                half4 color = RbxFragmentPBR(inputData, surfaceData);
                 color.rgb = MixFog(color.rgb, inputData.fogCoord);
                 color.a = lerp(1.0h, saturate(_Color.a), (half)saturate(_AlphaFromPartColor));
                 return color;

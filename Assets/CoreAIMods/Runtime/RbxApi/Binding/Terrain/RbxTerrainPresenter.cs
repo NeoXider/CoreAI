@@ -43,6 +43,11 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
         private ILog _log;
         private RbxWorldHost _worldHost;
         private bool _worldHostResolved;
+        private Func<int, int, int, float> _eyeSkyExposure;
+        private Vector3Int _eyeExposureCell;
+        private long _eyeExposureRevision = long.MinValue;
+        private TerrainChunkStore _eyeExposureStore;
+        private float _eyeExposure = 1f;
 
         /// <summary>The renderer of the bound Terrain; null while none is bound.</summary>
         public IRbxTerrainRenderer Renderer { get; private set; }
@@ -261,12 +266,38 @@ namespace CoreAI.Mods.Rbx.Binding.Terrain
             }
         }
 
+        /// <summary>
+        /// How much of the sky the space at a cell sees (0..1), from the renderer's sky light; 1 without a Terrain
+        /// renderer. Kept for the last cell until the Terrain changes, since the underwater view asks every frame.
+        /// </summary>
+        private float EyeSkyExposure(int x, int y, int z)
+        {
+            if (!(Renderer is RbxTerrainRenderer terrainRenderer))
+            {
+                return 1f;
+            }
+
+            Vector3Int cell = new(x, y, z);
+            TerrainChunkStore store = terrainRenderer.Terrain.Store;
+            long revision = store.Revision;
+            if (cell != _eyeExposureCell || revision != _eyeExposureRevision || store != _eyeExposureStore)
+            {
+                _eyeExposureCell = cell;
+                _eyeExposureRevision = revision;
+                _eyeExposureStore = store;
+                _eyeExposure = terrainRenderer.SkyExposure.SampleExposure(x, y, z);
+            }
+
+            return _eyeExposure;
+        }
+
         private void LateUpdate()
         {
             _frameBudget.RecordFrame(Time.unscaledDeltaTime * 1000d);
             Pump();
             Camera eye = Camera.main;
-            _underwater.Update(eye != null ? eye.transform.position : (Vector3?)null, this);
+            _eyeSkyExposure ??= EyeSkyExposure;
+            _underwater.Update(eye != null ? eye.transform.position : (Vector3?)null, this, _eyeSkyExposure);
             PumpPartExposure();
         }
 

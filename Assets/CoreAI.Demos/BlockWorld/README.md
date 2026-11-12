@@ -126,7 +126,9 @@ climbs a hillside, a cave mouth opens into it: two blocks high, running into the
 so a player sees a way in from outside. A cave at the shore or under the sea is
 flooded up to the sea level, inland caves are dry, no cave cuts through the bedrock, and the ground around the
 spawn stays whole. A cave is dark at any hour: the sky's light does not reach it, and the light it gets
-(`Lighting.Ambient`) stays low all day, so a torch is what lights it.
+(`Lighting.Ambient`) stays low all day, so a torch is what lights it: its light (Range 26 studs) reaches about six
+blocks, brightest beside it, as the Rbx shaders draw a PointLight out to its Range. Under water the view's fog
+takes the light on the water, so a flooded cave is dark too.
 
 ## When /undo works
 
@@ -218,7 +220,9 @@ Not done on purpose today: the mods still share state through workspace attribut
   while the mod loads (a reload must fit an AI tool call); the spawn column comes first, in
   under forty frames (it has no caves and no wood), and a column with caves and a wood takes about eighty.
 - The torch mod keeps at most 48 lit torches and says so when it is full. The host adds its own light budget:
-  desktop (Forward+) keeps 64 lights, the WebGL tier keeps the 8 nearest on and reports it.
+  desktop (Forward+) keeps 64 lights, the WebGL tier keeps the 8 nearest on and reports it. On WebGL a Terrain
+  chunk (16 blocks a side) also takes at most 4 lights (the Mobile pipeline asset's per-object limit), so where
+  more than four torches reach one chunk the others do not light its blocks.
 - The HUD rewrites a label only when its text changes, so an idle frame writes nothing to the UI.
 
 ## Tests
@@ -231,7 +235,8 @@ Not done on purpose today: the mods still share state through workspace attribut
   whose sunlit Grass top is drawn unlike its Ground twin, the HUD from the runtime UI host, place and break with the outline and the reach, noon, a readable dusk and a moonlit midnight against a torch
   on masked crops, a scripted model's watchtower and `/undo`, a villager answering by name, the no-model answers,
   a survival fall that hurts and a lethal one that respawns you, a dry cave the sky does not reach, at noon and
-  midnight and with a torch on the blocks around it, seen from the first-person eye with the body hidden, the
+  midnight and with a torch, which lights the blocks around it and those four cells away without burning out the
+  nearest, seen from the first-person eye with the body hidden, the
   characters in the shoulder view idle and walking, `/time midnight` typed in the chat, and the world from a
   hilltop, a wood and a cave mouth with and without a torch). `BlockWorldScenePlaytestPlayModeTests.cs` plays it as
   a player tries it (falling sand, torches on a floor and four walls, the body beside one- and two-block steps, the

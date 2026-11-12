@@ -176,6 +176,14 @@ part for what the sky no longer gives. Water scales its own environment term and
 back; the glass's Fresnel glow, which stands in for a sky reflection, scales with it. Both switches are
 floats, so no shader variant is added.
 
+## Point and spot lights
+
+The same four shaders light through `RbxFragmentPBR` (`RbxRangeLights.hlsl`), URP 17's `UniversalFragmentPBR`
+with each point and spot light's inverse square replaced by a range-shaped term: URP's range window over
+`1 / (1 + 2 (d / Range)^2)`, so a light reaches its Roblox `Range` (1 beside it, 0.8 at a third, 0.34 at two
+thirds, 0 at the Range) and never exceeds its colour times its intensity. No keyword, no new variant. The
+Terrain README (`Instances/Terrain/README.md`) has the reasoning and the WebGL per-object light limit.
+
 ## Visible fallback
 
 An id is valid only when both its integer value and canonical enum name match a catalog entry. Any

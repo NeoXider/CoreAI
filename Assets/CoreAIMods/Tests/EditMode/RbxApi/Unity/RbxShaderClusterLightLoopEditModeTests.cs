@@ -26,10 +26,13 @@ namespace CoreAI.Tests.EditMode
         // exactly UniversalFragmentPBR, UniversalFragmentBlinnPhong and the baked-only
         // UniversalFragmentBakedLit. BakedLit never samples the cluster loop, and
         // UniversalFragmentPBRSimple does not exist in this URP version, so only the first two are watched.
+        // WHY RbxFragmentPBR too: the lit Rbx shaders call it (RbxRangeLights.hlsl), a copy of UniversalFragmentPBR
+        // that runs the same cluster light loop.
         private static readonly string[] LitEntryPoints =
         {
             "UniversalFragmentPBR",
-            "UniversalFragmentBlinnPhong"
+            "UniversalFragmentBlinnPhong",
+            "RbxFragmentPBR"
         };
 
         [Test]

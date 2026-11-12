@@ -2095,30 +2095,37 @@ end";
             Color[] lit = Shoot("cave_noon_torch.png");
             float litLuminance = Luminance(lit, crop);
             // WHY the blocks around the torch as well as the middle of the view: the middle holds whatever the cave's
-            // shape puts there (a corridor's walls a cell away, or a chamber's far wall beyond a torch's light), while
-            // the claim is about the blocks around the torch; these are measured on the same pixels without it.
-            List<RectInt> around = ViewOfBlocksAround(found, 4);
+            // shape puts there (a corridor's walls a cell away, or a chamber's far wall), while the claims are about the
+            // blocks at a given distance from the torch; each is measured on the same pixels without it.
+            const int sampleStep = 4;
+            int[] rings = RingsInView(found, sampleStep);
+            List<RectInt> around = BlocksInRings(rings, sampleStep, 0, 1);
             float darkAround = Luminance(dark, around);
             float litAround = Luminance(lit, around);
-            Color[] marked = (Color[])lit.Clone();
-            foreach (RectInt block in around)
+            float nearBrightest = TopLuminance(lit, around, 0.01f);
+            float nearClipped = ClippedShare(lit, around);
+            StringBuilder reach = new();
+            float[] ringShare = new float[7];
+            float[] ringDark = new float[7];
+            float[] ringLit = new float[7];
+            for (int ring = 1; ring <= 6; ring++)
             {
-                for (int y = block.yMin; y < block.yMax; y++)
-                {
-                    for (int x = block.xMin; x < block.xMax; x++)
-                    {
-                        marked[y * ShotWidth + x] = Color.Lerp(marked[y * ShotWidth + x], Color.cyan, 0.35f);
-                    }
-                }
+                List<RectInt> blocks = BlocksInRings(rings, sampleStep, ring, ring);
+                ringShare[ring] = Share(blocks);
+                ringDark[ring] = Luminance(dark, blocks);
+                ringLit[ring] = Luminance(lit, blocks);
+                reach.Append(ring).Append(": ").Append(ringDark[ring].ToString("0.000")).Append(" -> ")
+                    .Append(ringLit[ring].ToString("0.000")).Append(" (").Append((ringShare[ring] * 100f).ToString("0.0"))
+                    .Append("%); ");
             }
 
-            WritePng("cave_noon_torch_blocks_around.png", marked);
+            WritePng("cave_noon_torch_rings.png", MarkRings(lit, rings, sampleStep));
             yield return Tap(_keyboard.digit1Key);
             Session().CurrentConcreteRuntime.UnloadMod(PlayerActor(), FirstPersonBodyModId);
             RunAsPlayer("test_cave_body_back", FirstPersonBodyBackSource);
             Session().CurrentConcreteRuntime.UnloadMod(PlayerActor(), "test_cave_body_back");
 
-            float aroundShare = around.Sum(block => block.width * block.height) / (float)(ShotWidth * ShotHeight);
+            float aroundShare = Share(around);
             string torchHere = found.x + "," + found.y + "," + found.z + ",";
             Record("cave: tunnel cell " + found + " heading " + along + "; the eye " + (eye.Y - floorTop.Y).ToString("0.00")
                    + " studs above the floor, the feet " + feetAboveFloor.ToString("0.00") + ", the own body hidden as in "
@@ -2127,7 +2134,9 @@ end";
                    + ", at noon with one (torches " + torches + ", cells '" + torchCells + "') "
                    + litLuminance.ToString("0.000") + "; the blocks around the torch (" + (aroundShare * 100f).ToString("0.0")
                    + "% of the view) without it " + darkAround.ToString("0.000") + ", with it " + litAround.ToString("0.000")
-                   + "; Ambient trials without a torch: " + trials);
+                   + ", its brightest 1% from " + nearBrightest.ToString("0.000") + ", a channel at white on "
+                   + (nearClipped * 100f).ToString("0.00") + "% of it; blocks n cells from the torch, without -> "
+                   + "with (share of the view): " + reach + "Ambient trials without a torch: " + trials);
             Expect(Mathf.Abs(feetAboveFloor) < 0.5f, "the player stands on the tunnel's floor, so the shots are a player's view");
             if (expectDark)
             {
@@ -2139,6 +2148,11 @@ end";
             Expect(aroundShare > 0.02f, "the blocks around the torch are in view");
             Expect(litAround > darkAround + 0.02f && litAround > darkAround * 2f,
                 "a torch clearly lights the blocks around it in the cave");
+            Expect(nearClipped < 0.01f, "the blocks next to the torch are not burnt out to white");
+            Expect(ringShare[4] > 0.005f, "blocks four cells from the torch are in view");
+            Expect(ringDark[4] < 0.02f, "without a torch the blocks four cells away are dark");
+            Expect(ringLit[4] > ringDark[4] + 0.02f && ringLit[4] > ringDark[4] * 2f,
+                "a torch clearly lights the blocks four cells from it, as a block game's torch does");
         }
 
         /// <summary>
@@ -2198,32 +2212,126 @@ end";
         }
 
         /// <summary>
-        /// The parts of the current camera's view, as blocks of <paramref name="step"/> pixels of a shot, where the
-        /// first solid Terrain cell along the view ray lies within one cell of <paramref name="cell"/>: the blocks
-        /// around that cell as the camera sees them, whatever lies behind them.
+        /// For each block of <paramref name="step"/> pixels of a shot from the current camera, row by row from the
+        /// bottom: how many cells the first solid Terrain cell along its view ray lies from <paramref name="cell"/> (the
+        /// largest of the three offsets), or -1 when the ray meets none.
         /// </summary>
-        private List<RectInt> ViewOfBlocksAround(Vector3Int cell, int step)
+        private int[] RingsInView(Vector3Int cell, int step)
         {
             Camera camera = _bootstrap.Composition.Camera;
             RbxTerrain terrain = Terrain();
-            List<RectInt> blocks = new();
-            for (int y = 0; y + step <= ShotHeight; y += step)
+            int columns = ShotWidth / step;
+            int rows = ShotHeight / step;
+            int[] rings = new int[columns * rows];
+            for (int row = 0; row < rows; row++)
             {
-                for (int x = 0; x + step <= ShotWidth; x += step)
+                for (int column = 0; column < columns; column++)
                 {
-                    Ray ray = camera.ViewportPointToRay(new Vector3((x + step * 0.5f) / ShotWidth,
-                        (y + step * 0.5f) / ShotHeight, 0f));
+                    Ray ray = camera.ViewportPointToRay(new Vector3((column + 0.5f) * step / ShotWidth,
+                        (row + 0.5f) * step / ShotHeight, 0f));
                     RbxVector3 from = RbxSpace.FromUnity(ray.origin);
                     RbxVector3 toward = RbxSpace.FromUnity(ray.origin + ray.direction);
-                    if (TryFirstSolidCell(terrain, from, toward, out Vector3Int hit) && Mathf.Abs(hit.x - cell.x) <= 1
-                        && Mathf.Abs(hit.y - cell.y) <= 1 && Mathf.Abs(hit.z - cell.z) <= 1)
-                    {
-                        blocks.Add(new RectInt(x, y, step, step));
-                    }
+                    rings[row * columns + column] = TryFirstSolidCell(terrain, from, toward, out Vector3Int hit)
+                        ? Mathf.Max(Mathf.Abs(hit.x - cell.x), Mathf.Max(Mathf.Abs(hit.y - cell.y), Mathf.Abs(hit.z - cell.z)))
+                        : -1;
+                }
+            }
+
+            return rings;
+        }
+
+        /// <summary>The pixel blocks of <see cref="RingsInView"/> whose ring lies in <paramref name="nearest"/>..<paramref name="farthest"/>.</summary>
+        private static List<RectInt> BlocksInRings(int[] rings, int step, int nearest, int farthest)
+        {
+            int columns = ShotWidth / step;
+            List<RectInt> blocks = new();
+            for (int index = 0; index < rings.Length; index++)
+            {
+                if (rings[index] >= nearest && rings[index] <= farthest)
+                {
+                    blocks.Add(new RectInt(index % columns * step, index / columns * step, step, step));
                 }
             }
 
             return blocks;
+        }
+
+        private static float Share(List<RectInt> blocks)
+        {
+            return blocks.Sum(block => block.width * block.height) / (float)(ShotWidth * ShotHeight);
+        }
+
+        /// <summary>The luminance from which the brightest <paramref name="share"/> of these pixels start.</summary>
+        private static float TopLuminance(Color[] shot, List<RectInt> blocks, float share)
+        {
+            List<float> values = new();
+            foreach (RectInt block in blocks)
+            {
+                for (int y = block.yMin; y < block.yMax; y++)
+                {
+                    for (int x = block.xMin; x < block.xMax; x++)
+                    {
+                        Color pixel = shot[y * ShotWidth + x];
+                        values.Add(0.2126f * pixel.r + 0.7152f * pixel.g + 0.0722f * pixel.b);
+                    }
+                }
+            }
+
+            if (values.Count == 0)
+            {
+                return 0f;
+            }
+
+            values.Sort();
+            return values[Mathf.Clamp(Mathf.FloorToInt(values.Count * (1f - share)), 0, values.Count - 1)];
+        }
+
+        /// <summary>The share of these pixels with a colour channel at white.</summary>
+        private static float ClippedShare(Color[] shot, List<RectInt> blocks)
+        {
+            int clipped = 0;
+            int count = 0;
+            foreach (RectInt block in blocks)
+            {
+                for (int y = block.yMin; y < block.yMax; y++)
+                {
+                    for (int x = block.xMin; x < block.xMax; x++)
+                    {
+                        Color pixel = shot[y * ShotWidth + x];
+                        clipped += Mathf.Max(pixel.r, Mathf.Max(pixel.g, pixel.b)) >= 0.99f ? 1 : 0;
+                        count++;
+                    }
+                }
+            }
+
+            return count == 0 ? 0f : clipped / (float)count;
+        }
+
+        /// <summary>The shot with the blocks of each ring up to six tinted, nearest red through farthest violet.</summary>
+        private static Color[] MarkRings(Color[] shot, int[] rings, int step)
+        {
+            Color[] marked = (Color[])shot.Clone();
+            int columns = ShotWidth / step;
+            for (int index = 0; index < rings.Length; index++)
+            {
+                if (rings[index] < 0 || rings[index] > 6)
+                {
+                    continue;
+                }
+
+                Color tint = Color.HSVToRGB(rings[index] / 7.5f, 0.9f, 1f);
+                int x0 = index % columns * step;
+                int y0 = index / columns * step;
+                for (int y = y0; y < y0 + step; y++)
+                {
+                    for (int x = x0; x < x0 + step; x++)
+                    {
+                        marked[y * ShotWidth + x] = Color.Lerp(marked[y * ShotWidth + x], tint, 0.3f);
+                    }
+                }
+            }
+
+            return marked;
         }
 
         /// <summary>The first solid Terrain cell on the ray from <paramref name="from"/> through <paramref name="toward"/> (studs), within 192 cell borders.</summary>

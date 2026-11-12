@@ -79,6 +79,7 @@ Shader "CoreAI/Rbx/Textured Surface"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
             #include "RbxSkyExposure.hlsl"
+            #include "RbxRangeLights.hlsl"
 
             TEXTURE2D(_BaseMap);
             SAMPLER(sampler_BaseMap);
@@ -473,7 +474,7 @@ Shader "CoreAI/Rbx/Textured Surface"
                 inputData.normalizedScreenSpaceUV = GetNormalizedScreenSpaceUV(input.positionCS);
                 inputData.shadowMask = half4(1.0h, 1.0h, 1.0h, 1.0h);
 
-                half4 color = UniversalFragmentPBR(inputData, surfaceData);
+                half4 color = RbxFragmentPBR(inputData, surfaceData);
                 color.rgb = MixFog(color.rgb, inputData.fogCoord);
                 color.a = lerp(1.0h, saturate(_Color.a), (half)saturate(_AlphaFromPartColor));
                 return color;

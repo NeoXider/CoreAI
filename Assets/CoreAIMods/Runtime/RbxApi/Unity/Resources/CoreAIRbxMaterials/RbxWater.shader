@@ -69,6 +69,7 @@ Shader "CoreAI/Rbx/Water"
             #endif
             #include "RbxProceduralCommon.hlsl"
             #include "RbxSkyExposure.hlsl"
+            #include "RbxRangeLights.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
@@ -201,7 +202,7 @@ Shader "CoreAI/Rbx/Water"
 
                 // WHY: this is only the reflected part (sky, probes, sun glint); the environment term
                 // carries its own Fresnel weight, so it is added, not blended.
-                half3 surface = UniversalFragmentPBR(inputData, surfaceData).rgb;
+                half3 surface = RbxFragmentPBR(inputData, surfaceData).rgb;
                 BRDFData brdfData;
                 InitializeBRDFData(surfaceData, brdfData);
                 // WHY: a wave tilted towards a low camera reflects a ray that points below the horizon, and
