@@ -605,6 +605,13 @@ Owner's questions and decisions on the Block World (2026-11-11):
       He confirmed the direction the same day ("это же будет удобнее и агентам и пользователям перешедшим с
       Roblox"): one tree is the model a Roblox creator already has, and its paths are the addresses an agent
       already writes in Lua (`game.Workspace...`, `script.Parent`) and gets from `manage_mods list`.
+      Priority (owner, later the same day): "думаю это один из приоритетов, так как сейчас человеку крайне
+      не удобно, да и привести в порядок надо" - take this first among the Hub work when work resumes. The
+      Mods page below is fixed through it ("и Mods таким образом поправим"), not polished on its own. He
+      adds to the design: think through how a person turns a mod off, opens (enters) a mod and does the
+      rest with it ("продумывание как выключать, заходить в мод и тд") - so the design starts from the
+      actions on a node (open the source, turn on or off, rename, move, delete, export, logs, undo) and from
+      how few steps each takes, not from the look.
 - [ ] **Hub: the Mods page looks bad and is awkward** (owner, a screenshot, 2026-11-12: "mods выглядит
       плоховато и не удобно"). Seen on it: every row is one raw line ("id: blockworld_world v1.5.1 caps: All
       loaded handlers: 0 timers: 0 errors: 0 [bundled]"), the row buttons (Move, About, Edit, Export) are cut
@@ -641,6 +648,21 @@ Owner's questions and decisions on the Block World (2026-11-11):
       Tests: the font asset has the Russian alphabet and the long dash; a WebGL check that a Russian line is
       drawn and that a typed one reaches the request unchanged. Other scripts (Chinese, Japanese, Korean,
       Arabic, emoji) are megabytes each - decide separately, as optional downloads.
+- [ ] **Chat: Enter on an empty line does not close the chat in a WebGL player** (owner, WebGL build 8,
+      2026-11-12: "полезно бы сделать: если просто Enter нажимаешь (пустое сообщение или пробелы), то в чат
+      ничего не отправляется и он закрывается (на Esc не удобно закрывать, так как полноэкранный режим
+      сбрасывается)"). The code already means this: `ChatOverlayController.Submit` closes the input on an
+      empty or blank line and sends nothing, and by default closes it after every sent line too. For him it
+      does not; on both of his screenshots the input is open while the model answers (he may have reopened
+      it himself). Suspected cause, not proven by a run: Enter is also an open key (`openChatKeys` = T,
+      Return, KeypadEnter in `CoreAiChatOverlaySettings`), and `CoreAiChatOverlayEntryPoint.PollKeys`
+      refuses to reopen only in the frame of the close; if a browser delivers the text field's key event and
+      the keyboard poll in different frames, one press closes the chat and opens it again. To do: reproduce
+      in a WebGL player first; hold the reopen until the closing key is released instead of for one frame;
+      a test with a keyboard fake that reports the press a frame late; then a WebGL check that Enter on an
+      empty line and Enter after a message both leave the chat closed, with the pointer captured again so
+      that play goes on without a click. Escape stays a close key, but in a browser it also leaves full
+      screen, so Enter must be the comfortable way.
 - [ ] **Hub in a play world (F2): the scroll bar is unstyled and no FPS is shown** (owner, a screenshot of the
       Graphics page, 2026-11-12: "плохо выглядит скролл бар, а так же fps не пишется"). The page's vertical
       scroll bar is UI Toolkit's default (a light grey track with white arrow buttons and a grey thumb) on the
