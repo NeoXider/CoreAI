@@ -2200,8 +2200,11 @@ return 'watchtower built'";
                    + "; /undo answered '" + undoReply + "'; world instances changed between the build and /undo: "
                    + changedSince + "; terrain golden " + goldenBefore + " -> " + goldenAfter + "; /redo answered '"
                    + redoReply + "', tower back " + redone);
-            Expect(model.SawCrosshairAttribute && model.HereAttribute == "CrosshairPlaceCell",
-                "the turn told the model, in its world state, that \"here\" is the attribute CrosshairPlaceCell");
+            // WHY BuildHereCell: the world state names the attribute that is always set (the crosshair's place cell,
+            // or the cell in front of the player when the crosshair is on nothing), since a live model asked to
+            // build "here" with no block under the crosshair built nothing.
+            Expect(model.SawCrosshairAttribute && model.HereAttribute == "BuildHereCell",
+                "the turn told the model, in its world state, that \"here\" is the attribute BuildHereCell");
             Expect(model.ToolCalls == 1, "the scripted model called execute_lua once");
             Expect(tower && changed > 50, "the watchtower stands at the crosshair");
             Expect(outside == 0, "every cell the build wrote is inside the box at the crosshair");

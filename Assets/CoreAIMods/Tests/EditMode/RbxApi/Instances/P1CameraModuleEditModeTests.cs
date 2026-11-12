@@ -280,6 +280,57 @@ namespace CoreAI.Tests.EditMode.RbxApi.Instances
             Assert.AreEqual(RbxMouseLock.Default, output.MouseLock);
         }
 
+        private static RbxCameraModuleInput FirstPerson()
+        {
+            RbxCameraModuleInput input = Frame();
+            input.CameraMode = RbxCameraMode.LockFirstPerson;
+            input.PointerDelta = new RbxVector2(100f, 0f);
+            return input;
+        }
+
+        [Test]
+        public void Module_FirstPerson_AFreePointerOverUi_StaysFree_AndTurnsNothing()
+        {
+            RbxDefaultCameraModule module = new();
+            module.Update(Frame());
+            RbxCameraModuleInput input = FirstPerson();
+            input.PointerOverUi = true;
+
+            RbxCameraModuleOutput output = module.Update(input);
+
+            Assert.IsTrue(output.IsFirstPerson);
+            Assert.AreEqual(RbxMouseLock.Default, output.MouseLock,
+                "a lock asked for now would take the click meant for the button under the pointer");
+            Assert.AreEqual(0d, module.Yaw, 1e-12d, "the view holds still while the pointer is on the panel");
+        }
+
+        [Test]
+        public void Module_FirstPerson_AFreePointerOffTheUi_IsLockedAndTurns_NegativeTwin()
+        {
+            RbxDefaultCameraModule module = new();
+            module.Update(Frame());
+
+            RbxCameraModuleOutput output = module.Update(FirstPerson());
+
+            Assert.AreEqual(RbxMouseLock.LockCenter, output.MouseLock);
+            Assert.AreNotEqual(0d, module.Yaw);
+        }
+
+        [Test]
+        public void Module_FirstPerson_ALockedPointer_StaysLocked_WhateverIsUnderTheCentre()
+        {
+            RbxDefaultCameraModule module = new();
+            module.Update(Frame());
+            RbxCameraModuleInput input = FirstPerson();
+            input.PointerLocked = true;
+            input.PointerOverUi = true;
+
+            RbxCameraModuleOutput output = module.Update(input);
+
+            Assert.AreEqual(RbxMouseLock.LockCenter, output.MouseLock, "a pickable element under the crosshair frees nothing");
+            Assert.AreNotEqual(0d, module.Yaw);
+        }
+
         [Test]
         public void Module_RightDragTurns_AndAsksForLockCurrentPosition()
         {

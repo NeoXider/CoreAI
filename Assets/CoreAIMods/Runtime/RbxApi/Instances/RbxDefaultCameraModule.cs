@@ -75,7 +75,8 @@ namespace CoreAI.Mods.Rbx.Instances
     /// is held, and with the right thumbstick; the zoom follows the PlayerModule curve, is clamped to the
     /// player's min and max distances and snaps to first person below one stud; <c>LockFirstPerson</c>
     /// holds first person; an obstruction between the focus and the camera pulls the camera in without
-    /// changing the zoom the player chose. Input the host owns (the chat is focused) turns and zooms nothing.
+    /// changing the zoom the player chose. Input the host owns (the chat is focused) turns and zooms nothing,
+    /// and a free pointer over UI is neither locked nor turns the view, so a click on a button reaches it.
     /// </summary>
     public sealed class RbxDefaultCameraModule : IRbxCameraModule
     {
@@ -128,9 +129,15 @@ namespace CoreAI.Mods.Rbx.Instances
 
             bool firstPersonBefore = RbxCameraOrbitMath.IsFirstPerson(
                 RbxCameraOrbitMath.ResolveZoom(_zoom, input.MinZoomDistance, input.MaxZoomDistance, input.CameraMode));
+            // WHY a free pointer over UI is the UI's, in first person too: a browser grants a pointer lock only on
+            // the next click, so a lock asked for while the pointer rests on a button takes that very click (the
+            // press lands on the button, the release at the centre of the locked view, and the button never fires),
+            // and a view that turned with it would move the button away from the pointer.
+            bool freePointerOnUi = input.PointerOverUi && !input.PointerLocked;
             if (!input.InputCaptured)
             {
-                if (input.PointerLocked || (input.RotateHeld && !input.PointerOverUi) || firstPersonBefore)
+                if (input.PointerLocked || (input.RotateHeld && !input.PointerOverUi)
+                                        || (firstPersonBefore && !freePointerOnUi))
                 {
                     RbxCameraOrbitMath.ApplyLook(ref _yaw, ref _pitch, input.PointerDelta,
                         _options.YawDegreesPerPixel * DegreesToRadians,
@@ -165,7 +172,10 @@ namespace CoreAI.Mods.Rbx.Instances
             {
                 if (firstPerson)
                 {
-                    mouseLock = RbxMouseLock.LockCenter;
+                    if (!freePointerOnUi)
+                    {
+                        mouseLock = RbxMouseLock.LockCenter;
+                    }
                 }
                 else if (input.RotateHeld && !input.PointerOverUi)
                 {

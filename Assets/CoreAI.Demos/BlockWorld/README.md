@@ -61,7 +61,9 @@ ground it can walk on and does not go up a hill. A villager is held until the la
 sinks into the land is stood back on top within a quarter second, and one that walks onto land not made yet is taken
 home. Characters block each other and never push: a villager whose walk you (or another villager) block steps a block
 and a half aside, the other side if that is blocked too, and then waits for its brain's next decision instead of
-walking into you again.
+walking into you again. A villager greets you once when you come up (within 10 studs); standing next to it does not
+bring another greeting, and after you have gone (beyond 15 studs) and come back it greets you again only when two
+minutes have passed since its last greeting (`RbxNpcBrainOptions.GreetQuietSeconds`). Talking to it is never limited.
 
 ## Controls
 
@@ -75,7 +77,7 @@ The key legend is on screen at the bottom right.
 | Mouse | Look (the pointer is locked) |
 | Left click | Break the outlined block (hold to keep breaking); on a torch, take it back |
 | Right click | Place the hotbar block on the outlined face (hold to keep placing) |
-| 1 - 9, mouse wheel | Choose a hotbar slot (or click a slot while the pointer is free); slot 9 is the torch |
+| 1 - 9, mouse wheel | Choose a hotbar slot (or click a slot while the pointer is free: press Escape, then click; a click on the world takes the pointer back); slot 9 is the torch |
 | G | Creative (endless blocks, no damage) or survival (you place what you broke, a tree trunk gives planks, and falls hurt) |
 | V | First person (the start) or third person over the shoulder |
 | E | Talk to the villager you look at, or the nearest one within 14 studs |

@@ -425,7 +425,9 @@ stud it snaps to first person (0.5 studs) and locks the pointer to the centre, a
 the camera pulls the camera in front of it (the subject's own character, non-colliding parts and parts
 at least 95% transparent never block it) without changing the zoom you chose. While the chat or the Hub
 holds the input the camera neither turns nor zooms and frees the pointer; with the pointer over a panel
-the wheel and the right button belong to the panel.
+the wheel and the right button belong to the panel. In first person a free pointer (a browser that let go of
+the lock on Escape) over a panel stays free and turns nothing, so a click on a button there reaches it: a
+browser grants the lock only on a click, and a lock asked for over a button would take that click away.
 
 **First person hides your own character, on this machine only.** `BasePart.LocalTransparencyModifier`
 (default 0) is a local multiplier on `Transparency`: the part is drawn at

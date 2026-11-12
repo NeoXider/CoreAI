@@ -1,7 +1,7 @@
 --[[@coreai
 id: blockworld_villagers
 name: Block World 6 - Villagers
-version: 1.5.1
+version: 1.5.2
 active: false
 capabilities: All
 category: Samples/Block World
@@ -41,6 +41,9 @@ local FOOTING_SECONDS = 0.25    -- how often a walking villager's footing is che
 local BODY_SCALE = 1.44         -- the player's size: 1.8 blocks tall
 local JUMP_HEIGHT = 5
 local STATE_SECONDS = 5         -- how often the villagers' facts (NpcState) are refreshed
+-- The brain's actions. `greet` says hello once when the player comes up (within 10 studs): a player who stays is not
+-- greeted again, and one who went away (beyond 15 studs) and came back is greeted again only when two minutes have
+-- passed since the last greeting. A greeting held back still turns the villager to the player.
 local BRAIN = "idle, wander, greet, face_player, follow_player, go_home"
 
 -- Homes around the spawn in studs, in the frame of the heading a new player first faces (BlockWorldSpawnLook):

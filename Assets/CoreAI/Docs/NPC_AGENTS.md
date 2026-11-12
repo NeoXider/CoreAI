@@ -147,7 +147,12 @@ In a Lua world, `RbxNpcBrain` (`CoreAI.RbxApi.Agents`) builds the whole brain fo
 Humanoid actuator (walk, face, jump, stop, wander), the dialogue actuator, the state text of what the villager sees,
 the feed, and a `player_approached` event when the local player comes close. Without a decision endpoint the rule
 table decides (`player_approached` greets, `spoken_to` turns to the speaker, otherwise the villager wanders) and the
-decision is marked `Fallback` with its reason. A mod gives a villager a brain with two attributes on its Model, and
+decision is marked `Fallback` with its reason. A greeting is said once per visit of the player, however often the
+model or the rule table chooses `greet`: a visit starts when the player comes within `ApproachRadius` (10 studs) and
+ends when the player is beyond one and a half times it, no greeting is said to a player farther away, and two are
+never said within `GreetQuietSeconds` (120). A greeting held back still turns the villager to the player
+(`GreetingsHeld` counts them), and the model's state text then says the player was greeted already.
+A mod gives a villager a brain with two attributes on its Model, and
 `RbxNpcBrainHost` builds and removes brains as the mod marks and unmarks villagers:
 
 ```lua

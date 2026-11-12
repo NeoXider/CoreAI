@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
@@ -17,7 +18,8 @@ namespace CoreAI.Ai.Logging
     /// call; <c>since_reload</c> starts after the mod's latest load or reload (<see cref="LuaModLifecycleLog"/>); and
     /// <c>wait_seconds</c> (at most <see cref="MaxWaitSeconds"/>) waits for a new warning or error and answers as soon as
     /// one arrives. The wait is scheduled by the host's <see cref="ILlmAsyncMarshaler.DelayAsync"/>, which a Unity
-    /// host drives from its frame loop, so it never blocks and runs in a WebGL player.
+    /// host drives from its frame loop, so it never blocks and runs in a WebGL player; its length is measured in
+    /// time, so a host that runs few frames (a hidden browser tab) still answers after <c>wait_seconds</c>.
     /// </para>
     /// <para>
     /// Production wiring: <c>CoreAiModsInstaller.RegisterCoreAiMods</c> registers the
@@ -47,6 +49,7 @@ namespace CoreAI.Ai.Logging
         private readonly ILuaLogService _logService;
         private readonly ILlmAsyncMarshaler _asyncMarshaler;
         private readonly LuaModLifecycleLog _lifecycle;
+        private readonly Func<double> _elapsedMilliseconds;
 
         public GetModLogsLlmTool(ILuaLogService logService)
             : this(logService, null, null)
@@ -62,12 +65,26 @@ namespace CoreAI.Ai.Logging
         /// <param name="lifecycle">The recorded load of every mod for <c>since_reload</c>; null scans the log for the load line.</param>
         public GetModLogsLlmTool(ILuaLogService logService, ILlmAsyncMarshaler asyncMarshaler,
             LuaModLifecycleLog lifecycle = null)
+            : this(logService, asyncMarshaler, lifecycle, null)
+        {
+        }
+
+        /// <param name="elapsedMilliseconds">A monotonic clock in milliseconds that measures a wait; null uses a stopwatch.</param>
+        internal GetModLogsLlmTool(ILuaLogService logService, ILlmAsyncMarshaler asyncMarshaler,
+            LuaModLifecycleLog lifecycle, Func<double> elapsedMilliseconds)
         {
             _logService = logService ?? throw new ArgumentNullException(nameof(logService));
             // WHY: no default scheduler: the pass-through delay is Task.Delay, which never fires in a WebGL player, so
             // a tool built without one must not wait at all rather than hang the model turn.
             _asyncMarshaler = asyncMarshaler;
             _lifecycle = lifecycle;
+            if (elapsedMilliseconds == null)
+            {
+                Stopwatch watch = Stopwatch.StartNew();
+                elapsedMilliseconds = () => watch.Elapsed.TotalMilliseconds;
+            }
+
+            _elapsedMilliseconds = elapsedMilliseconds;
         }
 
         /// <inheritdoc />
@@ -213,15 +230,22 @@ namespace CoreAI.Ai.Logging
             // WHY: a flag polled in short host-scheduled steps instead of a completion source: the event is raised
             // inside the mod's own print or error call, and completing the tool from there would run the model
             // turn's continuation in the middle of that mod's code.
-            int waitedMilliseconds = 0;
+            // WHY the clock as well as the steps: a host-scheduled step lasts at least one frame, and a hidden
+            // browser tab runs one or two frames a second, so counting steps made a 5 s wait last 50 frames
+            // (measured: 31 s, past the 30 s tool timeout). The wait ends when either the measured time or the
+            // steps' own lengths reach the window.
+            double waitedMilliseconds = 0d;
+            double steppedMilliseconds = 0d;
+            double startedAt = _elapsedMilliseconds();
             _logService.EntryAppended += watch;
             try
             {
-                int limit = waitSeconds * 1000;
+                double limit = waitSeconds * 1000d;
                 while (waitedMilliseconds < limit && Volatile.Read(ref arrived) == 0)
                 {
                     await _asyncMarshaler.DelayAsync(WaitStepMilliseconds, cancellationToken);
-                    waitedMilliseconds += WaitStepMilliseconds;
+                    steppedMilliseconds += WaitStepMilliseconds;
+                    waitedMilliseconds = Math.Max(steppedMilliseconds, _elapsedMilliseconds() - startedAt);
                 }
             }
             finally

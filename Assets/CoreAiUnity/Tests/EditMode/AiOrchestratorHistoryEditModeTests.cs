@@ -826,6 +826,138 @@ namespace CoreAI.Tests.EditMode
                 "The latch must be per turn rather than shared across orchestrator calls.");
         }
 
+        private static readonly LlmToolCallTrace[] BuildThenTimeoutTraces =
+        {
+            new("execute_lua", true, 12d, "native", "{\"Success\":true,\"Output\":\"built 4 walls\"}"),
+            new("get_mod_logs", false, 30000d, "timeout", "Error: Tool 'get_mod_logs' timed out after 30000ms")
+        };
+
+        [Test]
+        public async Task RunTaskAsync_TurnFailsAfterTools_RecordsWhatTheyDid_UnderALineThatSaysItEnded()
+        {
+            // WHY: with the user message alone the next request read the failed one as still waiting, and a small
+            // model answering a different request went on to redo the old one without knowing its walls stood.
+            ToolTraceLlmClient llm = new(
+                new LlmCompletionResult
+                {
+                    Ok = false,
+                    Error = "Tool 'get_mod_logs' timed out after 30000ms",
+                    ErrorCode = LlmErrorCode.Timeout,
+                    ExecutedToolCalls = BuildThenTimeoutTraces
+                },
+                new LlmCompletionResult { Ok = true, Content = "Done" });
+            RoleScopedLiveMemoryStore memory = new();
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, BuildToolResultPolicy("Teacher"));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "build a hut" });
+
+            CollectionAssert.AreEqual(new[] { "user", "tool" }, memory.Appended.Select(m => m.MessageRole).ToArray(),
+                "the user message, then what the tools did; no assistant turn, since nothing was answered");
+            string record = memory.Appended[1].Content;
+            StringAssert.StartsWith(
+                "turn_ended status=timeout answer=none reason=Tool 'get_mod_logs' timed out after 30000ms\n", record);
+            StringAssert.Contains("execute_lua", record);
+            StringAssert.Contains("get_mod_logs", record);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "now a door" });
+
+            string seen = string.Join("\n", llm.Requests[1].ChatHistory.Select(m => m.Text));
+            StringAssert.Contains("turn_ended status=timeout answer=none", seen, "the next request reads that it ended");
+            StringAssert.Contains("tool_result name=execute_lua status=ok", seen, "and what had run");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_SameWordsAfterATurnThatFailedAfterTools_AreANewAttempt()
+        {
+            ToolTraceLlmClient llm = new(
+                new LlmCompletionResult
+                {
+                    Ok = false,
+                    Error = "Tool 'get_mod_logs' timed out after 30000ms",
+                    ErrorCode = LlmErrorCode.Timeout,
+                    ExecutedToolCalls = BuildThenTimeoutTraces
+                },
+                new LlmCompletionResult { Ok = true, Content = "Done" });
+            RoleScopedLiveMemoryStore memory = new();
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, BuildToolResultPolicy("Teacher"));
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "build a hut" });
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "build a hut" });
+
+            CollectionAssert.AreEqual(new[] { "user", "tool", "user", "assistant" },
+                memory.Appended.Select(m => m.MessageRole).ToArray(),
+                "a user message followed by a tool record is not unanswered: the retry is its own turn");
+        }
+
+        [Test]
+        public async Task RunTaskAsync_TurnFailsAfterTools_ToolResultMemoryNone_RecordsOnlyTheUserMessage_NegativeTwin()
+        {
+            ToolTraceLlmClient llm = new(new LlmCompletionResult
+            {
+                Ok = false,
+                Error = "Tool 'get_mod_logs' timed out after 30000ms",
+                ErrorCode = LlmErrorCode.Timeout,
+                ExecutedToolCalls = BuildThenTimeoutTraces
+            });
+            RoleScopedLiveMemoryStore memory = new();
+            AgentMemoryPolicy policy = BuildToolResultPolicy("Teacher");
+            policy.SetToolResultMemoryPolicy("Teacher", ToolResultMemoryPolicy.None);
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, policy);
+
+            await orchestrator.RunTaskAsync(new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "build a hut" });
+
+            CollectionAssert.AreEqual(new[] { "user" }, memory.Appended.Select(m => m.MessageRole).ToArray(),
+                "a role that keeps no tool records keeps none for a failed turn either");
+        }
+
+        /// <summary>Streams a call's result, then ends the turn with a timeout chunk that carries the executed calls.</summary>
+        private sealed class TimeoutAfterToolsStreamLlmClient : ILlmClient
+        {
+            public List<LlmCompletionRequest> Requests { get; } = new();
+
+            public Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request,
+                CancellationToken cancellationToken = default)
+            {
+                Requests.Add(request);
+                return Task.FromResult(new LlmCompletionResult { Ok = true, Content = "buffered" });
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(
+                LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation]
+                CancellationToken cancellationToken = default)
+            {
+                await Task.Yield();
+                Requests.Add(request);
+                yield return new LlmStreamChunk { Text = "Building..." };
+                yield return new LlmStreamChunk
+                {
+                    IsDone = true,
+                    Error = "Tool 'get_mod_logs' timed out after 30000ms",
+                    ErrorCode = LlmErrorCode.Timeout,
+                    ExecutedToolCalls = BuildThenTimeoutTraces
+                };
+            }
+        }
+
+        [Test]
+        public async Task RunStreamingAsync_TurnFailsAfterTools_RecordsWhatTheyDid_UnderALineThatSaysItEnded()
+        {
+            TimeoutAfterToolsStreamLlmClient llm = new();
+            RoleScopedLiveMemoryStore memory = new();
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, BuildToolResultPolicy("Teacher"));
+
+            await foreach (LlmStreamChunk _ in orchestrator.RunStreamingAsync(
+                               new AiTaskRequest { RoleId = "Teacher", SourceTag = "Chat", Hint = "build a hut" }))
+            {
+            }
+
+            CollectionAssert.AreEqual(new[] { "user", "tool" }, memory.Appended.Select(m => m.MessageRole).ToArray());
+            StringAssert.StartsWith("turn_ended status=timeout answer=none reason=", memory.Appended[1].Content);
+            Assert.AreEqual("build a hut", memory.Appended[0].Content);
+        }
+
         [Test]
         public async Task RunTaskAsync_SuccessfulTurn_RecordsUserMessageExactlyOnce()
         {

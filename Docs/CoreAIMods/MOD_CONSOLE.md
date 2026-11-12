@@ -196,7 +196,7 @@ every request; the extension costs 33 tokens, 239 to 272):
 | Parameter | Meaning |
 |---|---|
 | `since_reload` | With `mod_id`: only entries since the mod's latest load or reload. For a gated load (the AI's `manage_mods`) the cursor sits before the new main chunk ran, so what it printed counts. |
-| `wait_seconds` | 0 to 10: when nothing at warning level or worse is there yet, wait for it and answer as soon as one arrives, otherwise after the wait. The wait is scheduled by the host's `ILlmAsyncMarshaler.DelayAsync`, frame-driven in Unity, so it never blocks and runs in a WebGL player; a tool built without one answers at once instead of waiting. |
+| `wait_seconds` | 0 to 10: when nothing at warning level or worse is there yet, wait for it and answer as soon as one arrives, otherwise after the wait. The wait is scheduled by the host's `ILlmAsyncMarshaler.DelayAsync`, frame-driven in Unity, so it never blocks and runs in a WebGL player; its length is measured in time, so a hidden browser tab that runs one or two frames a second still answers after `wait_seconds`; a tool built without one answers at once instead of waiting. |
 | `next_sequence` (result) | The cursor for the next call: pass it as `since_sequence`. |
 
 `LuaModLifecycleLog` writes `loaded`, `reloaded` and `unloaded` lines into the mod log (script name `coreai:lifecycle`,

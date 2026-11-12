@@ -161,6 +161,21 @@ namespace CoreAI.Tests.EditMode.SelfRepair
         }
 
         [Test]
+        public async Task Wait_InAHostThatRunsOneFrameASecond_LastsTheWindowInTime_NotFiftyFrames()
+        {
+            // WHY a step of one second: a hidden browser tab runs the player loop about once a second, and a
+            // host-scheduled 100 ms step ends at the first frame after it.
+            double now = 0d;
+            SteppingMarshaler marshaler = new() { OnStep = _ => now += 1000d };
+            GetModLogsLlmTool tool = new(new LuaLogService(), marshaler, null, () => now);
+
+            JObject result = JObject.Parse(await tool.ExecuteAsync(mod_id: "tower", wait_seconds: 5));
+
+            Assert.AreEqual(5, marshaler.Steps, "five one-second frames, where counting steps took fifty");
+            Assert.AreEqual(5d, result.Value<double>("waited_seconds"), 0.0001d);
+        }
+
+        [Test]
         public async Task Wait_AnErrorAlreadyThere_AnswersAtOnce()
         {
             LuaLogService logs = new();

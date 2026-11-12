@@ -513,9 +513,9 @@ namespace CoreAI.Ai
                 // WHY: every failed exit writes once here. A successful invocation writes unsuppressed below,
                 // so a store failure stops assistant-only persistence without a retry that could duplicate a
                 // commit-then-throw append.
-                if (!invocationSucceeded)
+                if (!invocationSucceeded && EnsureUserTurnRecorded(bundle, task, userTurn, true))
                 {
-                    EnsureUserTurnRecorded(bundle, task, userTurn, true);
+                    RecordEndedTurnToolResults(bundle, result);
                 }
             }
 
@@ -1247,6 +1247,13 @@ namespace CoreAI.Ai
                     failure.CacheReadTokens = cacheReadTokens;
                     failure.CacheWriteTokens = cacheWriteTokens;
                     RecordTrace(bundle, failure, null, terminalError);
+                    // WHY recorded here and not at teardown: the tools' record goes right after the user turn,
+                    // and only this branch still holds what they did.
+                    if (executedToolCalls != null && executedToolCalls.Count > 0 &&
+                        EnsureUserTurnRecorded(bundle, task, turn.UserTurn, true))
+                    {
+                        RecordEndedTurnToolResults(bundle, failure);
+                    }
                 }
                 else
                 {
@@ -2068,7 +2075,8 @@ namespace CoreAI.Ai
         /// appended — see <see cref="IsResendOfUnansweredUserTurn(string, string, AiTaskRequest, ChatMessage[])"/>.
         /// </para>
         /// </summary>
-        private void EnsureUserTurnRecorded(
+        /// <returns>True when this call left the user turn at the end of the role history (appended, or found as a resend).</returns>
+        private bool EnsureUserTurnRecorded(
             RequestBundle bundle,
             AiTaskRequest task,
             UserTurnHistoryLatch latch,
@@ -2076,7 +2084,7 @@ namespace CoreAI.Ai
         {
             if (latch == null || latch.Attempted || task == null)
             {
-                return;
+                return false;
             }
 
             string roleId = bundle?.RoleId;
@@ -2091,7 +2099,7 @@ namespace CoreAI.Ai
                                                                     task, roleId);
                 if (!roleConfig.WithChatHistory || _memoryStore == null)
                 {
-                    return;
+                    return false;
                 }
 
                 // WHY: teardown is later than every context-overflow rebuild, so the in-flight user payload
@@ -2103,11 +2111,12 @@ namespace CoreAI.Ai
                     : IsResendOfUnansweredUserTurn(roleId, traceId, task);
                 if (resend)
                 {
-                    return;
+                    return true;
                 }
 
                 _memoryStore.AppendChatMessage(roleId, "user", BuildUserTurnHistoryText(task),
                     roleConfig.PersistChatHistory);
+                return true;
             }
             catch (Exception ex) when (suppressPersistenceErrors)
             {
@@ -2116,6 +2125,58 @@ namespace CoreAI.Ai
                 Log.Instance.Warn(
                     $"[AiOrchestrator] role='{roleId ?? "unknown"}' trace='{traceId ?? "unknown"}' " +
                     $"could not persist the user turn: {ex.Message}",
+                    LogTag.Llm);
+                return false;
+            }
+        }
+
+        /// <summary>The first line of the record a turn that ended without an answer leaves after its tools.</summary>
+        internal const string EndedTurnRecordPrefix = "turn_ended ";
+
+        /// <summary>
+        /// After a turn that ended without an answer once tools had run (a timeout, a provider error, a stop),
+        /// records what those tools did, under the role's tool-result policy, behind one line that says the
+        /// request ended and why. Only called right after the turn's user message reached the history.
+        /// <para>
+        /// WHY: the user message alone read as a request still waiting, and a small model answering the next,
+        /// different request went on to do the old one as well, without knowing which of its changes had
+        /// already run. A <c>tool</c> record, not an assistant turn: nothing was answered, and a user message
+        /// followed by a tool record is not an unanswered tail, so a resend of the same words is a new attempt.
+        /// A turn that ran no tool keeps the plain rule (the user message and nothing else).
+        /// </para>
+        /// </summary>
+        private void RecordEndedTurnToolResults(RequestBundle bundle, LlmCompletionResult failed)
+        {
+            IReadOnlyList<LlmToolCallTrace> executed = failed?.ExecutedToolCalls;
+            if (bundle == null || failed == null || failed.Ok || executed == null || executed.Count == 0 ||
+                !bundle.RoleConfig.WithChatHistory || _memoryStore == null)
+            {
+                return;
+            }
+
+            try
+            {
+                string block = BuildToolResultsMemoryBlock(executed, bundle.RoleConfig.ToolResultMemory, out _);
+                if (string.IsNullOrWhiteSpace(block))
+                {
+                    return;
+                }
+
+                string status = failed.ErrorCode == LlmErrorCode.Cancelled
+                    ? "cancelled"
+                    : failed.ErrorCode == LlmErrorCode.Timeout ? "timeout" : "failed";
+                string reason = SingleLine(failed.Error ?? "", ToolTraceMessageMaxChars, out _);
+                string ended = EndedTurnRecordPrefix + "status=" + status + " answer=none" +
+                               (reason.Length > 0 ? " reason=" + reason : "");
+                _memoryStore.AppendChatMessage(bundle.RoleId, ToolResultPromptProjection.ToolHistoryRole,
+                    ended + "\n" + block, bundle.RoleConfig.PersistChatHistory);
+            }
+            catch (Exception ex)
+            {
+                // WHY swallowed: this runs while a failure unwinds; a store fault must not replace its outcome.
+                Log.Instance.Warn(
+                    $"[AiOrchestrator] role='{bundle.RoleId}' trace='{bundle.TraceId}' " +
+                    $"could not record the tools of a turn that ended without an answer: {ex.Message}",
                     LogTag.Llm);
             }
         }

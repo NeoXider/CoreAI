@@ -119,6 +119,74 @@ namespace CoreAI.Tests.EditMode.RbxApi.Agents
         }
 
         [Test]
+        public async Task AModelThatKeepsChoosingGreet_GreetsAPlayerWhoStays_Once_AndIsToldSo()
+        {
+            AgentsWorld world = new();
+            world.AddPlayer("steve", new RbxVector3(0f, 3f, 6f));
+            (NpcDirector director, Orchestrator _, RbxInstance bob, RecordingMotor _) = Village(world);
+            using NpcDirector owned = director;
+            StepClock clock = new();
+            AnsweringDecisionClient client = new() { Answer = r => AnsweringDecisionClient.Choose(r, "greet") };
+            using RbxNpcBrain brain = new("bob", RbxCharacterSubject.Of(world.World, bob), director, client, clock);
+            List<NpcSaid> said = new();
+            director.NpcSaid += said.Add;
+
+            // WHY 50 idle ticks of 6 s: five minutes of a player standing next to Bob, longer than the quiet time.
+            for (int tick = 0; tick < 50; tick++)
+            {
+                clock.NowSeconds = tick * 6d;
+                await brain.Tick();
+            }
+
+            Assert.AreEqual(50, client.Requests.Count, "the model chose greet on every idle tick");
+            Assert.AreEqual(1, said.Count, "but a player who never left is greeted once");
+            Assert.AreEqual(49, brain.GreetingsHeld);
+            Assert.AreEqual("greet", brain.Policy.Current.ActionId, "the decision stands: Bob only turns to the player");
+            StringAssert.DoesNotContain("You have greeted the player already", client.Requests[0].State);
+            StringAssert.Contains("You have greeted the player already", client.Requests[1].State,
+                "the model is told, so it can choose something else");
+        }
+
+        [Test]
+        public async Task APlayerWhoLeftAndCameBack_IsGreetedAgain_OnlyAfterTheQuietTime()
+        {
+            AgentsWorld world = new();
+            world.AddPlayer("steve", new RbxVector3(0f, 3f, 40f));
+            (NpcDirector director, Orchestrator _, RbxInstance bob, RecordingMotor _) = Village(world);
+            using NpcDirector owned = director;
+            StepClock clock = new();
+            AnsweringDecisionClient client = new() { Answer = r => AnsweringDecisionClient.Choose(r, "greet") };
+            using RbxNpcBrain brain = new("bob", RbxCharacterSubject.Of(world.World, bob), director, client, clock);
+            List<NpcSaid> said = new();
+            director.NpcSaid += said.Add;
+
+            async Task At(double seconds, float playerZ)
+            {
+                world.MovePlayer(new RbxVector3(0f, 3f, playerZ));
+                clock.NowSeconds = seconds;
+                await brain.Tick();
+            }
+
+            await At(0d, 40f);
+            Assert.AreEqual(0, said.Count, "nobody is close to greet");
+            await At(3d, 6f);
+            Assert.AreEqual(1, said.Count, "the player who walks up is greeted");
+            await At(10d, 40f);
+            await At(20d, 6f);
+            Assert.AreEqual(1, said.Count, "back after 17 s: within the quiet time, no second greeting");
+            await At(40d, 6f);
+            await At(130d, 6f);
+            Assert.AreEqual(1, said.Count, "the quiet time passing does not greet a player who has been there all along");
+            await At(140d, 40f);
+            await At(150d, 6f);
+
+            Assert.AreEqual(8, client.Requests.Count, "the model chose greet at every step");
+            Assert.AreEqual(2, said.Count, "gone and back after the quiet time: greeted again");
+            Assert.AreEqual("Good day, " + world.Player.DisplayName + ".", said[1].Text);
+            Assert.AreEqual(6, brain.GreetingsHeld);
+        }
+
+        [Test]
         public async Task SpeakingToTheVillager_ReachesItsNextDecision()
         {
             AgentsWorld world = new();
@@ -205,6 +273,31 @@ namespace CoreAI.Tests.EditMode.RbxApi.Agents
             clock.NowSeconds = 3d;
             scheduler.Advance(1d / 60d);
             Assert.AreEqual(0, host.Count);
+        }
+
+        [Test]
+        public void Host_ABrainGivenTheBlockWorldVillagersList_GreetsAPlayerWhoStays_Once()
+        {
+            AgentsWorld world = new();
+            world.AddPlayer("steve", new RbxVector3(0f, 3f, 6f));
+            (NpcDirector director, Orchestrator _, RbxInstance bob, RecordingMotor _) = Village(world);
+            using NpcDirector owned = director;
+            StepClock clock = new();
+            AnsweringDecisionClient client = new() { Answer = r => AnsweringDecisionClient.Choose(r, "greet") };
+            using RbxNpcBrainHost host = new(world.World, director, client, clock);
+            List<NpcSaid> said = new();
+            director.NpcSaid += said.Add;
+            bob.SetAttribute(RbxNpcBrainAttributes.Agent, "bob");
+            bob.SetAttribute(RbxNpcBrainAttributes.Actions, "idle, wander, greet, face_player, follow_player, go_home");
+
+            for (int second = 0; second <= 300; second++)
+            {
+                clock.NowSeconds = second;
+                host.Tick();
+            }
+
+            Assert.AreEqual(51, client.Requests.Count, "five minutes of idle ticks, each choosing greet");
+            Assert.AreEqual(1, said.Count, "the villager greeted the player who stood by it once");
         }
 
         [Test]
