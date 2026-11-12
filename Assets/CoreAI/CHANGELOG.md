@@ -145,6 +145,7 @@
 
 ### Fixed
 
+- Tests: the Block World cave checks look from the player's first-person eye with the own body hidden, pick a dry tunnel the sky's light does not reach, and judge the torch on the blocks around it. Since the 1.8-block body their fixed camera sat inside the body's shoulders, and their tunnel was flooded and seen through the underwater fog, so both failed although the torch light had not changed.
 - **NPC brains: a villager greets once per visit.** In the Block World the chat filled with "Hello, Player1!" and "Good day, Player1." for as long as the player stood near a villager: the decision model, asked again every idle tick, and the fallback rule on every new approach each chose `greet`. `RbxNpcBrain` now lets one greeting through per visit (within `ApproachRadius`, until the player is beyond 1.5 times it) and never two within `GreetQuietSeconds` (120 s); a held greeting only turns the villager, and the model is told it already greeted. New options `GreetActionId` and `GreetQuietSeconds`, new property `GreetingsHeld`.
 - Mods: `get_mod_logs` measures `wait_seconds` in time. It counted steps of at least one frame each, so in a hidden browser tab (1-2 frames per second) a 5 s wait took 50 frames, about 31 s, and ended as a tool timeout.
 - Controls: in first person a free pointer over UI is neither locked nor turns the view, so a click on a button reaches it. In a browser the lock is granted on the next click, which took the click meant for a hotbar slot.

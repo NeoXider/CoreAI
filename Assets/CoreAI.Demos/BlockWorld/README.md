@@ -230,7 +230,8 @@ Not done on purpose today: the mods still share state through workspace attribut
 - This scene as a player opens it: `BlockWorldScenePlayModeTests.cs` next to it (one player on generated ground
   whose sunlit Grass top is drawn unlike its Ground twin, the HUD from the runtime UI host, place and break with the outline and the reach, noon, a readable dusk and a moonlit midnight against a torch
   on masked crops, a scripted model's watchtower and `/undo`, a villager answering by name, the no-model answers,
-  a survival fall that hurts and a lethal one that respawns you, a cave at noon with and without a torch, the
+  a survival fall that hurts and a lethal one that respawns you, a dry cave the sky does not reach, at noon and
+  midnight and with a torch on the blocks around it, seen from the first-person eye with the body hidden, the
   characters in the shoulder view idle and walking, `/time midnight` typed in the chat, and the world from a
   hilltop, a wood and a cave mouth with and without a torch). `BlockWorldScenePlaytestPlayModeTests.cs` plays it as
   a player tries it (falling sand, torches on a floor and four walls, the body beside one- and two-block steps, the

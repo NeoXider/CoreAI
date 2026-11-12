@@ -1974,6 +1974,27 @@ return 'watchtower built'";
 
         // ---- a cave at noon --------------------------------------------------------------------------------------------
 
+        private const string FirstPersonBodyModId = "test_cave_first_person";
+
+        /// <summary>
+        /// What the first-person camera does to the local character: every part of the body drawn with a
+        /// <c>LocalTransparencyModifier</c> of 1, held each frame while the scripted test camera stands in for it.
+        /// </summary>
+        private const string FirstPersonBodySource = @"
+local character = game:GetService('Players'):GetPlayers()[1].Character
+local function hide()
+  for _, part in ipairs(character:GetDescendants()) do
+    if part:IsA('BasePart') then part.LocalTransparencyModifier = 1 end
+  end
+end
+hide()
+game:GetService('RunService').Heartbeat:Connect(hide)";
+
+        private const string FirstPersonBodyBackSource = @"
+for _, part in ipairs(game:GetService('Players'):GetPlayers()[1].Character:GetDescendants()) do
+  if part:IsA('BasePart') then part.LocalTransparencyModifier = 0 end
+end";
+
         private IEnumerator CheckCaveAtNoon(bool expectDark)
         {
             Workspace().SetAttribute("BlockWorldTime", "noon");
@@ -1983,6 +2004,8 @@ return 'watchtower built'";
             int sx = Mathf.FloorToInt(spawn.X / Cell);
             int sz = Mathf.FloorToInt(spawn.Z / Cell);
             RbxTerrain terrain = Terrain();
+            RbxTerrainRenderer renderer = Object.FindAnyObjectByType<RbxTerrainPresenter>()?.Renderer as RbxTerrainRenderer;
+            TerrainSkyExposure sky = new(terrain.Store, renderer?.SkyExposure.Reach ?? TerrainSkyExposure.DefaultReach);
             Vector3Int found = default;
             Vector3Int along = default;
             bool any = false;
@@ -1992,7 +2015,7 @@ return 'watchtower built'";
                 {
                     foreach (int dz in new[] { -radius, radius })
                     {
-                        if (TryFindTunnel(terrain, sx + dx, sz + dz, out found, out along))
+                        if (TryFindTunnel(terrain, sky, sx + dx, sz + dz, out found, out along))
                         {
                             any = true;
                             break;
@@ -2001,7 +2024,7 @@ return 'watchtower built'";
                 }
             }
 
-            Expect(any, "a tunnel two cells tall under at least three cells of rock lies within 40 cells of the spawn");
+            Expect(any, "a dry tunnel two cells tall, out of the sky's light, lies within 40 cells of the spawn");
             if (!any)
             {
                 yield break;
@@ -2012,16 +2035,18 @@ return 'watchtower built'";
                                            + Lua(floorTop.X) + ", " + Lua(floorTop.Y + 3.2f) + ", " + Lua(floorTop.Z)
                                            + "))");
             yield return Frames(30);
-            RbxVector3 eye = floorTop + new RbxVector3(0f, 6f, 0f);
+            // WHY the Head's centre with the own body hidden: that is the view of a player standing in the tunnel, as
+            // the first-person camera hides the body. A scripted camera leaves the body drawn, and a fixed 6 studs above
+            // the floor lies a quarter of a stud over a 1.8-block body's shoulders: their tops filled the crop, turned
+            // away from a torch at the feet.
+            float feetAboveFloor = FeetY() - floorTop.Y;
+            RbxVector3 eye = EyePosition();
             RbxVector3 ahead = floorTop + new RbxVector3(along.x * 3f * Cell, 2f, along.z * 3f * Cell);
             yield return Aim(eye, ahead);
+            RunAsPlayer(FirstPersonBodyModId, FirstPersonBodySource);
             yield return Frames(30);
             Color[] dark = Shoot("cave_noon_no_torch.png");
-            RbxVector3 side = new(along.z * 1.5f, 0f, -along.x * 1.5f);
-            RbxVector3 nearFloor = floorTop + new RbxVector3(along.x * Cell * 1.2f, 0f, along.z * Cell * 1.2f);
-            RbxVector3 farFloor = floorTop + new RbxVector3(along.x * Cell * 2.4f, 0f, along.z * Cell * 2.4f);
-            // WHY the middle of the view: the tunnel's walls ahead are what a torch lights; the floor near the camera
-            // lies in the shadow of its own step.
+            // WHY the middle of the view: the cave ahead, where daylight would show if the sky reached it.
             RectInt crop = new(ShotWidth / 4, ShotHeight / 4, ShotWidth / 2, ShotHeight / 2);
             float darkLuminance = Luminance(dark, crop);
 
@@ -2064,37 +2089,77 @@ return 'watchtower built'";
             yield return Aim(eye, torchFloor);
             yield return Click(_mouse.rightButton);
             object torches = Workspace().GetAttribute("BlockWorldTorches");
+            string torchCells = Convert.ToString(Workspace().GetAttribute("BlockWorldTorchCells"));
             yield return Aim(eye, ahead);
             yield return Frames(10);
             Color[] lit = Shoot("cave_noon_torch.png");
             float litLuminance = Luminance(lit, crop);
-            yield return Tap(_keyboard.digit1Key);
+            // WHY the blocks around the torch as well as the middle of the view: the middle holds whatever the cave's
+            // shape puts there (a corridor's walls a cell away, or a chamber's far wall beyond a torch's light), while
+            // the claim is about the blocks around the torch; these are measured on the same pixels without it.
+            List<RectInt> around = ViewOfBlocksAround(found, 4);
+            float darkAround = Luminance(dark, around);
+            float litAround = Luminance(lit, around);
+            Color[] marked = (Color[])lit.Clone();
+            foreach (RectInt block in around)
+            {
+                for (int y = block.yMin; y < block.yMax; y++)
+                {
+                    for (int x = block.xMin; x < block.xMax; x++)
+                    {
+                        marked[y * ShotWidth + x] = Color.Lerp(marked[y * ShotWidth + x], Color.cyan, 0.35f);
+                    }
+                }
+            }
 
-            Record("cave: tunnel cell " + found + " heading " + along + "; floor crop " + crop + " at noon without a "
+            WritePng("cave_noon_torch_blocks_around.png", marked);
+            yield return Tap(_keyboard.digit1Key);
+            Session().CurrentConcreteRuntime.UnloadMod(PlayerActor(), FirstPersonBodyModId);
+            RunAsPlayer("test_cave_body_back", FirstPersonBodyBackSource);
+            Session().CurrentConcreteRuntime.UnloadMod(PlayerActor(), "test_cave_body_back");
+
+            float aroundShare = around.Sum(block => block.width * block.height) / (float)(ShotWidth * ShotHeight);
+            string torchHere = found.x + "," + found.y + "," + found.z + ",";
+            Record("cave: tunnel cell " + found + " heading " + along + "; the eye " + (eye.Y - floorTop.Y).ToString("0.00")
+                   + " studs above the floor, the feet " + feetAboveFloor.ToString("0.00") + ", the own body hidden as in "
+                   + "first person; floor crop " + crop + " at noon without a "
                    + "torch " + darkLuminance.ToString("0.000") + ", at midnight " + midnightLuminance.ToString("0.000")
-                   + ", at noon with one (torches " + torches + ") " + litLuminance.ToString("0.000")
+                   + ", at noon with one (torches " + torches + ", cells '" + torchCells + "') "
+                   + litLuminance.ToString("0.000") + "; the blocks around the torch (" + (aroundShare * 100f).ToString("0.0")
+                   + "% of the view) without it " + darkAround.ToString("0.000") + ", with it " + litAround.ToString("0.000")
                    + "; Ambient trials without a torch: " + trials);
+            Expect(Mathf.Abs(feetAboveFloor) < 0.5f, "the player stands on the tunnel's floor, so the shots are a player's view");
             if (expectDark)
             {
                 Expect(darkLuminance <= midnightLuminance + 0.015f,
                     "the cave floor at noon is as dark as at midnight: the sky does not reach it");
             }
 
-            Expect(litLuminance > darkLuminance + 0.02f && litLuminance > darkLuminance * 2f,
-                "a torch clearly lights the cave");
+            Expect(torchCells.StartsWith(torchHere, StringComparison.Ordinal), "the torch stands in the player's own cell");
+            Expect(aroundShare > 0.02f, "the blocks around the torch are in view");
+            Expect(litAround > darkAround + 0.02f && litAround > darkAround * 2f,
+                "a torch clearly lights the blocks around it in the cave");
         }
 
         /// <summary>
-        /// A floor cell (x, y, z) whose two cells above are empty, with at least three solid cells of roof above them,
-        /// and a neighbour that continues the tunnel along x or z.
+        /// A dark dry tunnel: a floor cell (x, y, z) whose two cells above are air the sky's light does not reach
+        /// (level 0 of the world's sky flood, the light the renderer draws), with at least three solid cells of roof
+        /// above them, and a neighbour along x or z that continues the tunnel the same way.
         /// </summary>
-        private static bool TryFindTunnel(RbxTerrain terrain, int x, int z, out Vector3Int floor, out Vector3Int along)
+        /// <remarks>
+        /// WHY air and not water: in a flooded tunnel the eye is under water, and the underwater view's fog, the same
+        /// colour at noon and at midnight, fills the frame; that measures the water, not a cave's darkness or a torch.
+        /// WHY the sky's level and not the roof alone: three solid cells overhead are also a tree's canopy or the lip
+        /// of a cave mouth, where daylight comes in from the side.
+        /// </remarks>
+        private static bool TryFindTunnel(RbxTerrain terrain, TerrainSkyExposure sky, int x, int z, out Vector3Int floor,
+            out Vector3Int along)
         {
             floor = default;
             along = default;
             for (int y = 8; y > -14; y--)
             {
-                if (!Solid(terrain, x, y, z) || Solid(terrain, x, y + 1, z) || Solid(terrain, x, y + 2, z)
+                if (!Solid(terrain, x, y, z) || !DarkAir(terrain, sky, x, y + 1, z) || !DarkAir(terrain, sky, x, y + 2, z)
                     || !Solid(terrain, x, y + 3, z) || !Solid(terrain, x, y + 4, z) || !Solid(terrain, x, y + 5, z))
                 {
                     continue;
@@ -2102,8 +2167,8 @@ return 'watchtower built'";
 
                 foreach (Vector3Int step in new[] { Vector3Int.right, Vector3Int.left, new Vector3Int(0, 0, 1), new Vector3Int(0, 0, -1) })
                 {
-                    if (Solid(terrain, x + step.x, y, z + step.z) && !Solid(terrain, x + step.x, y + 1, z + step.z)
-                        && !Solid(terrain, x + step.x, y + 2, z + step.z))
+                    if (Solid(terrain, x + step.x, y, z + step.z) && DarkAir(terrain, sky, x + step.x, y + 1, z + step.z)
+                        && DarkAir(terrain, sky, x + step.x, y + 2, z + step.z))
                     {
                         floor = new Vector3Int(x, y + 1, z);
                         along = step;
@@ -2125,6 +2190,107 @@ return 'watchtower built'";
         {
             byte material = terrain.Store.GetMaterial(x, y, z);
             return material != TerrainMaterials.Air && material != TerrainMaterials.Water;
+        }
+
+        private static bool DarkAir(RbxTerrain terrain, TerrainSkyExposure sky, int x, int y, int z)
+        {
+            return terrain.Store.GetMaterial(x, y, z) == TerrainMaterials.Air && sky.SampleLevel(x, y, z) == 0;
+        }
+
+        /// <summary>
+        /// The parts of the current camera's view, as blocks of <paramref name="step"/> pixels of a shot, where the
+        /// first solid Terrain cell along the view ray lies within one cell of <paramref name="cell"/>: the blocks
+        /// around that cell as the camera sees them, whatever lies behind them.
+        /// </summary>
+        private List<RectInt> ViewOfBlocksAround(Vector3Int cell, int step)
+        {
+            Camera camera = _bootstrap.Composition.Camera;
+            RbxTerrain terrain = Terrain();
+            List<RectInt> blocks = new();
+            for (int y = 0; y + step <= ShotHeight; y += step)
+            {
+                for (int x = 0; x + step <= ShotWidth; x += step)
+                {
+                    Ray ray = camera.ViewportPointToRay(new Vector3((x + step * 0.5f) / ShotWidth,
+                        (y + step * 0.5f) / ShotHeight, 0f));
+                    RbxVector3 from = RbxSpace.FromUnity(ray.origin);
+                    RbxVector3 toward = RbxSpace.FromUnity(ray.origin + ray.direction);
+                    if (TryFirstSolidCell(terrain, from, toward, out Vector3Int hit) && Mathf.Abs(hit.x - cell.x) <= 1
+                        && Mathf.Abs(hit.y - cell.y) <= 1 && Mathf.Abs(hit.z - cell.z) <= 1)
+                    {
+                        blocks.Add(new RectInt(x, y, step, step));
+                    }
+                }
+            }
+
+            return blocks;
+        }
+
+        /// <summary>The first solid Terrain cell on the ray from <paramref name="from"/> through <paramref name="toward"/> (studs), within 192 cell borders.</summary>
+        private static bool TryFirstSolidCell(RbxTerrain terrain, RbxVector3 from, RbxVector3 toward, out Vector3Int hit)
+        {
+            Vector3 origin = new(from.X / Cell, from.Y / Cell, from.Z / Cell);
+            Vector3 direction = new Vector3(toward.X - from.X, toward.Y - from.Y, toward.Z - from.Z).normalized;
+            Vector3Int current = Vector3Int.FloorToInt(origin);
+            Vector3Int sign = new(direction.x > 0f ? 1 : -1, direction.y > 0f ? 1 : -1, direction.z > 0f ? 1 : -1);
+            Vector3 delta = new(Crossing(direction.x), Crossing(direction.y), Crossing(direction.z));
+            Vector3 next = new(
+                (sign.x > 0 ? current.x + 1 - origin.x : origin.x - current.x) * delta.x,
+                (sign.y > 0 ? current.y + 1 - origin.y : origin.y - current.y) * delta.y,
+                (sign.z > 0 ? current.z + 1 - origin.z : origin.z - current.z) * delta.z);
+            for (int crossed = 0; crossed < 192; crossed++)
+            {
+                if (Solid(terrain, current.x, current.y, current.z))
+                {
+                    hit = current;
+                    return true;
+                }
+
+                if (next.x <= next.y && next.x <= next.z)
+                {
+                    current.x += sign.x;
+                    next.x += delta.x;
+                }
+                else if (next.y <= next.z)
+                {
+                    current.y += sign.y;
+                    next.y += delta.y;
+                }
+                else
+                {
+                    current.z += sign.z;
+                    next.z += delta.z;
+                }
+            }
+
+            hit = default;
+            return false;
+        }
+
+        /// <summary>How far along a unit ray one whole cell is crossed on an axis with this component.</summary>
+        private static float Crossing(float component)
+        {
+            return Mathf.Approximately(component, 0f) ? float.PositiveInfinity : Mathf.Abs(1f / component);
+        }
+
+        private static float Luminance(Color[] shot, List<RectInt> blocks)
+        {
+            double sum = 0d;
+            int count = 0;
+            foreach (RectInt block in blocks)
+            {
+                for (int y = block.yMin; y < block.yMax; y++)
+                {
+                    for (int x = block.xMin; x < block.xMax; x++)
+                    {
+                        Color pixel = shot[y * ShotWidth + x];
+                        sum += 0.2126f * pixel.r + 0.7152f * pixel.g + 0.0722f * pixel.b;
+                        count++;
+                    }
+                }
+            }
+
+            return count == 0 ? 0f : (float)(sum / count);
         }
 
         // ---- build here with a scripted model, then /undo -------------------------------------------------------------
