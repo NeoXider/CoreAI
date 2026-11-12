@@ -101,6 +101,32 @@ namespace CoreAI.Infrastructure.Lua
         }
 
         /// <summary>
+        /// A paused player (an app sent to the background) may never run another frame, so every record and autosave
+        /// of the world still encoding a frame budget at a time is finished now.
+        /// </summary>
+        private void OnApplicationPause(bool paused)
+        {
+            if (paused)
+            {
+                FinishWritesInFlight();
+            }
+        }
+
+        /// <summary>A quitting player runs no more frames: the encodes still in flight are finished now.</summary>
+        private void OnApplicationQuit()
+        {
+            FinishWritesInFlight();
+        }
+
+        private void FinishWritesInFlight()
+        {
+            if (_sessionController != null && !_sessionController.IsDisposed)
+            {
+                _sessionController.FinishWritesInFlightAtOnce();
+            }
+        }
+
+        /// <summary>
         /// Opens the physics step and applies world gravity, once per fixed step.
         /// </summary>
         /// <remarks>

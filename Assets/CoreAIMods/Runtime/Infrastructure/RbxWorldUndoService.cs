@@ -168,6 +168,22 @@ namespace CoreAI.Mods.WorldPackages
         /// <summary>Marks <paramref name="registry"/>: a walk over its live instances, no allocation per instance.</summary>
         public static RbxWorldStateMark Of(InstanceRegistry registry, long sourceChanges)
         {
+            return Of(registry, sourceChanges, null);
+        }
+
+        /// <summary>
+        /// <see cref="Of(InstanceRegistry, long)"/> with the Terrain's cells counted by <paramref name="terrainEdits"/>
+        /// instead of its store's revision: the writes the host counts as edits of the world. A play world leaves out
+        /// the writes a world generator marks as its own (cells that come back from its seed, such as land streamed in
+        /// as the player looks around), so they no longer count as somebody changing the world.
+        /// </summary>
+        public static RbxWorldStateMark Of(InstanceRegistry registry, long sourceChanges, long terrainEdits)
+        {
+            return Of(registry, sourceChanges, (long?)terrainEdits);
+        }
+
+        private static RbxWorldStateMark Of(InstanceRegistry registry, long sourceChanges, long? terrainEdits)
+        {
             if (registry == null)
             {
                 throw new ArgumentNullException(nameof(registry));
@@ -194,7 +210,8 @@ namespace CoreAI.Mods.WorldPackages
                     && string.IsNullOrEmpty(record.OwnerModId))
                 {
                     ulong cells = Spread(unchecked(record.Id.Value * 0x9E3779B97F4A7C15UL
-                                                   ^ (ulong)terrain.Store.Revision ^ 0xA0761D6478BD642FUL));
+                                                   ^ (ulong)(terrainEdits ?? terrain.Store.Revision)
+                                                   ^ 0xA0761D6478BD642FUL));
                     sum = unchecked(sum + cells);
                     mix ^= Spread(cells ^ 0xD6E8FEB86659FD93UL);
                     continue;

@@ -74,7 +74,10 @@ is not one. `/undo` refuses when the world changed since: a player, a mod script
 another agent made an AI change (its name is in the reason). A script that changes those settings every frame (a
 day cycle, a flickering torch) does not refuse it and is not recorded; the undo puts back the values of the moment
 before your change, and the script carries on from there. Copies of StarterGui in a player's PlayerGui and the
-player's character are not part of the world, so a respawn never refuses an undo.
+player's character are not part of the world, so a respawn never refuses an undo. Land a world generator streams in
+(Terrain it writes while it sets the workspace attribute `CoreAITerrainGenerating`, as the Block World does for
+every column) does not refuse it either: that land comes back from the seed, so the undo restores the world before
+your change and the generator makes it again. A block a player, a mod or the Hub writes still refuses it.
 
 When a mod the AI wrote starts failing and the AI repairs it on its own, the repair joins the history entry of the
 change that wrote the mod, as long as nothing else changed the world in between: one `/undo` then takes back your
@@ -96,8 +99,9 @@ on) keeps it:
   (`KeptWorldRefreshInterval`) for a player who never stops. A change is a Terrain write, an AI change, a mod source
   change, an instance of the world added or removed outside the AI's calls, or a change of the Workspace number
   `CoreAIWorldEdits` (a mod raises it for what it keeps itself, such as the Block World's torch list). Nothing is
-  recorded while nothing changes. A record captures and encodes the whole world on the main thread, a hitch of about
-  120-190 ms at a Block World's radius 8 in the editor; `/save` records at once.
+  recorded while nothing changes. A record captures the world in one frame (about 20 ms at a Block World's radius 8,
+  most of it reading the mod sources back) and encodes it a few milliseconds per frame over the frames that follow
+  (in a hidden browser tab, at once); `/save` records at once. See WORLD_PACKAGE.md, "Encoding a frame at a time".
 - A world generator marks its own Terrain writes by setting the workspace attribute `CoreAITerrainGenerating` to
   true around them: cells made from a seed come back from it, so streaming alone records nothing. A Terrain write
   made while it is false (a player's block, a falling block) marks the world for its next record.

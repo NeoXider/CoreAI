@@ -195,8 +195,24 @@ after the round trip. `world.json` has no key for the flag; its projection leave
 **Client staging.** `RbxWorldPackageRestoreOptions.RegistryAuthority = Replica` restores into a replica registry
 inside one replication-apply scope, so a client's copy keeps the server's ids and every captured revision and
 nothing is marked diverged; a later local write is. `ReplicaRbxWorldSessionHost` stages and commits such
-worlds like the headless host (MVP4 SC-16; the checks that keep server sources out of a client payload come with
-step C5, the client composition, and read the version 2 bindings). Tests: `Mvp4ReplicaStagingEditModeTests`.
+worlds like the headless host (MVP4 SC-16), and refuses, before anything is restored, a payload that a client must
+never hold (`RbxClientJoinPayload.RefuseServerContent`, step C5): a `Mods/` entry that declares no context (legacy)
+or `server`, a `Script` bound to a source whose `RunContext` is Legacy or Server, or any instance under
+`ServerScriptService` or `ServerStorage`. Tests: `Mvp4ReplicaStagingEditModeTests`, `ClientCompositionEditModeTests`.
+
+**The join payload (MVP4 step C5).** `RbxClientJoinPayload.CaptureForRecipient(context, recipientActorId, filter)` is
+the package a joining client receives, in process for now (MVP5 carries it over a socket, MVP6 the deltas): the
+server's capture with every instance the replication filter hides from that recipient left out (the default filter is
+Roblox's: nothing under `ServerStorage`, `ServerScriptService` or another player's `PlayerGui`/`Backpack`), the
+DataModel's services kept as empty shells, a visible script bound to a server or legacy source kept unbound (a
+`Script` in a `Workspace` part reaches every client without its source), `Mods/` holding only the `client` and
+`shared` sources bound to a visible instance, per-instance state (parts, lights, GUI, chat commands, selection boxes)
+only for the instances kept, a `PrimaryPart` or `ObjectValue` reference to a hidden instance read as nil, and no
+capture diagnostics. Owner and ACL metadata are not stripped yet (MVP5, MP-20). Players are never in a package, so a
+client's local `Player` arrives by replication. `RbxClientWorldComposition.Join(payload, options)` stages it into a
+replica registry, builds the Roblox surface over it with a client topology and the local player's actor, and starts
+its sources from an in-memory store that persists nothing: modules register, client scripts wait for the local
+player and start at the frame after it appears.
 
 The durable v1 surface is class/name/Archivable, world-owned origin/ACL/revision metadata, attributes,
 tags, BasePart properties, Model PrimaryPart/stored WorldPivot, ClickDetector distance, camera CFrame,
@@ -420,12 +436,18 @@ the writer does, then bounds every entry from above without formatting a number 
 zlib's worst case for every entry plus its ZIP headers) and compares the bounds with its platform's limits.
 When every bound fits, the encode itself runs in `CommitAutoAsync`, after the pending marker and one
 player-loop frame later than the mutation (`UniTask.NextFrame`; no wait in Edit Mode or without a player
-loop), so the frame that shows the change is drawn first; when a bound does not fit, the encode runs in
-front of the mutation as before and decides exactly. A failure of the deferred encode, which the proof rules
-out unless the payload changed after it, is a lost backup like a failed write: the next gated mutation backs
-itself up durably first. The pre-mutation snapshot the undo service keeps holds the payload until the encode
-finishes and then only the compact package. `FileRbxWorldPackageStore(defersProvenEncodes: false)` encodes
-every autosave in front; `waitBeforeDeferredEncodeAsync` replaces the frame wait. Measured at 2,048 grid Parts
+loop), so the frame that shows the change is drawn first, and then a frame budget at a time
+([Encoding a frame at a time](#encoding-a-frame-at-a-time)), without the payload validation the proof already
+ran; when a bound does not fit, the encode runs in front of the mutation as before and decides exactly. When
+the next gated mutation has to wait for this backup (it settles the pending write before it runs), the gate
+asks the encode to finish at once (`RbxPreparedAutoSave.RequestEncodeAtOnce`): the wait for its next frame
+ends and the rest runs in that one step, since the caller waits anyway. A failure of the deferred encode,
+which the proof rules out unless the payload changed after it, is a lost backup like a failed write: the next
+gated mutation backs itself up durably first. The pre-mutation snapshot the undo service keeps holds the
+payload until the encode finishes and then only the compact package.
+`FileRbxWorldPackageStore(defersProvenEncodes: false)` encodes every autosave in front;
+`waitBeforeDeferredEncodeAsync` replaces the frame wait (before the deferred encode and between the frames of
+every encode). Measured at 2,048 grid Parts
 (CoreCLR, contended machine, see `dev-docs/PERF_BASELINE_2026-11.md`): the proof costs a few milliseconds
 where the encode cost over a hundred. Tests: `WorldPackageEncodeBehindEditModeTests`.
 
@@ -439,7 +461,76 @@ startup world then follows mod source changes only (recorded from the frame pump
 world tree are not recorded for the next start, the boot restore runs without the gate, and a source
 change may be recorded in the middle of a gated mutation (the next change records the finished state).
 
-File reads/writes are chunked with PlayerLoop yields. The JSON/ZIP codec itself is not incremental, so
+### Encoding a frame at a time
+
+Every package the file store writes — the autosave behind a mutation, a durable-first autosave, a manual save,
+a startup selection and the record of a kept world — is encoded in units of bounded work
+(`RbxWorldPackageSerializer.IncrementalEncoder`, `Infrastructure/RbxWorldPackageIncrementalEncoder.cs`) and
+spread over frames (`RbxWorldPackageEncodeFrames`). A unit is the payload validation, one manifest, the head,
+the tail or 16 instances of `world.json`, one mod's two entries, one Terrain chunk, 64 KiB hashed for the
+startup digest, 4 KiB handed to deflate, or the close of the ZIP. `WritePackage` and `ComputeEntryDigest` are
+the same encoder run in one go, so a package written over many frames is byte for byte the one written at
+once. Each entry reaches deflate in 4 KiB slices at fixed offsets whatever the frames did, so the bytes never
+depend on the timing; on Mono (the editor and Mono players) and .NET Framework deflate gives the same stream
+however its input is split, so the bytes are also those of the writer before this change (pinned in the
+editor by `Deflate_OnMono_GivesTheSameStreamHoweverItsInputIsSplit` and the byte comparison in
+`WorldPackageChunkedEncodeEditModeTests`); CoreCLR's deflate does not, so in the engine-free suite only the
+entries equal the old writer's. The format, the limits and every refusal (in the writer's order) are unchanged.
+
+The work of one frame (a slice) stops at the first unit that ends past its budget, measured with the host
+clock (`Stopwatch.GetTimestamp`, which a WebGL player has too), and the budget follows the frames that
+actually come:
+
+- the gap is the time from the end of the encode's previous slice to the start of this one (the rest of the
+  frame; the encode's own work is not in it, so a long unit never inflates the next budget);
+- the budget is the store's (`FileRbxWorldPackageStore(encodeFrameBudget:)`, default
+  `DefaultEncodeFrameBudget` = 4 ms) or a third of the gap, whichever is more: at most about a quarter of the
+  frame, 4 ms at 60 fps;
+- a gap of 250 ms or more — a hidden or throttled browser tab, below 4 fps, where nobody sees a hitch —
+  runs all the remaining work in that slice, and every later slice of the same encode does too. A deferred
+  autosave measures the gap across its first wait, so in a tab at 1 fps it settles in its first slice, one
+  frame after the mutation, as the one-block encode did; any other encode settles in its second slice;
+- a request for the encode at once (the gate settling the backup for its next mutation) does the same, and
+  ends the wait for the next frame immediately;
+- a budget of zero runs exactly one unit per slice (tests).
+
+The record of a kept world (and the confirmed load's selection) computes its startup digest with the same
+encoder and then goes on to the package from the same entries, so the world is encoded once per record
+instead of twice; the package starts at the next frame, since the digest's last slice may have spent this
+one. The store encodes before it takes its transaction, so a long encode never holds a startup read or a
+commit behind a mutation. What stays in one frame: the capture (the tree, Terrain and mod sources read into
+a payload), the payload validation unit on the paths that validate (the deferred backup skips it, its proof
+ran it), and, when two encodes run at the same time (a backup and a record), each slices to its own budget.
+
+Measured engine-free on a contended machine (`tools/perfbench --only edit-gate`, frames played as 12.7 ms of
+game per frame or a 1 s hidden-tab gap; Unity players and WebGL not measured): the seed-1337 Block World at
+view radius 8 (379 Terrain chunks, nine mods) recorded in 75-91 ms in one frame before, and now takes 53-66 ms
+of work over 13-16 frames, the longest 4.8 ms (CoreCLR); the perfbench Block World-sized payload records in
+11 frames, the longest 4.7 ms (CoreCLR), or 16 frames, the longest 5.1 ms (the Mono CLI with the Boehm
+collector), and in two frames at one frame a second. On the Mono CLI a frame of a 2,048- or 16,384-Part
+encode can still reach about 40 ms, most likely a stop-the-world collection of that collector (it
+grows with the heap, and on CoreCLR the same units measured alone stay under 0.8 ms but for collections);
+whether Unity's incremental collector removes it is not measured. Tests:
+`WorldPackageChunkedEncodeEditModeTests`.
+
+**When the play world stops.** An encode spread over frames waits for frames that a closed scene, a quitting player
+or an unloaded page may never run, so the session controller's `Dispose` finishes every record of the startup world
+and the autosave behind the last gated mutation in one step, inside the call
+(`RbxWorldRuntimeSessionController.FinishWritesInFlightAtOnce`, which a host may also call itself;
+`LuaModRuntimeTickDriver` calls it on an application pause and on quit). "Finished" means encoded: the file write
+that follows still yields a frame per 64 KiB written, as every package write always did, so a player that stops
+running frames at once can still lose a write of more than 64 KiB, exactly as before the incremental encode. A
+record that starts after the stop is not spread over frames either. A browser gives no callback on a page unload:
+there, a record or a backup still encoding when the page closes is lost (before the incremental encode only its
+write was in flight, a frame or two; now the encode is too, about 13-16 frames for a Block World's record at 60 fps,
+none in a hidden tab), and the autosave behind a mutation is reported at the next start as a missing backup. A change
+made while a record is encoding gets its own record afterwards (the record took its pending state when it captured
+the world). Tests: `KeptWorldRecordAndBackupBehind_MidSlicesWhenThePlayWorldStops_AreFinishedAtOnce`,
+`KeptWorldRecord_FinishWritesInFlightAtOnce_EndsTheWaitForFrames`,
+`KeptWorld_AChangeWhileARecordIsMidSlices_GetsARecordOfItsOwn`.
+
+File reads/writes are chunked with PlayerLoop yields. Decoding is not incremental, and the WebGL write budget
+below predates the incremental encode and is kept as it was, so
 the actual WebGL player writes with the 7.56.0 entry limit (16 MiB, `RbxWorldPackageLimits.Version1Baseline`)
 and reads with `RbxWorldPackageLimits.WebGl` (4 MiB compressed, 16 MiB per entry), and it refuses to write
 a package above 4 MiB, with more than 4,096 instances, more
@@ -508,7 +599,8 @@ made after the confirmation reopen too. What triggers a record (`RbxWorldRuntime
   frame pump once it has passed, together with every change made meanwhile. A change made within the
   interval before the process ends is not recorded. Each record is a whole package written, synced and
   pruned while the gate is held — on WebGL up to 4 MB handed to the browser — which is why an AI
-  building in many small calls does not write one per call.
+  building in many small calls does not write one per call. Its digest and its encode run a frame budget
+  at a time ([Encoding a frame at a time](#encoding-a-frame-at-a-time)); only the capture is one frame.
 - **Nothing else is.** A call that changed neither — a read-only call, one that only moved parts through
   physics or moved the camera, or one that changed only the mods' own instances, which no entry holds —
   writes nothing, and an entry whose content equals the newest one is not written again.

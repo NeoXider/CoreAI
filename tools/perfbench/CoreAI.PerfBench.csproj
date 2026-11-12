@@ -75,5 +75,6 @@
     <Compile Include="StreamingCases.cs" />
     <Compile Include="LuauStdlibCases.cs" />
     <Compile Include="TerrainCases.cs" />
+    <Compile Include="WorldEncodeCases.cs" />
   </ItemGroup>
 </Project>

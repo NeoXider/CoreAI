@@ -145,6 +145,10 @@ namespace CoreAI.PerfBench
                         result.Group, result.Name, result.MedianNanosecondsPerOp,
                         result.BytesPerOp < 0 ? "n/a" : result.BytesPerOp.ToString("F1", CultureInfo.InvariantCulture),
                         result.OpsPerTrial, result.Error == null ? "" : "  ERROR " + result.Error));
+                    if (result.Details.Length > 0)
+                    {
+                        Console.WriteLine("             " + result.Details);
+                    }
                 }
             }
 
@@ -212,6 +216,8 @@ namespace CoreAI.PerfBench
                 json.Append(", \"gen0Collections\": ").Append(result.Gen0Collections.ToString(CultureInfo.InvariantCulture));
                 json.Append(", \"notes\": ");
                 PerfReportJson.AppendString(json, result.Notes);
+                json.Append(", \"details\": ");
+                PerfReportJson.AppendString(json, result.Details);
                 json.Append(", \"error\": ");
                 if (result.Error == null)
                 {

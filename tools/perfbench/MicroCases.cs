@@ -44,6 +44,7 @@ namespace CoreAI.PerfBench
             AddSchedulerCases(cases);
             AddLegacyDispatchCases(cases);
             AddWorldCaptureCases(cases);
+            WorldEncodeCases.Add(cases);
             AddSseCases(cases);
             StreamingCases.Add(cases);
             LuauStdlibCases.Add(cases);

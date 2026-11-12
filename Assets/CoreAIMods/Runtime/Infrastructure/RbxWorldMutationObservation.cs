@@ -510,6 +510,18 @@ namespace CoreAI.Mods.WorldPackages
             }
         }
 
+        /// <summary>The request a deferred encode spread over frames listens to (see <see cref="RequestEncodeAtOnce"/>).</summary>
+        internal RbxWorldPackageEncodeUrgency EncodeUrgency { get; } = new();
+
+        /// <summary>
+        /// Asks a deferred encode that is spread over frames to finish at once, in one step; nothing for an autosave
+        /// already encoded. The gate calls it when the next mutation waits for this backup.
+        /// </summary>
+        internal void RequestEncodeAtOnce()
+        {
+            EncodeUrgency.Request();
+        }
+
         /// <summary>The write result a durable-first autosave of the same payload would have returned.</summary>
         public RbxWorldPackageWriteResult ToFailedWrite()
         {

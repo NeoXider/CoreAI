@@ -111,6 +111,7 @@ namespace CoreAI.Mods.WorldPackages
         private int _held;
         private long _sequence;
         private Task<RbxWorldPackageWriteResult> _pendingBackup;
+        private RbxPreparedAutoSave _pendingPrepared;
         private string _pendingTrigger = "";
         private string _lastBackupFailure = "";
         private RbxWorldBackupMetrics _latestMetrics;
@@ -201,6 +202,16 @@ namespace CoreAI.Mods.WorldPackages
             {
                 return new RbxWorldPackageWriteResult(false, "", ex.Message);
             }
+        }
+
+        /// <summary>
+        /// Finishes the encode of the autosave written behind the last mutation in one step now, instead of a frame
+        /// budget at a time; nothing when none is encoding. The play world calls it when it stops, so the frames a
+        /// closed page or a quitting player no longer runs cannot leave the backup half-encoded.
+        /// </summary>
+        internal void FinishPendingBackupAtOnce()
+        {
+            Volatile.Read(ref _pendingPrepared)?.RequestEncodeAtOnce();
         }
 
         /// <inheritdoc />
@@ -548,6 +559,7 @@ namespace CoreAI.Mods.WorldPackages
             double encodeMilliseconds)
         {
             _pendingTrigger = prepared.Trigger;
+            Volatile.Write(ref _pendingPrepared, prepared);
             Volatile.Write(
                 ref _pendingBackup,
                 CommitBehindAsync(prepared, sequence, captureMilliseconds, encodeMilliseconds));
@@ -595,6 +607,9 @@ namespace CoreAI.Mods.WorldPackages
         /// <summary>Waits for the autosave written behind the previous mutation; answers why it failed, or empty.</summary>
         private async Task<string> SettlePendingBackupAsync()
         {
+            // WHY: this mutation waits for the backup behind the previous one, so its encode, spread over frames
+            // while nobody waited, now finishes in one step.
+            Volatile.Read(ref _pendingPrepared)?.RequestEncodeAtOnce();
             Task<RbxWorldPackageWriteResult> pending = Volatile.Read(ref _pendingBackup);
             if (pending == null)
             {

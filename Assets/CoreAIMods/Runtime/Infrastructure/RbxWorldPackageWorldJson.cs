@@ -58,6 +58,101 @@ namespace CoreAI.Mods.WorldPackages
         }
 
         /// <summary>
+        /// <see cref="Write"/> in pieces: the same writers get the same calls in the same order, so the bytes are the
+        /// same, but the instances are written a few at a time and the writers are kept between the pieces.
+        /// </summary>
+        /// <remarks>
+        /// WHY segments instead of a growing <see cref="MemoryStream"/>: a stream that doubles copies the whole entry
+        /// and allocates twice its size in one write (tens of milliseconds for the 20 MB of a 16,384-Part world), which
+        /// would put the whole hitch back into one slice.
+        /// </remarks>
+        internal sealed class ResumableWriter : IDisposable
+        {
+            private readonly RbxWorldPackagePayload _payload;
+            private readonly IReadOnlyList<InstanceSnapshot> _instances;
+            private RbxWorldPackageSegmentedBytes _stream;
+            private StreamWriter _text;
+            private JsonTextWriter _json;
+            private WriterSink _sink;
+            private int _next = -1;
+            private bool _complete;
+
+            internal ResumableWriter(RbxWorldPackagePayload payload)
+            {
+                _payload = payload ?? throw new ArgumentNullException(nameof(payload));
+                _instances = payload.Tree.Instances;
+                _stream = new RbxWorldPackageSegmentedBytes();
+                _text = new StreamWriter(_stream, StrictUtf8, 64 * 1024, true);
+                _json = new JsonTextWriter(_text) { Formatting = Formatting.Indented, Culture = CultureInfo.InvariantCulture };
+                _sink = new WriterSink(_json);
+            }
+
+            /// <summary>True once the closing brace is written and <see cref="Finish"/> may take the stream.</summary>
+            internal bool IsComplete => _complete;
+
+            /// <summary>
+            /// Writes the head on the first call, then at most <paramref name="instances"/> instances, then the tail once
+            /// none is left; true when the tail is written.
+            /// </summary>
+            internal bool WriteSome(int instances)
+            {
+                if (_complete)
+                {
+                    return true;
+                }
+
+                if (_next < 0)
+                {
+                    EmitHead(_sink, _payload);
+                    _next = 0;
+                    return false;
+                }
+
+                int end = Math.Min(_instances.Count, _next + Math.Max(1, instances));
+                for (; _next < end; _next++)
+                {
+                    Instance(_sink, _instances[_next], _payload);
+                }
+
+                if (_next < _instances.Count)
+                {
+                    return false;
+                }
+
+                EmitTail(_sink, _payload);
+                _complete = true;
+                return true;
+            }
+
+            /// <summary>Closes the writers as <see cref="Write"/> does and hands over the bytes.</summary>
+            internal RbxWorldPackageSegmentedBytes Finish()
+            {
+                if (!_complete)
+                {
+                    throw new InvalidOperationException("world.json is not written to its end yet.");
+                }
+
+                ((IDisposable)_json).Dispose();
+                _text.Dispose();
+                RbxWorldPackageSegmentedBytes stream = _stream;
+                _json = null;
+                _text = null;
+                _sink = null;
+                _stream = null;
+                return stream;
+            }
+
+            public void Dispose()
+            {
+                _sink = null;
+                _json = null;
+                _text = null;
+                _stream?.Dispose();
+                _stream = null;
+            }
+        }
+
+        /// <summary>
         /// Bytes <see cref="Write"/> would produce, never fewer: structure and text are counted exactly,
         /// every float and double at its longest form and every line break at two characters.
         /// </summary>
@@ -128,6 +223,18 @@ namespace CoreAI.Mods.WorldPackages
 
         private static void Emit(Sink sink, RbxWorldPackagePayload payload)
         {
+            EmitHead(sink, payload);
+            foreach (InstanceSnapshot node in payload.Tree.Instances)
+            {
+                Instance(sink, node, payload);
+            }
+
+            EmitTail(sink, payload);
+        }
+
+        /// <summary>Everything before the first instance: the settings, the camera and the open <c>instances</c> array.</summary>
+        private static void EmitHead(Sink sink, RbxWorldPackagePayload payload)
+        {
             sink.StartObject();
             sink.Name("schema_version");
             sink.Number(RbxWorldPackageSerializer.CurrentWorldSchemaVersion);
@@ -162,11 +269,11 @@ namespace CoreAI.Mods.WorldPackages
 
             sink.Name("instances");
             sink.StartArray();
-            foreach (InstanceSnapshot node in payload.Tree.Instances)
-            {
-                Instance(sink, node, payload);
-            }
+        }
 
+        /// <summary>Everything after the last instance: the closed array, the service blocks and the closed object.</summary>
+        private static void EmitTail(Sink sink, RbxWorldPackagePayload payload)
+        {
             sink.EndArray();
             if (payload.Lighting.HasValue)
             {

@@ -473,6 +473,9 @@ namespace CoreAI.Mods.WorldPackages
         /// <summary>Default total bytes of all manual slots together; a save that would pass it is refused.</summary>
         public const long DefaultMaximumManualSlotBytes = 256L * 1024L * 1024L;
 
+        /// <summary>The encode work one frame does unless the store was given another budget: 4 ms.</summary>
+        public static readonly TimeSpan DefaultEncodeFrameBudget = RbxWorldPackageEncodeFrames.DefaultFrameBudget;
+
         public const int MaximumWebGlSafePackageBytes = 4 * 1024 * 1024;
         public const int MaximumWebGlSafeInstances = 4096;
         public const int MaximumWebGlSafeCollectionItems = 32768;
@@ -516,6 +519,8 @@ namespace CoreAI.Mods.WorldPackages
         private readonly List<RbxMissingAutoSave> _missingAutoSavesAtOpen = new();
         private readonly List<string> _unacknowledgedMarkers = new();
         private readonly Func<CancellationToken, UniTask> _waitBeforeDeferredEncodeAsync;
+        private readonly TimeSpan _encodeFrameBudget;
+        private Func<long> _encodeClock;
         private readonly bool _defersProvenEncodes;
 
 #if UNITY_WEBGL && !UNITY_EDITOR
@@ -546,8 +551,14 @@ namespace CoreAI.Mods.WorldPackages
         /// prepared autosave in front of the mutation.
         /// </param>
         /// <param name="waitBeforeDeferredEncodeAsync">
-        /// What a commit awaits before a deferred encode; null waits for the next player-loop frame in a
-        /// running player and not at all elsewhere. Tests pass their own to observe the order.
+        /// What a commit awaits before a deferred encode, and every encode between two frames of its work; null
+        /// waits for the next player-loop frame in a running player and not at all elsewhere (where an encode then
+        /// runs in one go). Tests pass their own to observe the order.
+        /// </param>
+        /// <param name="encodeFrameBudget">
+        /// The encode work one frame may do (null: <see cref="DefaultEncodeFrameBudget"/>): every package this store
+        /// writes is encoded in units of bounded work, and a frame stops at the first unit that ends past the
+        /// budget. Zero runs one unit a frame.
         /// </param>
         public FileRbxWorldPackageStore(
             string rootDirectory = null,
@@ -559,8 +570,17 @@ namespace CoreAI.Mods.WorldPackages
             int maximumManualSlots = DefaultMaximumManualSlots,
             long maximumManualSlotBytes = DefaultMaximumManualSlotBytes,
             bool defersProvenEncodes = true,
-            Func<CancellationToken, UniTask> waitBeforeDeferredEncodeAsync = null)
+            Func<CancellationToken, UniTask> waitBeforeDeferredEncodeAsync = null,
+            TimeSpan? encodeFrameBudget = null)
         {
+            if (encodeFrameBudget.HasValue && encodeFrameBudget.Value < TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(encodeFrameBudget),
+                    encodeFrameBudget.Value,
+                    "The encode frame budget cannot be negative.");
+            }
+
             if (autoBackupCapacity <= 0)
             {
                 throw new ArgumentOutOfRangeException(
@@ -599,7 +619,8 @@ namespace CoreAI.Mods.WorldPackages
             _persistenceSyncAsync = persistenceSyncAsync ?? RequestPersistenceCompletionAsync;
             _utcNow = utcNow ?? (() => DateTime.UtcNow);
             _defersProvenEncodes = defersProvenEncodes;
-            _waitBeforeDeferredEncodeAsync = waitBeforeDeferredEncodeAsync ?? WaitOneFrameBeforeDeferredEncodeAsync;
+            _waitBeforeDeferredEncodeAsync = waitBeforeDeferredEncodeAsync ?? RbxWorldPackageEncodeFrames.WaitForNextFrameAsync;
+            _encodeFrameBudget = encodeFrameBudget ?? DefaultEncodeFrameBudget;
             _fileSystem = fileSystem ?? new SystemRbxWorldPackageFileSystem();
             _transactionRoot = Path.GetFullPath(resolvedRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             _transactionFileSystem = _fileSystem is SystemRbxWorldPackageFileSystem
@@ -725,7 +746,7 @@ namespace CoreAI.Mods.WorldPackages
                     }
 
                     return await WriteCreateOnceAsync(
-                        path, null, true, cancellationToken, prepared.PackageBytes);
+                        path, true, cancellationToken, prepared.PackageBytes);
                 }
                 finally
                 {
@@ -743,13 +764,15 @@ namespace CoreAI.Mods.WorldPackages
 
         /// <summary>
         /// Encodes an autosave whose encode was deferred, after the wait that lets the mutation's frame be
-        /// drawn; null when it is encoded (or needed no encode), otherwise the failed write to return.
+        /// drawn and a frame budget at a time; null when it is encoded (or needed no encode), otherwise the
+        /// failed write to return.
         /// </summary>
         /// <remarks>
         /// WHY after the pending marker: a crash during the encode is then reported at the next start as a
-        /// missing backup, like a crash during the write. A failure here contradicts the proof made before
-        /// the mutation (the payload changed after it, or a bug), so it is reported as a lost backup and the
-        /// gate backs the next mutation up durably first.
+        /// missing backup, like a crash during the write. WHY without the payload validation: the proof ran the
+        /// writer's own validation on this payload before the mutation, and a captured payload is never written
+        /// to. A failure here contradicts the proof (the payload changed after it, or a bug), so it is reported
+        /// as a lost backup and the gate backs the next mutation up durably first.
         /// </remarks>
         private async UniTask<RbxWorldPackageWriteResult> CompleteDeferredEncodeAsync(
             RbxPreparedAutoSave prepared,
@@ -761,10 +784,10 @@ namespace CoreAI.Mods.WorldPackages
                 return null;
             }
 
-            await _waitBeforeDeferredEncodeAsync(cancellationToken);
             try
             {
-                prepared.CompleteDeferredEncode(await EncodeForStoreAsync(deferred, cancellationToken));
+                prepared.CompleteDeferredEncode(await EncodeForStoreAsync(
+                    deferred, cancellationToken, true, null, true, prepared.EncodeUrgency));
                 return null;
             }
             catch (Exception ex) when (IsEncodingFailure(ex))
@@ -924,11 +947,30 @@ namespace CoreAI.Mods.WorldPackages
         /// <summary>The resolved startup directory, namespace included; read-only, for composition tests.</summary>
         internal string StartupDirectoryForTests => _startupDirectory;
 
-        public async UniTask<RbxWorldPackageWriteResult> SelectStartupAsync(
+        public UniTask<RbxWorldPackageWriteResult> SelectStartupAsync(
             RbxWorldPackagePayload payload,
             string sourceKind,
             string sourceName,
             CancellationToken cancellationToken = default)
+        {
+            return SelectStartupAsync(payload, sourceKind, sourceName, cancellationToken, null);
+        }
+
+        /// <summary>
+        /// <see cref="SelectStartupAsync(RbxWorldPackagePayload, string, string, CancellationToken)"/> whose package
+        /// reuses the entries of a finished entry digest of <paramref name="payload"/> (a startup record computes one
+        /// first), so the record encodes the world once; null encodes it here.
+        /// </summary>
+        /// <param name="urgency">
+        /// A request to finish the encode at once (the play world stops while the record is still encoding), or null.
+        /// </param>
+        internal async UniTask<RbxWorldPackageWriteResult> SelectStartupAsync(
+            RbxWorldPackagePayload payload,
+            string sourceKind,
+            string sourceName,
+            CancellationToken cancellationToken,
+            RbxWorldPackageSerializer.IncrementalEncoder digestedEntries,
+            RbxWorldPackageEncodeUrgency urgency = null)
         {
             if (payload == null)
             {
@@ -936,6 +978,7 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+            EncodedAhead encoded = await EncodeAheadAsync(payload, cancellationToken, digestedEntries, urgency);
             IDisposable transaction = await WorldPackageTransactions.EnterAsync(
                 _transactionRoot, _transactionFileSystem, cancellationToken);
             try
@@ -957,6 +1000,11 @@ namespace CoreAI.Mods.WorldPackages
                 string stem = FormatStartupSequence(sequence);
                 string packagePath = Path.Combine(_startupDirectory, stem + Extension);
                 string metadataPath = Path.Combine(_startupDirectory, stem + StartupMetadataExtension);
+                if (encoded.Failure != null)
+                {
+                    return encoded.ToFailedWrite(packagePath);
+                }
+
                 // WHY the metadata goes first: the package's own durability confirmation then covers
                 // both files, and an entry is only ever current once its package exists.
                 bool metadataInstalled = await TryInstallStartupMetadataAsync(
@@ -968,10 +1016,10 @@ namespace CoreAI.Mods.WorldPackages
                     cancellationToken);
                 RbxWorldPackageWriteResult written = await WriteCreateOnceAsync(
                     packagePath,
-                    payload,
                     false,
                     cancellationToken,
-                    companionPath: metadataInstalled ? metadataPath : null);
+                    encoded.Bytes,
+                    metadataInstalled ? metadataPath : null);
                 if (written.Success)
                 {
                     await PruneStartupEntriesAsync(sequence);
@@ -1018,7 +1066,6 @@ namespace CoreAI.Mods.WorldPackages
                     FormatStartupSequence(sequence) + StartupDefaultExtension);
                 RbxWorldPackageWriteResult written = await WriteCreateOnceAsync(
                     markerPath,
-                    null,
                     false,
                     cancellationToken,
                     Array.Empty<byte>());
@@ -1159,11 +1206,12 @@ namespace CoreAI.Mods.WorldPackages
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            string safeSlot = ValidateName(slot, "manual slot");
+            EncodedAhead encoded = await EncodeAheadAsync(payload, cancellationToken);
             IDisposable transaction = await WorldPackageTransactions.EnterAsync(
                 _transactionRoot, _transactionFileSystem, cancellationToken);
             try
             {
-                string safeSlot = ValidateName(slot, "manual slot");
                 string path = Path.Combine(_manualDirectory, safeSlot + Extension);
                 if (_fileSystem.FileExists(path))
                 {
@@ -1202,16 +1250,12 @@ namespace CoreAI.Mods.WorldPackages
                         + DescribeManualSlotRecovery());
                 }
 
-                byte[] bytes;
-                try
+                if (encoded.Failure != null)
                 {
-                    bytes = await EncodeForStoreAsync(payload, cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    return new RbxWorldPackageWriteResult(false, path, ex.Message, IsEncodingFailure(ex));
+                    return encoded.ToFailedWrite(path);
                 }
 
+                byte[] bytes = encoded.Bytes;
                 if (slotBytes + bytes.LongLength > _maximumManualSlotBytes)
                 {
                     return new RbxWorldPackageWriteResult(
@@ -1225,7 +1269,7 @@ namespace CoreAI.Mods.WorldPackages
                         + " bytes this store allows. " + DescribeManualSlotRecovery());
                 }
 
-                return await WriteCreateOnceAsync(path, payload, false, cancellationToken, bytes);
+                return await WriteCreateOnceAsync(path, false, cancellationToken, bytes);
             }
             finally
             {
@@ -1352,6 +1396,8 @@ namespace CoreAI.Mods.WorldPackages
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            DateTime requestedAtUtc = _utcNow();
+            EncodedAhead encoded = await EncodeAheadAsync(payload, cancellationToken);
             IDisposable transaction = await WorldPackageTransactions.EnterAsync(
                 _transactionRoot, _transactionFileSystem, cancellationToken);
             try
@@ -1360,7 +1406,7 @@ namespace CoreAI.Mods.WorldPackages
                 try
                 {
                     string safeTrigger = SanitizeTrigger(trigger);
-                    string timestamp = NormalizeUtc(_utcNow()).ToString(
+                    string timestamp = NormalizeUtc(requestedAtUtc).ToString(
                         "yyyyMMdd'T'HHmmssfff'Z'", System.Globalization.CultureInfo.InvariantCulture);
                     _fileSystem.CreateDirectory(_autoDirectory);
                     path = AllocateUniqueAutoPath(timestamp, safeTrigger);
@@ -1376,7 +1422,12 @@ namespace CoreAI.Mods.WorldPackages
                         + ex.Message + ").");
                 }
 
-                return await WriteCreateOnceAsync(path, payload, true, cancellationToken);
+                if (encoded.Failure != null)
+                {
+                    return encoded.ToFailedWrite(path);
+                }
+
+                return await WriteCreateOnceAsync(path, true, cancellationToken, encoded.Bytes);
             }
             finally
             {
@@ -1506,19 +1557,23 @@ namespace CoreAI.Mods.WorldPackages
             return default;
         }
 
-        /// <param name="rawBytes">Exact bytes to install instead of encoding <paramref name="payload"/>.</param>
+        /// <param name="bytes">The exact bytes to install (an encoded package, or a marker's).</param>
         /// <param name="companionPath">
         /// An already installed file that belongs to this create; a failed create removes it before its
         /// cleanup durability confirmation, so neither survives a reload.
         /// </param>
         private async UniTask<RbxWorldPackageWriteResult> WriteCreateOnceAsync(
             string path,
-            RbxWorldPackagePayload payload,
             bool rotateAutoRing,
             CancellationToken cancellationToken,
-            byte[] rawBytes = null,
+            byte[] bytes,
             string companionPath = null)
         {
+            if (bytes == null)
+            {
+                throw new ArgumentNullException(nameof(bytes));
+            }
+
             string temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             bool installed = false;
             List<RotatedFile> rotatedFiles = new();
@@ -1528,22 +1583,6 @@ namespace CoreAI.Mods.WorldPackages
                 if (!string.IsNullOrEmpty(directory))
                 {
                     _fileSystem.CreateDirectory(directory);
-                }
-
-                byte[] bytes = rawBytes;
-                if (bytes == null)
-                {
-                    try
-                    {
-                        bytes = await EncodeForStoreAsync(payload, cancellationToken);
-                    }
-                    catch (Exception ex) when (IsEncodingFailure(ex))
-                    {
-                        // WHY typed: nothing was written, and the same world fails the same way on
-                        // every retry; the pre-mutation gate lets the actions that can shrink or
-                        // replace such a world run without the backup it can never get.
-                        return new RbxWorldPackageWriteResult(false, path, ex.Message, true);
-                    }
                 }
 
                 await _fileSystem.WriteAllBytesCreateNewAsync(
@@ -1680,31 +1719,69 @@ namespace CoreAI.Mods.WorldPackages
             return RbxWorldPackageSerializer.ReadPackage(bytes, ReadLimits);
         }
 
-        /// <summary>
-        /// The default wait before a deferred encode: until the next player-loop frame in a running player
-        /// (a frame later than the mutation's, which a plain yield does not promise), so the frame that shows
-        /// the mutation is drawn before the encode runs; none where no player loop runs (Edit Mode,
-        /// the engine-free build), whose callers must not wait for a frame that never comes.
-        /// </summary>
-        private static UniTask WaitOneFrameBeforeDeferredEncodeAsync(CancellationToken token)
+        /// <summary>The encode work one frame of this store does (the controller's digest of a record uses it too).</summary>
+        internal TimeSpan EncodeFrameBudget => _encodeFrameBudget;
+
+        /// <summary>What this store's encodes await between two frames of their work.</summary>
+        internal UniTask WaitForNextEncodeFrameAsync(CancellationToken cancellationToken)
         {
-#if UNITY_EDITOR
-            bool loopRunning;
-            try
+            return _waitBeforeDeferredEncodeAsync(cancellationToken);
+        }
+
+        /// <summary>
+        /// The clock this store's encodes pace their frames with, in <see cref="System.Diagnostics.Stopwatch"/> ticks;
+        /// null is the host clock. Tests set a fake one to play slow or fast frames.
+        /// </summary>
+        internal Func<long> EncodeClock
+        {
+            get => _encodeClock;
+            set => _encodeClock = value;
+        }
+
+        /// <summary>
+        /// An encode run before the write that installs it takes the store's transaction, so a long encode spread
+        /// over frames never holds the transaction (a startup read, a commit behind a mutation) meanwhile; a
+        /// failure is kept for the write to return where the encode used to fail.
+        /// </summary>
+        private sealed class EncodedAhead
+        {
+            public EncodedAhead(byte[] bytes, Exception failure)
             {
-                loopRunning = Application.isPlaying;
-            }
-            catch (Exception)
-            {
-                loopRunning = false;
+                Bytes = bytes;
+                Failure = failure;
             }
 
-            return loopRunning ? UniTask.NextFrame(PlayerLoopTiming.Update, token) : UniTask.CompletedTask;
-#elif UNITY_5_3_OR_NEWER
-            return UniTask.NextFrame(PlayerLoopTiming.Update, token);
-#else
-            return UniTask.CompletedTask;
-#endif
+            public byte[] Bytes { get; }
+
+            public Exception Failure { get; }
+
+            /// <summary>The write result the encode's failure gives at <paramref name="path"/>, typed when the payload itself failed.</summary>
+            /// <remarks>
+            /// WHY typed: nothing was written, and the same world fails the same way on every retry; the
+            /// pre-mutation gate lets the actions that can shrink or replace such a world run without the backup it
+            /// can never get.
+            /// </remarks>
+            public RbxWorldPackageWriteResult ToFailedWrite(string path)
+            {
+                return new RbxWorldPackageWriteResult(false, path, Failure.Message, IsEncodingFailure(Failure));
+            }
+        }
+
+        private async UniTask<EncodedAhead> EncodeAheadAsync(
+            RbxWorldPackagePayload payload,
+            CancellationToken cancellationToken,
+            RbxWorldPackageSerializer.IncrementalEncoder digestedEntries = null,
+            RbxWorldPackageEncodeUrgency urgency = null)
+        {
+            try
+            {
+                return new EncodedAhead(
+                    await EncodeForStoreAsync(payload, cancellationToken, false, digestedEntries, false, urgency), null);
+            }
+            catch (Exception ex)
+            {
+                return new EncodedAhead(null, ex);
+            }
         }
 
         /// <summary>
@@ -1716,15 +1793,60 @@ namespace CoreAI.Mods.WorldPackages
             return exception is RbxWorldPackageException || exception is EncoderFallbackException;
         }
 
-        private static async UniTask<byte[]> EncodeForStoreAsync(
+        /// <summary>
+        /// <see cref="RbxWorldPackageSerializer.WritePackage(RbxWorldPackagePayload, RbxWorldPackageLimits)"/> held to
+        /// this platform's limits, a frame budget at a time (<see cref="EncodeFrameBudget"/>, the frames awaited
+        /// with <see cref="WaitForNextEncodeFrameAsync"/>): the same bytes and refusals, spread over frames.
+        /// </summary>
+        /// <param name="provenEncodable">
+        /// True for a payload <see cref="TryProveEncodableForStore"/> proved, which skips the validation the proof ran.
+        /// </param>
+        /// <param name="digestedEntries">
+        /// A finished entry digest of <paramref name="payload"/> whose entries the package reuses (a startup record),
+        /// or null.
+        /// </param>
+        /// <param name="waitBeforeFirstSlice">True for a deferred encode: the first slice waits for the next frame.</param>
+        /// <param name="urgency">A request to finish at once (the gate waits for the backup), or null.</param>
+        private async UniTask<byte[]> EncodeForStoreAsync(
             RbxWorldPackagePayload payload,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool provenEncodable = false,
+            RbxWorldPackageSerializer.IncrementalEncoder digestedEntries = null,
+            bool waitBeforeFirstSlice = false,
+            RbxWorldPackageEncodeUrgency urgency = null)
         {
 #if UNITY_WEBGL && !UNITY_EDITOR
             ValidateWebGlWorkBudget(payload);
             await UniTask.Yield(PlayerLoopTiming.Update, cancellationToken);
 #endif
-            byte[] bytes = RbxWorldPackageSerializer.WritePackage(payload, WriteLimits);
+            RbxWorldPackageSerializer.IncrementalEncoder encoder;
+            if (digestedEntries != null)
+            {
+                if (!ReferenceEquals(digestedEntries.Payload, payload))
+                {
+                    throw new ArgumentException("The digested entries are another payload's.", nameof(digestedEntries));
+                }
+
+                digestedEntries.ContinueWithPackage(WriteLimits);
+                encoder = digestedEntries;
+                // WHY the next frame: the digest's last slice may have spent this frame's budget already; an
+                // encode that finishes at once (a throttled tab, a waiting gate) needs no frame of its own.
+                waitBeforeFirstSlice |= !encoder.FinishesAtOnce;
+            }
+            else
+            {
+                encoder = RbxWorldPackageSerializer.IncrementalEncoder.ForPackage(payload, WriteLimits, !provenEncodable);
+            }
+
+            byte[] bytes;
+            using (encoder)
+            {
+                await RbxWorldPackageEncodeFrames.RunAsync(
+                    encoder, _encodeFrameBudget, _waitBeforeDeferredEncodeAsync, cancellationToken,
+                    waitBeforeFirstSlice, urgency, _encodeClock);
+                bytes = encoder.Result;
+            }
+
 #if UNITY_WEBGL && !UNITY_EDITOR
             if (bytes.Length > MaximumWebGlSafePackageBytes)
             {

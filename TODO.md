@@ -556,11 +556,12 @@ Owner's questions and decisions on the Block World (2026-11-11):
 - [ ] **WebGL build of the Block World with a launcher and fps numbers** (owner request), after the visual
       fixes and after the Lua VM update to 0.5.8 is in.
 - [ ] **A world kept between starts: on by default?** `CoreAiModsLifetimeScope.keepWorldBetweenStarts` is off
-      by default and on in the Block World (2026-11-12). Decide whether every play world keeps itself, and do
-      the chunked encode first: one record of a radius-8 Block World takes about 120 ms on the main thread
-      (measured 119 to 330 ms under load, 156 to 174 KB on disk), which is why it is recorded 3 s after the
-      last change and not while the player builds. In a WebGL player a record can also be refused by the
-      package's work-budget check ("Startup world not updated: ...").
+      by default and on in the Block World (2026-11-12). Decide whether every play world keeps itself. The
+      record no longer stalls a frame (the encode runs a few milliseconds per frame since 2026-11-12; what is
+      left in one frame is the capture, 7 to 21 ms, mostly the mod sources read back from disk), so the 3 s
+      quiet time before a record can be revisited. In a WebGL player a record can still be refused by the
+      package's work-budget check ("Startup world not updated: ..."), and nothing of the sliced encode has
+      been timed in a player yet.
 - [ ] **Remember an API key on the device?** The Hub's AI Settings remember the server's address and model
       and never the key (project rule), so a paid API needs its key typed again after every restart. Owner
       decision; in a browser it would be browser storage.

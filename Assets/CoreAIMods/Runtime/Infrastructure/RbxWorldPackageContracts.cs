@@ -1851,6 +1851,11 @@ namespace CoreAI.Mods.WorldPackages
         private object _lastWorldEdits;
         private bool _worldEditsSeen;
         private string _lastKeptRecord = "";
+        private readonly List<RbxWorldPackageEncodeUrgency> _recordEncodes = new();
+        private RbxTerrain _editCountedTerrain;
+        private RbxInstance _editCountedWorkspace;
+        private Action<TerrainChangeSet> _onEditCountedTerrainChanged;
+        private long _terrainEdits;
 
         public RbxWorldRuntimeSessionController(
             IRbxWorldSessionHost host,
@@ -2047,9 +2052,10 @@ namespace CoreAI.Mods.WorldPackages
             {
                 _keepWorld = true;
                 _bundledForRestore = bundled ?? Array.Empty<CoreAI.Infrastructure.Lua.IBundledModSource>();
-                // WHY a debounce unless the host chose its own: a record captures and encodes the whole world on the
-                // main thread (about 120 ms at radius 8 in the editor), so it waits until the player stopped changing
-                // the world for a moment, and one who never stops gets a record a minute; /save records at once.
+                // WHY a debounce unless the host chose its own: a record captures and encodes the whole world (about
+                // 120 ms of main-thread work at radius 8 in the editor, the encode spread over frames), so it waits
+                // until the player stopped changing the world for a moment, and one who never stops gets a record a
+                // minute; /save records at once.
                 if (_startupRefreshInterval == DefaultStartupRefreshInterval)
                 {
                     _startupRefreshInterval = KeptWorldRefreshInterval;
@@ -2411,18 +2417,70 @@ namespace CoreAI.Mods.WorldPackages
         public IModFolderListStore ModFolderListStore { get; set; }
 
         /// <inheritdoc />
+        /// <remarks>
+        /// WHY the Terrain counted by its edits: a world generator streams land in while the player looks around (a
+        /// Block World writes a column every second or so until its whole radius is made), and every one of those
+        /// writes moved the store's revision, so an undo asked for a few frames after an AI change was refused as if
+        /// somebody had edited the world. A write made while the generator marks it
+        /// (<see cref="TerrainGeneratingAttribute"/>) comes back from the seed: the undo restores the snapshot and the
+        /// generator makes that land again. A block the player, a mod or the Hub changes still counts.
+        /// </remarks>
         public RbxWorldStateMark MarkPublishedWorld()
         {
             InstanceRegistry registry;
             long sourceChanges;
+            Session session;
             lock (_gate)
             {
                 DemandActiveLocked();
-                registry = _current.RbxApi.Registry;
+                session = _current;
+                registry = session.RbxApi.Registry;
                 sourceChanges = _sourceChanges;
             }
 
-            return RbxWorldStateMark.Of(registry, sourceChanges);
+            return RbxWorldStateMark.Of(registry, sourceChanges, FollowTerrainEditsOf(session));
+        }
+
+        /// <summary>
+        /// Counts, from the first mark on, the writes to <paramref name="session"/>'s Terrain that a world generator did
+        /// not mark as its own; answers the count.
+        /// </summary>
+        private long FollowTerrainEditsOf(Session session)
+        {
+            RbxInstance workspace = session?.RbxApi?.Game?.FindFirstChildOfClass("Workspace");
+            RbxTerrain terrain = workspace != null ? RbxTerrainBootstrap.Find(workspace) : null;
+            lock (_gate)
+            {
+                if (!ReferenceEquals(terrain, _editCountedTerrain))
+                {
+                    _onEditCountedTerrainChanged ??= OnEditCountedTerrainChanged;
+                    if (_editCountedTerrain != null)
+                    {
+                        _editCountedTerrain.Store.Changed -= _onEditCountedTerrainChanged;
+                    }
+
+                    _editCountedTerrain = terrain;
+                    _editCountedWorkspace = workspace;
+                    if (terrain != null && !_disposed)
+                    {
+                        terrain.Store.Changed += _onEditCountedTerrainChanged;
+                    }
+                }
+
+                return Interlocked.Read(ref _terrainEdits);
+            }
+        }
+
+        private void OnEditCountedTerrainChanged(TerrainChangeSet changes)
+        {
+            // WHY read at the write, as the kept world does: Lua runs one handler at a time, so a write made while the
+            // attribute is true is the generator's.
+            if (Equals(Volatile.Read(ref _editCountedWorkspace)?.GetAttribute(TerrainGeneratingAttribute), true))
+            {
+                return;
+            }
+
+            Interlocked.Increment(ref _terrainEdits);
         }
 
         /// <inheritdoc />
@@ -3326,6 +3384,7 @@ namespace CoreAI.Mods.WorldPackages
         {
             Session outgoing;
             InstanceRegistry watched;
+            RbxTerrain editCounted;
             lock (_gate)
             {
                 if (_disposed)
@@ -3339,11 +3398,80 @@ namespace CoreAI.Mods.WorldPackages
                 watched = _watchedRegistry;
                 _watchedRegistry = null;
                 _mutationWatchActive = false;
+                editCounted = _editCountedTerrain;
+                _editCountedTerrain = null;
+            }
+
+            if (editCounted != null)
+            {
+                editCounted.Store.Changed -= _onEditCountedTerrainChanged;
             }
 
             Unwatch(watched);
             DetachGateHooks();
+            // WHY before the shutdown: a record or a backup still encoding a frame budget at a time would wait for
+            // frames that a closed scene, a quitting player or an unloaded page may never run again.
+            FinishWritesInFlightAtOnce();
             ShutdownOutgoing(outgoing);
+        }
+
+        /// <summary>
+        /// Finishes every write of this play world whose encode is spread over frames in one step now: each record of
+        /// the world that opens on the next start and the autosave written behind the last gated mutation. The encode
+        /// then runs to its end inside this call; the file write that follows still yields a frame per 64 KiB written,
+        /// as every package write does. <see cref="Dispose"/> calls it; a host calls it too when it is about to lose
+        /// its frames (an application pause or quit). Never throws.
+        /// </summary>
+        public void FinishWritesInFlightAtOnce()
+        {
+            RbxWorldPackageEncodeUrgency[] records;
+            lock (_gate)
+            {
+                records = _recordEncodes.ToArray();
+            }
+
+            foreach (RbxWorldPackageEncodeUrgency record in records)
+            {
+                record.Request();
+            }
+
+            if (_worldMutationGate is ConfirmedWorldMutationGate gate)
+            {
+                gate.FinishPendingBackupAtOnce();
+            }
+        }
+
+        /// <summary>
+        /// The request a record's encode listens to, kept until <see cref="EndRecordEncode"/>; already requested once
+        /// the play world stopped, so a record that only starts then is finished at once too.
+        /// </summary>
+        private RbxWorldPackageEncodeUrgency BeginRecordEncode()
+        {
+            RbxWorldPackageEncodeUrgency urgency = new();
+            bool stopped;
+            lock (_gate)
+            {
+                stopped = _disposed;
+                if (!stopped)
+                {
+                    _recordEncodes.Add(urgency);
+                }
+            }
+
+            if (stopped)
+            {
+                urgency.Request();
+            }
+
+            return urgency;
+        }
+
+        private void EndRecordEncode(RbxWorldPackageEncodeUrgency urgency)
+        {
+            lock (_gate)
+            {
+                _recordEncodes.Remove(urgency);
+            }
         }
 
         /// <summary>True once <see cref="Dispose"/> ran; a frame pump then has nothing to drive.</summary>
@@ -3579,21 +3707,37 @@ namespace CoreAI.Mods.WorldPackages
             else
             {
                 await _startupSelectionGate.WaitAsync(CancellationToken.None);
+                RbxWorldPackageSerializer.IncrementalEncoder encoding = null;
+                RbxWorldPackageEncodeUrgency urgency = BeginRecordEncode();
                 try
                 {
+                    // WHY the content first and its entries reused: the record then encodes the world once,
+                    // a frame budget at a time; a payload whose digest fails is still written, as before.
+                    try
+                    {
+                        encoding = await DigestStartupContentAsync(source.Payload, urgency);
+                    }
+                    catch (Exception)
+                    {
+                        encoding = null;
+                    }
+
                     // WHY uncancelled: the player confirmed and the world is already live; abandoning the
                     // bounded selection write half-way would only make the next start disagree with it.
-                    RbxWorldPackageWriteResult written = await _startupStore.SelectStartupAsync(
-                        source.Payload,
-                        source.SourceKind,
-                        source.Slot,
-                        CancellationToken.None);
+                    RbxWorldPackageWriteResult written = _startupStore is FileRbxWorldPackageStore fileStore
+                        ? await fileStore.SelectStartupAsync(
+                            source.Payload, source.SourceKind, source.Slot, CancellationToken.None, encoding, urgency)
+                        : await _startupStore.SelectStartupAsync(
+                            source.Payload,
+                            source.SourceKind,
+                            source.Slot,
+                            CancellationToken.None);
                     if (written != null && written.Success)
                     {
                         SetLiveStartupSource(new StartupSource(
                             source.SourceKind,
                             source.Slot,
-                            ComputeStartupContentOrNull(source.Payload)));
+                            encoding?.EntryDigest));
                         return "";
                     }
 
@@ -3607,6 +3751,8 @@ namespace CoreAI.Mods.WorldPackages
                 }
                 finally
                 {
+                    EndRecordEncode(urgency);
+                    encoding?.Dispose();
                     _startupSelectionGate.Release();
                 }
             }
@@ -3948,6 +4094,7 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             await _startupSelectionGate.WaitAsync(CancellationToken.None);
+            RbxWorldPackageEncodeUrgency urgency = BeginRecordEncode();
             try
             {
                 StartupSource source = TakeLiveStartupSourceForRefresh();
@@ -3961,8 +4108,14 @@ namespace CoreAI.Mods.WorldPackages
                 {
                     System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
                     RbxWorldPackagePayload captured = CaptureCurrent();
-                    byte[] content = ComputeStartupContent(captured);
                     double captureMs = watch.Elapsed.TotalMilliseconds;
+                    // WHY the digest a frame budget at a time, and its entries kept for the write: a record of a
+                    // whole world is tens to hundreds of milliseconds of encoding (about 135 ms at a Block World's
+                    // radius 8 on CoreCLR), which in one block was a hitch after every burst of building; one encode
+                    // now serves the comparison and the package.
+                    using RbxWorldPackageSerializer.IncrementalEncoder encoding =
+                        await DigestStartupContentAsync(captured, urgency);
+                    byte[] content = encoding.EntryDigest;
 
                     // WHY still compared: a call that changed the sources or the world-owned tree may
                     // have left them as the newest entry holds them (a folder created and destroyed
@@ -3993,11 +4146,14 @@ namespace CoreAI.Mods.WorldPackages
                         StartWorldRefreshInterval();
                     }
 
-                    RbxWorldPackageWriteResult written = await _startupStore.SelectStartupAsync(
-                        captured,
-                        source.Kind,
-                        source.Name,
-                        CancellationToken.None);
+                    RbxWorldPackageWriteResult written = _startupStore is FileRbxWorldPackageStore fileStore
+                        ? await fileStore.SelectStartupAsync(
+                            captured, source.Kind, source.Name, CancellationToken.None, encoding, urgency)
+                        : await _startupStore.SelectStartupAsync(
+                            captured,
+                            source.Kind,
+                            source.Name,
+                            CancellationToken.None);
                     if (written != null && written.Success)
                     {
                         ReplaceLiveStartupSource(source, new StartupSource(source.Kind, source.Name, content));
@@ -4032,6 +4188,7 @@ namespace CoreAI.Mods.WorldPackages
             }
             finally
             {
+                EndRecordEncode(urgency);
                 _startupSelectionGate.Release();
             }
         }
@@ -4249,6 +4406,34 @@ namespace CoreAI.Mods.WorldPackages
             FileRbxWorldPackageStore.ValidateWebGlWorkBudget(payload);
 #endif
             return RbxWorldPackageSerializer.ComputeEntryDigest(payload.WithCapturedAtUtc(DateTime.MinValue));
+        }
+
+        /// <summary>
+        /// <see cref="ComputeStartupContent"/> a frame budget at a time (the file store's budget and frame wait, or the
+        /// defaults for another store), as an encode whose <c>EntryDigest</c> is the content and which can go on to the
+        /// package. A refusal throws what <see cref="ComputeStartupContent"/> throws.
+        /// </summary>
+        /// <param name="urgency">The record's request to finish at once (<see cref="FinishWritesInFlightAtOnce"/>).</param>
+        private async UniTask<RbxWorldPackageSerializer.IncrementalEncoder> DigestStartupContentAsync(
+            RbxWorldPackagePayload payload,
+            RbxWorldPackageEncodeUrgency urgency)
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            FileRbxWorldPackageStore.ValidateWebGlWorkBudget(payload);
+#endif
+            RbxWorldPackageSerializer.IncrementalEncoder encoder =
+                RbxWorldPackageSerializer.IncrementalEncoder.ForEntryDigest(payload, DateTime.MinValue);
+            FileRbxWorldPackageStore fileStore = _startupStore as FileRbxWorldPackageStore;
+            await RbxWorldPackageEncodeFrames.RunAsync(
+                encoder,
+                fileStore?.EncodeFrameBudget ?? RbxWorldPackageEncodeFrames.DefaultFrameBudget,
+                fileStore != null
+                    ? fileStore.WaitForNextEncodeFrameAsync
+                    : (Func<CancellationToken, UniTask>)RbxWorldPackageEncodeFrames.WaitForNextFrameAsync,
+                CancellationToken.None,
+                urgency: urgency,
+                clock: fileStore?.EncodeClock);
+            return encoder;
         }
 
         /// <summary>

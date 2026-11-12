@@ -11,7 +11,7 @@ namespace CoreAI.PerfBench
     internal sealed class MicroCase
     {
         public MicroCase(string group, string name, Func<int, long> run, string notes = null,
-            Action setup = null, Action teardown = null, int fixedOps = 0)
+            Action setup = null, Action teardown = null, int fixedOps = 0, Func<string> details = null)
         {
             Group = group;
             Name = name;
@@ -20,7 +20,14 @@ namespace CoreAI.PerfBench
             Setup = setup;
             Teardown = teardown;
             FixedOps = fixedOps;
+            Details = details;
         }
+
+        /// <summary>
+        /// Read after the trials, before the teardown: what the case measured besides its time per operation (a
+        /// sliced encode's slice count and longest slice); null for most cases.
+        /// </summary>
+        public Func<string> Details { get; }
 
         public string Group { get; }
 
@@ -55,6 +62,9 @@ namespace CoreAI.PerfBench
 
         public int Gen0Collections;
         public string Error;
+
+        /// <summary>What <see cref="MicroCase.Details"/> answered; empty when the case has none.</summary>
+        public string Details = "";
     }
 
     /// <summary>
@@ -103,6 +113,7 @@ namespace CoreAI.PerfBench
                 result.MinNanosecondsPerOp = nanoseconds[0];
                 result.MaxNanosecondsPerOp = nanoseconds[nanoseconds.Count - 1];
                 result.BytesPerOp = countAllocations ? bytes[bytes.Count / 2] : -1d;
+                result.Details = microCase.Details?.Invoke() ?? "";
                 GC.KeepAlive(checksum);
             }
             catch (Exception exception)

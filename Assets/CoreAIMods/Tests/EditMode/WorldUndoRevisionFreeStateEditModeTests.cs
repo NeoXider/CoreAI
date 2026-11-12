@@ -6,6 +6,7 @@ using CoreAI.Authority;
 using CoreAI.Mods.Rbx.Datatypes;
 using CoreAI.Mods.Rbx.Instances;
 using CoreAI.Mods.Rbx.Instances.Networking;
+using CoreAI.Mods.Rbx.Instances.Terrain;
 using CoreAI.Mods.WorldPackages;
 using NUnit.Framework;
 
@@ -35,6 +36,28 @@ namespace CoreAI.Tests.EditMode
         private static RbxLighting Lighting(P3HeadlessSession session)
         {
             return (RbxLighting)session.Controller.CurrentRbxApi.Registry.WorldRoot.Parent.FindFirstChildOfClass("Lighting");
+        }
+
+        /// <summary>
+        /// Writes a column of rock at cell column (<paramref name="x"/>, 0) outside the gate, as a world generator
+        /// (<paramref name="generated"/>, marked with the Workspace attribute around the write) or as a player.
+        /// </summary>
+        private static void WriteTerrain(P3HeadlessSession session, int x, bool generated)
+        {
+            RbxInstance workspace = session.Controller.CurrentRbxApi.Registry.WorldRoot;
+            RbxTerrain terrain = RbxTerrainBootstrap.Find(workspace);
+            Assert.IsNotNull(terrain, "the headless world has a Terrain");
+            Assert.IsTrue(TerrainMaterials.TryGetSlot("Rock", out byte rock));
+            if (generated)
+            {
+                workspace.SetAttribute(RbxWorldRuntimeSessionController.TerrainGeneratingAttribute, true);
+            }
+
+            terrain.Store.FillBox(new TerrainCellBox(x, -4, 0, 1, 5, 1), rock, TerrainOccupancy.Full);
+            if (generated)
+            {
+                workspace.SetAttribute(RbxWorldRuntimeSessionController.TerrainGeneratingAttribute, false);
+            }
         }
 
         /// <summary>"Make it night" changes nothing but Lighting, and is one AI change an undo takes back.</summary>
@@ -130,6 +153,51 @@ namespace CoreAI.Tests.EditMode
             RbxWorldUndoResult undone = await session.Undo.UndoAsync(builder);
             Assert.IsTrue(undone.Success, undone.Message);
             Assert.IsNull(session.Controller.CurrentRbxApi.Registry.WorldRoot.FindFirstChild("Tower1"));
+            await session.Gate.WaitForPendingBackupAsync();
+        }
+
+        /// <summary>
+        /// Land a world generator streams in after the AI's build (Terrain written while the Workspace marks the writes
+        /// as the generator's, as a Block World does for every column) does not refuse the undo of the build: the land
+        /// comes back from the seed. Before, every streamed column moved the Terrain's revision and the undo was
+        /// refused as if the player had edited the world.
+        /// </summary>
+        [Test]
+        public async Task Undo_LandStreamedInAfterTheAiBuild_DoesNotRefuseIt()
+        {
+            using P3HeadlessSession session = new(new P3MemoryPackageStore());
+            ActorContext builder = Actor("builder");
+            Assert.IsTrue((await session.ExecuteAsAsync(builder, BuildTower)).Success);
+
+            WriteTerrain(session, 40, true);
+
+            RbxWorldUndoStatus status = session.Undo.GetStatus(builder.ActorId);
+            Assert.IsTrue(status.CanUndo, status.Reason);
+            RbxWorldUndoResult undone = await session.Undo.UndoAsync(builder);
+            Assert.IsTrue(undone.Success, undone.Message);
+            Assert.IsNull(session.Controller.CurrentRbxApi.Registry.WorldRoot.FindFirstChild("Tower1"));
+            await session.Gate.WaitForPendingBackupAsync();
+        }
+
+        /// <summary>
+        /// Twin: a block the player places after the AI's build (a Terrain write nobody marks as generated) still refuses
+        /// the undo, which would otherwise take that block away too.
+        /// </summary>
+        [Test]
+        public async Task Undo_APlayersBlockAfterTheAiBuild_StillRefusesIt()
+        {
+            using P3HeadlessSession session = new(new P3MemoryPackageStore());
+            ActorContext builder = Actor("builder");
+            Assert.IsTrue((await session.ExecuteAsAsync(builder, BuildTower)).Success);
+            WriteTerrain(session, 40, true);
+
+            WriteTerrain(session, 41, false);
+
+            Assert.IsFalse(session.Undo.GetStatus(builder.ActorId).CanUndo);
+            RbxWorldUndoResult refused = await session.Undo.UndoAsync(builder);
+            Assert.AreEqual(RbxWorldUndoResult.WorldChangedStatus, refused.Status, refused.Message);
+            StringAssert.Contains("a player, a mod script or the Hub", refused.Message);
+            Assert.IsNotNull(session.Controller.CurrentRbxApi.Registry.WorldRoot.FindFirstChild("Tower1"));
             await session.Gate.WaitForPendingBackupAsync();
         }
 

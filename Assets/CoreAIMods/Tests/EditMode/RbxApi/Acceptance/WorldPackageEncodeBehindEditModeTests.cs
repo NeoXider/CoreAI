@@ -378,7 +378,7 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         /// Captured and hand-built payloads that together reach every block of <c>world.json</c> and every class of
         /// character the JSON writer escapes or the package replaces.
         /// </summary>
-        private static IEnumerable<RbxWorldPackagePayload> EveryShapeOfPayload()
+        internal static IEnumerable<RbxWorldPackagePayload> EveryShapeOfPayload()
         {
             yield return WorldPackageTestWorlds.CaptureHeavyWorld(96, 8, 4, CapturedAtUtc);
             yield return P3Fixtures.CapturePayload("Plain", "Second");

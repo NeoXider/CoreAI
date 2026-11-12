@@ -25,7 +25,7 @@ namespace CoreAI.Mods.WorldPackages
     /// Canonical MVP3 world codec. Capture/export produces one in-memory payload; disk packages
     /// encode and decode that same payload rather than maintaining a second tree mapper.
     /// </summary>
-    public static class RbxWorldPackageSerializer
+    public static partial class RbxWorldPackageSerializer
     {
         /// <summary>
         /// The format version <see cref="Capture(RbxWorldPackageCaptureContext)"/> writes for a world that needs no
@@ -1288,7 +1288,23 @@ namespace CoreAI.Mods.WorldPackages
         /// Encodes a validated payload held to <paramref name="limits"/> (a platform's budget, at most the
         /// format's); a payload past one of them is refused with <see cref="RbxWorldPackageException"/>.
         /// </summary>
+        /// <remarks>
+        /// The <see cref="IncrementalEncoder"/> run in one go, so a package encoded a frame at a time is this one
+        /// byte for byte on every runtime.
+        /// </remarks>
         public static byte[] WritePackage(RbxWorldPackagePayload payload, RbxWorldPackageLimits limits)
+        {
+            using IncrementalEncoder encoder = IncrementalEncoder.ForPackage(payload, limits);
+            encoder.RunToEnd();
+            return encoder.Result;
+        }
+
+        /// <summary>
+        /// The writer as it was before <see cref="IncrementalEncoder"/>: every entry handed to deflate in one write.
+        /// Tests compare the encoder with it; where deflate gives the same stream however its input is split (Mono,
+        /// .NET Framework) the bytes are the same, elsewhere (CoreCLR) only the entries are.
+        /// </summary>
+        internal static byte[] WritePackageInOneBlockForTests(RbxWorldPackagePayload payload, RbxWorldPackageLimits limits)
         {
             if (limits == null)
             {
@@ -1443,6 +1459,14 @@ namespace CoreAI.Mods.WorldPackages
         /// with the same digest encode to the same package.
         /// </summary>
         internal static byte[] ComputeEntryDigest(RbxWorldPackagePayload payload)
+        {
+            using IncrementalEncoder encoder = IncrementalEncoder.ForEntryDigest(payload);
+            encoder.RunToEnd();
+            return encoder.EntryDigest;
+        }
+
+        /// <summary><see cref="ComputeEntryDigest"/> as it was before <see cref="IncrementalEncoder"/>; tests compare the two.</summary>
+        internal static byte[] ComputeEntryDigestInOneBlockForTests(RbxWorldPackagePayload payload)
         {
             ValidatePayload(payload, ClassCatalog.CreateMvp1());
             PackageManifestDto manifest = BuildManifest(payload);

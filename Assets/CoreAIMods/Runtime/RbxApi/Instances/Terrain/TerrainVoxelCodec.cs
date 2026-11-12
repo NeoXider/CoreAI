@@ -50,6 +50,23 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
             List<TerrainChunkCoord> coords = new(store.ChunkCount);
             store.CopyChunkCoords(coords);
             using MemoryStream output = new(64 + coords.Count * 64);
+            WriteHeader(output, coords.Count);
+            for (int index = 0; index < coords.Count; index++)
+            {
+                store.TryGetChunk(coords[index], out TerrainChunk chunk);
+                WriteChunk(output, chunk);
+            }
+
+            return output.ToArray();
+        }
+
+        /// <summary>
+        /// The bytes <see cref="Encode"/> writes before the first of <paramref name="chunkCount"/> chunks; followed by
+        /// <see cref="WriteChunk"/> of each chunk in <see cref="TerrainChunkStore.CopyChunkCoords"/> order it gives the
+        /// same bytes, so a world package can encode the cells a few chunks at a time.
+        /// </summary>
+        internal static void WriteHeader(Stream output, int chunkCount)
+        {
             output.Write(Magic, 0, Magic.Length);
             WriteUInt16(output, FormatVersion);
             WriteUInt16(output, TerrainChunkCoord.Size);
@@ -59,14 +76,7 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
                 WriteUInt16(output, (ushort)TerrainMaterials.GetEnumValue((byte)slot));
             }
 
-            WriteUInt32(output, (uint)coords.Count);
-            for (int index = 0; index < coords.Count; index++)
-            {
-                store.TryGetChunk(coords[index], out TerrainChunk chunk);
-                WriteChunk(output, chunk);
-            }
-
-            return output.ToArray();
+            WriteUInt32(output, (uint)chunkCount);
         }
 
         /// <summary>
@@ -183,7 +193,8 @@ namespace CoreAI.Mods.Rbx.Instances.Terrain
             return chunkCoordinate >= -(1 << 20) && chunkCoordinate < (1 << 20);
         }
 
-        private static void WriteChunk(Stream output, TerrainChunk chunk)
+        /// <summary>The bytes <see cref="Encode"/> writes for one chunk (see <see cref="WriteHeader"/>).</summary>
+        internal static void WriteChunk(Stream output, TerrainChunk chunk)
         {
             WriteZigZag(output, chunk.Coord.X);
             WriteZigZag(output, chunk.Coord.Y);

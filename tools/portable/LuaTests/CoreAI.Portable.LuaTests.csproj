@@ -131,6 +131,7 @@
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/Mvp3WorldPackageQaEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/Mvp3WorldPackageQaEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/WorldPackageCeilingEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/WorldPackageCeilingEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/WorldPackageEncodeBehindEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/WorldPackageEncodeBehindEditModeTests.cs" />
+    <Compile Include="$(TestsRoot)/RbxApi/Acceptance/WorldPackageChunkedEncodeEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/WorldPackageChunkedEncodeEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/WorldPackageTerrainEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/WorldPackageTerrainEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/WorldPackageLightingEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/WorldPackageLightingEditModeTests.cs" />
     <Compile Include="$(TestsRoot)/RbxApi/Acceptance/WorldPackageEnvironmentScalesEditModeTests.cs" Link="Assets/CoreAIMods/Tests/EditMode/RbxApi/Acceptance/WorldPackageEnvironmentScalesEditModeTests.cs" />

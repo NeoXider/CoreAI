@@ -112,6 +112,46 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
             yield return OpenScene(null);
         }
 
+        /// <summary>What the crosshair rested on while <see cref="AimAtLandBeyond"/> waited for the land; empty when it did not wait.</summary>
+        private string _crosshairWait = "";
+
+        /// <summary>
+        /// Waits until the crosshair rests on the land at a cell other than <paramref name="notCell"/>, looking a little
+        /// to the side after a second of waiting (something standing in the line of sight); the crosshair's own mod
+        /// decides, so a crosshair that never updates still fails the test.
+        /// </summary>
+        private IEnumerator AimAtLandBeyond(RbxVector3 eye, RbxVector3 look, RbxVector3 notCell)
+        {
+            _crosshairWait = "";
+            RbxVector3[] looks = { look, look + new RbxVector3(0f, 0f, 2.5f), look + new RbxVector3(0f, 0f, -2.5f) };
+            for (int attempt = 0; attempt < looks.Length; attempt++)
+            {
+                if (attempt > 0)
+                {
+                    yield return Aim(eye, eye + looks[attempt]);
+                }
+
+                for (int frame = 0; frame < 60; frame++)
+                {
+                    object cell = Workspace().GetAttribute("CrosshairCell");
+                    if (Equals(Workspace().GetAttribute("CrosshairHasTarget"), true) && cell is RbxVector3 onCell
+                        && (onCell.X != notCell.X || onCell.Y != notCell.Y || onCell.Z != notCell.Z))
+                    {
+                        yield break;
+                    }
+
+                    if (frame == 0)
+                    {
+                        _crosshairWait += "[look " + attempt + ": on terrain " + Workspace().GetAttribute("CrosshairHasTarget")
+                                          + ", part '" + Workspace().GetAttribute("CrosshairPartName") + "', model '"
+                                          + Workspace().GetAttribute("CrosshairModelName") + "'] ";
+                    }
+
+                    yield return null;
+                }
+            }
+        }
+
         private static IEnumerator WaitWallSeconds(float seconds, List<float> frameMs)
         {
             float until = Time.realtimeSinceStartup + seconds;
@@ -196,6 +236,10 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
             RbxVector3 brokenCell = (RbxVector3)Workspace().GetAttribute("CrosshairCell");
             yield return Click(_mouse.leftButton);
             yield return Frames(3);
+            // WHY the crosshair is waited for: a right click places a block only where the crosshair rests on the land,
+            // and the line of sight past the broken block can be crossed by a villager (or reach nothing within reach),
+            // which left the click placing nothing and the stale place cell read as the player's block.
+            yield return AimAtLandBeyond(eye, new RbxVector3(8f, -6f, 3f), brokenCell);
             RbxVector3 placedCell = (RbxVector3)Workspace().GetAttribute("CrosshairPlaceCell");
             yield return Tap(_keyboard.digit6Key);
             yield return Click(_mouse.rightButton);
@@ -246,7 +290,8 @@ namespace CoreAI.Tests.PlayMode.RbxApi.BlockWorld
             byte placedAfter = Terrain().Store.GetMaterial((int)placedCell.X, (int)placedCell.Y, (int)placedCell.Z);
             Record("the player's blocks: broke " + brokenCell + " (slot " + brokenBefore + " before the stop, "
                    + brokenAfter + " after the start), placed Brick at " + placedCell + " (slot " + placedBefore
-                   + " before, " + placedAfter + " after; Brick is " + brick + ")");
+                   + " before, " + placedAfter + " after; Brick is " + brick + "); the crosshair after the break "
+                   + (_crosshairWait.Length == 0 ? "rested on the land at once" : "waited for " + _crosshairWait));
             Expect(brokenBefore == TerrainMaterials.Air && brokenAfter == TerrainMaterials.Air,
                 "a block the player broke is still gone after a stop and a start");
             Expect(placedBefore == brick && placedAfter == brick, "a block the player placed is still there");
