@@ -1,4 +1,5 @@
 using System;
+using CoreAI.PanelFonts;
 using UnityEngine;
 using UnityEngine.UIElements;
 using Object = UnityEngine.Object;
@@ -46,6 +47,7 @@ namespace CoreAI.ChatOverlay
 
             GameObject gameObject = new(GameObjectName);
             gameObject.SetActive(false);
+            CoreAiPanelFonts.ApplyTo(panel);
             UIDocument document = gameObject.AddComponent<UIDocument>();
             document.panelSettings = panel;
             document.sortingOrder = resolved.SortingOrder;

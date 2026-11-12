@@ -8,8 +8,9 @@ using UnityEngine.UIElements;
 namespace CoreAI.Hub.UI
 {
     /// <summary>
-    /// Built-in Hub page for the player's graphics options: a quality preset plus one switch per option
-    /// (post-processing, shadows, anti-aliasing, render scale, fog, sky) and "Reset to defaults". Every
+    /// Built-in Hub page for the player's graphics options: the current frame rate, a quality preset plus one
+    /// switch per option (post-processing, shadows, anti-aliasing, render scale, fog, sky) and "Reset to
+    /// defaults". The frame rate is shown whoever owns rendering. Every
     /// change applies at once and is stored by the scope's <see cref="IGraphicsOptionsService"/>, so it
     /// survives a restart. Without a service (the game owns rendering, or no CoreAI scope applies a look)
     /// the page says so instead of offering switches that would do nothing.
@@ -29,11 +30,13 @@ namespace CoreAI.Hub.UI
         internal static readonly string[] AntiAliasingChoices = { "Off", "FXAA", "SMAA" };
 
         private const float RenderScaleStep = 0.05f;
+        private const long FrameRateRefreshMilliseconds = 500;
 
         private readonly IGraphicsOptionsService _serviceOverride;
         private IGraphicsOptionsService _attached;
         private VisualElement _body;
         private bool _listeningForService;
+        private readonly HubFrameRateMeter _frameRate = new();
 
         /// <summary>Creates the page.</summary>
         /// <param name="service">
@@ -78,6 +81,8 @@ namespace CoreAI.Hub.UI
         internal Label StatusLabel { get; private set; }
 
         internal Label ManagedNote { get; private set; }
+
+        internal Label FrameRateValue { get; private set; }
 
         /// <inheritdoc />
         public override void OnActivated()
@@ -205,12 +210,27 @@ namespace CoreAI.Hub.UI
                 : "The last change applies now but was not saved, so it will be lost on restart.";
         }
 
+        /// <summary>
+        /// Feeds the frame rate readout the frame counter and the clock; the page calls it twice a second.
+        /// </summary>
+        internal void SampleFrameRate(int frameCount, double seconds)
+        {
+            if (_frameRate.Sample(frameCount, seconds) && FrameRateValue != null)
+            {
+                FrameRateValue.text = _frameRate.Describe();
+            }
+        }
+
         private object BuildContent()
         {
             ScrollView scroll = HubPageWidgets.CreatePage(null, out VisualElement body);
             scroll.AddToClassList("coreai-hub-page");
             body.AddToClassList("coreai-hub-page-body");
             _body = body;
+            // WHY scheduled on the body: it ticks only while the page is on a panel, so a closed Hub measures
+            // nothing, and it needs no component of its own.
+            body.schedule.Execute(() => SampleFrameRate(Time.frameCount, Time.realtimeSinceStartupAsDouble))
+                .Every(FrameRateRefreshMilliseconds);
             if (!_listeningForService)
             {
                 CoreAiGraphicsUi.ServiceChanged += HandleServiceChanged;
@@ -240,6 +260,9 @@ namespace CoreAI.Hub.UI
 
             _body.Clear();
             _body.Add(HubPageWidgets.MakeTitle(DisplayName));
+            _body.Add(HubPageWidgets.MakeSection("Performance"));
+            _body.Add(HubPageWidgets.MakeRow("Frames per second", _frameRate.Describe(), out Label frameRate));
+            FrameRateValue = frameRate;
             IGraphicsOptionsService service = Service;
             if (service == null)
             {
@@ -381,6 +404,7 @@ namespace CoreAI.Hub.UI
             CustomNote = null;
             StatusLabel = null;
             ManagedNote = null;
+            FrameRateValue = null;
         }
 
         private static string FormatPercent(float renderScale)

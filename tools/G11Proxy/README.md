@@ -66,7 +66,7 @@ Everything else in the asset stays as-is. The values that matter for §6.5, as c
 
 | Field | Value | Why it matters |
 | --- | --- | --- |
-| `requestTimeoutSeconds` | `120` | the "outer timeout + 5 s" budget in §6.5 is **125 s** |
+| `requestTimeoutSeconds` | `0` | no total ceiling on a request; a silent one is ended by the response wait (`llmResponseWaitTimeoutSeconds`, 180 s by default), so the "outer timeout + 5 s" budget in §6.5 is **185 s** |
 | `maxLlmRequestRetries` | `3` | one injected `503` is retried automatically |
 | `modelName` | whatever the asset names | must be a model LM Studio can actually load (see *Limitations*) |
 
@@ -129,8 +129,8 @@ curl -s -X POST http://127.0.0.1:8811/control/hang -H "Content-Type: application
 ```
 
 One-shot: the next `/v1` request is held that long and then answered with `status` (default `503`). Use a
-value above `requestTimeoutSeconds` (120) to exercise the player's own outer timeout rather than the
-proxy's error path. `seconds` defaults to `5`.
+value above the response wait (180 s; `requestTimeoutSeconds` is 0, no total ceiling) to exercise the
+player's own outer timeout rather than the proxy's error path. `seconds` defaults to `5`.
 
 ### `POST /control/reset` — clear every injection
 
@@ -222,7 +222,7 @@ curl -s -X POST http://127.0.0.1:8811/control/block -H "Content-Type: applicatio
 ```
 
 Expected: every attempt is `status=503 injected=block`, upstream is never touched, and by
-`requestTimeoutSeconds + 5` (**125 s** with the committed asset) the turn shows a visible terminal
+the response wait + 5 s (**185 s** with the committed asset) the turn shows a visible terminal
 error/timeout and the send controls are re-enabled. An indefinite busy state, controls that stay
 disabled, or a retry that never resumes is a G11 failure.
 

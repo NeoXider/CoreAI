@@ -186,7 +186,7 @@ Creator -> LocalModel
 | `LLM Mode` | Chooses local, client-owned HTTP, server-managed, auto, offline, or limited execution. (`LLM Backend` applies only while it is `Auto`.) |
 | `Model`, `Base URL`, `API Key` | Backend model and connection fields (Essentials). |
 | `Temperature`, `Max Output Tokens` (General tab) | Generation controls; each is sent only when its override toggle is on. |
-| `Timeout (sec)` (HTTP tab), `LLM Timeout (sec)` (General tab) | Per-HTTP-call and per-turn idle timeout guardrails (default 120 s each). |
+| `Timeout (sec)` (HTTP tab), `LLM Timeout (sec)` (General tab) | Ceilings on one HTTP call and on one turn. Zero (the default, and what the bundled settings assets carry) means no ceiling, so an answer that is still arriving is never cut off however long the model thinks. A request that has gone silent is ended by `Response Wait (sec)` instead: 180 s without a model delta by default, and reasoning and tool deltas count. |
 | `Global streaming` | Global streaming default. |
 | `Universal Prompt Prefix` (General tab) | Text prepended to every agent system prompt. |
 

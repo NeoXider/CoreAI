@@ -3,6 +3,7 @@ using CoreAI.ChatOverlay;
 using CoreAI.Composition;
 using CoreAI.Hub.UI;
 using CoreAI.Infrastructure.Llm;
+using CoreAI.PanelFonts;
 using CoreAI.Presentation;
 using CoreAI.UiFocus;
 using UnityEngine;
@@ -345,6 +346,7 @@ namespace CoreAI.Ai.Hub
             _hintObject = new GameObject(HintObjectName);
             _hintObject.SetActive(false);
             _hintObject.transform.SetParent(parent, false);
+            CoreAiPanelFonts.ApplyTo(_hintPanel);
             _hintDocument = _hintObject.AddComponent<UIDocument>();
             _hintDocument.panelSettings = _hintPanel;
             _hintDocument.sortingOrder = hintSortingOrder;

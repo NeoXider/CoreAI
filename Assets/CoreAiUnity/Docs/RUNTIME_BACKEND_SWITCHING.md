@@ -38,8 +38,8 @@ Hub endpoint edits expose reasoning effort/dialect, nullable temperature, output
 override flag. Editing clones the existing descriptor and merges exposed values, preserving hidden
 fields such as tool channel, legacy thinking controls, and provider body parameters. HTTP endpoints require an explicit
 model; the LLMUnity HTTP adapter also requires its loaded model name rather than substituting `local`.
-Runtime HTTP endpoints use the same transport timeout as the legacy path: the HTTP timeout (120 seconds
-by default), limited by the rounded-up positive orchestration ceiling. A non-positive orchestration
+Runtime HTTP endpoints use the same transport timeout as the legacy path: the HTTP timeout (zero by
+default, which means no ceiling), limited by the rounded-up positive orchestration ceiling. A non-positive orchestration
 ceiling leaves the HTTP timeout in force. Orchestration concurrency honours `MaxConcurrentOrchestrations`
 (including 1 or 2); legacy LLMUnity hosts use `LlmUnityMaxConcurrentChats` for native parallel prompts.
 Named LLMUnity endpoints continue to use their descriptor's `ParallelSlots`.

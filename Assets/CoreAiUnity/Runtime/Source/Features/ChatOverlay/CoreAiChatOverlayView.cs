@@ -46,6 +46,7 @@ namespace CoreAI.ChatOverlay
         private static readonly Color PanelBackground = new(0f, 0f, 0f, 0.45f);
         private static readonly Color InputBackground = new(0f, 0f, 0f, 0.7f);
         private static readonly Color InputBorder = new(1f, 1f, 1f, 0.35f);
+        private static readonly Color InputSelection = new(1f, 1f, 1f, 0.3f);
 
         private readonly CoreAiChatOverlaySettings _settings;
         private readonly ChatOverlayOptions _options;
@@ -62,6 +63,7 @@ namespace CoreAI.ChatOverlay
         private bool _scrollScheduled;
         private KeyCode _suppressKey = KeyCode.None;
         private char _suppressCharacter;
+        private bool _suppressNextCharacter;
         private int _suppressUntilFrame = -1;
         private int _lastSubmitFrame = -1;
 
@@ -170,12 +172,14 @@ namespace CoreAI.ChatOverlay
 
         /// <summary>
         /// Swallows the keystroke that opened the input (its key code and its character) until the frame after
-        /// <paramref name="frame"/>, so the opening key never lands in the field.
+        /// <paramref name="frame"/>, so the opening key never lands in the field. The character is swallowed
+        /// whatever the keyboard layout made of it.
         /// </summary>
         public void SuppressOpeningKey(KeyCode key, int frame)
         {
             _suppressKey = key;
             _suppressCharacter = ChatOverlayHotkeys.CharacterFor(key);
+            _suppressNextCharacter = _suppressCharacter != '\0';
             _suppressUntilFrame = frame + 1;
         }
 
@@ -491,12 +495,26 @@ namespace CoreAI.ChatOverlay
         {
             if (keyCode != KeyCode.None && keyCode == _suppressKey)
             {
+                if (character != '\0')
+                {
+                    _suppressNextCharacter = false;
+                }
+
                 return true;
             }
 
             if (character == '\0' || _suppressCharacter == '\0')
             {
                 return false;
+            }
+
+            // WHY: the opening key types what the active keyboard layout maps it to (T is a Cyrillic letter on a
+            // Russian layout, the slash key a full stop), so its character cannot be recognised by value: the first
+            // character after the opening is the key's own, whichever it is.
+            if (_suppressNextCharacter)
+            {
+                _suppressNextCharacter = false;
+                return true;
             }
 
             char typed = character == '\r' ? '\n' : char.ToLowerInvariant(character);
@@ -601,6 +619,10 @@ namespace CoreAI.ChatOverlay
             _input.style.marginBottom = 2f;
             _input.style.fontSize = _settings.FontSize;
             _input.style.color = Color.white;
+            // WHY: the theme's caret is dark and cannot be seen on the dark field, so the player did not see where
+            // they were typing.
+            _input.textSelection.cursorColor = Color.white;
+            _input.textSelection.selectionColor = InputSelection;
             VisualElement inputBox = _input.Q(className: TextField.inputUssClassName);
             if (inputBox != null)
             {

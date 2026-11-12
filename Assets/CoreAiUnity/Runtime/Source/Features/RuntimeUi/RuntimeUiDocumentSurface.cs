@@ -1,4 +1,5 @@
 using System;
+using CoreAI.PanelFonts;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -54,6 +55,7 @@ namespace CoreAI.RuntimeUi
                 surface._ownedSettings = settings;
             }
 
+            CoreAiPanelFonts.ApplyTo(settings);
             surface._document.panelSettings = settings;
             host.SetActive(true);
             return surface;

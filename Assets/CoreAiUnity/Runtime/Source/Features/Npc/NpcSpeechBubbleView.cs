@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using CoreAI.ChatOverlay;
+using CoreAI.PanelFonts;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -292,6 +293,7 @@ namespace CoreAI.Ai.Npc
 
             GameObject gameObject = new(GameObjectName);
             gameObject.SetActive(false);
+            CoreAiPanelFonts.ApplyTo(panel);
             UIDocument document = gameObject.AddComponent<UIDocument>();
             document.panelSettings = panel;
             if (Application.isPlaying)

@@ -24,7 +24,7 @@ MonoBehaviour:
   maxTokens: 20000
   maxClientLimitedRequestsPerSession: 0
   maxClientLimitedPromptChars: 0
-  requestTimeoutSeconds: 240
+  requestTimeoutSeconds: 0
   enableFallbackBackend: 0
   secondaryApiBaseUrl: 
   secondaryApiKey: 
@@ -86,7 +86,7 @@ MonoBehaviour:
   logToolCallArguments: 1
   logToolCallResults: 1
   logMeaiToolCallingSteps: 1
-  llmRequestTimeoutSeconds: 240
+  llmRequestTimeoutSeconds: 0
   maxConcurrentOrchestrations: 2
   logOrchestrationMetrics: 1
   inputTokenPricePer1KUsd: 0

@@ -565,6 +565,24 @@ Owner's questions and decisions on the Block World (2026-11-11):
       the view is left on after the player comes out; what the horizon dome and the water's underside draw
       against that fog. Needs captured frames from the sea floor at noon and from a beach, in a player, before
       any fix.
+- [ ] **Block World: the sun or the sky moves in jumps** (owner, WebGL play, 2026-11-12: "солнце не плавно, а
+      скачками двигается или небо скачками меняется", and "потемнение скачками, а не плавно"). Not investigated.
+      The darkening is the mod's own part: `applyAmbient` sets the light of the sky by the hour - check
+      whether it interpolates or switches between a few levels. Read from the code: the day and
+      night mod writes `Lighting.ClockTime` ten times a second (`STEP_SECONDS = 0.1` in
+      `blockworld_daynight.lua`), which is 0.075 degrees of sun a step - too fine to see, so the steps are
+      probably made after it: how often the engine turns the clock into the sun's direction, the sky, the
+      ambient light and the sky-only reflection probe, and whether the shadows snap as the sun turns. To do:
+      watch a fast day (`/time` with a short day) in a build and name what jumps - the sun's disc, the sky's
+      colour, the light on the ground or the shadows - then fix that part; the mod's own step can go to every
+      frame if it turns out to matter.
+- [ ] **Block World: villagers cannot be hit or pushed, and neither will mobs** (owner, WebGL play,
+      2026-11-12: "бить и толкать жителей (как и мобов вероятно) не могу"). Not investigated. To find out: whether
+      a character's body collides with another character's (the player walks through a villager or is
+      stopped dead), what a left click on a character does today (the build mod breaks blocks at the
+      crosshair), and what the Lua API offers for it (`Humanoid:TakeDamage`, `Humanoid.Health`, `Touched`,
+      an impulse on the body). Wanted: a hit with a knock-back and a visible reaction, bodies that push each
+      other instead of passing through, all written in the mods the way a Roblox creator would.
 - [ ] **Block World: the character controller is bad to play** (owner, WebGL play, 2026-11-12: "контроллер в
       CoreAI плохой"). Three things he named, and "and so on": (1) after falling off a block the character
       goes on sliding by itself; (2) walking into a one-block step should climb it without a jump, as
@@ -576,6 +594,10 @@ Owner's questions and decisions on the Block World (2026-11-11):
       in a WebGL player against Minecraft's basics (walk, stop, step up, fall, sprint, jump while sprinting,
       swim), with every difference written down; then the fixes in the engine's character body and the control
       script, each proven by playing, not only by a test.
+      Added by the owner the same day: "shift в майне не работает". Today Left Shift only flies down
+      (`coreai_player_controls.lua`), and the sprint is Left Control or W twice (`blockworld_build.lua`); on
+      foot Shift does nothing. Minecraft's Shift is sneaking (slower, and no stepping off an edge); decide
+      with the controller pass whether Shift sneaks, and say it in the on-screen legend.
       A controller to learn from (the owner pointed at it, 2026-11-12: "может он пригодиться на потом"): his
       game `D:\Git\DiveForBrainrots`, `Assets/Scripts/Player/PlayerLocomotion.cs` (1,345 lines),
       `LocomotionRules.cs` (the water states as plain rules) and `PlayerMovementSettings.cs`: ground
@@ -631,38 +653,61 @@ Owner's questions and decisions on the Block World (2026-11-11):
       when something asks to replace the world. Proposal to decide with the World hierarchy: fold it into the
       World tab as a "Saves" part, and ask the approval in a dialog when a request arrives instead of on a
       page that is empty the rest of the time.
-- [ ] **Chat and every other panel: Russian text is not drawn in a WebGL player** (owner, a screenshot of
-      WebGL build 8, 2026-11-12: "почему то русский не поддерживает"). In the chat his Russian line is an
-      empty "You:" and the model's Russian answer is blanks with only "Block World", digits and punctuation
-      left; the long dash of an English answer is a gap too. Cause read from the code, not yet proven by a
-      run: no panel names a font - `textSettings` is empty in `CoreAiChatPanelSettings_Demo.asset` and
-      `CoreAiHubPanelSettings.asset`, the chat's own panel (`CoreAiChatOverlaySurface.CreateRuntimePanelSettings`)
-      sets none, and no style sheet has a font definition - so the text is drawn with Unity's built-in font,
-      which borrows missing letters from the system's fonts; a browser page has none to lend. The model is
-      not the problem: it answered in Russian. Not checked: whether the typed Russian line reaches the model
-      whole (the model replied "looks like a typo"; the proxy log keeps no request bodies).
-      To do: ship one font with Latin and Cyrillic in the package (the tree already has
-      `Assets/TextMesh Pro/Fonts/LiberationSans.ttf`, 350 KB, but outside the packages; check its licence
-      file goes with it) as a font asset with a fallback list, and give it to every panel in one place: the
-      chat, the Hub, the Lua-made interface (`ScreenGui`, `TextLabel`), speech bubbles, the download overlay.
-      Tests: the font asset has the Russian alphabet and the long dash; a WebGL check that a Russian line is
-      drawn and that a typed one reaches the request unchanged. Other scripts (Chinese, Japanese, Korean,
-      Arabic, emoji) are megabytes each - decide separately, as optional downloads.
-- [ ] **Chat: Enter on an empty line does not close the chat in a WebGL player** (owner, WebGL build 8,
+- [x] **Chat and every other panel: Russian text is not drawn in a WebGL player** (owner, a screenshot of
+      WebGL build 8, 2026-11-12: "почему то русский не поддерживает"). No panel named a font, so text was
+      drawn with Unity's built-in font, which borrows missing letters from the system's fonts; a browser page
+      has none to lend. Fixed 2026-11-12: Liberation Sans (Latin, Cyrillic, Greek; 350 KB, with its licence)
+      is bundled in the Unity package and `CoreAiPanelFonts` gives it, as the default and as the fallback for
+      missing letters, to every panel CoreAI sets up: the chat overlay, the full chat panel, the Hub, the
+      Lua-made interface, speech bubbles and the F2 hint. A panel with its own text settings keeps them.
+      A test holds the Russian alphabet, the long dash and the angle quotes in the font. Not covered: the
+      model download overlay (it draws with the legacy built-in font), and other scripts (Chinese, Japanese,
+      Korean, Arabic, emoji) - megabytes each, to decide separately as optional downloads.
+- [x] **Chat: Enter on an empty line does not close the chat and the agent answers it** (owner, WebGL build 8,
       2026-11-12: "полезно бы сделать: если просто Enter нажимаешь (пустое сообщение или пробелы), то в чат
       ничего не отправляется и он закрывается (на Esc не удобно закрывать, так как полноэкранный режим
-      сбрасывается)"). The code already means this: `ChatOverlayController.Submit` closes the input on an
-      empty or blank line and sends nothing, and by default closes it after every sent line too. For him it
-      does not; on both of his screenshots the input is open while the model answers (he may have reopened
-      it himself). Suspected cause, not proven by a run: Enter is also an open key (`openChatKeys` = T,
-      Return, KeypadEnter in `CoreAiChatOverlaySettings`), and `CoreAiChatOverlayEntryPoint.PollKeys`
-      refuses to reopen only in the frame of the close; if a browser delivers the text field's key event and
-      the keyboard poll in different frames, one press closes the chat and opens it again. To do: reproduce
-      in a WebGL player first; hold the reopen until the closing key is released instead of for one frame;
-      a test with a keyboard fake that reports the press a frame late; then a WebGL check that Enter on an
-      empty line and Enter after a message both leave the chat closed, with the pointer captured again so
-      that play goes on without a click. Escape stays a close key, but in a browser it also leaves full
-      screen, so Enter must be the comfortable way.
+      сбрасывается)", then "вот на пустое он начал отвечать"). The line was not empty. The chat swallowed
+      the key that opened it only by its Latin character; on a Russian layout the T key types a Cyrillic
+      letter, which landed in the field, and the font could not draw it, so the field looked empty while
+      Enter sent that one letter to the model ("looks like a typo"). Fixed 2026-11-12: the first character
+      after the opening key is swallowed whatever the layout made of it
+      (`CoreAiChatOverlayView.SuppressOpeningKey`), with tests. An empty or blank line already closed the
+      input without sending (`ChatOverlayController.Submit`). The chat does not reopen on the Enter that
+      closed it (read from the code: the input counts as open until the next chat tick, and the open keys
+      are read only in the frame of the press). What is left, order-dependent and not seen live: the hold
+      lasts one chat tick, not one input step of the world, so that Enter may reach Lua as
+      `InputBegan(Return, gameProcessed=false)` when the chat ticks before the world's input pump. Check with
+      a one-line mod that warns on Return; if it leaks, keep the input counted as open until the world has
+      run one input step after the close. To see in a build: the pointer is captured again after the close.
+- [ ] **Chat status: show what the agent is doing, not only "thinking"** (owner, 2026-11-12, after a turn
+      that built a pig and showed "thinking" for 140 s: "так и оставим или будем отображать состояния").
+      Decided: show them. Tools run in milliseconds, and almost all the time the model is composing a tool
+      call's arguments (the script), which today counts as thinking. States: thinking; writing a script, with
+      its size growing; running a tool or reading logs (exists, `AgentStatusKind.RunningTool`, but flashes
+      by); answering; retrying N of M; plus a step counter. Needs one new event from the model stream (a tool
+      call is being composed, with the size so far) carried to `AgentStatusTracker`, and the same states
+      offered to the Lua chat mod (`dev-docs/CHAT_AS_LUA_MOD_DESIGN.md`).
+      The owner's own wish for it (same day): "подсчет токенов на output думаю было бы полезно" - so the
+      status line carries the count of output tokens next to the elapsed time (an estimate while the stream
+      runs, the server's own number once it reports usage), and the states stay few: thinking, writing a
+      script, answering.
+- [ ] **Other caps that end a model's turn by total time** (found 2026-11-12 while lifting the request caps
+      for the owner: "если модель уже первый токен отправила ... нужно огромный лимит"). The request itself
+      now has no total cap in the bundled settings, only the idle wait (180 s without a model delta). Two
+      total caps remain elsewhere and will cut a slow local model the same way: an NPC's reply (45 s,
+      `NpcDirectorOptions.TurnTimeoutSeconds`) and a mod's self-repair turn (120 s,
+      `LuaModRuntimeRepairOptions.DefaultTurnTimeoutSeconds`). Bring both under the same rule: no total cap
+      while the model is delivering, an idle wait otherwise.
+- [ ] **Speed of the platform itself, for later** (owner, 2026-11-12: "мы можем полезные вещи
+      оптимизировать, чтобы узкие места роблокса покрывать (и lua, но это план на будущее, а не сейчас)", "в
+      идеале сам lua должен иметь оптимизированный функционал, но опять же это на потом"). Two lines of work,
+      neither for the current sprint: (1) generic engine-side calls for the things a Roblox game is slow at
+      when written in a script (bulk voxel work, many instances a frame, path queries), each mirrored from a
+      Roblox call where one exists, never a call that serves one demo; (2) the Lua runtime: measure the
+      interpreter against Luau and a browser's JavaScript on the loops mods really run, then decide (a
+      faster interpreter path, compiled hot loops, or library functions that do the loop natively). The
+      Block World stays a set of Lua mods written as a Roblox creator would write them (his rule the same
+      day: "смысл чтобы майн был на модах, как в роблоксе бы делался").
 - [ ] **Hub in a play world (F2): the scroll bar is unstyled and no FPS is shown** (owner, a screenshot of the
       Graphics page, 2026-11-12: "плохо выглядит скролл бар, а так же fps не пишется"). The page's vertical
       scroll bar is UI Toolkit's default (a light grey track with white arrow buttons and a grey thumb) on the

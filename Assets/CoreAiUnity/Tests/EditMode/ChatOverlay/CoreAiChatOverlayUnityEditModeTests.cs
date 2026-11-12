@@ -353,6 +353,43 @@ namespace CoreAI.Tests.EditMode.ChatOverlay
         }
 
         [Test]
+        public void View_SwallowsTheOpeningKeystroke_OnAnotherKeyboardLayout()
+        {
+            const char cyrillicOnTheTKey = 'е';
+            CoreAiChatOverlayView view = new();
+            view.SetInputOpen(true, "");
+            view.SuppressOpeningKey(KeyCode.T, 10);
+
+            Assert.IsTrue(view.HandleInputKey(KeyCode.T, '\0', 10));
+            Assert.IsTrue(view.HandleInputKey(KeyCode.None, cyrillicOnTheTKey, 11),
+                "the opening key's own character, as a Russian layout types it");
+            Assert.IsFalse(view.HandleInputKey(KeyCode.None, cyrillicOnTheTKey, 11), "the next one is typing");
+
+            view.SuppressOpeningKey(KeyCode.Slash, 20);
+            Assert.IsTrue(view.HandleInputKey(KeyCode.None, '.', 20), "the slash key types a full stop there");
+            Assert.IsFalse(view.HandleInputKey(KeyCode.None, 'a', 20), "typing after it reaches the field");
+        }
+
+        [Test]
+        public void View_OpenedByAKeyWithoutACharacter_SwallowsNoTyping()
+        {
+            CoreAiChatOverlayView view = new();
+            view.SetInputOpen(true, "");
+            view.SuppressOpeningKey(KeyCode.F1, 10);
+
+            Assert.IsFalse(view.HandleInputKey(KeyCode.None, 'a', 10));
+        }
+
+        [Test]
+        public void View_DefaultStyle_ShowsAWhiteCaretOnTheDarkField()
+        {
+            CoreAiChatOverlayView view = new();
+
+            Assert.AreEqual(Color.white, view.Input.textSelection.cursorColor);
+            Assert.Greater(view.Input.textSelection.selectionColor.a, 0f);
+        }
+
+        [Test]
         public void View_EnterSubmitsTheText_EscapeRequestsClose()
         {
             CoreAiChatOverlayView view = new();

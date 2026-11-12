@@ -21,6 +21,13 @@ WebGL (no threads, no blocking waits), and is UI Toolkit only.
 - Lines stay for 10 seconds after they last changed, then fade out. While the input is open every line is
   shown. A streamed answer never fades while it is still arriving.
 - Enter on an empty input only closes it.
+- The key that opens the input never lands in the field, whatever the keyboard layout types for it (on a
+  Russian layout **T** is a Cyrillic letter and **/** a full stop): the first character after the opening key
+  is swallowed.
+- Text in Latin, Cyrillic and Greek is drawn in every player, a WebGL page included: the overlay's panel takes
+  the package's bundled font (`CoreAiPanelFonts`, Liberation Sans) as its default and as the fallback for letters
+  another font lacks. A panel you assign with its own text settings keeps them. The caret and the selection
+  are light in the default style, so they show on the dark field.
 - The status line under the input shows the agent's activity during a turn: `thinking`,
   `answering`, `running execute_lua`, `loading mod` (for `manage_mods`), `execute_lua failed, retrying`,
   `running execute_lua (retry 1)`, with the elapsed time (`thinking · 4s`) from the first second on. It

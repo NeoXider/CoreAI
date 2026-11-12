@@ -9,6 +9,7 @@ using CoreAI.Authority;
 using CoreAI.ChatMarkdown;
 using CoreAI.Composition;
 using CoreAI.Infrastructure.Logging;
+using CoreAI.PanelFonts;
 using CoreAI.Threading;
 using Cysharp.Threading.Tasks;
 using Newtonsoft.Json.Linq;
@@ -474,6 +475,7 @@ namespace CoreAI.Chat
             _panelRenderer = GetComponent<PanelRenderer>();
             if (_panelRenderer != null)
             {
+                CoreAiPanelFonts.ApplyTo(_panelRenderer.panelSettings);
                 _panelRenderer.RegisterUIReloadCallback(OnPanelRendererUiReloaded);
                 return;
             }
@@ -492,6 +494,7 @@ namespace CoreAI.Chat
                 return;
             }
 
+            CoreAiPanelFonts.ApplyTo(uiDoc.panelSettings);
             InitializeUiRoot(uiDoc.rootVisualElement);
         }
 

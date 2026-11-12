@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using CoreAI.Hub;
+using CoreAI.PanelFonts;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -258,6 +259,10 @@ namespace CoreAI.Hub.UI
 
             Unwire();
             _viewGeneration++;
+            if (_document != null)
+            {
+                CoreAiPanelFonts.ApplyTo(_document.panelSettings);
+            }
 
             if (shellUxml == null)
             {

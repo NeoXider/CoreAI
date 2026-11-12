@@ -230,6 +230,34 @@ namespace CoreAI.Tests.EditMode
             return new GraphicsOptionsService(new InMemoryGraphicsOptionsStore(), platformDefault);
         }
 
+        [Test]
+        public void Page_ShowsTheFrameRate_WhoeverOwnsRendering()
+        {
+            HubGraphicsPage page = Build(null);
+
+            Assert.IsNotNull(page.ManagedNote, "no options service: the game owns rendering");
+            Assert.AreEqual(HubFrameRateMeter.NoReadingText, page.FrameRateValue.text);
+
+            page.SampleFrameRate(100, 10.0);
+            page.SampleFrameRate(130, 10.5);
+
+            Assert.AreEqual("60 (16.7 ms a frame)", page.FrameRateValue.text);
+        }
+
+        [Test]
+        public void FrameRateMeter_WaitsForALongEnoughStretch_AndStartsAgainWhenTheCounterGoesBack()
+        {
+            HubFrameRateMeter meter = new();
+
+            Assert.IsFalse(meter.Sample(10, 1.0), "the first call only sets the start");
+            Assert.IsFalse(meter.Sample(12, 1.1), "too short a stretch to trust");
+            Assert.IsTrue(meter.Sample(40, 2.0));
+            Assert.AreEqual(30d, meter.FramesPerSecond, 0.001);
+            Assert.IsFalse(meter.Sample(5, 2.5), "the frame counter went back");
+            Assert.IsTrue(meter.Sample(55, 3.5));
+            Assert.AreEqual(50d, meter.FramesPerSecond, 0.001);
+        }
+
         private static HubGraphicsPage Build(IGraphicsOptionsService service)
         {
             HubGraphicsPage page = new(service);

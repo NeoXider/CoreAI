@@ -89,7 +89,7 @@ Design the shipped build so every rung failing lands on the next one, never on a
 4. **Offline stub** — `Offline` mode returns deterministic per-role responses (configurable via **Custom Response**), so AI-driven features visibly degrade ("The model is temporarily unavailable") instead of breaking. If no model resolves at all, `LlmUnityAutoDisableIfNoModel` disables LLMUnity and DI falls back to `StubLlmClient` automatically.
 5. **Design floor:** make sure core gameplay is playable when every AI feature is answering from stubs — treat LLM features as enhancement, and gate quest-critical logic on tool results you validate, not on free-form model text.
 
-Timeouts are the other half of degradation: **LLM Timeout (sec)** (orchestrator/chat idle window, default 120 s) and the HTTP request timeout are linked so a stuck call cannot outlive the cancel window (see [MEAI_TOKENS_FACT_VS_ESTIMATE](../../CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) §3). Wire your UI to the typed error codes (`Timeout`, `RateLimited`, `BackendUnavailable`, …) rather than raw provider strings.
+Timeouts are the other half of degradation: **LLM Timeout (sec)** (orchestrator/chat idle window; zero, the default, turns it off) and the HTTP request timeout (zero by default as well) are linked so a stuck call cannot outlive the cancel window (see [MEAI_TOKENS_FACT_VS_ESTIMATE](../../CoreAI/Docs/MEAI_TOKENS_FACT_VS_ESTIMATE.md) §3). Wire your UI to the typed error codes (`Timeout`, `RateLimited`, `BackendUnavailable`, …) rather than raw provider strings.
 
 ---
 
