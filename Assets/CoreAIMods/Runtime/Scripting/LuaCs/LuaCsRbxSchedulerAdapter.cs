@@ -502,6 +502,18 @@ namespace CoreAI.Ai.LuaCs
         internal object CaptureChunk(IScriptState ownerState, string source,
             IExecutionBudget resumeBudget, CancellationToken cancellationToken, IExecutionBudget initialResumeBudget)
         {
+            return CaptureChunk(ownerState, source, resumeBudget, cancellationToken, initialResumeBudget,
+                "sandbox_chunk");
+        }
+
+        /// <summary>
+        /// Captures a main chunk compiled under <paramref name="chunkName"/>: a mod's is <c>mod:&lt;id&gt;</c> (MVP4
+        /// SC-19), which is how an error is attributed to the chunk that raised it.
+        /// </summary>
+        internal object CaptureChunk(IScriptState ownerState, string source,
+            IExecutionBudget resumeBudget, CancellationToken cancellationToken, IExecutionBudget initialResumeBudget,
+            string chunkName)
+        {
             cancellationToken.ThrowIfCancellationRequested();
             if (ownerState == null)
             {
@@ -510,7 +522,8 @@ namespace CoreAI.Ai.LuaCs
 
             LuaState state = LuaCsScriptState.Unwrap(ownerState);
             LuaCsSecureEnvironment.InstallTrustedIteratorResolver(state);
-            LuaClosure closure = state.Load(source ?? string.Empty, "sandbox_chunk");
+            LuaClosure closure = state.Load(source ?? string.Empty,
+                string.IsNullOrEmpty(chunkName) ? "sandbox_chunk" : chunkName);
             if (resumeBudget != null)
             {
                 _allocationBudgets.GetValue(state, CreateStateAllocationBudget).MaxAllocatedBytes =
@@ -526,6 +539,62 @@ namespace CoreAI.Ai.LuaCs
         {
             _scriptEngine.RunChunk(ownerState, WaitBridgeSource);
         }
+
+        /// <summary>
+        /// Defines <c>require</c> on a state (MVP4 step C4) over the host primitives the <c>task</c> table carries
+        /// (<see cref="LuaCsRbxApiBindings"/>), and erases them from <c>task</c>. Runs for every registered state, a
+        /// one-shot console state included, before any script code.
+        /// </summary>
+        internal void PrepareRequireBindings(IScriptState ownerState)
+        {
+            _scriptEngine.RunChunk(ownerState, RequireBridgeSource);
+        }
+
+        // WHY Lua and not a host function: a module body must be able to yield (WaitForChild at its top level is the
+        // common client-module pattern), and a yield cannot cross a counted host call; a Lua call through pcall can.
+        // WHY inline on the requiring thread: the requirer waits for a yielding module exactly as long as the body
+        // runs, and a cycle is a module the requiring thread is itself loading, which the require graph sees directly.
+        private const string RequireBridgeSource = @"
+            local requireBegin = task._requireBegin
+            local requireSettle = task._requireSettle
+            local requireAfterWait = task._requireAfterWait
+            task._requireBegin = nil
+            task._requireSettle = nil
+            task._requireAfterWait = nil
+            if requireBegin == nil then
+                return
+            end
+            -- WHY captured before any script runs: a script that reassigns pcall, error, rawset or coroutine.yield
+            -- must not change how its modules load, as the wait bridge captures yield for the same reason.
+            local protectedCall = pcall
+            local raise = error
+            local yield = coroutine.yield
+            local setRaw = rawset
+            local function finish(token, ...)
+                local ok, value = requireSettle(token, ...)
+                if not ok then
+                    raise(value, 0)
+                end
+                return value
+            end
+            local makeRequire
+            makeRequire = function(anchor)
+                return function(module)
+                    local step, first, chunk, environment, moduleScript = requireBegin(module, anchor)
+                    while true do
+                        if step == 1 then
+                            return first
+                        end
+                        if step == 2 then
+                            setRaw(environment, 'require', makeRequire(moduleScript))
+                            return finish(first, protectedCall(chunk))
+                        end
+                        yield()
+                        step, first, chunk, environment, moduleScript = requireAfterWait(first)
+                    end
+                end
+            end
+            require = makeRequire(nil)";
 
         internal LuaCsRbxScriptThread Enter(LuaCsRbxScriptThread thread)
         {

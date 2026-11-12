@@ -75,8 +75,34 @@ namespace CoreAI.Ai
         /// </summary>
         public int RescuedObjects { get; }
 
+        /// <summary>
+        /// MVP4 SC-18: the running scripts that had required this module (directly or through another module) and
+        /// were restarted after its reload, in start order. Empty for a reload of anything but a module.
+        /// </summary>
+        public IReadOnlyList<string> RestartedDependents { get; internal set; } = Array.Empty<string>();
+
+        /// <summary>The dependents whose restart failed; each keeps its old run, as a failed reload always does.</summary>
+        public IReadOnlyList<string> FailedDependents { get; internal set; } = Array.Empty<string>();
+
         /// <summary>One English clause for a status line, e.g. "cleaned 126 objects of the previous run".</summary>
         public string Describe()
+        {
+            string objects = DescribeObjects();
+            if (RestartedDependents.Count == 0 && FailedDependents.Count == 0)
+            {
+                return objects;
+            }
+
+            string dependents = RestartedDependents.Count == 0
+                ? ""
+                : "; restarted the scripts that require it: " + string.Join(", ", RestartedDependents);
+            return FailedDependents.Count == 0
+                ? objects + dependents
+                : objects + dependents + "; these kept their old run because their restart failed: "
+                  + string.Join(", ", FailedDependents);
+        }
+
+        private string DescribeObjects()
         {
             if (Mode == ModReloadMode.KeepObjects)
             {
@@ -593,6 +619,12 @@ namespace CoreAI.Ai.LuaCs
 
             /// <summary>What <see cref="ScriptRunRules.Evaluate"/> answered when this record was built; Running when it runs.</summary>
             public ScriptRunState StartState = ScriptRunState.Running;
+
+            /// <summary>
+            /// A module's Lua 5.2 text, downleveled once when it was registered (MVP4 SC-19, step C4); every
+            /// <c>require</c> compiles it into the requiring script's state. Null for a record that is not a module.
+            /// </summary>
+            public string CompileSource;
 
             /// <summary>
             /// The run predicate's last answer for a durable script (MVP4 step C2): a change of its inputs acts only when
@@ -2358,6 +2390,11 @@ namespace CoreAI.Ai.LuaCs
                 if (mod.StartState != ScriptRunState.Running)
                 {
                     mod.Runs = false;
+                    if (mod.StartState == ScriptRunState.Module)
+                    {
+                        mod.CompileSource = compileSource;
+                    }
+
                     commit(mod);
                     CompleteScriptPlacement(modId, scriptPlacement);
                     RecordRegisteredOwner(mod);
@@ -3310,11 +3347,80 @@ namespace CoreAI.Ai.LuaCs
                 return report;
             }
 
-            _log?.Info($"[LuaCsModRuntime] Mod '{modId}' reloaded (caps={caps}); {report.Describe()}.");
             RecordRevision(modId, luaCode);
             PersistMod(modId, luaCode, caps, ownerActorId, false);
             RaiseModSourceLoaded(modId, luaCode, caps);
+            if (existing.Context == ScriptContext.Shared || replacement.Context == ScriptContext.Shared)
+            {
+                RestartModuleDependents(modId, mode, report);
+            }
+
+            _log?.Info($"[LuaCsModRuntime] Mod '{modId}' reloaded (caps={caps}); {report.Describe()}.");
             return report;
+        }
+
+        /// <summary>
+        /// MVP4 SC-18: after a module's source changed (a reload or a revert), every running script whose environment
+        /// loaded it, directly or through another module, restarts in the module's reload mode, the server side first
+        /// and each side in load order (R2.2). A restart records no revision and writes no store entry, so it stays
+        /// inside the module's own gated operation; one that fails keeps its old run.
+        /// </summary>
+        private void RestartModuleDependents(string moduleId, ModReloadMode mode, ModReloadReport report)
+        {
+            if (_rbxApi == null)
+            {
+                return;
+            }
+
+            List<Mod> dependents = new();
+            lock (_gate)
+            {
+                foreach (Mod candidate in _modsInLoadOrder)
+                {
+                    if (candidate.Runs && !candidate.Removed && candidate.State != null
+                        && !string.Equals(candidate.Id, moduleId, StringComparison.Ordinal)
+                        && _rbxApi.HasRequiredModule(candidate.State, moduleId))
+                    {
+                        dependents.Add(candidate);
+                    }
+                }
+            }
+
+            if (dependents.Count == 0)
+            {
+                return;
+            }
+
+            List<string> restarted = new();
+            List<string> failed = new();
+            for (int pass = 0; pass < 2; pass++)
+            {
+                for (int index = 0; index < dependents.Count; index++)
+                {
+                    Mod dependent = dependents[index];
+                    bool clientSide = dependent.Context == ScriptContext.Client;
+                    if (clientSide != (pass == 1))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        ReloadModCore(dependent.Id, dependent.Source, mode, false);
+                        restarted.Add(dependent.Id);
+                    }
+                    catch (Exception ex)
+                    {
+                        failed.Add(dependent.Id);
+                        _log?.Warn($"[LuaCsModRuntime] Restarting '{dependent.Id}' after its module '{moduleId}' changed failed; it keeps its old run: {ex.Message}");
+                        AppendLog(dependent.Id, LuaLogLevel.RuntimeError,
+                            $"restart after module '{moduleId}' changed failed, the old run continues: {SingleLineErrorMessage(ex)}");
+                    }
+                }
+            }
+
+            report.RestartedDependents = restarted;
+            report.FailedDependents = failed;
         }
 
         /// <summary>
@@ -6002,6 +6108,25 @@ namespace CoreAI.Ai.LuaCs
             }
 
             source = "";
+            return false;
+        }
+
+        /// <inheritdoc />
+        bool ILuaCsScriptSourceHost.TryGetRequirableModule(string sourceId, out LuaCsRequirableModule module)
+        {
+            string modId = Normalize(sourceId);
+            lock (_gate)
+            {
+                if (_mods.TryGetValue(modId, out Mod mod) && mod.Context == ScriptContext.Shared
+                                                         && mod.CompileSource != null)
+                {
+                    module = new LuaCsRequirableModule(modId, mod.CompileSource, mod.OwnerActorId,
+                        mod.OwnerHasHostAuthority);
+                    return true;
+                }
+            }
+
+            module = default;
             return false;
         }
 

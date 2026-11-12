@@ -1,13 +1,14 @@
 # MVP4 — Script contexts and the client runtime: design note
 
-Status (2026-11-12): **steps A1–A3, B1, B2, C1 (C1-1 to C1-6), C2 and C3 written; C4–C6 not started.**
-C3 left a few SC-13 rows unbound (listed in its entry). Next: C4 (`require`).
+Status (2026-11-12): **steps A1–A3, B1, B2, C1 (C1-1 to C1-6), C2, C3 and C4 written; C5–C6 not started.**
+C3 left a few SC-13 rows unbound (listed in its entry, moved to C6). Next: C5 (the client composition).
 A1–A3 are green in Unity 6000.6 EditMode; B1 (the script instance classes and `Enum.RunContext`), B2 (the package v2
 reader), C1 (declared mods get durable bound script instances, saved in format version 2; C1-6 registers sources
 without a run and gates a start by the SC-9 predicate), C2 (`Enabled`, `Disabled`, `RunContext`, `Source` in Lua; a
 running script stops and starts as its instance changes) and C3 (the side a script runs as comes from its context;
 CONTEXT_VIOLATION for side-only members; no Player minting on a replica; client scripts wait for the local player)
-have passed their portable tests only; see their entries in §5.
+have passed their portable tests only, and so has C4 (`require`, dependents restarting, `mod:<id>` chunk names and
+attribution); see their entries in §5.
 Written 2026-11-11 for the rung "MVP4 — Script contexts & client
 runtime" (`Docs/CoreAIMods/ROBLOX_API_ROADMAP.md:929-977`) and the open item "Design note for plan
 decision D1 (c) before any code" (`TODO.md:557-561`). Plan decision D1 (c) — "instances are views over
@@ -1128,7 +1129,62 @@ The original entry:
 - `RbxRuntimeTopology.cs:82-88`: the comment becomes "per-context answers live on the script context".
 - Legacy tests asserting `NOT_AUTHORITY` stay green by construction.
 
-### C4 (M) — `require`
+### C4 (M) — `require` — done 2026-11-12
+
+**Built** (portable Lua tier: `Tests/EditMode/RbxApi/ScriptsLua/RequireLuaEditModeTests.cs`; Unity EditMode not run):
+
+- **The bridge.** `LuaCsRbxScriptThreadFactory.PrepareRequireBindings` runs `RequireBridgeSource` on every registered
+  state (an environment decorator `RegisterRequire` adds in `RegisterCore`, so a console state gets it too). It
+  captures `task._requireBegin`, `_requireSettle`, `_requireAfterWait` (added by `AddRequirePrimitives` in
+  `BuildTaskGlobal`), erases them, and defines `require = makeRequire(nil)`; a module's environment gets its own
+  `require` bound to the ModuleScript, so `./` and `@self/` resolve from the module.
+- **The host** is a new partial file, `Scripting/LuaCs/LuaCsRbxApiBindings.Require.cs` (`LuaCsRbxApiBindings` is now
+  `partial`). `BeginRequire` resolves the argument (instance, `RequirePath` string from the calling chunk's `script`,
+  a number is `AssetIdError`), refuses a non-ModuleScript, an unbound one and an unloaded one, applies
+  `ModuleRequirePolicy.CheckTrust` (host-authored modules are trusted by everyone; the requirer is "host" when its
+  context is unrestricted) and `CheckLocation` (the container from `DescribeScriptLocation`), then asks the graph.
+  On `Load` it compiles the module's compile source into the requiring thread's state with
+  `LuaState.Load(source, "mod:<id>", environment)` (environment: `script` = the ModuleScript, `__index` = the
+  state's globals) and hands the chunk to the bridge, which runs it as `pcall(chunk)` and reports through
+  `SettleRequire` (exactly one non-nil value completes it; anything else fails it and is logged in the module's log
+  buffer through `_modLog`).
+- **The environment** of SC-11 is one registered `LuaCsRbxModContext` (so one Lua state): a `RequireEnvironment`
+  (its own `ModuleRequireGraph`, tokens, load signals, `ModuleIds`) in a `ConditionalWeakTable` keyed by the context
+  and by the main `LuaState`, so a reload, an unload or the end of a console chunk drops it without a teardown call.
+- **The seam**: `ILuaCsScriptSourceHost.TryGetRequirableModule` (new, internal) returns a loaded `shared` record's
+  compile source and author; `Mod.CompileSource` keeps the downlevel of a module record made at registration.
+- **SC-18**: `ReloadModCore` (every reload and revert) of a record whose old or new context is `shared` calls
+  `RestartModuleDependents`: every running record whose state `HasRequiredModule` restarts through
+  `ReloadModCore(id, source, mode, recordSource: false)`, server side first, each side in load order.
+  `ModReloadReport.RestartedDependents` and `FailedDependents` (new, additive) list them and `Describe` names them.
+- **SC-19**: a mod's main chunk is captured as `mod:<id>` (`CaptureChunk` overload with a chunk name);
+  `LuaCsRbxLua.WithProductionContext` attributes a host error to the innermost Lua frame of a `mod:` chunk
+  (`TryFindModChunkFrame`): on a mod's state every other Lua frame (the bridges, the signal runner) is skipped, so an
+  error raised inside a bridge names the requiring line; on the console's state the console's own chunk ends the
+  search. The innermost frame keeps the traceback's `LastLine`, so no existing line changes. `IsScriptClosure`
+  (`debug.info`, `debug.traceback`) accepts `mod:` chunks, and `LuaModErrorSite.Describe` shows `mod:x` as `x`.
+- **Deliberately changed test**: `LuauLibraryInventoryEditModeTests` lists `require` as real instead of absent.
+- **DEV ids**: DEV-1 restated (matches the guide, differs from the class page), DEV-126 (SC-a, two copies),
+  DEV-127 (asset ids).
+
+**Where C4 differs from the plan:**
+
+- **The module body runs inline on the requiring thread**, not on a scheduler thread of its own. The observable rules
+  are the plan's (a synchronous module does not yield the requirer; a yielding one makes it wait; a second thread
+  waits through a signal the load fires; the body runs in the requirer's context and is killed with its script), and
+  a cycle is then simply a module the requesting thread is itself loading. What differs: a requirer whose thread is
+  cancelled or budget-killed while the module yields abandons the load, which fails for that environment with "the
+  thread loading the module stopped" (`ForgetRequireThread` from `OnSchedulerThreadRetired`) and wakes the waiters.
+- **A module is VM-compiled at its first `require`**, not at registration: a Lua syntax error that the downleveler
+  lets through fails that `require` with `BAD_ARGUMENT: module '<path>' does not compile` and the module stays failed
+  for that script.
+- **A tail call loses the module's frame** (`return Instance.new('X')` in a module, DEV-111): the error is then
+  attributed to the next `mod:` frame out, the requirer's. Lua errors carry their position text unchanged
+  (`[string "mod:util"]:3: boom`).
+- **Not built**: a module unload does not count the scripts that still hold the old copy (`UnloadMod` returns a
+  bool); the SC-11 note goes to the world log and the module's log buffer, not to the second script's.
+
+The hand-over C4 started from (kept for reference):
 
 **Start here (hand-over, 2026-11-12).** What C1–C3 left for this step, verified in the tree:
 

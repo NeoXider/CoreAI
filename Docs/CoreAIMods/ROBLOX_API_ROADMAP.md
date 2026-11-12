@@ -334,7 +334,7 @@ Conscious deviations (running list — additions require an entry here):
 
 | ID | Roblox behavior (rule) | CoreAI decision | Why |
 |---|---|---|---|
-| DEV-1 | cyclic `require` hangs forever (R3.7) | raise `CYCLIC_REQUIRE` naming the cycle path | hangs are hostile to AI self-repair; an error is patchable |
+| DEV-1 | cyclic `require` hangs forever (R3.7; the `ModuleScript` class page); the scripting guide (`scripting/module.md`) says it errors with `Requested module was required recursively` | raise `CYCLIC_REQUIRE: Requested module was required recursively: A -> B -> A` naming the cycle path (MVP4 step C4, `DEV1_CyclicRequireRaisesError`); a thread that requires a module another thread is still loading waits instead (`DEV1_ConcurrentRequireOfALoadingModuleWaits`) | hangs are hostile to AI self-repair; an error is patchable. Matches the guide, differs from the class page |
 | DEV-2 | `SignalBehavior.Immediate` exists | Deferred only; setter is a loud stub | D4; budget enforcement and reentrancy safety |
 | DEV-3 | no per-slice instruction budgets | budget kills + quarantine per mod (§2, quarantine policy) | sandbox safety in a live game |
 | DEV-4 | fixed stud scale | configurable `RbxSpace` scale (default 0.28 m) | host-game integration |
@@ -458,6 +458,8 @@ Conscious deviations (running list — additions require an entry here):
 | DEV-123 | a `MoveTo` walker pushes through others or times out after 8 s | a `MoveTo` blocked by another character ends after 1 s with `MoveToFinished(false)` | characters block each other, so the script needs the choice back quickly |
 | DEV-124 | `UserInputService.TextBoxFocused` fires only for a TextBox | it also fires, with nil, while a host screen holds the keyboard (the Hub opened over the world), and `TextBoxFocusReleased(nil)` when it lets go | the world must ignore keys behind a host screen, and scripts learn about it through the event they already have for lost keyboard input |
 | DEV-125 | a script that sets its own `Enabled` to false stops at its threads' next resumption point (R1.10) | it finishes its current resume and stops before the next frame; any stop or start a change of `Enabled`, `RunContext`, parent or destruction causes is applied at the start of the next frame (MVP4 step C2; pinned by `R1_10_AScriptThatDisablesItself_StopsByTheNextFrame`) | no mod's code ever runs inside another script's property write, and a stop never tears down the thread that is running; the difference is only "before the next frame" against "at the next yield" |
+| DEV-126 | a ModuleScript runs once per side of the client-server boundary, and every script on that side gets the same returned value (R3.2, R3.3; `LuaGlobals.yaml`, `require`) | a module runs once per requiring script: two scripts on one side each run it and get their own copy of its table; the first time a module loads into a second script on the same side, one note per module says so (MVP4 step C4, SC-11; pinned by `DEV126_TwoScriptsGetTwoCopiesAndOneNote`) | every script keeps its own Lua state, so a module table shared between scripts would hand one author's closures to another's code and break instance-proxy identity; share state through attributes or value objects. Revisited with folder mods (design note Q2) |
+| DEV-127 | `require(assetId)` loads a published `MainModule` on the server (R3.5) | a number raises `BAD_ARGUMENT: require(assetId) loads a published model, which CoreAI does not have` (MVP4 step C4; pinned by `R3_5_RequireByAssetId_IsRefusedLoudly`) | CoreAI has no asset catalog; put the module in the world and require the instance |
 
 ---
 
@@ -1065,8 +1067,19 @@ I" below, host mode and the join snapshot are MVP5, world-state replication is M
     so a restricted author's server script runs as the server on a host; server- or client-only members
     used from the other side raise `CONTEXT_VIOLATION` (remotes, `UserInputService`, render signals, the
     camera, server containers, `store_*`, cross-side `mods_call`/`mods_get`); a replica mints no Player;
-    a client script waits for the local player. Legacy mods keep every pre-MVP4 rule. Not started: C4
-    (`require`), C5 (the client composition), C6 (skill, P1, acceptance, the SC-13 rows C3 left).
+    a client script waits for the local player. Legacy mods keep every pre-MVP4 rule. C4 (portable tests only so
+    far) — `require` of a `context: shared` ModuleScript by instance or by Roblox path string (`./`, `../`,
+    `@self/`, `@game/`, `..`): the module runs once per requiring script, inline on the requiring thread (a
+    yielding module makes the requirer wait, a second thread waits for the first), must return exactly one
+    non-nil value, and every later `require` in that script returns the same value (R3.1 to R3.3, R3.5, R3.6);
+    two scripts get two copies (DEV-126) and a server and a client script each run it (R3.4); a cycle raises
+    `CYCLIC_REQUIRE` with the path (DEV-1); a module error is raised at the `require` line with the module's own
+    chunk and line, logged in the module's log and charged to the requirer, and stays failed for that script
+    (R3.8); asset ids are refused (DEV-127), so are another actor's modules (`NOT_AUTHORITY`) and server-only
+    modules from a client script (`CONTEXT_VIOLATION`); a module reload or revert restarts the scripts that
+    required it (SC-18); every mod chunk is named `mod:<id>` and errors are attributed to the chunk that raised
+    them (SC-19); the console may require modules. Not started: C5 (the client composition), C6 (skill, P1,
+    acceptance, the SC-13 rows C3 left).
   - *The survey this package started from (release 7.56.0); the lines above supersede it where they
     differ:*
   - `RbxNetworkTopology {Solo, Host, DedicatedServer, Client}` (`RbxApi/Instances/Networking/INetworkBridge.cs`)

@@ -12,6 +12,7 @@ namespace CoreAI.Ai.SelfRepair
     public readonly struct LuaModErrorSite
     {
         private const string EnginePrefix = "Lua-CSharp: ";
+        private const string ModChunkPrefix = "mod:";
         private const int MaximumKeyMessageLength = 120;
 
         private LuaModErrorSite(string script, int line, string message, string key)
@@ -49,6 +50,12 @@ namespace CoreAI.Ai.SelfRepair
             }
 
             string script = Script.Length == 0 || IsInternalChunkName(Script) ? (modId ?? "") : Script;
+            // WHY: a mod's chunk is named mod:<id> (MVP4 SC-19); the player reads the mod id, as for the internal name.
+            if (script.Length > ModChunkPrefix.Length && script.StartsWith(ModChunkPrefix, StringComparison.Ordinal))
+            {
+                script = script.Substring(ModChunkPrefix.Length);
+            }
+
             return script + ":" + Line.ToString(CultureInfo.InvariantCulture);
         }
 

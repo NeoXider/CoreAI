@@ -188,7 +188,10 @@ namespace CoreAI.Sandbox.LuaCs
             return new ValueTask<int>(ctx.Return(text.ToString()));
         }
 
-        /// <summary>The chunk name every script chunk is loaded under (mods, <c>execute_lua</c>, the AI envelope).</summary>
+        /// <summary>
+        /// The chunk name a script chunk is loaded under (<c>execute_lua</c>, the AI envelope); a mod's main chunk and its
+        /// modules are <c>mod:&lt;id&gt;</c> (MVP4 SC-19).
+        /// </summary>
         private const string ScriptChunkName = "sandbox_chunk";
 
         /// <summary>
@@ -203,7 +206,15 @@ namespace CoreAI.Sandbox.LuaCs
         private static bool IsScriptClosure(LuaFunction function, out LuaClosure closure)
         {
             closure = function as LuaClosure;
-            return closure != null && string.Equals(closure.Proto.ChunkName, ScriptChunkName, StringComparison.Ordinal);
+            if (closure == null)
+            {
+                return false;
+            }
+
+            string chunkName = closure.Proto.ChunkName ?? "";
+            return string.Equals(chunkName, ScriptChunkName, StringComparison.Ordinal)
+                   || (chunkName.Length > LuaCsRbxLua.ModChunkPrefix.Length
+                       && chunkName.StartsWith(LuaCsRbxLua.ModChunkPrefix, StringComparison.Ordinal));
         }
 
         /// <summary>The line frame <paramref name="index"/> is at: the call its callee was made from, or its start.</summary>

@@ -75,6 +75,15 @@ namespace CoreAI.Ai.LuaCs
     {
         private const string ModMainScript = "main.lua";
 
+        /// <summary>The prefix of every mod chunk's name: a main chunk and a module are <c>mod:&lt;id&gt;</c> (SC-19).</summary>
+        internal const string ModChunkPrefix = "mod:";
+
+        /// <summary>The name a mod's chunk (its main chunk, or a module's) is compiled under.</summary>
+        internal static string ModChunkName(string modId)
+        {
+            return ModChunkPrefix + (modId ?? "");
+        }
+
         /// <summary>Builds a host function whose body may throw Roblox-layer errors.</summary>
         public static LuaFunction Fn(string name, Func<LuaFunctionExecutionContext, LuaValue> body,
             LuaCsRbxModContext context = null)
@@ -157,15 +166,26 @@ namespace CoreAI.Ai.LuaCs
             // HttpService adapter resolves its context the same way); the one-off surface's proxy
             // has no owner id, so its errors stay unprefixed exactly as before.
             string ownerModId = (context ?? ResolveStateContext(state))?.OwnerModId;
-            if (string.IsNullOrWhiteSpace(ownerModId))
+            bool ownedByMod = !string.IsNullOrWhiteSpace(ownerModId);
+
+            // WHY the chunk decides (SC-19): a module's code runs on its requirer's state, so the error belongs to the
+            // module chunk that raised it, while the requiring script's streak is still the one charged. Every chunk
+            // has one author source, exposed under the virtual author-relative main.lua path with its author line.
+            int line;
+            if (TryFindModChunkFrame(state, ownedByMod, out string chunkModId, out int chunkLine))
+            {
+                ownerModId = chunkModId;
+                line = chunkLine;
+            }
+            else if (!ownedByMod)
             {
                 return ex;
             }
+            else
+            {
+                line = state.GetTraceback().LastLine;
+            }
 
-            // WHY: Persistent mods currently have one author source and Lua-CSharp names the VM chunk
-            // generically. The live traceback still carries the post-downlevel author line, so expose
-            // that line under the virtual author-relative main.lua path until multi-file chunks land.
-            int line = state.GetTraceback().LastLine;
             if (error != null)
             {
                 return error.WithContext(ownerModId, ModMainScript, line);
@@ -179,6 +199,68 @@ namespace CoreAI.Ai.LuaCs
         {
             LuaValue game = state?.Environment["game"] ?? LuaValue.Nil;
             return TryGetInstance(game, out LuaCsRbxInstanceProxy proxy) ? proxy.Context : null;
+        }
+
+        /// <summary>
+        /// The innermost Lua frame of a mod chunk (<c>mod:&lt;id&gt;</c>, SC-19) on <paramref name="state"/>'s stack: the
+        /// mod it belongs to and the author line it is at. On a mod's state every other Lua frame is host-authored (the
+        /// scheduler and require bridges, the signal runner) and is skipped; on the console's state the first other
+        /// frame is the console's own chunk, which ends the search.
+        /// </summary>
+        private static bool TryFindModChunkFrame(LuaState state, bool skipOtherChunks, out string modId, out int line)
+        {
+            modId = null;
+            line = 0;
+            if (state == null)
+            {
+                return false;
+            }
+
+            ReadOnlySpan<CallStackFrame> frames = state.GetCallStackFrames();
+            bool innermost = true;
+            for (int index = frames.Length - 1; index >= 0; index--)
+            {
+                if (!(frames[index].Function is LuaClosure closure))
+                {
+                    continue;
+                }
+
+                string chunkName = closure.Proto.ChunkName ?? "";
+                if (chunkName.Length > ModChunkPrefix.Length
+                    && chunkName.StartsWith(ModChunkPrefix, StringComparison.Ordinal))
+                {
+                    modId = chunkName.Substring(ModChunkPrefix.Length);
+                    // WHY the traceback's own line for the innermost Lua frame: it is the line every error carried
+                    // before SC-19, so attribution changes nothing for code that calls the host directly.
+                    line = innermost ? state.GetTraceback().LastLine : FrameLine(frames, index, closure);
+                    return true;
+                }
+
+                if (!skipOtherChunks)
+                {
+                    return false;
+                }
+
+                innermost = false;
+            }
+
+            return false;
+        }
+
+        /// <summary>The author line a frame is at: the call it made into the next frame, else its first line.</summary>
+        private static int FrameLine(ReadOnlySpan<CallStackFrame> frames, int index, LuaClosure closure)
+        {
+            ReadOnlySpan<int> lines = closure.Proto.LineInfo;
+            if (index + 1 < frames.Length)
+            {
+                int pc = frames[index + 1].CallerInstructionIndex;
+                if (pc >= 0 && pc < lines.Length)
+                {
+                    return lines[pc];
+                }
+            }
+
+            return closure.Proto.LineDefined;
         }
 
         /// <summary>

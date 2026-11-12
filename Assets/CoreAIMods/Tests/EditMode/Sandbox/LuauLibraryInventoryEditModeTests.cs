@@ -48,7 +48,7 @@ namespace CoreAI.Tests.EditMode.Sandbox
             "debug.setmemorycategory", "debug.resetmemorycategory",
             "assert", "error", "gcinfo", "getfenv", "getmetatable", "ipairs", "newproxy", "next", "pairs", "pcall",
             "print", "rawequal", "rawget", "rawlen", "rawset", "select", "setmetatable", "tonumber", "tostring",
-            "type", "unpack", "xpcall", "collectgarbage", "loadstring",
+            "type", "unpack", "xpcall", "collectgarbage", "loadstring", "require",
             "delay", "spawn", "tick", "time", "typeof", "wait", "warn", "ypcall"
         };
 
@@ -70,12 +70,12 @@ namespace CoreAI.Tests.EditMode.Sandbox
         };
 
         /// <summary>
-        /// Absent on purpose, each with its reason: <c>require</c> (RT2, MVP4's ModuleScript), <c>plugin</c> (nil in a
-        /// Roblox game too), and the Studio and host globals no game script uses.
+        /// Absent on purpose, each with its reason: <c>plugin</c> (nil in a Roblox game too), and the Studio and host
+        /// globals no game script uses. <c>require</c> is real since MVP4 step C4.
         /// </summary>
         private static readonly string[] Absent =
         {
-            "require", "plugin", "settings", "UserSettings", "stats", "version", "printidentity", "elapsedTime",
+            "plugin", "settings", "UserSettings", "stats", "version", "printidentity", "elapsedTime",
             "DebuggerManager", "PluginManager", "load", "dofile", "loadfile", "io", "package", "string.dump"
         };
 

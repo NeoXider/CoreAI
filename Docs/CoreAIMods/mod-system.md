@@ -54,8 +54,8 @@ tags: movement, camera
 - `context` — optional, the script context the mod declares: `server`, `client` or `shared` (any case).
   A mod that declares one gets its own script instance in the world (below). Any other value fails the
   load with `BAD_ARGUMENT: @coreai context 'clinet' is not server, client or shared`. `shared` makes a
-  ModuleScript: it loads and is listed, but its code runs only when a script requires it, and `require`
-  arrives with MVP4 step C4, so until then nothing runs it. Without the key the mod is a legacy script and
+  ModuleScript: it loads and is listed, but its code runs only when a script requires it (see "Modules and
+  `require`" below). Without the key the mod is a legacy script and
   runs exactly as before. The context decides where the script starts (below) and which side it runs as
   (`dev-docs/MVP4_SCRIPT_CONTEXTS_DESIGN.md`, SC-5, SC-9, SC-13, SC-14):
   - a `server` script is the server whoever wrote it: `RunService:IsServer()` is true,
@@ -139,6 +139,38 @@ Where `script` lives:
   mod is bound to fails with `NOT_IMPLEMENTED` until a later MVP4 step; load the code as a mod with a
   `parent:` header instead. A copy made by `Clone()` never runs (it is bound to no mod); the cloning mod is
   told once.
+
+Modules and `require` (MVP4 step C4; `dev-docs/MVP4_SCRIPT_CONTEXTS_DESIGN.md`, SC-10 to SC-12, SC-18, SC-19):
+- `require(module)` takes the ModuleScript of a `context: shared` mod, or a Roblox path string relative to the
+  calling script: `./X` starts at `script.Parent`, `../X` at `script.Parent.Parent`, `@self/X` at `script`,
+  `@game/ReplicatedStorage/X` at `game`, and a `..` component goes up one more. A path never waits: a missing
+  module fails at once (use `WaitForChild` and require the instance). A number (an asset id) is refused with
+  `BAD_ARGUMENT` (CoreAI has no published models, DEV-127); an instance that is not a ModuleScript, a ModuleScript
+  no mod is bound to (made with `Instance.new` or `Clone`) and an unloaded module are refused naming it.
+- The module runs the first time a script requires it, on the requiring thread, with the requiring script's side
+  and authority, and it must return exactly one value that is not nil. Every later `require` of it in that script
+  returns the same value, so a returned table is shared by all threads of the script. Another script runs its own
+  copy (DEV-126: Roblox shares it between scripts of one side; CoreAI keeps every script in its own environment
+  and notes it once per module). Inside the module, `script` is the ModuleScript and its globals stay in the
+  module; it still reads the requiring script's globals.
+- A module that yields (for example `WaitForChild` at its top level) makes the requiring thread wait until it
+  returns; a second thread that requires it meanwhile waits for the first one. A cycle (A requires B, which
+  requires A) raises `CYCLIC_REQUIRE: Requested module was required recursively: ReplicatedStorage.A ->
+  ReplicatedStorage.B -> ReplicatedStorage.A` (DEV-1).
+- A module that raises fails at the `require` line with its own error (its chunk is `mod:<module id>`, so the
+  line is the module's); the module's log records the failure too, and the error is charged to the requiring
+  script. Later requires in that script raise `Requested module experienced an error while loading: ...` until
+  the module's source changes or the script restarts.
+- Who may require what: a module written by another actor than the script's author is refused with
+  `NOT_AUTHORITY` (the host's modules may be required by everyone), and a `context: client` script may not require
+  a module under `ServerStorage` or `ServerScriptService` (`CONTEXT_VIOLATION`).
+- Reloading or reverting a module restarts every running script that required it, directly or through another
+  module, in the reload's mode, server-side scripts first; the reload reports them, and one whose restart fails
+  keeps its old run. Unloading a module restarts nobody. The console (`execute_lua`) may require modules too; a
+  module that yields there raises `CONTEXT_VIOLATION`, as every wait in the console does.
+- An error raised in a mod's code names the chunk it came from, `[mod:<id> script:main.lua line:<n>]` for a host
+  error and `[string "mod:<id>"]:<n>:` for a Lua error. A tail call (`return f()`) replaces its caller's frame
+  (DEV-111), so an error raised by the called host function is attributed to the next mod frame out.
 
 Parsing rules:
 - The block form must be the first thing in the file: the source starts with `--[[@coreai` and the

@@ -34,5 +34,37 @@ namespace CoreAI.Ai.LuaCs
         /// <c>RunContext</c> back and throws.
         /// </summary>
         void WriteScriptRunContext(ActorContext caller, RbxBaseScript script, int runContext);
+
+        /// <summary>
+        /// SC-10, SC-11 (step C4): the loaded <c>context: shared</c> source <paramref name="sourceId"/> as
+        /// <c>require</c> runs it: its compile source (downleveled once, when it was loaded) and its author. False when
+        /// the source is not loaded or is not a module.
+        /// </summary>
+        bool TryGetRequirableModule(string sourceId, out LuaCsRequirableModule module);
+    }
+
+    /// <summary>What <c>require</c> needs of a loaded module source (MVP4 step C4).</summary>
+    internal readonly struct LuaCsRequirableModule
+    {
+        public LuaCsRequirableModule(string moduleId, string compileSource, string ownerActorId,
+            bool ownerHasHostAuthority)
+        {
+            ModuleId = moduleId ?? "";
+            CompileSource = compileSource ?? "";
+            OwnerActorId = ownerActorId ?? "";
+            OwnerHasHostAuthority = ownerHasHostAuthority;
+        }
+
+        /// <summary>The module's mod id; its chunk is loaded as <c>mod:&lt;id&gt;</c> (SC-19).</summary>
+        public string ModuleId { get; }
+
+        /// <summary>The Lua 5.2 text the VM compiles: the author's Luau after the downlevel.</summary>
+        public string CompileSource { get; }
+
+        /// <summary>The actor the module was loaded for.</summary>
+        public string OwnerActorId { get; }
+
+        /// <summary>True when the module's author holds host authority, which every requirer trusts (SC-10 item 3).</summary>
+        public bool OwnerHasHostAuthority { get; }
     }
 }

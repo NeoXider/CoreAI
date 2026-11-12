@@ -34,7 +34,7 @@ namespace CoreAI.Ai.LuaCs
     /// <see cref="IScriptFunctionRegistry"/> seam; value globals use the Lua-CSharp registry's
     /// engine-specific value escape hatch, which is why this class lives in the adapter layer.
     /// </summary>
-    public sealed class LuaCsRbxApiBindings : IDisposable, ILuaCsRuntimeLifetimeHost
+    public sealed partial class LuaCsRbxApiBindings : IDisposable, ILuaCsRuntimeLifetimeHost
     {
         private const double LegacySchedulerMinimumDelaySeconds = 0.029d;
         internal const double RemoteFunctionInvokeTimeoutSeconds = 30d;
@@ -2230,7 +2230,7 @@ namespace CoreAI.Ai.LuaCs
 
             _schedulerThreadFactory.PrepareWaitBindings(ownerState);
             object callable = _schedulerThreadFactory.CaptureChunk(
-                ownerState, source, resumeBudget, cancellationToken, initialResumeBudget);
+                ownerState, source, resumeBudget, cancellationToken, initialResumeBudget, ModChunkName(owner));
             IRbxScriptThread thread = _scheduler.Spawn(
                 owner, callable, Array.Empty<object>());
             if (thread is LuaCsRbxScriptThread luaThread)
@@ -4435,6 +4435,7 @@ namespace CoreAI.Ai.LuaCs
             }
 
             luaRegistry.RegisterValue("task", () => BuildTaskGlobal(context));
+            RegisterRequire(luaRegistry, context);
             luaRegistry.RegisterValue("wait", () => new LuaValue(Fn(
                 "wait", ctx => ScheduleWait(
                     context, ctx, "wait", LegacySchedulerMinimumDelaySeconds, true))));
@@ -5118,6 +5119,7 @@ namespace CoreAI.Ai.LuaCs
                 context.NoteLoadCharacterDeprecation(_log);
                 return LuaValue.Nil;
             });
+            AddRequirePrimitives(t, context);
             t["spawn"] = Fn("task.spawn", ctx => WrapTaskThread(
                 TrackScheduledThread(context,
                     _scheduler.Spawn(
@@ -5317,6 +5319,7 @@ namespace CoreAI.Ai.LuaCs
         /// </summary>
         private void OnSchedulerThreadRetired(IRbxScriptThread thread)
         {
+            ForgetRequireThread(thread);
             if (!(thread is LuaCsRbxScriptThread luaThread))
             {
                 _remoteFunctionWaitGenerations.Remove(thread);

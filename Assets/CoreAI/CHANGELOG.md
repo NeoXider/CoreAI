@@ -13,6 +13,7 @@
 
 ### Added
 
+- **Mods (MVP4): `require` for shared modules.** `require` takes a ModuleScript (a `context: shared` mod) or a Roblox path string (`./`, `../`, `@self/`, `@game/`). The module runs once per requiring script and its value is cached; a module that yields makes the requirer wait. It must return exactly one value. A cycle raises `CYCLIC_REQUIRE` with the path; a module's error is raised at the `require` line with the module's own chunk and line, and the module stays failed for that script until its source changes or the script restarts. Another actor's module is NOT_AUTHORITY, a server-only module from a client script is CONTEXT_VIOLATION, and an asset id is refused (DEV-1, DEV-126, DEV-127).
 - **Mods (MVP4): a script runs as the side it declares.** A script with `context: server` runs as the server whoever wrote it, and a `context: client` script runs as the client and the player at this screen: `RunService:IsServer()`/`IsClient()`, `Players.LocalPlayer` and the remote sender follow the context, not the author's grant. A server or client script that uses the other side's members (remotes, `UserInputService`, render signals, the camera, `ServerStorage`, `store_set`/`store_get`, `mods_call` into the other side) gets `CONTEXT_VIOLATION`, naming the rule and the fix. A client script starts once the local player exists (listed `waiting-for-local-player` until then), and a client copy of a world never creates players itself. Mods that declare no context are unchanged.
 - **Mods (MVP4): `script.Enabled`, `script.RunContext` and `script.Source` are real.** Scripts read `script.Enabled`, `script.RunContext` and (deprecated) `script.Disabled`. Setting `Enabled = false` stops a script at the next frame and keeps what it built, `Enabled = true` starts it afresh; moving a script where it does not run (ServerStorage) or destroying it stops it, moving it back starts it. None of this writes the mod store. The host console (`execute_lua`) reads a script's `Source` and writes it (a reload with a new revision) or its `RunContext` (a restart under the new context); mods get NOT_AUTHORITY. Before, `Script.Source` answered NOT_IMPLEMENTED.
 - Mods (MVP4): cloning a part that holds a running script makes a copy that does not run, and the mod is told once.
@@ -105,6 +106,8 @@
 
 ### Changed
 
+- Mods (MVP4): reloading or reverting a module restarts the running scripts that required it; `ModReloadReport` lists `RestartedDependents` and `FailedDependents`.
+- Mods: mod chunks are named `mod:<id>`, so a Lua error position reads `[string "mod:door"]:5:` instead of `[string "sandbox_chunk"]:5:`, and a host error is attributed to the chunk that raised it.
 - Mods (MVP4): a reload that changes a script's class (a script to `context: shared` and back, a LocalScript to a server script) replaces the instance, keeping its name, place, children and `Enabled`; a failed reload puts the old one back. Before, such a reload was refused as not implemented.
 - Skills: the Rbx API skill's scripting section names `manage_mods edit` next to `reload`.
 - Docs: `PROMPT_TOKEN_COSTS.md` is regenerated. Its Rbx API rows had been stale, and it was missing the `data` and `rig` sections and the Lua Modding sections. Per request, the Programmer now pays 4,525 tokens of tool definitions plus 1,036 of prefix and prompt.
