@@ -20,6 +20,7 @@ layout) are in [Tests/README.md](../Tests/README.md). Tool-call JSON shapes and 
 | **Per-call log** | `[ToolCall] traceId=… role=… tool=… status=OK dur=… args=… result=…` | `ToolCallExtractionParityEditModeTests.NonStreaming_PerCallLogLine_*` |
 | **Summary log** | `tools=[name(ok,12ms),…]` tail on the `LLM <` line | `ToolCallExtractionParityEditModeTests.FormatExecutedTools_*` |
 | **Execution policy** | cross-turn echo no-op, per-tool / global `AllowDuplicates`, consecutive-error counter, batch execution | `ToolExecutionPolicyEditModeTests` |
+| **Echo after a change** | a read repeated after a successful state change runs again; echoed changes never replay; per-call `ILlmToolCallEffects` | `ToolEchoAfterStateChangeEditModeTests` |
 | **Tool loop** | retry and duplicate behaviour of the MEAI tool loop | `SmartToolCallingChatClientEditModeTests` |
 | **Memory and Lua tools** | `MemoryTool` actions and versions; the `execute_lua` AIFunction | `MeaiToolCallsEditModeTests`; the Lua runtime behind `execute_lua`: `LuaToolEditModeTests`, `LuaCsModRuntimeEditModeTests` (`CoreAI.Mods.Tests`) |
 | **MessagePipe events** | LLM broker events, streaming/non-streaming parity, child-scope subscriptions | `MessagePipeEventPublishingEditModeTests` |

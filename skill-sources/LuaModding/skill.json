@@ -1,0 +1,7 @@
+{
+  "name": "Lua Modding",
+  "description": "Full CoreAI Lua reference: every sandbox API with signatures, working mod examples (timers, input, persistence, cross-mod calls, a complete mini-game skeleton), and the common errors. Read this before writing any non-trivial Lua mod.",
+  "resources": "Assets/CoreAiUnity/Resources/AgentSkills/LuaModding.txt",
+  "csharp": "Assets/CoreAI/Runtime/Core/Features/AgentPrompts/BuiltInLuaModdingSkillText.cs",
+  "csharpClass": "BuiltInLuaModdingSkillText"
+}

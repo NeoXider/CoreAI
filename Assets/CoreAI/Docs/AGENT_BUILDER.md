@@ -1142,7 +1142,7 @@ AgentConfig planner = new AgentBuilder("Programmer")
     .Build();
 ```
 
-Suppression is per **call**, not per turn, and only against calls that **succeeded in an earlier turn of the same request**. Identical calls emitted together in ONE turn all execute, and a call that failed stays repeatable with the same arguments.
+Suppression is per **call**, not per turn, and only against calls that **succeeded in an earlier turn of the same request**. Identical calls emitted together in ONE turn all execute, and a call that failed stays repeatable with the same arguments. A read repeated after a successful call that changed state runs again, because its earlier result may be stale (`manage_mods get_source` -> `edit` -> the same `get_source`); calls that change state stay suppressed for the whole request. See [TOOL_AUTHORING_GUIDE.md](../../CoreAiUnity/Docs/TOOL_AUTHORING_GUIDE.md) (`ILlmToolCallEffects`).
 
 A suppressed call is a **no-op, not an error**. The tool is not executed and the model receives:
 

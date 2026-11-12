@@ -26,7 +26,7 @@ namespace CoreAI.Vision
     /// for it (<see cref="CoreAiAgentCamera"/>) or its free camera, created on demand; the player's camera never moves.
     /// See <c>Docs/CoreAI/agent-vision.md</c>.
     /// </summary>
-    public sealed class CameraLlmTool : IAIFunctionsLlmTool
+    public sealed class CameraLlmTool : IAIFunctionsLlmTool, ILlmToolCallEffects
     {
         private readonly IAgentCameraService _service;
         private readonly IAgentCameraRig _rig;
@@ -51,6 +51,17 @@ namespace CoreAI.Vision
         }
 
         public string Name => "camera";
+
+        /// <inheritdoc />
+        /// <remarks>
+        /// <c>camera_look</c> and <c>camera_orbit</c> move the agent's camera, so a capture repeated after them in the
+        /// same request takes a new picture; capturing and listing only read.
+        /// </remarks>
+        public bool ChangesState(string functionName, IDictionary<string, object> arguments)
+        {
+            return string.Equals(functionName, "camera_look", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(functionName, "camera_orbit", StringComparison.OrdinalIgnoreCase);
+        }
 
         public string Description =>
             "See the game through a camera: capture a screenshot, aim or orbit your own camera to look around, " +

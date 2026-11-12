@@ -95,10 +95,11 @@ namespace CoreAI.Ai
         /// keeps the guarantee without any edits.
         /// </para>
         /// <para>
-        /// The flag has NOTHING to do with echo suppression: a repeated call is suppressed by its own
+        /// The flag does not switch echo suppression on or off: a repeated call is suppressed by its own
         /// per-call signature for any tool with <see cref="AllowDuplicates"/> = <c>false</c>, mutating or
-        /// not. It is resolved BY NAME from the role's tool list, just like
-        /// <see cref="ToolTimeoutMsOverride"/>.
+        /// not. Its one effect there: unless the tool answers per call through <see cref="ILlmToolCallEffects"/>,
+        /// a successful call of a mutating tool counts as a state change, after which earlier reads run again.
+        /// It is resolved BY NAME from the role's tool list, just like <see cref="ToolTimeoutMsOverride"/>.
         /// </para>
         /// </summary>
         bool IsMutating => false;

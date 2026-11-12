@@ -93,7 +93,8 @@ namespace CoreAI.Tests.EditMode
                     DefaultToolTimeoutMs = 88,
                     MaxResponseChars = 77,
                     MaxToolCallRoundtrips = 6,
-                    MaxToolCallHistoryMessages = 5
+                    MaxToolCallHistoryMessages = 5,
+                    AiModsDefaultFolder = "AI/Made"
                 });
 
                 CoreAISettingsOptions options = asset.ToOptions();
@@ -111,6 +112,7 @@ namespace CoreAI.Tests.EditMode
                 Assert.IsFalse(options.EnableStreaming);
                 Assert.AreEqual(4096, options.MaxTokens);
                 Assert.AreEqual(6, options.MaxToolCallRoundtrips);
+                Assert.AreEqual("AI/Made", options.AiModsDefaultFolder);
             }
             finally
             {

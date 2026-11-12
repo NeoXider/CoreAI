@@ -154,6 +154,14 @@ retry is never blocked:
 - **Intra-turn repeats always execute.** Three identical `spawn tree` calls in ONE
   turn are a legitimate request and all run — signatures are compared only against
   earlier turns, never against sibling slots in the same turn.
+- **A read repeated after a change runs again.** Once a call that changes state
+  succeeds (a mutating tool, or a call its tool's `ILlmToolCallEffects.ChangesState`
+  answers true for, such as `manage_mods edit`), the earlier results of reading calls
+  may be stale, so an identical read in a later turn runs instead of being answered
+  "use its earlier result" (`manage_mods get_source` -> `edit` -> the same `get_source`
+  shows the edit). A read made in the same turn as the change is not registered at all.
+  Calls that change state keep their echo protection for the whole request, and
+  identical reads with nothing changed in between are still suppressed.
 - **Failed calls stay retryable.** A call's signature is registered **only after it
   succeeds**. A transient failure — including the failed slot of a partially
   successful batch — is never registered, so retrying exactly that call with

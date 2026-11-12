@@ -56,7 +56,8 @@ namespace CoreAI.Mcp.Tools
             "coreai_world_find(pattern)/coreai_world_pos(name)/coreai_world_exists(name); " +
             "logic_list()/logic_define(name, function(...) return v end) for rule slots. Return a compact " +
             "string/JSON for diagnostics. Do NOT invent globals (no game.create, GameObject.Find, etc.). " +
-            "Call read_skill('Lua Modding') or read_skill('Rbx API') FIRST for the full API reference.";
+            "Call read_skill('Lua Modding') or read_skill('Rbx API') FIRST: each returns its core reference and " +
+            "the list of sections to read as the task needs.";
 
         /// <inheritdoc />
         public string InputSchemaJson =>

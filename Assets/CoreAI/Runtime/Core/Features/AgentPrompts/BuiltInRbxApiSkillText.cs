@@ -184,7 +184,8 @@ scene load, domain reload, leaving play mode): report it, do not retry, until th
   `string.pack/unpack` are NOT_IMPLEMENTED (use `string.char`/`string.byte`, `Vector3`);
   `loadstring` returns nil, ""loadstring() is not available""; `setfenv` is refused. `goto`,
   `::labels::` and `_ENV` run here but not in Roblox: do not write them.
-- Reloading: `manage_mods reload` (and the Hub's Save & run) first removes the previous run's
+- Reloading: `manage_mods reload`, `manage_mods edit` (change a piece of a mod in place: `old_text`
+  copied from `get_source`, `new_text`) and the Hub's Save & run all first remove the previous run's
   startup objects — what its main chunk built before its first yield and the mod still owns — so a
   mod that builds its scene at startup never duplicates it; objects made later by handlers, tasks or
   players stay. Pass keep_objects=true to keep everything and build next to it. Two budget cuts in a

@@ -70,6 +70,7 @@
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/UniversalPrefixDefaultEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/UniversalPrefixDefaultEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/PromptRegression/*.cs" Link="Assets/CoreAI/Tests/EditMode/PromptRegression/%(Filename)%(Extension)" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/PromptTokenCostTableEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/PromptTokenCostTableEditModeTests.cs" />
+    <Compile Include="../../../Assets/CoreAI/Tests/EditMode/ToolEchoAfterStateChangeEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/ToolEchoAfterStateChangeEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/Skills/*.cs" Link="Assets/CoreAI/Tests/EditMode/Skills/%(Filename)%(Extension)" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/LlmToolArgumentNormalizerEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/LlmToolArgumentNormalizerEditModeTests.cs" />
     <Compile Include="../../../Assets/CoreAI/Tests/EditMode/LlmToolChannelPolicyEditModeTests.cs" Link="Assets/CoreAI/Tests/EditMode/LlmToolChannelPolicyEditModeTests.cs" />

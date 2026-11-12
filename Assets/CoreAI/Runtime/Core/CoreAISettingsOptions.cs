@@ -79,6 +79,9 @@ namespace CoreAI
         public float InputTokenPricePer1KUsd { get; set; }
         public float OutputTokenPricePer1KUsd { get; set; }
 
+        /// <inheritdoc cref="ICoreAISettings.AiModsDefaultFolder"/>
+        public string AiModsDefaultFolder { get; set; } = "";
+
         public static CoreAISettingsOptions From(ICoreAISettings source)
         {
             if (source == null)
@@ -137,7 +140,8 @@ namespace CoreAI
                 EnableLuaOnWebGl = source.EnableLuaOnWebGl,
 #pragma warning restore CS0618
                 InputTokenPricePer1KUsd = source.InputTokenPricePer1KUsd,
-                OutputTokenPricePer1KUsd = source.OutputTokenPricePer1KUsd
+                OutputTokenPricePer1KUsd = source.OutputTokenPricePer1KUsd,
+                AiModsDefaultFolder = source.AiModsDefaultFolder ?? ""
             };
         }
     }

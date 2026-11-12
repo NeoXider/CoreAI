@@ -38,7 +38,7 @@ namespace CoreAI.Ai
     /// one per call.
     /// </para>
     /// </summary>
-    public sealed class LuaModsLlmTool : LlmToolBase, IAIFunctionLlmTool
+    public sealed class LuaModsLlmTool : LlmToolBase, IAIFunctionLlmTool, ILlmToolCallEffects
     {
         /// <summary>
         /// Most source characters one <c>get_source</c> page returns. The page is also kept under
@@ -460,6 +460,22 @@ namespace CoreAI.Ai
             }
 
             return result;
+        }
+
+        /// <inheritdoc />
+        /// <remarks>
+        /// Only <c>list</c>, <c>get_source</c>, <c>export</c>, <c>versions</c> and <c>diagnostics</c> read; every other
+        /// action, an unknown one included, counts as a change. So a <c>get_source</c> repeated after an
+        /// <c>edit</c> in the same request runs again instead of returning the page from before the edit.
+        /// </remarks>
+        public bool ChangesState(string functionName, IDictionary<string, object> arguments)
+        {
+            string action = LlmToolCallArguments.GetAction(arguments);
+            return action != "list"
+                   && action != "get_source"
+                   && action != "export"
+                   && action != "versions"
+                   && action != "diagnostics";
         }
 
         private static bool IsMutatingAction(string normalizedAction)

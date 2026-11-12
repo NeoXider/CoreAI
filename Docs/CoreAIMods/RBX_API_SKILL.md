@@ -38,6 +38,10 @@ Roblox-style API and assumes the classic one for timers/persistence/events.
   hosts). Both hold the same text, every section opened by a `<!-- section: name -->` line, and are never
   edited by hand: `SkillSourceCopiesEditModeTests` (portable CI) and `python tools/generate_skills.py
   --check` fail when a copy and its source disagree.
+- **The Lua Modding skill is built the same way** from `skill-sources/LuaModding/` (sections `core`, `loops`,
+  `events`, `full`, `example`, `errors`) into `AgentSkills/LuaModding.txt` and `BuiltInLuaModdingSkillText`.
+  Full Lua is still one hand-kept text. `BuiltInSkillReadsFitTheToolResultCapEditModeTests` fails when any read
+  of any built-in skill, bare or by section, is longer than the default tool-result cap.
 - **Registration** — `CoreAiModsInstaller.RegisterCoreAiMods` adds the skill to the `lua-builder` tool
   profile (the Programmer's), loading the Resources text if present and the built-in constant otherwise,
   through `SkillSet.FromTextContent`, which splits a marked text into its sections (a host override

@@ -190,6 +190,15 @@ Three consequences worth knowing before you touch the flag:
   legitimate request; signatures are only compared against earlier turns, never against sibling slots.
 - **Only success registers a signature.** A failed call stays repeatable with identical arguments, so a retry
   of exactly the call that failed is never blocked.
+- **A read repeated after a change runs again.** After a successful call that changes state, the signatures of
+  earlier reads are forgotten, because their results may be stale; a read in the same turn as the change is not
+  registered. A call changes state when its tool is mutating (`IsMutating` or a built-in mutating name), or,
+  for a tool whose calls differ, when the tool's `ILlmToolCallEffects.ChangesState(functionName, arguments)`
+  says so: `manage_mods` (only `list`, `get_source`, `export`, `versions`, `diagnostics` read), `memory`
+  (only `read`), `world_command` (`list_*` read), `component_command` (`list_components` reads), `camera`
+  (`camera_look` and `camera_orbit` change the view) and `scene_tool` (`set_transform`) implement it. A call
+  that changes state is never forgotten: an echoed mutation is not replayed. Read arguments with
+  `LlmToolCallArguments.GetString`/`GetAction`, which accept strings, `JsonElement` and `JToken` values.
 
 The key is per call and not per turn on purpose: a batch-wide key let the model slip an echo past the guard
 just by changing what it sent *alongside* the repeated call (turn 1 = `[A]`, turn 2 = `[A, B]` re-executed
@@ -228,9 +237,10 @@ Rules of thumb:
 - **The flag is resolved by name from the role's tool list**, exactly like `ToolTimeoutMsOverride`. A tool
   reached through the skill proxy is covered twice over: the proxy itself is treated as mutating, and the
   policy also reads the resolved inner tool's own flag before scheduling the call.
-- **It is unrelated to echo suppression.** `IsMutating` decides ordering; `AllowDuplicates` decides whether a
-  repeat is suppressed. A read-only tool is still echo-suppressed, and a mutating tool with
-  `AllowDuplicates => true` is still exempt.
+- **It does not switch echo suppression on or off.** `IsMutating` decides ordering; `AllowDuplicates` decides
+  whether a repeat is suppressed. A read-only tool is still echo-suppressed, and a mutating tool with
+  `AllowDuplicates => true` is still exempt. The one link: without `ILlmToolCallEffects`, a call of a mutating
+  tool counts as a change, which makes earlier reads run again (above).
 
 ### Understanding `ToolTimeoutMsOverride` (tools that wait for a human)
 

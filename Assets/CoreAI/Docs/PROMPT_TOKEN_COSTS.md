@@ -48,29 +48,36 @@ Counter: BpeTokenCounter fallback estimator
 
 | Skill text | Characters | UTF-8 bytes | Tokens |
 |---|---|---|---|
-| Lua Modding instructions (Resources) | 11254 | 11254 | 2814 |
-| Lua Modding instructions (C# literal) | 11254 | 11254 | 2814 |
-| Lua Modding read_skill result | 11700 | 11700 | 2925 |
+| Lua Modding instructions (Resources) | 11880 | 11880 | 2970 |
+| Lua Modding instructions (C# literal) | 11880 | 11880 | 2970 |
+| Lua Modding read_skill result | 5084 | 5084 | 1271 |
+| Lua Modding read_skill result, section loops | 1824 | 1824 | 456 |
+| Lua Modding read_skill result, section events | 1963 | 1963 | 491 |
+| Lua Modding read_skill result, section full | 992 | 992 | 248 |
+| Lua Modding read_skill result, section example | 1951 | 1951 | 488 |
+| Lua Modding read_skill result, section errors | 1502 | 1502 | 376 |
 | Lua Modding catalog entry | 253 | 253 | 64 |
-| Rbx API instructions (Resources) | 76219 | 76321 | 19055 |
-| Rbx API instructions (C# literal) | 76219 | 76321 | 19055 |
-| Rbx API read_skill result | 7920 | 7920 | 1980 |
-| Rbx API read_skill result, section scripting | 5191 | 5201 | 1298 |
+| Rbx API instructions (Resources) | 86192 | 86294 | 21548 |
+| Rbx API instructions (C# literal) | 86192 | 86294 | 21548 |
+| Rbx API read_skill result | 7996 | 7996 | 1999 |
+| Rbx API read_skill result, section scripting | 6495 | 6505 | 1624 |
 | Rbx API read_skill result, section datatypes | 4948 | 4950 | 1237 |
-| Rbx API read_skill result, section instances | 5848 | 5850 | 1462 |
-| Rbx API read_skill result, section attributes | 3802 | 3816 | 951 |
+| Rbx API read_skill result, section instances | 6214 | 6216 | 1554 |
+| Rbx API read_skill result, section attributes | 3904 | 3918 | 976 |
 | Rbx API read_skill result, section parts | 5163 | 5181 | 1291 |
 | Rbx API read_skill result, section tweens | 2219 | 2225 | 555 |
 | Rbx API read_skill result, section messaging | 1364 | 1364 | 341 |
-| Rbx API read_skill result, section terrain | 4956 | 4958 | 1239 |
+| Rbx API read_skill result, section data | 4997 | 4997 | 1250 |
+| Rbx API read_skill result, section terrain | 5471 | 5473 | 1368 |
 | Rbx API read_skill result, section building | 3777 | 3777 | 945 |
-| Rbx API read_skill result, section characters | 6433 | 6455 | 1609 |
+| Rbx API read_skill result, section characters | 6450 | 6472 | 1613 |
+| Rbx API read_skill result, section rig | 1697 | 1697 | 425 |
 | Rbx API read_skill result, section input | 4757 | 4763 | 1190 |
 | Rbx API read_skill result, section camera | 3820 | 3832 | 955 |
-| Rbx API read_skill result, section gui | 3107 | 3107 | 777 |
+| Rbx API read_skill result, section gui | 3744 | 3744 | 936 |
 | Rbx API read_skill result, section uxml | 6743 | 6747 | 1686 |
 | Rbx API read_skill result, section chat | 2011 | 2011 | 503 |
-| Rbx API read_skill result, section lighting | 2846 | 2846 | 712 |
+| Rbx API read_skill result, section lighting | 3615 | 3615 | 904 |
 | Rbx API read_skill result, section ai | 6007 | 6011 | 1502 |
 | Rbx API catalog entry | 462 | 462 | 116 |
 | Full Lua instructions (Resources) | 2000 | 2004 | 500 |
@@ -92,7 +99,7 @@ Counter: BpeTokenCounter fallback estimator
 | Creator role prompt | 927 | 927 | 232 |
 | Builder role prompt | 736 | 736 | 184 |
 | Analyzer role prompt | 334 | 334 | 84 |
-| Programmer role prompt | 3408 | 3408 | 852 |
+| Programmer role prompt | 3530 | 3530 | 883 |
 | AINpc role prompt | 293 | 293 | 74 |
 | CoreMechanicAI role prompt | 334 | 334 | 84 |
 | PlainChat role prompt | 310 | 310 | 78 |
@@ -126,7 +133,7 @@ history and the user message come on top.
 
 | Role | Tools offered | Tool definitions | Prefix + role prompt | Total |
 |---|---|---|---|---|
-| Programmer | memory, camera, execute_lua, manage_mods, get_mod_logs, save_world, load_world, list_autosaves, load_autosave, read_skill, call_skill_tool | 4525 | 1005 | 5530 |
+| Programmer | memory, camera, execute_lua, manage_mods, get_mod_logs, save_world, load_world, list_autosaves, load_autosave, read_skill, call_skill_tool | 4525 | 1036 | 5561 |
 | Creator | memory, world_command | 1771 | 385 | 2156 |
 | Builder | memory, world_command | 1771 | 337 | 2108 |
 | Merchant | memory, get_inventory | 357 | 302 | 659 |
@@ -140,15 +147,17 @@ chat role, so a SmartChat host with the panel pays 1352 more per request.
 
 The Programmer's three skills are kept out of the prompt and read on demand. Measured instead of assumed:
 
-- Inlining the three skill texts in the system prompt would cost 2814 + 19055 + 500 = **22369** tokens on
+- Inlining the three skill texts in the system prompt would cost 2970 + 21548 + 500 = **25018** tokens on
   every request.
 - Offering them through the two meta-tools costs `read_skill` + `call_skill_tool` = 208 + 158 = **366** tokens
-  per request, so a request that reads no skill saves 22003 tokens (98.4 percent of the inline cost).
-- A turn that reads a skill pays its `read_skill` result on top: 2925 for Lua Modding and 568 for Full Lua.
-  The Rbx API skill is read in parts: a bare `read_skill("Rbx API")` returns its core and the list of its
-  17 sections for 1980 tokens, and each section read costs 341 to 1686 more (all 17 sections together:
-  18253). The largest single read is 7920 characters, so every read fits the default tool-result cap of
-  8,000 characters, which cut the old one-piece text to its first 8,000 characters.
+  per request, so a request that reads no skill saves 24652 tokens (98.5 percent of the inline cost).
+- A turn that reads a skill pays its `read_skill` results on top, and the two large skills are read in parts.
+  A bare `read_skill("Lua Modding")` returns its core and the list of its 5 sections for 1271 tokens,
+  and each section costs 248 to 491 more (all 5 together: 2059). A bare `read_skill("Rbx API")` returns its core and
+  the list of its 19 sections for 1999 tokens, and each section read costs 341 to 1686 more (all 19
+  sections together: 20855). Full Lua is one read of 568 tokens. The largest single read is 7996
+  characters, so every read fits the default tool-result cap of 8,000 characters, which cut each of the
+  old one-piece texts to its first 8,000 characters (`BuiltInSkillReadsFitTheToolResultCapEditModeTests` keeps it so).
 
 These figures replace the "~91% saving" arithmetic in [AGENT_BUILDER.md](AGENT_BUILDER.md), which assumed 50
 tools of 80 tokens each; the shipped skills carry instructions, not tools, and their cost is dominated by the

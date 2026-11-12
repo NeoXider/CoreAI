@@ -1,7 +1,7 @@
 # Skill self-improvement: correcting a skill section from observed failures
 
 Status: design note, not implemented (2026-11-11, P15 second half). Applies to the built-in skills generated from
-`skill-sources/` (today `Rbx API`) and to skills a game's agents author through `manage_skills`.
+`skill-sources/` (today `Rbx API` and `Lua Modding`) and to skills a game's agents author through `manage_skills`.
 
 The unit of change is **one section**. Since the Rbx API skill is read in parts (a core plus sections, each under
 the 8,000-character tool-result cap), a lesson lands in the section a model reads when it needs it, and the core

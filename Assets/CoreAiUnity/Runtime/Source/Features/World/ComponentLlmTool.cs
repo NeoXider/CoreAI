@@ -17,7 +17,7 @@ namespace CoreAI.Infrastructure.Llm
     /// <summary>
     /// LLM tool that converts model requests into component commands.
     /// </summary>
-    public sealed class ComponentLlmTool : LlmToolBase, IAIFunctionLlmTool
+    public sealed class ComponentLlmTool : LlmToolBase, IAIFunctionLlmTool, ILlmToolCallEffects
     {
         private readonly ICoreAiComponentCommandExecutor _executor;
         private readonly ICoreAISettings _settings;
@@ -32,6 +32,13 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         public override string Name => "component_command";
+
+        /// <inheritdoc />
+        /// <remarks>Only <c>list_components</c> reads; every other action, an unknown one included, counts as a change.</remarks>
+        public bool ChangesState(string functionName, IDictionary<string, object> arguments)
+        {
+            return LlmToolCallArguments.GetAction(arguments) != "list_components";
+        }
 
         // Component mutations must be idempotent across turns: AllowDuplicates=false lets
         // ToolExecutionPolicy suppress only a CROSS-TURN identical echo (structured no-op) while still

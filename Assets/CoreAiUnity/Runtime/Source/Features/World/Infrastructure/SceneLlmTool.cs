@@ -15,12 +15,19 @@ namespace CoreAI.Ai
     /// <summary>
     /// LLM tool that exposes scene inspection and manipulation operations.
     /// </summary>
-    public sealed class SceneLlmTool : IAIFunctionsLlmTool
+    public sealed class SceneLlmTool : IAIFunctionsLlmTool, ILlmToolCallEffects
     {
         public string Name => "scene_tool";
         public string Description => "Manipulate and inspect Unity GameObjects dynamically at runtime.";
 
         public bool AllowDuplicates => false;
+
+        /// <inheritdoc />
+        /// <remarks>Only <c>set_transform</c> changes the scene; finding and reading objects only read.</remarks>
+        public bool ChangesState(string functionName, IDictionary<string, object> arguments)
+        {
+            return string.Equals(functionName, "set_transform", StringComparison.OrdinalIgnoreCase);
+        }
 
         // WHY: This wrapper expands into multiple native MEAI functions. The aggregate ILlmTool schema is
         // intentionally empty because each AIFunction.JsonSchema from CreateAIFunctions is authoritative.

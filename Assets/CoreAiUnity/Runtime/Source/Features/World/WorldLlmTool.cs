@@ -18,7 +18,7 @@ namespace CoreAI.Infrastructure.Llm
     /// <summary>
     /// LLM tool that converts model requests into world commands.
     /// </summary>
-    public sealed class WorldLlmTool : LlmToolBase, IAIFunctionLlmTool
+    public sealed class WorldLlmTool : LlmToolBase, IAIFunctionLlmTool, ILlmToolCallEffects
     {
         private readonly ICoreAiWorldCommandExecutor _executor;
         private readonly ICoreAISettings _settings;
@@ -39,6 +39,17 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         public override string Name => "world_command";
+
+        /// <inheritdoc />
+        /// <remarks>
+        /// The <c>list_*</c> actions only read, so one repeated after a change in the same request runs again; every
+        /// other action, an unknown one included, counts as a change.
+        /// </remarks>
+        public bool ChangesState(string functionName, IDictionary<string, object> arguments)
+        {
+            string action = LlmToolCallArguments.GetAction(arguments);
+            return action != "list_prefabs" && action != "list_animations" && action != "list_objects";
+        }
 
         // WHY: World mutations must be idempotent across turns: an echoed or blind-retried identical spawn
         // would create a second object. AllowDuplicates=false lets ToolExecutionPolicy suppress only a

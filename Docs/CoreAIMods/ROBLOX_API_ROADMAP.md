@@ -3579,8 +3579,9 @@ Milestones: **stage 1 in M2**, **stage 2 in M4** (lower priority).
     day, not run in Unity: the Rbx API skill is read in sections (`read_skill("Rbx API")` returns a core and
     the section list; every read fits the default tool-result cap, where the whole text used to be cut to
     its first 8,000 characters), generated with its shipped copies from one source (`skill-sources/RbxApi/`,
-    `tools/generate_skills.py`, checked in CI). Open: the Lua Modding and Full Lua skills (still hand-kept
-    pairs), the history preload (still the whole text), skill self-improvement, per-world overrides, and a
+    `tools/generate_skills.py`, checked in CI). On 2026-11-12 the Lua Modding skill followed (sections from
+    `skill-sources/LuaModding/`; its one-piece read was 11,700 characters and lost its end to the cap). Open:
+    the Full Lua skill (still a hand-kept pair), the history preload (still the whole text), skill self-improvement, per-world overrides, and a
     real-model run of the prompt fixtures and of the section list.
   - *The survey this package started from (release 7.56.0); the lines above supersede it where they
     differ:*

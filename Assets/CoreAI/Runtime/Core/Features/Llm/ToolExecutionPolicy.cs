@@ -101,6 +101,14 @@ namespace CoreAI.Infrastructure.Llm
         /// </summary>
         private readonly HashSet<string> _succeededCallSignatures = new();
 
+        /// <summary>
+        /// The part of <see cref="_succeededCallSignatures"/> that belongs to calls which only READ
+        /// (<see cref="CallChangesState"/> false). A later successful call that changes state makes their results
+        /// stale, so they are forgotten then and an identical read runs again; the signatures of calls that change
+        /// state stay, so an echoed mutation is still never replayed.
+        /// </summary>
+        private readonly HashSet<string> _succeededReadSignatures = new();
+
         private readonly List<LlmToolCallTrace> _executedTraces = new();
 
         /// <summary>
@@ -209,6 +217,7 @@ namespace CoreAI.Infrastructure.Llm
             _consecutiveErrors = 0;
             Interlocked.Exchange(ref _turnEndingToolSucceeded, 0);
             _succeededCallSignatures.Clear();
+            _succeededReadSignatures.Clear();
             lock (_traceLock)
             {
                 _executedTraces.Clear();
@@ -246,6 +255,7 @@ namespace CoreAI.Infrastructure.Llm
             public ToolCallResult[] IndexedResults = Array.Empty<ToolCallResult>();
             public bool[] IsDuplicateIndex = Array.Empty<bool>();
             public string[] Signatures = Array.Empty<string>();
+            public bool[] ChangesState = Array.Empty<bool>();
             public ResolvedCall[] Calls = Array.Empty<ResolvedCall>();
             public bool HasExecutable;
         }
@@ -289,6 +299,7 @@ namespace CoreAI.Infrastructure.Llm
                 IndexedResults = new ToolCallResult[count],
                 IsDuplicateIndex = new bool[count],
                 Signatures = new string[count],
+                ChangesState = new bool[count],
                 Calls = toolCalls.Select(call => ResolveCall(call, options)).ToArray(),
                 HasExecutable = count > 0
             };
@@ -305,6 +316,7 @@ namespace CoreAI.Infrastructure.Llm
             bool anyExecutable = false;
             for (int i = 0; i < count; i++)
             {
+                plan.ChangesState[i] = CallChangesState(plan.Calls[i]);
                 if (TryBuildDuplicateSignature(plan.Calls[i], out string signature))
                 {
                     plan.Signatures[i] = signature;
@@ -380,6 +392,67 @@ namespace CoreAI.Infrastructure.Llm
 
             signature = $"{GetDuplicateToolName(resolved)}({GetDuplicateArguments(resolved)})";
             return true;
+        }
+
+        /// <summary>
+        /// Whether the call can change state other calls read: the tool's own per-call answer
+        /// (<see cref="ILlmToolCallEffects"/>) when it gives one, otherwise whether the tool is mutating. A tool whose
+        /// answer throws is taken to change state.
+        /// </summary>
+        private bool CallChangesState(ResolvedCall resolved)
+        {
+            MEAI.FunctionCallContent call = resolved?.Call;
+            if (resolved?.Metadata is ILlmToolCallEffects effects)
+            {
+                try
+                {
+                    return effects.ChangesState(resolved.Invocation?.Name ?? call?.Name ?? "",
+                        resolved.Invocation?.Arguments ?? call?.Arguments);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn($"[ToolPolicy] {call?.Name}: ChangesState threw, treated as a state change: " +
+                                 ex.Message, LogTag.Llm);
+                    return true;
+                }
+            }
+
+            return IsMutatingTool(call) || resolved?.Metadata?.IsMutating == true;
+        }
+
+        /// <summary>
+        /// Forgets the signatures of the reads registered so far; called when a turn's call that changes state
+        /// succeeded, because their earlier results may no longer be true.
+        /// </summary>
+        private void ForgetReadSignatures()
+        {
+            foreach (string signature in _succeededReadSignatures)
+            {
+                _succeededCallSignatures.Remove(signature);
+            }
+
+            _succeededReadSignatures.Clear();
+        }
+
+        /// <summary>
+        /// Registers one successful call of a turn. A read in a turn whose state changed is not registered: it may
+        /// have run before the change, so its result is not one to hand back later.
+        /// </summary>
+        private void RegisterSucceededSignature(string signature, bool changesState, bool turnChangedState)
+        {
+            if (changesState)
+            {
+                _succeededCallSignatures.Add(signature);
+                return;
+            }
+
+            if (turnChangedState)
+            {
+                return;
+            }
+
+            _succeededCallSignatures.Add(signature);
+            _succeededReadSignatures.Add(signature);
         }
 
         private string GetDuplicateToolName(ResolvedCall resolved)
@@ -1525,6 +1598,20 @@ namespace CoreAI.Infrastructure.Llm
             List<MEAI.AIContent> results = new(plan.IndexedResults.Length);
             int executed = 0;
             int executedFailed = 0;
+            bool turnChangedState = false;
+            for (int i = 0; i < plan.IndexedResults.Length; i++)
+            {
+                if (!plan.IsDuplicateIndex[i] && plan.IndexedResults[i].Succeeded && plan.ChangesState[i])
+                {
+                    turnChangedState = true;
+                }
+            }
+
+            if (turnChangedState)
+            {
+                ForgetReadSignatures();
+            }
+
             for (int i = 0; i < plan.IndexedResults.Length; i++)
             {
                 ToolCallResult r = plan.IndexedResults[i];
@@ -1541,7 +1628,7 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 else if (plan.Signatures[i] != null)
                 {
-                    _succeededCallSignatures.Add(plan.Signatures[i]);
+                    RegisterSucceededSignature(plan.Signatures[i], plan.ChangesState[i], turnChangedState);
                 }
             }
 
@@ -1611,6 +1698,9 @@ namespace CoreAI.Infrastructure.Llm
             /// check), parallel to <see cref="Slots"/>. At finalization only the succeeded slots register.
             /// </summary>
             internal readonly List<string> SlotSignatures = new();
+
+            /// <summary>Whether each slot's call can change state (<see cref="CallChangesState"/>), parallel to <see cref="Slots"/>.</summary>
+            internal readonly List<bool> SlotChangesState = new();
 
             /// <summary>Slots filled with an echo no-op: they take no part in the turn accounting.</summary>
             internal readonly HashSet<StreamedSlot> DuplicateSlots = new();
@@ -1718,6 +1808,7 @@ namespace CoreAI.Infrastructure.Llm
             StreamedSlot slot = new(fc.CallId);
             turn.Slots.Add(slot);
             turn.SlotSignatures.Add(hasSignature ? signature : null);
+            turn.SlotChangesState.Add(chatOptions?.ToolMode is not MEAI.NoneChatToolMode && CallChangesState(resolved));
 
             if (hasSignature && _succeededCallSignatures.Contains(signature))
             {
@@ -1973,6 +2064,8 @@ namespace CoreAI.Infrastructure.Llm
             List<MEAI.AIContent> results = new(turn.Slots.Count);
             int executed = 0;
             int executedFailed = 0;
+            ToolCallResult[] outcomes = new ToolCallResult[turn.Slots.Count];
+            bool turnChangedState = false;
             for (int slotIndex = 0; slotIndex < turn.Slots.Count; slotIndex++)
             {
                 StreamedSlot slot = turn.Slots[slotIndex];
@@ -1983,6 +2076,22 @@ namespace CoreAI.Infrastructure.Llm
                         "or stream aborted) while the call was still in flight.");
                 }
 
+                outcomes[slotIndex] = r;
+                if (!turn.DuplicateSlots.Contains(slot) && r.Succeeded && turn.SlotChangesState[slotIndex])
+                {
+                    turnChangedState = true;
+                }
+            }
+
+            if (turnChangedState)
+            {
+                ForgetReadSignatures();
+            }
+
+            for (int slotIndex = 0; slotIndex < turn.Slots.Count; slotIndex++)
+            {
+                StreamedSlot slot = turn.Slots[slotIndex];
+                ToolCallResult r = outcomes[slotIndex];
                 results.Add(r.Result);
                 if (turn.DuplicateSlots.Contains(slot))
                 {
@@ -1996,7 +2105,8 @@ namespace CoreAI.Infrastructure.Llm
                 }
                 else if (turn.SlotSignatures[slotIndex] != null)
                 {
-                    _succeededCallSignatures.Add(turn.SlotSignatures[slotIndex]);
+                    RegisterSucceededSignature(turn.SlotSignatures[slotIndex], turn.SlotChangesState[slotIndex],
+                        turnChangedState);
                 }
             }
 

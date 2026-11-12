@@ -1213,6 +1213,7 @@ namespace CoreAI.Infrastructure.Llm
                 options.MaxToolCallHistoryMessages < 0 ? 20 : options.MaxToolCallHistoryMessages;
             maxParallelToolCalls = options.MaxParallelToolCalls < 1 ? 1 : options.MaxParallelToolCalls;
             allowWorldPrimitives = options.AllowWorldPrimitives;
+            aiModsDefaultFolder = options.AiModsDefaultFolder ?? "";
         }
 
         #endregion

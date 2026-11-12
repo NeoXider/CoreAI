@@ -358,7 +358,7 @@ Both streaming and non-streaming paths use `ToolExecutionPolicy` for:
 | Guarantee | Description |
 |-----------|-------------|
 | Argument preflight | Missing / `null` required arguments and arguments that cannot bind to the parameter type are refused before the tool body runs (retry allowed); see [TOOL_AUTHORING_GUIDE](TOOL_AUTHORING_GUIDE.md#required-arguments-null-is-missing-empty-is-present). |
-| Duplicate detection | Signature-based (name + arguments hash). Only a **cross-turn echo** is suppressed — a call whose signature an *earlier* turn of the same request already registered after making progress. Identical calls issued together in one batch all execute. Per-tool `AllowDuplicates` flag overrides. |
+| Duplicate detection | Signature-based (name + arguments hash). Only a **cross-turn echo** is suppressed — a call whose signature an *earlier* turn of the same request already registered after making progress. Identical calls issued together in one batch all execute. A successful call that changes state makes earlier read signatures stale, so an identical read after it runs again. Per-tool `AllowDuplicates` flag overrides. |
 | Consecutive error tracking | Counts batches/turns in which **every** call failed; a partly successful batch resets it. When `MaxToolCallRetries` is reached (or the roundtrip cap is hit) the loop makes one final tools-disabled summary turn. |
 | Notification | Every tool execution fires `IToolCallEventPublisher.PublishStarted/Completed/Failed` (portable) → `MessagePipeToolCallEventPublisher` adapter → `GlobalMessagePipe`. Also calls `IToolExecutionNotifier.NotifyToolExecuted` → `CoreAiToolExecutionNotifier` adapter → `CoreAi.NotifyToolExecuted`. |
 

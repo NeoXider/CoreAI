@@ -314,6 +314,47 @@ namespace CoreAI.Tests.EditMode
             StringAssert.Contains("get_source", export);
         }
 
+        /// <summary>
+        /// Read, edit, read the same page again in one request: the second read runs and shows the edit, while the
+        /// policy still answers an echo of the edit itself.
+        /// </summary>
+        [Test]
+        public async Task ScriptedTurn_TheSameGetSourceAfterAnEdit_RunsAgainAndShowsTheEdit()
+        {
+            LuaCsModRuntime runtime = new(store: new MemoryModStore());
+            runtime.LoadMod("hud", HudSource, persistToStore: false);
+            CoreAISettingsOptions settings = Settings(DefaultCap);
+            LuaModsLlmTool tool = Tool(runtime, settings);
+            Dictionary<string, object> read = new() { ["action"] = "get_source", ["mod_id"] = "hud" };
+            Dictionary<string, object> edit = new()
+            {
+                ["action"] = "edit", ["mod_id"] = "hud", ["old_text"] = "'Brick'", ["new_text"] = "'Ice Glacier'"
+            };
+            ScriptedModel model = new(iteration => iteration switch
+            {
+                1 => Call("call-read", read),
+                2 => Call("call-edit", edit),
+                3 => Call("call-reread", new Dictionary<string, object>(read)),
+                4 => Call("call-edit-echo", new Dictionary<string, object>(edit)),
+                _ => new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, "Done."))
+            });
+            SmartToolCallingChatClient client = new(model, NullLog.Instance, settings, false,
+                new List<ILlmTool> { tool }, BuiltInAgentRoleIds.Programmer, 3);
+            MEAI.ChatOptions options = new() { Tools = new List<MEAI.AITool> { tool.CreateAIFunction() } };
+
+            await client.GetResponseAsync(new[] { new MEAI.ChatMessage(MEAI.ChatRole.User, "Make slot 6 ice.") },
+                options, CancellationToken.None);
+
+            Assert.AreEqual(5, model.Requests.Count);
+            JObject reread = JObject.Parse(ResultOf(model.Requests[3], "call-reread"));
+            Assert.IsNull(reread["duplicate"], reread.ToString());
+            StringAssert.Contains("'Ice Glacier'", reread.Value<string>("data"), "the page read after the edit is current");
+            JObject editEcho = JObject.Parse(ResultOf(model.Requests[4], "call-edit-echo"));
+            Assert.IsTrue(editEcho.Value<bool>("duplicate"), "an echoed edit is never replayed");
+            Assert.IsTrue(runtime.TryGetModSource("hud", out string source));
+            Assert.AreEqual(HudSource.Replace("'Brick'", "'Ice Glacier'"), source);
+        }
+
         private static MEAI.ChatResponse Call(string callId, IDictionary<string, object> arguments)
         {
             return new MEAI.ChatResponse(new MEAI.ChatMessage(MEAI.ChatRole.Assistant,

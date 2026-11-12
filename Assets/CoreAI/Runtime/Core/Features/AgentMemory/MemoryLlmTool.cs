@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using CoreAI.Ai;
 
 namespace CoreAI.AgentMemory
@@ -5,9 +6,16 @@ namespace CoreAI.AgentMemory
     /// <summary>
     /// LLM tool wrapper for agent memory operations.
     /// </summary>
-    public sealed class MemoryLlmTool : LlmToolBase
+    public sealed class MemoryLlmTool : LlmToolBase, ILlmToolCallEffects
     {
         public override string Name => "memory";
+
+        /// <inheritdoc />
+        /// <remarks>Only <c>read</c> reads; so a <c>read</c> repeated after a write in the same request runs again.</remarks>
+        public bool ChangesState(string functionName, IDictionary<string, object> arguments)
+        {
+            return LlmToolCallArguments.GetAction(arguments) != "read";
+        }
 
         public override string Description =>
             "Persistent memory document for agent recall. " +
