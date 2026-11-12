@@ -1099,7 +1099,8 @@ same slot replaces the older one, and expired, unknown, rejected, or reused ids 
 **Autosaves are separate and automatic.** `ConfirmedWorldMutationGate` sits in front of every
 `execute_lua` call that carries code (trigger `execute_lua`; an empty or whitespace-only `code` is
 refused with `Lua code is required` before any capture) and every *mutating* `manage_mods` action — `load`,
-`reload`, `unload`, `import`, `forget`, `revert` (trigger `manage_mods-<action>`). It captures the
+`reload`, `unload`, `import`, `forget`, `revert` (trigger `manage_mods-<action>`), and `edit`, a reload of the
+edited source (trigger `manage_mods-reload`). It captures the
 world and writes an autosave *before* the mutation runs; if the capture or the write fails, the
 mutation does not happen and the tool returns a structured failure. The one exception is a world that
 cannot be encoded as a package at all (past a format limit or a platform budget): `manage_mods forget`

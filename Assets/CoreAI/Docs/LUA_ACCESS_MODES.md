@@ -118,7 +118,7 @@ file APIs that a host game exposes through components.
 
 ## Mod LLM Tools
 
-`manage_mods` (`list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget`,
+`manage_mods` (`list`, `get_source`, `edit`, `load`, `reload`, `unload`, `export`, `import`, `forget`,
 `versions`, `revert`, `diagnostics`), `execute_lua` and `get_mod_logs` are attached to the built-in
 Programmer role by `CoreAiModsInstaller.RegisterCoreAiMods`, together with the world-package tools
 (`save_world`, `load_world`, `list_autosaves`, `load_autosave`; see

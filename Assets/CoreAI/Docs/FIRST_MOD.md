@@ -89,8 +89,11 @@ mod has them regardless of tier.
 ### (a) Via the agent — `manage_mods load`
 
 Ask the Programmer agent in chat to create a mod, or call the tool directly. The `manage_mods` tool
-accepts these actions: `list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget`,
-`versions`, `revert`, `diagnostics`.
+accepts these actions: `list`, `get_source`, `edit`, `load`, `reload`, `unload`, `export`, `import`, `forget`,
+`versions`, `revert`, `diagnostics`. To change a mod that already runs, the agent reads it with `get_source`
+(in pages of whole lines: `from_line`, and the `next_from_line` each page names) and changes it with `edit`
+(`old_text` copied exactly from the source, `new_text`), which reloads it; `reload` with the whole source
+replaces a mod outright. See [mod-system.md](../../../Docs/CoreAIMods/mod-system.md) §4.1.
 
 ```json
 { "action": "load", "mod_id": "greeter", "code": "--[[@coreai\nid: greeter\n]]\nhooks_on(\"wave_started\", function(evt, payload) print(payload) end)" }

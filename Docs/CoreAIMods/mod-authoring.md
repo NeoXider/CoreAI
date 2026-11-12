@@ -8,10 +8,10 @@ A mod is Lua source that the runtime runs ONCE through `LoadMod`. During that ru
 afterwards the host drives those hooks. Persistent mods live across frames (and reloads). A one-off script
 (`execute_lua`) runs once and is not persisted.
 
-**A reload starts from a clean world.** Save & run on the Hub and `manage_mods reload` remove what the
+**A reload starts from a clean world.** Save & run on the Hub, `manage_mods reload` and `manage_mods edit` remove what the
 previous run's main chunk built before its first yield (its *startup objects*) before the new chunk runs,
 so a mod that builds a castle at startup can be saved again and again without stacking castles; objects
-built later by handlers, tasks or players stay. Pass `keep_objects: true` to `manage_mods reload` (or turn
+built later by handlers, tasks or players stay. Pass `keep_objects: true` to `manage_mods reload` or `edit` (or turn
 on **Keep objects on Save & run** in the Hub) to keep everything and build next to it. Build your scene in
 the main chunk, before the first `task.wait`, so a reload can replace it (`mod-system.md` §5c).
 

@@ -176,6 +176,11 @@ Nine bundled mods in one mod folder, `Samples/Block World` (their `category:`), 
 `Assets/CoreAIMods/Runtime/Resources/CoreAIMods/BlockWorld/`. Turn the folder on as a whole; each mod also
 reloads on its own.
 
+Asking the AI to change one ("make hotbar slot 6 ice instead of brick") works on mods of any size: the AI reads
+the mod with `manage_mods get_source` in pages of whole lines (every one of these mods but the survival mod is
+longer than one tool result) and changes only the lines it needs with `manage_mods edit`, which reloads the mod;
+`/undo` takes the change back ([mod-system.md](../../../Docs/CoreAIMods/mod-system.md) §4.1).
+
 | Mod | Owns | Talks to the others through |
 |---|---|---|
 | `blockworld_world` | the seeded world: sea and lakes, sandy beaches, grass lowlands with woods and single trees (round oaks, tall narrow trees, big oaks), hills whose steps show earth, rocky ridges and snowy peaks, caves with hillside mouths, bedrock; streamed around you in budgeted steps (your own column first, then the one whose edge is nearest you, the way you walk, or else look, before the way behind), one to eight steps a frame as the frame time allows; the spawn and the heading you first face; the body of a block game (1.8 blocks tall, a jump of 1.25 blocks, a walk of 4.3 blocks a second), a new player held until the first view is built | `BlockWorldSeed`, `BlockWorldSpawn`, `BlockWorldSpawnLook`, `BlockWorldReady`, `BlockWorldOpened`, `BlockWorldOpeningColumns`, `BlockWorldColumns`, `BlockWorldViewStuds` (how far the land is sure to reach), `BlockWorldWorkers` (generation steps a frame now) |

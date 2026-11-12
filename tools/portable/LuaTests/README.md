@@ -107,7 +107,7 @@ The real `CoreServicesInstaller` is a VContainer/MessagePipe installer, but the 
 
 ## Coverage
 
-Linked from `Assets/CoreAIMods/Tests/EditMode` (75 fixture files, 4 helpers, 1 derived helper), plus `Assets/CoreAiUnity/Tests/EditMode/LuaModAutoRepairPolicyEditModeTests.cs` (a Lua-tier policy tested through public API only). The explicit list is in the project file. 36 files of the same folder already run in the engine-free suite and are not linked again.
+Linked from `Assets/CoreAIMods/Tests/EditMode` (76 fixture files, 4 helpers, 1 derived helper), plus `Assets/CoreAiUnity/Tests/EditMode/LuaModAutoRepairPolicyEditModeTests.cs` (a Lua-tier policy tested through public API only). The explicit list is in the project file. 36 files of the same folder already run in the engine-free suite and are not linked again.
 
 Linked fixtures still contain tests that do not run here. Counted from the TRX log on 2026-09-24 at `055aed29`, the Lua-tier run is 1837 passed (11 of them the runner self-tests above), 0 failed, 38 not executed:
 

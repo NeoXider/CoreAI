@@ -368,7 +368,8 @@ via `GetRecentHandlerErrors(caller, modId = null)` and clearable via
 the agent can learn of them on a later turn through `manage_mods diagnostics` and repair the mod.
 
 The `manage_mods` tool exposes the same flow to the agent: `export`, `import`, `forget`, `versions`,
-`revert`, and `diagnostics` in addition to `load`, `reload`, `unload`, `list`, `get_source`. See
+`revert`, and `diagnostics` in addition to `load`, `reload`, `unload`, `list`, `get_source` (paged by
+`from_line`) and `edit` (replace an exact piece of the source, then reload). See
 [FIRST_MOD.md](FIRST_MOD.md) for a worked walkthrough.
 
 ## LLM Tools (Programmer Role)
@@ -376,7 +377,7 @@ The `manage_mods` tool exposes the same flow to the agent: `export`, `import`, `
 | Tool | Purpose |
 |---|---|
 | `execute_lua` | One-shot Lua in the sandbox (same bindings and limits as the envelope pipeline) |
-| `manage_mods` | `list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget`, `versions`, `revert`, `diagnostics` for `LuaCsModRuntime` |
+| `manage_mods` | `list`, `get_source` (pages of whole lines: `from_line`, `line_count`), `edit` (`old_text` -> `new_text`, `replace_all`, then a reload), `load`, `reload`, `unload`, `export`, `import`, `forget`, `versions`, `revert`, `diagnostics` for `LuaCsModRuntime` |
 | `get_mod_logs` | Read-only: a mod's captured `print`/`warn`/error log, filterable by `mod_id`, `level`, `since_sequence` |
 
 `manage_mods` does not let the model expand the capability tier; the host sets the tier when registering the tool.

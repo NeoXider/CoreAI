@@ -209,7 +209,7 @@ failing source or mod is logged and skipped, and never stops startup.
 ### 4.1 LLM
 
 `manage_mods` (`Assets/CoreAIMods/Runtime/LuaExecution/LuaModsLlmTool.cs`) handles
-list/get_source/load/reload/unload/forget/export/import/versions/revert/diagnostics and the folder actions
+list/get_source/edit/load/reload/unload/forget/export/import/versions/revert/diagnostics and the folder actions
 below. `reload` cleans the
 previous run's startup objects (§5c) unless the optional `keep_objects: true` is passed (the MCP wrapper
 `ManageModsMcpTool` forwards it); its result says which mode ran (`clean_startup_objects` or
@@ -217,6 +217,23 @@ previous run's startup objects (§5c) unless the optional `keep_objects: true` i
 will not reopen after a restart, the result carries a `startup_warning`
 ([`WORLD_PACKAGE.md`](WORLD_PACKAGE.md), "Startup selection"). The `category` from the `@coreai` header
 is persisted into the manifest.
+
+Reading and changing an existing mod (the way the model is told to change a mod; `reload` with the whole
+source stays for replacing a mod outright):
+
+| Action | Arguments | Does |
+|---|---|---|
+| `get_source` | `mod_id`, optional `from_line` (1-based, default 1), optional `line_count` (default: as many as fit) | returns one page of whole lines: `first_line`, `last_line`, `total_lines`, `total_chars`, `next_from_line` (only while more lines remain; the message names it too) and `data`, the text exactly as stored. A page is sized so its serialized result stays within `ICoreAISettings.MaxToolResultChars` (8,000 by default, the cut `ToolExecutionPolicy` applies to every tool result; 0 = unlimited) and within `LuaModsLlmTool.MaxSourceLengthReturned` (16,000 source characters), so the pages of a mod concatenate back to its exact source (a cap smaller than a page's own message and numbers, a few hundred characters, cannot be met and is cut as usual). A single line too long for any page is shown cut, with a `--[[ …[+N chars] ]]` marker and `cut_line`; the next page starts at the following line. A `from_line` past the end is refused with the line count |
+| `edit` | `mod_id`, `old_text`, `new_text` (empty deletes), optional `replace_all` (default false), optional `keep_objects` | replaces an exact occurrence of `old_text` in the mod's current source, then reloads the result through the same call as `reload`: the same authorization, rate limit, backup trigger (`manage_mods-reload`, because the undo service and the self-repair authorship tracker key on it), revision, persistence and `keep_objects` behaviour, and a failed load changes nothing. The result names the replacements, the lines the new text covers and the new revision |
+
+`edit` refusals change nothing and say what to send next: `old_text` empty; `new_text` missing; `old_text`
+equal to `new_text`; `old_text` not found (with the lines where its first line appears, so the model can read
+them with `from_line`); `old_text` found N times without `replace_all` (with the lines, asking for more
+surrounding context or `replace_all=true`). Line endings: when `old_text` does not occur exactly, it is
+looked up once more with CRLF read as LF on both sides (a source saved on Windows can hold CRLF while a model
+writes LF), and `new_text` is always written in the line endings the source mostly uses. No other whitespace
+is ignored. `export` of a mod whose bundle is longer than `MaxToolResultChars` says in its message that the
+bundle arrives cut and cannot be imported, and points at `get_source` and `edit`.
 
 Folders through `manage_mods` (parameters `folder` and `target`):
 
@@ -334,7 +351,7 @@ configurable via `LuaCsModStackOptions.MaxErrorsBeforeQuarantine` — the mod is
   `quarantined: true`); `get_source`, `diagnostics`, `versions`, `export` keep working. This is what
   keeps the async "AI repairs a broken mod live" loop honest — a repair that takes minutes still
   finds its target instead of a `not loaded` error.
-- **Cleared by reload:** a successful `manage_mods reload` (or `ReloadMod`) swaps in a fresh
+- **Cleared by reload:** a successful `manage_mods reload` or `edit` (or `ReloadMod`) swaps in a fresh
   instance with a zero streak and no quarantine, and dispatch resumes. `unload`/`forget` remain the
   explicit removal paths.
 

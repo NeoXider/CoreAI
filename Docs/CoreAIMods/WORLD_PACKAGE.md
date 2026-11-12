@@ -398,7 +398,8 @@ no thread, blocking wait, or sync-over-async path.
 
 The implemented adapters conservatively protect every `execute_lua` call with trigger `execute_lua`.
 Every mutating `manage_mods` action (`load`, `reload`, `unload`, `import`, `forget`, and `revert`) uses
-the deterministic trigger `manage_mods-<action>`. Read-only `list`, `get_source`, `export`, `versions`,
+the deterministic trigger `manage_mods-<action>`; `edit` is a reload of the edited source and uses
+`manage_mods-reload`. Read-only `list`, `get_source`, `export`, `versions`,
 and `diagnostics` bypass capture and autosave. A null or unsuccessful write result, store/capture
 exception, or cancellation prevents the Lua/runtime mutation and becomes the tool's structured
 failure. Manual slots are not read, written, or rotated by this gate. An `execute_lua` queued behind a

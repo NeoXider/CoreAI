@@ -48,9 +48,9 @@ Counter: BpeTokenCounter fallback estimator
 
 | Skill text | Characters | UTF-8 bytes | Tokens |
 |---|---|---|---|
-| Lua Modding instructions (Resources) | 10604 | 10604 | 2651 |
-| Lua Modding instructions (C# literal) | 10604 | 10604 | 2651 |
-| Lua Modding read_skill result | 11041 | 11041 | 2761 |
+| Lua Modding instructions (Resources) | 11254 | 11254 | 2814 |
+| Lua Modding instructions (C# literal) | 11254 | 11254 | 2814 |
+| Lua Modding read_skill result | 11700 | 11700 | 2925 |
 | Lua Modding catalog entry | 253 | 253 | 64 |
 | Rbx API instructions (Resources) | 76219 | 76321 | 19055 |
 | Rbx API instructions (C# literal) | 76219 | 76321 | 19055 |
@@ -92,7 +92,7 @@ Counter: BpeTokenCounter fallback estimator
 | Creator role prompt | 927 | 927 | 232 |
 | Builder role prompt | 736 | 736 | 184 |
 | Analyzer role prompt | 334 | 334 | 84 |
-| Programmer role prompt | 3295 | 3295 | 824 |
+| Programmer role prompt | 3408 | 3408 | 852 |
 | AINpc role prompt | 293 | 293 | 74 |
 | CoreMechanicAI role prompt | 334 | 334 | 84 |
 | PlainChat role prompt | 310 | 310 | 78 |
@@ -108,7 +108,7 @@ Counter: BpeTokenCounter fallback estimator
 |---|---|---|---|
 | `camera` | 5408 | 5408 | 1352 |
 | `execute_lua` | 1827 | 1827 | 457 |
-| `manage_mods` | 4968 | 4968 | 1242 |
+| `manage_mods` | 5885 | 5885 | 1472 |
 | `get_mod_logs` | 1087 | 1087 | 272 |
 | `save_world` | 326 | 326 | 82 |
 | `load_world` | 347 | 347 | 87 |
@@ -126,7 +126,7 @@ history and the user message come on top.
 
 | Role | Tools offered | Tool definitions | Prefix + role prompt | Total |
 |---|---|---|---|---|
-| Programmer | memory, camera, execute_lua, manage_mods, get_mod_logs, save_world, load_world, list_autosaves, load_autosave, read_skill, call_skill_tool | 3994 | 977 | 4971 |
+| Programmer | memory, camera, execute_lua, manage_mods, get_mod_logs, save_world, load_world, list_autosaves, load_autosave, read_skill, call_skill_tool | 4525 | 1005 | 5530 |
 | Creator | memory, world_command | 1771 | 385 | 2156 |
 | Builder | memory, world_command | 1771 | 337 | 2108 |
 | Merchant | memory, get_inventory | 357 | 302 | 659 |
@@ -140,11 +140,11 @@ chat role, so a SmartChat host with the panel pays 1352 more per request.
 
 The Programmer's three skills are kept out of the prompt and read on demand. Measured instead of assumed:
 
-- Inlining the three skill texts in the system prompt would cost 2651 + 19055 + 500 = **22206** tokens on
+- Inlining the three skill texts in the system prompt would cost 2814 + 19055 + 500 = **22369** tokens on
   every request.
 - Offering them through the two meta-tools costs `read_skill` + `call_skill_tool` = 208 + 158 = **366** tokens
-  per request, so a request that reads no skill saves 21840 tokens (98.4 percent of the inline cost).
-- A turn that reads a skill pays its `read_skill` result on top: 2761 for Lua Modding and 568 for Full Lua.
+  per request, so a request that reads no skill saves 22003 tokens (98.4 percent of the inline cost).
+- A turn that reads a skill pays its `read_skill` result on top: 2925 for Lua Modding and 568 for Full Lua.
   The Rbx API skill is read in parts: a bare `read_skill("Rbx API")` returns its core and the list of its
   17 sections for 1980 tokens, and each section read costs 341 to 1686 more (all 17 sections together:
   18253). The largest single read is 7920 characters, so every read fits the default tool-result cap of

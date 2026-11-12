@@ -154,7 +154,7 @@ Which role gets which tool by default, and which tools the host wires itself, is
 |---|---|---|
 | `memory` | `action` (`read`, `write`, `append`, `clear`, `str_replace`, `insert`, `delete`, `rename`), `content`, `old_text`, `new_text`, `anchor`, `line`, `replace_all` | `{Success, Message, Error, Version, MemoryLength, Memory}` |
 | `execute_lua` | `code` | `{Success, Output, Error}` (null fields omitted) |
-| `manage_mods` | `action` (`list`, `get_source`, `load`, `reload`, `unload`, `export`, `import`, `forget`, `versions`, `revert`, `diagnostics`), `mod_id`, `code`, `bundle`, `revision`, `keep_objects` | `{success, message, data}` |
+| `manage_mods` | `action` (`list`, `get_source`, `edit`, `load`, `reload`, `unload`, `export`, `import`, `forget`, `versions`, `revert`, `diagnostics` and the folder actions), `mod_id`, `code`, `bundle`, `revision`, `keep_objects`, `folder`, `target`, `from_line`, `line_count`, `old_text`, `new_text`, `replace_all` | `{success, message, data}`; a `get_source` page adds `first_line`, `last_line`, `total_lines`, `total_chars` and, while lines remain, `next_from_line` |
 | `world_command` | see [§4](#4-world-command-tool) | `{Success, Message, Action}` |
 | `component_command` | see [§5](#5-component-command-tool) | `{Success, Message, Action}` |
 | `get_inventory` | none | `{Success, Error, Items: [{Name, Type, Quantity, Price}]}` |

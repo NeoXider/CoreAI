@@ -187,8 +187,9 @@ namespace CoreAI.Ai
                 $"The Lua mod '{id}' is throwing at runtime and must be fixed. The broken source is in " +
                 "fix_this_lua and the error is in lua_error. The mod is still loaded: repeated errors " +
                 "QUARANTINE a mod (its handlers/timers are suspended and it shows quarantined=true in " +
-                "manage_mods list) but never unload it. Fix the bug, then re-apply the corrected Lua under " +
-                $"the same id with manage_mods reload mod_id='{id}' - a successful reload clears the " +
+                "manage_mods list) but never unload it. Fix the bug under the same id: manage_mods edit " +
+                $"mod_id='{id}' (old_text copied exactly from the source, new_text) or manage_mods reload " +
+                $"mod_id='{id}' with the whole corrected Lua - a successful edit or reload clears the " +
                 "quarantine and the error streak and the mod resumes running. " +
                 "Keep the mod's original intent and id; do not create a new mod id.";
 

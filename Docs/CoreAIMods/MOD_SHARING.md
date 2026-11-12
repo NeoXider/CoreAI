@@ -174,7 +174,10 @@ Notes:
   source and keeps that mod's current capability tier — convenient for updates, and a reason
   to review ids from strangers (§4).
 - The AI can perform the same round trip through the `manage_mods` tool (`export` /
-  `import` actions), so "share the mod you just wrote" works as a chat instruction.
+  `import` actions), so "share the mod you just wrote" works as a chat instruction. A bundle
+  longer than one tool result (`MaxToolResultChars`, 8,000 characters by default) reaches the
+  model cut and cannot be imported; the export result says so. To change a mod the AI uses
+  `get_source` and `edit` instead ([mod-system.md](mod-system.md) §4.1).
 
 ## 4. Safety when importing third-party mods
 

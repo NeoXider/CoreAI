@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreAI.Mods.WorldPackages;
@@ -10,19 +11,26 @@ using CoreAI.Logging;
 using CoreAI.Mods.Folders;
 using Microsoft.Extensions.AI;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace CoreAI.Ai
 {
     /// <summary>
     /// LLM tool (<c>manage_mods</c>) that lets an agent inspect and rewrite its own persistent
-    /// Lua mods in <c>LuaModRuntime</c>: list mods, read their source, load, reload, unload,
-    /// export, import, and forget them; list a mod's revision history and roll back to an earlier
-    /// revision (<c>versions</c>/<c>revert</c>); and read recent runtime hook/timer failures
-    /// (<c>diagnostics</c>) so a mod that throws long after it loaded can be repaired. Loaded/reloaded
-    /// mods auto-persist and survive a restart; export/import move a mod between players via a
-    /// shareable bundle.
+    /// Lua mods in <c>LuaModRuntime</c>: list mods, read their source in pages of whole lines
+    /// (<c>get_source</c> with <c>from_line</c>/<c>line_count</c>), change part of a mod by exact text
+    /// replacement (<c>edit</c>), load, reload, unload, export, import, and forget them; list a mod's
+    /// revision history and roll back to an earlier revision (<c>versions</c>/<c>revert</c>); and read
+    /// recent runtime hook/timer failures (<c>diagnostics</c>) so a mod that throws long after it loaded
+    /// can be repaired. Loaded/reloaded/edited mods auto-persist and survive a restart; export/import move
+    /// a mod between players via a shareable bundle.
     /// <para>
-    /// Mutating actions (<c>load</c>/<c>reload</c>/<c>unload</c>/<c>import</c>/<c>forget</c>/<c>revert</c>)
+    /// A <c>get_source</c> page is sized so its serialized result fits <see cref="ICoreAISettings.MaxToolResultChars"/>,
+    /// the cut <c>ToolExecutionPolicy</c> applies to every tool result, so a mod of any size can be read whole by
+    /// following <c>next_from_line</c>. <c>edit</c> runs the same reload as <c>reload</c>, with the same rules.
+    /// </para>
+    /// <para>
+    /// Mutating actions (<c>edit</c>/<c>load</c>/<c>reload</c>/<c>unload</c>/<c>import</c>/<c>forget</c>/<c>revert</c>)
     /// effectively grant the model the
     /// whole capability tier configured at registration, so hosts that only want introspection
     /// must construct the tool with <c>allowModManagement: false</c>. Loaded mods always receive
@@ -32,13 +40,16 @@ namespace CoreAI.Ai
     /// </summary>
     public sealed class LuaModsLlmTool : LlmToolBase, IAIFunctionLlmTool
     {
-        /// <summary>Cap on the source text returned by <c>get_source</c>.</summary>
+        /// <summary>
+        /// Most source characters one <c>get_source</c> page returns. The page is also kept under
+        /// <see cref="ICoreAISettings.MaxToolResultChars"/> as serialized JSON, which is usually the tighter limit.
+        /// </summary>
         public const int MaxSourceLengthReturned = 16_000;
 
         /// <summary>Stable autosave trigger for loading a mod.</summary>
         public const string LoadBackupTrigger = "manage_mods-load";
 
-        /// <summary>Stable autosave trigger for reloading a mod.</summary>
+        /// <summary>Stable autosave trigger for reloading a mod, and for <c>edit</c>, which is a reload of the edited source.</summary>
         public const string ReloadBackupTrigger = "manage_mods-reload";
 
         /// <summary>Stable autosave trigger for unloading a mod.</summary>
@@ -194,7 +205,7 @@ namespace CoreAI.Ai
         public override string Name => "manage_mods";
 
         /// <inheritdoc />
-        // WHY: Mutating mod actions (load/reload/unload/import/forget/revert) are non-idempotent, so an
+        // WHY: Mutating mod actions (edit/load/reload/unload/import/forget/revert) are non-idempotent, so an
         // WHY: identical cross-turn echo must not re-run. AllowDuplicates=false lets ToolExecutionPolicy
         // WHY: suppress only a CROSS-TURN byte-identical echo (structured no-op) while still allowing
         // WHY: intra-turn repeats and never suppressing the retry of a FAILED call.
@@ -203,8 +214,11 @@ namespace CoreAI.Ai
         /// <inheritdoc />
         public override string Description =>
             "Manage persistent Lua mods (long-lived scripts with hooks_on/hooks_every handlers). " +
-            "Actions: list (all loaded mods), get_source (read a mod's Lua code), " +
-            "load (install new mod), reload (replace a mod's code keeping its permissions; by default the " +
+            "Actions: list (all loaded mods), get_source (read a mod's Lua in pages of whole lines; while " +
+            "next_from_line is set, call again with from_line=next_from_line), " +
+            "edit (replace old_text, copied exactly from get_source, with new_text, then reload; a failed edit " +
+            "changes nothing), " +
+            "load (install new mod), reload (replace a mod's WHOLE code keeping its permissions; by default the " +
             "objects the previous run's main chunk built are removed first so the new code builds into a clean " +
             "world, objects created later by handlers or players are kept, and a failed reload changes nothing; " +
             "pass keep_objects=true to keep every object and build next to them), " +
@@ -220,13 +234,13 @@ namespace CoreAI.Ai
             "target = new name) and move_folder (folder + target = new parent) manage folders; list shows each mod's " +
             "folder and the folders, and with 'folder' only that branch. A refused folder call returns a code such as " +
             "FOLDER_NOT_EMPTY or INVALID_CHARACTER. " +
-            "load/reload auto-persist mods so they survive an app restart; export/import move mods between players. " +
-            "Each load/reload records a new revision; use versions then revert to undo a bad edit. " +
+            "load/reload/edit auto-persist mods so they survive an app restart; export/import move mods between players. " +
+            "Each load/reload/edit records a new revision; use versions then revert to undo a bad edit. " +
             "A hook or timer that starts throwing at runtime is reported via diagnostics (not as an error on the " +
-            "call that loaded it) - poll diagnostics, fix the mod, and reload it. " +
+            "call that loaded it) - poll diagnostics, then fix the mod with edit. " +
             "A mod that keeps failing is QUARANTINED, never auto-unloaded: it stays in list (quarantined=true) " +
-            "with its handlers/timers suspended, and a successful reload clears the quarantine and resumes it. " +
-            "Use get_source before reload to edit existing behavior. " +
+            "with its handlers/timers suspended, and a successful reload or edit clears the quarantine and resumes it. " +
+            "To change a mod: get_source, then edit; use reload only to replace a whole mod. " +
             "Lua callback syntax: hooks_on('event', function(name, payload) ... end) " +
             "and hooks_every(seconds, function() ... end). Do not write hooks_on('event') function() ... end. " +
             "Extra globals inside mods: hooks_on('tick', fn) per-frame alias; store_set(key, value)/store_get(key) " +
@@ -239,23 +253,52 @@ namespace CoreAI.Ai
         /// <inheritdoc />
         public override string ParametersSchema => JsonParams(
             ("action", "string", true, ActionDescription),
-            ("mod_id", "string", false,
-                "Mod id (required for get_source, load, reload, unload, export, forget, versions, revert; optional filter for diagnostics)"),
-            ("code", "string", false,
-                "Lua source for load/reload. Multi-line code is fully supported: write newlines as standard JSON \\n escapes inside this string (do not double-escape as \\\\n - that reaches Lua as a literal backslash and breaks parsing). Valid callbacks: hooks_on('event', function(name, payload) ... end); hooks_every(seconds, function() ... end). For import, the shareable bundle may be passed here if 'bundle' is omitted."),
-            ("bundle", "string", false,
-                "Shareable mod bundle JSON (as returned by export) for the import action."),
-            ("revision", "integer", false,
-                "Revision index to roll back to for the revert action (as listed by versions; 0 is the original)."),
+            ("mod_id", "string", false, ModIdDescription),
+            ("code", "string", false, CodeDescription),
+            ("bundle", "string", false, BundleDescription),
+            ("revision", "integer", false, RevisionDescription),
             ("keep_objects", "boolean", false,
                 KeepObjectsDescription),
             ("folder", "string", false, FolderDescription),
-            ("target", "string", false, TargetDescription)
+            ("target", "string", false, TargetDescription),
+            ("from_line", "integer", false, FromLineDescription),
+            ("line_count", "integer", false, LineCountDescription),
+            ("old_text", "string", false, OldTextDescription),
+            ("new_text", "string", false, NewTextDescription),
+            ("replace_all", "boolean", false, ReplaceAllDescription)
         );
 
         private const string ActionDescription =
-            "One of: list, get_source, load, reload, unload, export, import, forget, versions, revert, diagnostics, " +
-            "move, create_folder, rename_folder, move_folder, delete_folder";
+            "One of: list, get_source, edit, load, reload, unload, export, import, forget, versions, revert, " +
+            "diagnostics, move, create_folder, rename_folder, move_folder, delete_folder";
+
+        private const string ModIdDescription =
+            "Mod id (required for get_source, edit, load, reload, unload, export, forget, versions, revert; optional filter for diagnostics)";
+
+        private const string CodeDescription =
+            "Lua source for load/reload. Multi-line code is fully supported: write newlines as standard JSON \\n escapes inside this string (do not double-escape as \\\\n - that reaches Lua as a literal backslash and breaks parsing). Valid callbacks: hooks_on('event', function(name, payload) ... end); hooks_every(seconds, function() ... end). For import, the shareable bundle may be passed here if 'bundle' is omitted.";
+
+        private const string BundleDescription =
+            "Shareable mod bundle JSON (as returned by export) for the import action.";
+
+        private const string RevisionDescription =
+            "Revision index to roll back to for the revert action (as listed by versions; 0 is the original).";
+
+        private const string FromLineDescription =
+            "get_source: first line, 1-based; pass the previous page's next_from_line.";
+
+        private const string LineCountDescription =
+            "get_source: most lines (default: all that fit).";
+
+        private const string OldTextDescription =
+            "edit: exact text to replace, copied from get_source (whole lines, same indentation); must match once " +
+            "unless replace_all.";
+
+        private const string NewTextDescription =
+            "edit: replacement for old_text (empty deletes it).";
+
+        private const string ReplaceAllDescription =
+            "edit: replace every occurrence of old_text.";
 
         private const string FolderDescription =
             "Mod folder path like Games/Arcade (letters, digits, spaces and _ - . ( ) & + ! ' , #; up to 8 levels of " +
@@ -267,14 +310,14 @@ namespace CoreAI.Ai
             "rename_folder: the new name (one folder name, no '/'). move_folder: the new parent folder (empty = top level).";
 
         private const string KeepObjectsDescription =
-            "reload only. false (default): the objects the previous run's main chunk built are removed before " +
-            "the new code runs. true: every object stays and the new code builds next to them.";
+            "reload and edit only. false (default): the objects the previous run's main chunk built are removed " +
+            "before the new code runs. true: every object stays and the new code builds next to them.";
 
         /// <summary>Creates the MEAI function surface for <c>manage_mods</c>.</summary>
         public AIFunction CreateAIFunction()
         {
-            Func<string, string, string, string, int, CancellationToken, bool, string, string, Task<string>> func =
-                ExecuteAsync;
+            Func<string, string, string, string, int, CancellationToken, bool, string, string, int, int, string,
+                string, bool, Task<string>> func = ExecuteAsync;
             AIFunctionFactoryOptions options = new()
             {
                 Name = Name,
@@ -290,16 +333,13 @@ namespace CoreAI.Ai
         public Task<string> ExecuteAsync(
             [Description(ActionDescription)]
             string action,
-            [Description(
-                "Mod id (required for get_source, load, reload, unload, export, forget, versions, revert; optional filter for diagnostics)")]
+            [Description(ModIdDescription)]
             string mod_id = null,
-            [Description(
-                "Lua source for load/reload. Multi-line code is fully supported: write newlines as standard JSON \\n escapes inside this string (do not double-escape as \\\\n - that reaches Lua as a literal backslash and breaks parsing). Valid callbacks: hooks_on('event', function(name, payload) ... end); hooks_every(seconds, function() ... end). For import, the shareable bundle may be passed here if 'bundle' is omitted.")]
+            [Description(CodeDescription)]
             string code = null,
-            [Description("Shareable mod bundle JSON (as returned by export) for the import action.")]
+            [Description(BundleDescription)]
             string bundle = null,
-            [Description(
-                "Revision index to roll back to for the revert action (as listed by versions; 0 is the original).")]
+            [Description(RevisionDescription)]
             int revision = -1,
             CancellationToken cancellationToken = default,
             [Description(KeepObjectsDescription)]
@@ -307,19 +347,58 @@ namespace CoreAI.Ai
             [Description(FolderDescription)]
             string folder = null,
             [Description(TargetDescription)]
-            string target = null) =>
+            string target = null,
+            [Description(FromLineDescription)]
+            int from_line = 0,
+            [Description(LineCountDescription)]
+            int line_count = 0,
+            [Description(OldTextDescription)]
+            string old_text = null,
+            [Description(NewTextDescription)]
+            string new_text = null,
+            [Description(ReplaceAllDescription)]
+            bool replace_all = false) =>
             MeaiToolTaskBridge.Publish(
-                ExecuteBodyAsync(action, mod_id, code, bundle, revision, keep_objects, folder, target,
-                    cancellationToken));
+                ExecuteBodyAsync(new ModsCall
+                {
+                    ModId = mod_id,
+                    Code = code,
+                    Bundle = bundle,
+                    Revision = revision,
+                    KeepObjects = keep_objects,
+                    Folder = folder,
+                    Target = target,
+                    FromLine = from_line,
+                    LineCount = line_count,
+                    OldText = old_text,
+                    NewText = new_text,
+                    ReplaceAll = replace_all
+                }, action, cancellationToken));
 
-        private async Task<string> ExecuteBodyAsync(string action, string mod_id, string code, string bundle,
-            int revision, bool keepObjects, string folder, string target, CancellationToken cancellationToken)
+        /// <summary>The arguments of one call, past the action.</summary>
+        private sealed class ModsCall
+        {
+            public string ModId;
+            public string Code;
+            public string Bundle;
+            public int Revision;
+            public bool KeepObjects;
+            public string Folder;
+            public string Target;
+            public int FromLine;
+            public int LineCount;
+            public string OldText;
+            public string NewText;
+            public bool ReplaceAll;
+        }
+
+        private async Task<string> ExecuteBodyAsync(ModsCall call, string action, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             string normalized = (action ?? "").Trim().ToLowerInvariant();
             if (_settings.LogToolCalls)
             {
-                _logger.Info($"[Tool Call] manage_mods: action={normalized} mod_id={mod_id}");
+                _logger.Info($"[Tool Call] manage_mods: action={normalized} mod_id={call.ModId}");
             }
 
             string result;
@@ -351,13 +430,7 @@ namespace CoreAI.Ai
                             return Task.FromResult(ExecuteAuthorizedAction(
                                 normalized,
                                 actor,
-                                mod_id,
-                                code,
-                                bundle,
-                                revision,
-                                keepObjects,
-                                folder,
-                                target,
+                                call,
                                 cancellationToken));
                         },
                         cancellationToken);
@@ -367,13 +440,7 @@ namespace CoreAI.Ai
                     result = ExecuteAuthorizedAction(
                         normalized,
                         actor,
-                        mod_id,
-                        code,
-                        bundle,
-                        revision,
-                        keepObjects,
-                        folder,
-                        target,
+                        call,
                         cancellationToken);
                 }
             }
@@ -399,6 +466,7 @@ namespace CoreAI.Ai
         {
             return normalizedAction == "load"
                    || normalizedAction == "reload"
+                   || normalizedAction == "edit"
                    || normalizedAction == "unload"
                    || normalizedAction == "import"
                    || normalizedAction == "forget"
@@ -427,10 +495,14 @@ namespace CoreAI.Ai
             string normalizedAction,
             out string trigger)
         {
+            // WHY: edit shares the reload trigger because an edit IS a reload of the edited source; the undo service
+            // WHY: and the authorship tracker key their mod-source rules on the trigger, so a trigger of its own would
+            // WHY: make an AI edit look like a non-AI change to both.
             trigger = normalizedAction switch
             {
                 "load" => LoadBackupTrigger,
                 "reload" => ReloadBackupTrigger,
+                "edit" => ReloadBackupTrigger,
                 "unload" => UnloadBackupTrigger,
                 "import" => ImportBackupTrigger,
                 "forget" => ForgetBackupTrigger,
@@ -450,22 +522,25 @@ namespace CoreAI.Ai
         private string ExecuteAuthorizedAction(
             string normalized,
             ActorContext actor,
-            string modId,
-            string code,
-            string bundle,
-            int revision,
-            bool keepObjects,
-            string folder,
-            string target,
+            ModsCall call,
             CancellationToken cancellationToken)
         {
+            string modId = call.ModId;
+            string code = call.Code;
+            string bundle = call.Bundle;
+            int revision = call.Revision;
+            bool keepObjects = call.KeepObjects;
+            string folder = call.Folder;
+            string target = call.Target;
             lock (_authorizationGate)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 return normalized switch
                 {
                     "list" => ListMods(actor, folder),
-                    "get_source" => GetSource(actor, modId),
+                    "get_source" => GetSource(actor, modId, call.FromLine, call.LineCount),
+                    "edit" => Mutate(() =>
+                        Edit(actor, modId, call.OldText, call.NewText, call.ReplaceAll, keepObjects)),
                     "load" => Mutate(() => Load(modId, code, actor, folder)),
                     "reload" => Mutate(() => Reload(actor, modId, code, keepObjects)),
                     "unload" => Mutate(() => Unload(actor, modId)),
@@ -485,7 +560,7 @@ namespace CoreAI.Ai
                     "delete_folder" => Mutate(() => FolderOperation(actor, "delete_folder", folder, null,
                         service => service.DeleteFolder(folder))),
                     _ => Fail(
-                        $"Unknown action '{normalized}'. Valid: list, get_source, load, reload, unload, export, import, forget, versions, revert, diagnostics, move, create_folder, rename_folder, move_folder, delete_folder.")
+                        $"Unknown action '{normalized}'. Valid: list, get_source, edit, load, reload, unload, export, import, forget, versions, revert, diagnostics, move, create_folder, rename_folder, move_folder, delete_folder.")
                 };
             }
         }
@@ -640,31 +715,188 @@ namespace CoreAI.Ai
             });
         }
 
-        private string GetSource(ActorContext actor, string modId)
+        /// <summary>
+        /// One page of a mod's source: whole lines from <paramref name="fromLine"/>, as many as fit both
+        /// <see cref="MaxSourceLengthReturned"/> and, serialized, <see cref="ICoreAISettings.MaxToolResultChars"/>,
+        /// and at most <paramref name="lineCount"/> when it is positive. <c>data</c> is the text exactly as stored,
+        /// so the pages of a source concatenate back to it; a line too long for any page is shown cut, with a marker.
+        /// </summary>
+        private string GetSource(ActorContext actor, string modId, int fromLine, int lineCount)
         {
             if (string.IsNullOrWhiteSpace(modId))
             {
                 return Fail("get_source: mod_id is required.");
             }
 
+            string id = modId.Trim();
             if (!_runtime.TryGetModSource(actor, modId, out string source))
             {
-                return Fail($"get_source: mod '{modId.Trim()}' is not loaded.");
+                return Fail($"get_source: mod '{id}' is not loaded.");
             }
 
-            if (source.Length > MaxSourceLengthReturned)
+            source ??= "";
+            IReadOnlyList<int> starts = LuaModSourceEditor.LineStarts(source);
+            int total = starts.Count;
+            if (total == 0)
             {
-                int cut = char.IsHighSurrogate(source[MaxSourceLengthReturned - 1])
-                    ? MaxSourceLengthReturned - 1
-                    : MaxSourceLengthReturned;
-                int dropped = source.Length - cut;
-                _logger.Info(
-                    $"[manage_mods] get_source '{modId.Trim()}': {source.Length} chars total -> {cut} returned, " +
-                    $"{dropped} dropped (limit {MaxSourceLengthReturned}).");
-                source = source.Substring(0, cut) + "\n--[[ " + TruncationMarker.Format(dropped) + " ]]";
+                return Ok($"Source of mod '{id}' is empty.", "");
             }
 
-            return Ok($"Source of mod '{modId.Trim()}'.", source);
+            int first = fromLine < 1 ? 1 : fromLine;
+            if (first > total)
+            {
+                return Fail($"get_source: from_line {first} is past the end of mod '{id}', which has {total} " +
+                            $"lines; pass a from_line from 1 to {total}.");
+            }
+
+            int cap = _settings.MaxToolResultChars;
+            int maxLines = lineCount > 0 ? lineCount : int.MaxValue;
+            int textBudget = cap > 0
+                ? cap - SourcePage(id, source.Length, total, total, total, total + 1, 0, 0, "").Length
+                : int.MaxValue;
+            int last = first - 1;
+            int rawUsed = 0;
+            int jsonUsed = 0;
+            while (last < total && last - first + 1 < maxLines)
+            {
+                string line = LineText(source, starts, last + 1);
+                int lineJson = JsonTextLength(line);
+                if (rawUsed + line.Length > MaxSourceLengthReturned || jsonUsed + lineJson > textBudget)
+                {
+                    break;
+                }
+
+                rawUsed += line.Length;
+                jsonUsed += lineJson;
+                last++;
+            }
+
+            if (last < first)
+            {
+                return CutLinePage(id, source, starts, first, cap);
+            }
+
+            string page = WholeLinesPage(id, source, starts, first, last);
+            while (cap > 0 && page.Length > cap && last > first)
+            {
+                last--;
+                page = WholeLinesPage(id, source, starts, first, last);
+            }
+
+            return page;
+        }
+
+        private static string WholeLinesPage(string id, string source, IReadOnlyList<int> starts, int first, int last)
+        {
+            int total = starts.Count;
+            int start = starts[first - 1];
+            int end = last < total ? starts[last] : source.Length;
+            return SourcePage(id, source.Length, first, last, total, last < total ? last + 1 : 0, 0, 0,
+                source.Substring(start, end - start));
+        }
+
+        /// <summary>
+        /// The page for a line that does not fit a page by itself: its longest prefix that fits, then a
+        /// <c>--[[ …[+N chars] ]]</c> marker; the next page starts at the following line.
+        /// </summary>
+        private string CutLinePage(string id, string source, IReadOnlyList<int> starts, int lineNumber, int cap)
+        {
+            int total = starts.Count;
+            string line = LineText(source, starts, lineNumber);
+            int next = lineNumber < total ? lineNumber + 1 : 0;
+            int budget = cap > 0
+                ? cap - SourcePage(id, source.Length, lineNumber, lineNumber, total, next, lineNumber, line.Length, "")
+                    .Length - JsonTextLength(CutMarker(line.Length))
+                : int.MaxValue;
+            int low = 0;
+            int high = Math.Min(line.Length, MaxSourceLengthReturned);
+            while (low < high)
+            {
+                int middle = low + (high - low + 1) / 2;
+                if (JsonTextLength(line.Substring(0, middle)) <= budget)
+                {
+                    low = middle;
+                }
+                else
+                {
+                    high = middle - 1;
+                }
+            }
+
+            int shown = low > 0 && char.IsHighSurrogate(line[low - 1]) ? low - 1 : low;
+            _logger.Info(
+                $"[manage_mods] get_source '{id}': line {lineNumber} ({line.Length} chars) does not fit one page; " +
+                $"{shown} chars returned, {line.Length - shown} dropped.");
+            return SourcePage(id, source.Length, lineNumber, lineNumber, total, next, lineNumber, shown,
+                line.Substring(0, shown) + CutMarker(line.Length - shown));
+        }
+
+        private static string CutMarker(int dropped)
+        {
+            return "\n--[[ " + TruncationMarker.Format(dropped) + " ]]";
+        }
+
+        private static string LineText(string source, IReadOnlyList<int> starts, int lineNumber)
+        {
+            int start = starts[lineNumber - 1];
+            int end = lineNumber < starts.Count ? starts[lineNumber] : source.Length;
+            return source.Substring(start, end - start);
+        }
+
+        /// <summary>The characters <paramref name="text"/> takes inside a serialized JSON string, quotes excluded.</summary>
+        private static int JsonTextLength(string text)
+        {
+            return JsonConvert.ToString(text).Length - 2;
+        }
+
+        /// <summary>
+        /// The serialized <c>get_source</c> result. The numbers come before <c>data</c>, so a reader that cuts the
+        /// result still sees which lines it holds and where the next page starts.
+        /// </summary>
+        private static string SourcePage(string id, int totalChars, int first, int last, int total, int nextFromLine,
+            int cutLine, int cutShown, string text)
+        {
+            StringBuilder message = new();
+            message.Append("Source of mod '").Append(id).Append("', lines ").Append(first).Append('-').Append(last)
+                .Append(" of ").Append(total).Append(" (").Append(totalChars).Append(" chars)");
+            if (nextFromLine > 0)
+            {
+                message.Append(". NOT the whole source: call get_source with from_line=").Append(nextFromLine)
+                    .Append(" for the next part.");
+            }
+            else
+            {
+                message.Append(first == 1 ? ", the whole source." : ", to the end.");
+            }
+
+            if (cutLine > 0)
+            {
+                message.Append(" Line ").Append(cutLine).Append(" is too long for one result: only its first ")
+                    .Append(cutShown).Append(" chars are shown, so take old_text for edit from that part only.");
+            }
+
+            message.Append(" To change the mod call edit with old_text copied exactly from data.");
+            JObject page = new()
+            {
+                ["success"] = true,
+                ["message"] = message.ToString(),
+                ["first_line"] = first,
+                ["last_line"] = last,
+                ["total_lines"] = total,
+                ["total_chars"] = totalChars
+            };
+            if (nextFromLine > 0)
+            {
+                page["next_from_line"] = nextFromLine;
+            }
+
+            if (cutLine > 0)
+            {
+                page["cut_line"] = cutLine;
+            }
+
+            page["data"] = text;
+            return page.ToString(Formatting.None);
         }
 
         private string Load(string modId, string code, ActorContext actor, string folder)
@@ -737,18 +969,156 @@ namespace CoreAI.Ai
                 return Fail("reload: mod_id and code are required.");
             }
 
-            ModReloadReport report = _runtime.ReloadMod(
-                actor, modId, code, keepObjects ? ModReloadMode.KeepObjects : ModReloadMode.CleanStartupObjects);
+            ModReloadReport report = ReloadSource(actor, modId, code, keepObjects);
 
             return report == null
                 ? Ok($"Mod '{modId.Trim()}' reloaded.")
                 : Ok($"Mod '{modId.Trim()}' reloaded; {report.Describe()}.", new
                 {
-                    mode = report.Mode == ModReloadMode.KeepObjects ? "keep_objects" : "clean_startup_objects",
+                    mode = ReloadModeName(report),
                     cleaned_objects = report.CleanedObjects,
                     kept_objects = report.KeptObjects,
                     rescued_objects = report.RescuedObjects
                 });
+        }
+
+        /// <summary>The one reload <c>reload</c> and <c>edit</c> share; a failure throws and leaves the mod as it was.</summary>
+        private ModReloadReport ReloadSource(ActorContext actor, string modId, string code, bool keepObjects)
+        {
+            return _runtime.ReloadMod(
+                actor, modId, code, keepObjects ? ModReloadMode.KeepObjects : ModReloadMode.CleanStartupObjects);
+        }
+
+        private static string ReloadModeName(ModReloadReport report)
+        {
+            return report.Mode == ModReloadMode.KeepObjects ? "keep_objects" : "clean_startup_objects";
+        }
+
+        /// <summary>
+        /// Replaces <paramref name="oldText"/> with <paramref name="newText"/> in the mod's current source and reloads
+        /// the result through <see cref="ReloadSource"/>, so authorization, the rate limit, the backup trigger, the
+        /// revision, persistence and <c>keep_objects</c> are those of <c>reload</c>. Every refusal changes nothing and
+        /// says what to send next.
+        /// </summary>
+        private string Edit(ActorContext actor, string modId, string oldText, string newText, bool replaceAll,
+            bool keepObjects)
+        {
+            if (string.IsNullOrWhiteSpace(modId))
+            {
+                return Fail("edit: mod_id is required.");
+            }
+
+            string id = modId.Trim();
+            if (string.IsNullOrEmpty(oldText))
+            {
+                return Fail("edit: old_text is empty. Copy the exact lines to change from get_source data, " +
+                            "indentation included, into old_text, and their replacement into new_text.");
+            }
+
+            if (newText == null)
+            {
+                return Fail("edit: new_text is required (pass an empty string to delete old_text).");
+            }
+
+            if (LuaModSourceEditor.IsSameText(oldText, newText))
+            {
+                return Fail("edit: old_text and new_text are the same, so there is nothing to change. Put the " +
+                            "changed text in new_text.");
+            }
+
+            if (!_runtime.TryGetModSource(actor, modId, out string source))
+            {
+                return Fail($"edit: mod '{id}' is not loaded.");
+            }
+
+            LuaModSourceEdit edit = LuaModSourceEditor.Replace(source, oldText, newText, replaceAll);
+            switch (edit.Status)
+            {
+                case LuaModSourceEditStatus.NotFound:
+                    return Fail($"edit: old_text was not found in mod '{id}' ({edit.TotalLines} lines); nothing " +
+                                "changed. It must match the current source exactly, spaces and indentation " +
+                                "included." + (edit.Lines.Count > 0
+                                    ? $" Its first line appears at line(s) {JoinLines(edit.Lines)}: call get_source " +
+                                      $"with from_line={edit.Lines[0]} and copy old_text from there."
+                                    : " Call get_source to read the current text and copy old_text from it."));
+                case LuaModSourceEditStatus.Ambiguous:
+                    return Fail($"edit: old_text occurs {edit.Occurrences} times in mod '{id}' (at line(s) " +
+                                $"{JoinLines(edit.Lines)}); nothing changed. Add surrounding lines to old_text so " +
+                                "it matches once, or pass replace_all=true to change every occurrence.");
+                case LuaModSourceEditStatus.NoChange:
+                    return Fail("edit: old_text and new_text are the same, so there is nothing to change.");
+            }
+
+            ModReloadReport report;
+            try
+            {
+                report = ReloadSource(actor, modId, edit.Source, keepObjects);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return Fail($"edit: the edited source of mod '{id}' failed to load, so nothing changed and the mod " +
+                            $"keeps running its previous source: {ex.Message} Fix new_text and call edit again.");
+            }
+
+            int revision = LatestRevision(actor, modId);
+            string lines = edit.FirstLine == edit.LastLine
+                ? "line " + edit.FirstLine
+                : "lines " + edit.FirstLine + "-" + edit.LastLine;
+            string message = $"Mod '{id}' edited and reloaded: " +
+                             (edit.Occurrences == 1 ? "" : edit.Occurrences + " replacements, ") +
+                             $"now {lines} of {edit.TotalLines}" +
+                             (revision >= 0 ? $", revision {revision}" : "") +
+                             (edit.ReadCrlfAsLf ? " (old_text matched once CRLF line endings were read as LF)" : "") +
+                             (report == null ? "." : $"; {report.Describe()}.");
+            return Ok(message, new
+            {
+                replacements = edit.Occurrences,
+                first_line = edit.FirstLine,
+                last_line = edit.LastLine,
+                total_lines = edit.TotalLines,
+                revision = revision >= 0 ? (int?)revision : null,
+                mode = report == null ? null : ReloadModeName(report),
+                cleaned_objects = report?.CleanedObjects,
+                kept_objects = report?.KeptObjects,
+                rescued_objects = report?.RescuedObjects
+            });
+        }
+
+        /// <summary>The index of the mod's newest recorded revision, or -1 when no history is kept.</summary>
+        private int LatestRevision(ActorContext actor, string modId)
+        {
+            // WHY: caught because the edit has already been applied; a history that cannot be read must not turn
+            // WHY: its result into a failure the model would retry.
+            try
+            {
+                IReadOnlyList<LuaScriptRevision> history = _runtime.ListModVersions(actor, modId);
+                return history == null || history.Count == 0 ? -1 : history[history.Count - 1].Index;
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn($"[manage_mods] edit: the revision history of '{modId.Trim()}' could not be read: {ex.Message}");
+                return -1;
+            }
+        }
+
+        private static string JoinLines(IReadOnlyList<int> lines)
+        {
+            StringBuilder text = new();
+            for (int index = 0; index < lines.Count; index++)
+            {
+                if (index > 0)
+                {
+                    text.Append(", ");
+                }
+
+                text.Append(lines[index]);
+            }
+
+            return text.ToString();
         }
 
         private string Unload(ActorContext actor, string modId)
@@ -776,7 +1146,13 @@ namespace CoreAI.Ai
                 return Fail($"export: mod '{modId.Trim()}' is not loaded or stored.");
             }
 
-            return Ok($"Bundle for mod '{modId.Trim()}'. Pass it to import on another player.", bundle);
+            string result = Ok($"Bundle for mod '{modId.Trim()}'. Pass it to import on another player.", bundle);
+            int cap = _settings.MaxToolResultChars;
+            return cap > 0 && result.Length > cap
+                ? Ok($"Bundle for mod '{modId.Trim()}'. It is longer than one tool result ({result.Length} > {cap} " +
+                     "chars) and reaches you cut: a cut bundle cannot be imported. To change this mod use get_source " +
+                     "and edit instead.", bundle)
+                : result;
         }
 
         private string Import(string bundle, ActorContext actor)

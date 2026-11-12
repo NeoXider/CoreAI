@@ -81,12 +81,15 @@ namespace CoreAI.Mcp.Tools
         /// <inheritdoc />
         public string Description =>
             "Inspect and rewrite the running game's persistent Lua mods (long-lived scripts with " +
-            "hooks_on/hooks_every handlers). Actions: list (loaded mods), get_source (read a mod's Lua), " +
-            "load (compile new source AND start it; auto-persists), reload (replace a loaded mod's code, " +
-            "keeping its store entry and permissions), unload (tear a mod down without deleting storage), " +
+            "hooks_on/hooks_every handlers). Actions: list (loaded mods), get_source (read a mod's Lua in pages " +
+            "of whole lines: from_line/line_count; follow next_from_line until it is absent), edit (replace " +
+            "old_text, copied exactly from get_source, with new_text and reload the mod; replace_all for every " +
+            "occurrence), load (compile new source AND start it; auto-persists), reload (replace a loaded mod's " +
+            "WHOLE code, keeping its store entry and permissions), unload (tear a mod down without deleting storage), " +
             "export/import (move a mod between players via a bundle), forget (unload AND delete from storage), " +
             "versions/revert (list saved revisions and roll back), diagnostics (recent runtime hook/timer errors). " +
-            "A mod that keeps throwing is quarantined (still listed, dispatch suspended) until a successful reload. " +
+            "A mod that keeps throwing is quarantined (still listed, dispatch suspended) until a successful reload " +
+            "or edit. " +
             "Call read_skill('Lua Modding') for the full hooks/store/events API before authoring a mod.";
 
         /// <inheritdoc />
@@ -104,9 +107,15 @@ namespace CoreAI.Mcp.Tools
             // WHY null when absent and never "": move reads an empty folder as the top level.
             string folder = McpArguments.String(arguments, "folder");
             string target = McpArguments.String(arguments, "target");
+            int fromLine = McpArguments.Int(arguments, "from_line", 0);
+            int lineCount = McpArguments.Int(arguments, "line_count", 0);
+            string oldText = McpArguments.String(arguments, "old_text");
+            string newText = McpArguments.String(arguments, "new_text");
+            bool replaceAll = McpArguments.Bool(arguments, "replace_all");
 
             string json = await _inner
-                .ExecuteAsync(action, modId, code, bundle, revision, cancellationToken, keepObjects, folder, target)
+                .ExecuteAsync(action, modId, code, bundle, revision, cancellationToken, keepObjects, folder, target,
+                    fromLine, lineCount, oldText, newText, replaceAll)
                 .ConfigureAwait(false);
 
             bool isError = TryReadSuccessFalse(json);

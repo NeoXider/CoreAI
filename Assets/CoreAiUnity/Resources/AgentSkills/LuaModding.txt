@@ -10,14 +10,19 @@ Contents: 1. Execution models  2. World API  3. Scene queries  4. Full tier (uni
   and single actions. Nothing survives the call.
 - `manage_mods` tool: persistent mods. `load` compiles and runs the source once (register your
   hooks there); handlers then run until `unload`. Mods auto-persist and reload on app restart.
-  Actions: list, get_source, load, reload, unload, export, import, forget, versions, revert,
+  Actions: list, get_source, edit, load, reload, unload, export, import, forget, versions, revert,
   diagnostics, move, create_folder, rename_folder, move_folder, delete_folder. A hook that throws at runtime surfaces in `diagnostics`, not in the load call.
   A mod failing repeatedly is quarantined, never auto-unloaded: it stays in `list` with
-  quarantined=true and its handlers/timers suspended; a successful `reload` clears it.
-- Improving an existing mod: `get_source` first, edit that text, then `reload` with the FULL
-  updated source (reload replaces the whole mod; never send a fragment). Every reload stores a
-  revision: `versions` lists them, `revert` rolls back. `forget` = delete (unload + remove the
-  persisted copy) - the panel's Forget button does the same.
+  quarantined=true and its handlers/timers suspended; a successful `reload` or `edit` clears it.
+- Changing an existing mod: read it with `get_source`. It comes in pages of whole lines; a page
+  that is not the whole source has `next_from_line`: call again with `from_line` set to it
+  (`line_count` limits a page). Then call `edit` with `old_text` copied exactly from `data`
+  (whole lines, indentation included, enough of them to match once; `replace_all=true` changes
+  every occurrence) and `new_text`. The mod reloads with the change; a refused or failed edit
+  changes nothing and says what to send next. `reload` with the FULL source replaces the whole
+  mod (never send it a fragment). Every load, reload and edit stores a revision: `versions` lists
+  them, `revert` rolls back. `forget` = delete (unload + remove the persisted copy) - the panel's
+  Forget button does the same.
 - Mods live in folders. A mod's folder is the `category:` entry of its `@coreai` header, a `/`
   path (`category: Games/Arcade`); no category = top level. Prefer writing `category:` in the
   header you send. `load` with `folder` writes it for you (the game may also set a default
@@ -177,7 +182,9 @@ end)
 
 - "')' expected (to close '(' at line 1)" right after load: the code string was mangled in
   the tool call - usually double-escaped newlines (\\n). Use plain \n in the JSON string.
-- "Mod 'x' is already loaded": use action=reload, not load.
+- "Mod 'x' is already loaded": use action=edit (or reload with the whole source), not load.
+- "edit: old_text was not found": copy old_text again from get_source data, spaces and
+  indentation included, starting at the from_line the message names.
 - "mods_get: mod 'y' is not loaded": load-order problem - read inside a handler instead of
   the load chunk, or load the provider first.
 - "cross-mod call depth limit reached": two mods call each other in a cycle - break it.
