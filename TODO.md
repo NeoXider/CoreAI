@@ -758,6 +758,21 @@ Owner's questions and decisions on the Block World (2026-11-11):
         download in WebGL, a Hub "Sessions" page) and a harness skill for the MCP link
         (`skills/coreai-game-mcp/`, not started). Today turns are traced only when a host registers
         `InMemoryAgentTurnTraceSink`, and the only viewer is the editor's Agent Session Inspector.
+      - **Kept world: saving and every gated world change stop after a mod is loaded (owner lost a build in build
+        11).** The owner built (by hand and with the AI, which also made a pig), reloaded at "Saving..." through the
+        browser's "Leave site?" guard, and the build was gone. Reproduced in build 11 over MCP: a pillar built with
+        `execute_lua` alone is saved in about 11 s and survives a reload; after `manage_mods load` of a mod that
+        moves its own Part every Heartbeat, every gated call (`execute_lua`, `manage_mods unload`) waits forever
+        while ungated reads (`game_status`, `manage_mods list`) answer, and FPS fell from 65 to 15-45. Suspect the
+        world mutation gate held by the load's after-mutation record (`RefreshStartupSelectionAsync` /
+        `DigestStartupContentAsync`) that never ends; not yet read further. Also not journaled: a hand-placed block
+        in land the last record lacks, so a record that never ends loses those too.
+      - **Block World: the player's position is not kept** - `blockworld_world` puts the character at
+        `BlockWorldSpawn` at every start (owner: "местоположение тоже сбрасывается"). A Lua fix: keep the last
+        position in the world (an attribute written when the player stops, not every frame, so it does not keep the
+        record busy) and spawn there.
+      - **Swimming: Space does not lift the player in water** (owner, build 11: "в воде плавать невозможно, на
+        пробел не поднимается"); `SwimmingInTerrainWaterPlayModeTests` passes, so the test does not cover going up.
       - **MCP `screenshot screen:true` never answers in a WebGL player** (seen in build 10, in a headless Chrome and in the owner's Chrome;
         `screen` without it, the camera render, works and so does every other tool). Nothing is logged: neither
         the end-of-frame capture nor its 5 s deadline coroutine finishes. Also: the main-thread queue's own deadline
