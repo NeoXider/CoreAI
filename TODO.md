@@ -555,6 +555,23 @@ Owner's questions and decisions on the Block World (2026-11-11):
       the client composition (MVP4 C5), and a Mirror run under `MIRROR` on 96.11.4.
 - [ ] **WebGL build of the Block World with a launcher and fps numbers** (owner request), after the visual
       fixes and after the Lua VM update to 0.5.8 is in.
+- [ ] **Block World: the view under water is wrong** (owner's play of the WebGL build, 2026-11-12, two
+      screenshots). Standing on the sea floor at 12:07, the sky is a dark navy band with darker hard-edged
+      polygons above the horizon and nothing but dark below it, and no land is drawn past the sand under the
+      player. At 13:00, on a beach by a bay, the land around and its trees are drawn dark teal, as at night,
+      and the sky is dark. Not investigated. To check first: whether the underwater view (`RbxUnderwaterView`)
+      and its fog-by-light rule of 2026-11-12 (no sky above the eye's cell reads as a flooded cave, near black)
+      apply while the eye's cell is Water but the land and the water around it are not built yet, and whether
+      the view is left on after the player comes out; what the horizon dome and the water's underside draw
+      against that fog. Needs captured frames from the sea floor at noon and from a beach, in a player, before
+      any fix.
+- [ ] **Block World: chunks load badly** (the same play: "под водой да и в целом чанки плохо грузятся"). Land
+      comes in slowly and with holes: a bay with nothing past its near shore, a flat sea floor with no further
+      terrain. Not measured. To measure in a WebGL player in a foreground tab: the time to fill the view radius
+      (6 in WebGL) after the spawn and while walking, sprinting and flying; what the generator's frame budget
+      and the cut at the end of the fog do when the player moves fast or is under water. Related finding of the
+      same day: in Play Mode the generator never settles (a test's wait for streaming ends at its 9,000-frame
+      cap with 144 to 207 columns and still streaming).
 - [ ] **A world kept between starts: on by default?** `CoreAiModsLifetimeScope.keepWorldBetweenStarts` is off
       by default and on in the Block World (2026-11-12). Decide whether every play world keeps itself. The
       record no longer stalls a frame (the encode runs a few milliseconds per frame since 2026-11-12; what is
