@@ -758,7 +758,7 @@ Owner's questions and decisions on the Block World (2026-11-11):
         download in WebGL, a Hub "Sessions" page) and a harness skill for the MCP link
         (`skills/coreai-game-mcp/`, not started). Today turns are traced only when a host registers
         `InMemoryAgentTurnTraceSink`, and the only viewer is the editor's Agent Session Inspector.
-      - **MCP `screenshot screen:true` never answers in a WebGL player** (seen in build 10 in a headless Chrome;
+      - **MCP `screenshot screen:true` never answers in a WebGL player** (seen in build 10, in a headless Chrome and in the owner's Chrome;
         `screen` without it, the camera render, works and so does every other tool). Nothing is logged: neither
         the end-of-frame capture nor its 5 s deadline coroutine finishes. Also: the main-thread queue's own deadline
         (`CoreAiMcpServer.FailOnTimeoutAsync`) is a `Task.Delay`, which never fires in a WebGL player.
@@ -773,10 +773,15 @@ Owner's questions and decisions on the Block World (2026-11-11):
         `CoreAIWorldEdits` bump would add torches and settings); `DataStoreService` is implemented, so the Block
         World could keep its own edit list per column the Roblox way, which would also make unloading far
         columns safe.
-      - **Orchestrator mode, Team style:** on in the Block World, never run with a live model (the script is in
-        `dev-docs/ORCHESTRATION_SUBAGENT_CONTROL_DESIGN.md` and the agent's report: start a house, ask something
-        else meanwhile, continue, stop); the built-in `/stop` should also stop background sub-agents when no turn
-        is active (`/agents stop` does it today).
+      - **Orchestrator mode, Team style:** run once with a live model in build 11 (2026-11-12, the owner's local
+        `swift-1.5` at about 11 tokens/s): the chat agent started `scripter-1` for "a stone house 7x7 with a door"
+        by itself and answered the game time meanwhile; a second message and `/agents` went through at once while
+        the sub-agent worked; the status line showed "scripter-1 working (5 steps)"; the sub-agent built the
+        stone shell (101 Rock cells) and the agent got its news. Left: `SubAgentDefinition.DefaultDeadline` (5
+        min for a whole sub-agent run) cancelled the sub-agent in the middle of a streaming answer - too short
+        for a local model, and against the rule that a model already streaming is never cut (raise it or make it
+        an idle limit); `continue` and `stop` not tried live; the built-in `/stop` should also stop background
+        sub-agents when no turn is active (`/agents stop` does it today).
       - **Sneaking on Shift:** a slower walk and a HUD mark are small; a lower eye needs `Humanoid.CameraOffset`
         (not supported yet); not walking off ledges needs a hook in `coreai_player_controls`.
       - **Tests red on a clean HEAD in the portable tier, not caused by the sprint:**
