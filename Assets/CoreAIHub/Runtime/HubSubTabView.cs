@@ -49,6 +49,12 @@ namespace CoreAI.Hub.UI
         /// </summary>
         public event Action<int> SelectionChanged;
 
+        /// <summary>
+        /// Raised with the index of a sub-tab the player pressed, after its selection, also when it already was the
+        /// selected one. Hosts use it to bring a sub-page that opened an inner view back to its first view.
+        /// </summary>
+        public event Action<int> TabPressed;
+
         /// <summary>Creates the view from an ordered set of sub-tabs; the first is selected by default.</summary>
         public HubSubTabView(IEnumerable<SubTab> tabs)
         {
@@ -120,12 +126,25 @@ namespace CoreAI.Hub.UI
             }
         }
 
+        /// <summary>What a press of sub-tab <paramref name="index"/> does: selects it, then raises <see cref="TabPressed"/>.</summary>
+        internal void Press(int index)
+        {
+            if (index < 0 || index >= _tabs.Count)
+            {
+                return;
+            }
+
+            Select(index);
+            TabPressed?.Invoke(index);
+        }
+
         private void AddTab(SubTab tab)
         {
             int index = _tabs.Count;
             _tabs.Add(tab);
 
-            Button button = new(() => Select(index)) { text = tab.Title ?? "" };
+            Button button = new(() => Press(index)) { text = tab.Title ?? "" };
+            button.name = "coreai-hub-subtab-" + index;
             button.AddToClassList("coreai-hub-tab");
             // WHY: one level down should read a touch lighter than the top tab bar without a USS change.
             button.style.height = 28f;

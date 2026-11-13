@@ -77,10 +77,11 @@ only when it composes `CoreAiModsLifetimeScope`.
 
 With `com.neoxider.coreaihub` installed, `CoreAI.Mods.Hub` compiles and **CoreAI → Setup → Add Hub**
 adds `CoreAiModsHubBinder` to the Hub. The binder finds the scene's `CoreAiModsLifetimeScope` and
-registers the **Mods** tab (sub-tabs **Mods** and **Logs**) and the **World Loads** page, and upgrades
+registers the **Mods** tab (sub-tabs **Mods** and **Logs**; pressing **Mods** goes back to the list from a mod's
+About panel or editor) and the **World** page (Save, Load, New world, Next start), and upgrades
 the Settings and Statistics pages with live sources. Setup also adds the optional
-`WorldStateHubBinder` when that type is available; it registers **World** when a world manager is
-resolved. A custom Hub can add the binder explicitly. See [the Hub README](../CoreAIHub/README.md).
+`WorldStateHubBinder` when that type is available; it registers the legacy **AI objects** page when a world
+manager is resolved. A custom Hub can add the binder explicitly. See [the Hub README](../CoreAIHub/README.md).
 
 ## Host gameplay and world-package storage
 

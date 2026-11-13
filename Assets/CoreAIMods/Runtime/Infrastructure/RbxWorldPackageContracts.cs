@@ -809,6 +809,29 @@ namespace CoreAI.Mods.WorldPackages
             CancellationToken cancellationToken = default);
     }
 
+    /// <summary>
+    /// Trusted player surface of the Hub's World page beside <see cref="IRbxWorldRuntimeService"/>: the manual saves
+    /// to list, and a new world from zero. Like <see cref="IRbxWorldStartupSelection"/>, no AI tool is given it.
+    /// </summary>
+    public interface IRbxWorldPlayerActions
+    {
+        /// <summary>The manual save slots, sorted by name; empty when there are none.</summary>
+        IReadOnlyList<string> ListManualSaves();
+
+        /// <summary>
+        /// Replaces the live world now with an empty one when <paramref name="playerConfirmed"/>: the services only, no
+        /// Terrain cells, no saved state, and a new
+        /// <see cref="RbxWorldRuntimeSessionController.NewWorldSeedAttribute"/> on the Workspace. The enabled mods then
+        /// start on it as on a fresh start and fill it; with none enabled it stays empty. The replacement runs through
+        /// the shared world mutation gate, which first writes a safety autosave of the outgoing world. A world kept
+        /// between starts drops its startup record and change journal and records the new world as the one that opens
+        /// on the next start. Without the confirmation nothing changes.
+        /// </summary>
+        UniTask<RbxWorldLoadResult> OpenNewWorldAsync(
+            bool playerConfirmed,
+            CancellationToken cancellationToken = default);
+    }
+
     /// <summary>Fail-closed AI restore request consumable only after player confirmation.</summary>
     public sealed class RbxWorldLoadRequest
     {
@@ -1817,7 +1840,7 @@ namespace CoreAI.Mods.WorldPackages
     /// world stays live every mutation through the shared gate records it again as it is.
     /// </summary>
     public sealed class RbxWorldRuntimeSessionController
-        : IRbxWorldRuntimeService, IRbxWorldStartupSelection, IRbxWorldUndoHost, IDisposable
+        : IRbxWorldRuntimeService, IRbxWorldStartupSelection, IRbxWorldPlayerActions, IRbxWorldUndoHost, IDisposable
     {
         private const int MaximumPendingLoadRequests = 8;
         private static readonly TimeSpan DefaultPendingLoadTimeToLive = TimeSpan.FromMinutes(2d);
@@ -2766,7 +2789,7 @@ namespace CoreAI.Mods.WorldPackages
             try
             {
                 StartupSource keep = ReadLiveStartupSource();
-                RbxWorldLoadResult replaced = await ReplaceWorldAsync(payload, null, keep, cancellationToken);
+                RbxWorldLoadResult replaced = await ReplaceWorldAsync(payload, null, keep, cancellationToken, false);
                 if (replaced != null && replaced.Success && keep != null)
                 {
                     lock (_gate)
@@ -3159,6 +3182,251 @@ namespace CoreAI.Mods.WorldPackages
             return await _startupStore.ReadStartupInfoAsync(cancellationToken);
         }
 
+        /// <summary>
+        /// The Workspace attribute of a world made by <see cref="OpenNewWorldAsync"/>: a whole number from 1 to 999,999,
+        /// different for each new world, that a world generator can take as its seed when it has none of its own. A
+        /// world that did not start as a new world has none.
+        /// </summary>
+        public const string NewWorldSeedAttribute = "CoreAIWorldSeed";
+
+        private Func<int> _newWorldSeed = () => new System.Random(Guid.NewGuid().GetHashCode()).Next(1, 1000000);
+
+        /// <summary>Replaces the seed source of <see cref="OpenNewWorldAsync"/>, for tests.</summary>
+        internal void ConfigureNewWorldSeedForTests(Func<int> seed)
+        {
+            _newWorldSeed = seed ?? throw new ArgumentNullException(nameof(seed));
+        }
+
+        /// <inheritdoc />
+        public IReadOnlyList<string> ListManualSaves()
+        {
+            DemandActive();
+            return _packageStore.ListManualSlots() ?? Array.Empty<string>();
+        }
+
+        /// <inheritdoc />
+        /// <remarks>
+        /// WHY the mods of the live world: the player turned on the mods this world should run, and a new world is a
+        /// new place for them, not a reinstall; their sources and on/off states stay as they are.
+        /// WHY written as format version 1: the empty tree holds no script instance, and in version 2 every declared
+        /// mod would start detached; version 1 starts each active mod at its placement, as the default world's start does.
+        /// </remarks>
+        public async UniTask<RbxWorldLoadResult> OpenNewWorldAsync(
+            bool playerConfirmed,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            DemandActive();
+            if (!playerConfirmed)
+            {
+                return new RbxWorldLoadResult(
+                    false, "Player confirmation is required; the live world was not changed.", 0);
+            }
+
+            RbxWorldPackagePayload newWorld;
+            try
+            {
+                newWorld = BuildNewWorld(CaptureCurrent(), Current.RbxApi.Registry.Catalog, _newWorldSeed());
+            }
+            catch (Exception ex)
+            {
+                return new RbxWorldLoadResult(
+                    false, "The new world could not be prepared, so the live world was not changed: " + ex.Message, 0);
+            }
+
+            RbxWorldLoadResult loaded = await LoadConfirmedCoreAsync(newWorld, true, null, null, cancellationToken);
+            if (loaded == null || !loaded.Success)
+            {
+                return loaded ?? new RbxWorldLoadResult(false, "The world session returned no result.", 0);
+            }
+
+            bool kept;
+            lock (_gate)
+            {
+                kept = _keepWorld && _startupStore != null && !_disposed;
+            }
+
+            string selectionError = kept
+                ? await RecordNewKeptWorldAsync()
+                : _startupStore == null
+                    ? "the world package store keeps no startup selection"
+                    : "this world is not kept between starts, so the next start opens the world it selected";
+            return new RbxWorldLoadResult(
+                    true, "", loaded.ActiveModsStarted, kept && selectionError.Length == 0, selectionError, loaded.Status)
+                .WithBackupWarning(loaded.BackupWarning)
+                .WithNotStartedMods(loaded.NotStartedMods);
+        }
+
+        /// <summary>
+        /// After a new world replaced a kept one: drops the outgoing world's startup record and journals, makes the new
+        /// world the kept startup world and records it at once. Answers why it is not recorded, or empty.
+        /// </summary>
+        /// <remarks>
+        /// WHY recorded at once and not at its first change: the mods set the new world up while it is staged (a
+        /// generator's seed among it), so nothing changes after the publish, and the next start would open the default
+        /// world instead of this one.
+        /// </remarks>
+        private async UniTask<string> RecordNewKeptWorldAsync()
+        {
+            string problem = "";
+            try
+            {
+                RbxWorldPackageWriteResult cleared = await ClearStartupSelectionAsync();
+                if (cleared == null || !cleared.Success)
+                {
+                    problem = "the previous world's startup record was not cleared ("
+                              + (cleared?.Error ?? "no result") + "). ";
+                }
+            }
+            catch (Exception ex)
+            {
+                problem = "the previous world's startup record was not cleared (" + ex.Message + "). ";
+            }
+
+            lock (_gate)
+            {
+                if (_disposed)
+                {
+                    return "the world session was shut down";
+                }
+
+                _keptRestoreFellBack = false;
+                _forceStartupRecordAfterMutation = false;
+                SetLiveStartupSourceLocked(new StartupSource(KeptWorldSourceKind, "default", null));
+            }
+
+            string note;
+            try
+            {
+                note = await RefreshStartupSelectionAsync("new world", false, true);
+            }
+            catch (Exception ex)
+            {
+                note = ex.Message;
+            }
+
+            if (note.Length == 0)
+            {
+                lock (_gate)
+                {
+                    note = _keptSaveFailure;
+                }
+            }
+
+            return note.Length == 0 ? "" : problem + note;
+        }
+
+        /// <summary>
+        /// The empty world <see cref="OpenNewWorldAsync"/> opens, built from a capture of the live one: the DataModel,
+        /// its services and the Workspace's Camera, each without tags or attributes, no Terrain cells, no optional state,
+        /// <paramref name="seed"/> as the Workspace's <see cref="NewWorldSeedAttribute"/>, and the live world's mods and
+        /// mod folders.
+        /// </summary>
+        internal static RbxWorldPackagePayload BuildNewWorld(RbxWorldPackagePayload current, ClassCatalog catalog, int seed)
+        {
+            if (current?.Tree?.Instances == null || current.Tree.Instances.Count == 0)
+            {
+                throw new RbxWorldPackageException("The live world capture holds no DataModel.");
+            }
+
+            List<InstanceSnapshot> nodes = current.Tree.Instances;
+            ulong rootId = nodes[0].Id;
+            ulong workspaceId = 0UL;
+            InstanceTreeSnapshot tree = new() { WorldAclVersion = current.Tree.WorldAclVersion };
+            for (int index = 0; index < nodes.Count; index++)
+            {
+                InstanceSnapshot node = nodes[index];
+                bool keep;
+                if (index == 0)
+                {
+                    keep = true;
+                }
+                else if (node.ParentId == rootId)
+                {
+                    keep = catalog != null && catalog.TryGet(node.ClassName, out ClassDescriptor descriptor)
+                                           && descriptor.IsService;
+                    if (keep && string.Equals(node.ClassName, "Workspace", StringComparison.Ordinal))
+                    {
+                        workspaceId = node.Id;
+                    }
+                }
+                else
+                {
+                    keep = workspaceId != 0UL && node.ParentId == workspaceId
+                                              && (string.Equals(node.ClassName, "Camera", StringComparison.Ordinal)
+                                                  || string.Equals(node.ClassName, RbxTerrain.ClassNameValue,
+                                                      StringComparison.Ordinal));
+                }
+
+                if (!keep)
+                {
+                    continue;
+                }
+
+                InstanceSnapshot clean = new()
+                {
+                    Id = node.Id,
+                    ParentId = node.ParentId,
+                    ClassName = node.ClassName,
+                    Name = node.Name,
+                    Archivable = node.Archivable,
+                    OwnerModId = node.OwnerModId,
+                    OriginTag = node.OriginTag,
+                    OwnerActorId = node.OwnerActorId,
+                    AccessScope = node.AccessScope,
+                    IsRuntimeInfrastructure = node.IsRuntimeInfrastructure,
+                    Revision = node.Revision,
+                    // WHY the class state is kept: the Workspace is a Model, and a restore refuses its node without
+                    // the Model block; its primary part went with the rest of the world.
+                    Model = node.Model == null
+                        ? null
+                        : new ModelSnapshot
+                        {
+                            PrimaryPartId = 0UL,
+                            HasStoredWorldPivot = node.Model.HasStoredWorldPivot,
+                            StoredWorldPivot = node.Model.StoredWorldPivot,
+                            Scale = node.Model.Scale
+                        },
+                    ClickDetector = node.ClickDetector,
+                    MaterialVariant = node.MaterialVariant,
+                    Humanoid = node.Humanoid,
+                    Value = node.Value == null
+                        ? null
+                        : new ValueSnapshot { StringValue = node.Value.StringValue, ObjectTargetId = 0UL }
+                };
+                if (node.Id == workspaceId)
+                {
+                    clean.Attributes.Add(new AttributeSnapshot
+                    {
+                        Name = NewWorldSeedAttribute,
+                        Kind = AttributeValueKind.Number,
+                        NumberValue = seed
+                    });
+                }
+
+                tree.Instances.Add(clean);
+            }
+
+            if (workspaceId == 0UL)
+            {
+                throw new RbxWorldPackageException("The live world capture holds no Workspace service.");
+            }
+
+            return new RbxWorldPackagePayload(
+                DateTime.UtcNow,
+                current.Settings,
+                tree,
+                new Dictionary<InstanceId, PartProperties>(),
+                null,
+                current.Mods,
+                null,
+                new RbxWorldPackageOptionalState
+                {
+                    FormatVersion = RbxWorldPackageSerializer.LegacyScriptPlacementFormatVersion,
+                    ModFolders = current.ModFolders
+                });
+        }
+
         /// <param name="writeSafetyAutosave">False only for the boot-time startup restore.</param>
         /// <param name="startupSource">
         /// The consumed player-confirmed request; non-null records the published payload as the
@@ -3225,7 +3493,7 @@ namespace CoreAI.Mods.WorldPackages
             {
                 if (!writeSafetyAutosave)
                 {
-                    return await ReplaceWorldAsync(payload, startupSource, restoredStartup, cancellationToken);
+                    return await ReplaceWorldAsync(payload, startupSource, restoredStartup, cancellationToken, true);
                 }
 
                 if (_worldMutationGate == null)
@@ -3238,7 +3506,7 @@ namespace CoreAI.Mods.WorldPackages
                     }
 
                     RbxWorldLoadResult replaced =
-                        await ReplaceWorldAsync(payload, startupSource, restoredStartup, cancellationToken);
+                        await ReplaceWorldAsync(payload, startupSource, restoredStartup, cancellationToken, true);
                     return backupWarning.Length == 0 ? replaced : replaced.WithBackupWarning(backupWarning);
                 }
 
@@ -3250,7 +3518,7 @@ namespace CoreAI.Mods.WorldPackages
                 {
                     return await _worldMutationGate.ExecuteAsync(
                         PreLoadAutosaveTrigger,
-                        token => ReplaceWorldAsync(payload, startupSource, restoredStartup, token).AsTask(),
+                        token => ReplaceWorldAsync(payload, startupSource, restoredStartup, token, true).AsTask(),
                         cancellationToken);
                 }
                 catch (Exception ex)
@@ -3331,7 +3599,8 @@ namespace CoreAI.Mods.WorldPackages
             RbxWorldPackagePayload payload,
             PendingLoad startupSource,
             StartupSource restoredStartup,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool ensureTerrain)
         {
             IRbxWorldSessionCandidate candidate = null;
             StagedNetworkBridge stagedNetwork = null;
@@ -3355,6 +3624,10 @@ namespace CoreAI.Mods.WorldPackages
                 }
 
                 candidate = _host.Stage(payload);
+                if (ensureTerrain)
+                {
+                    EnsureStagedTerrain(candidate);
+                }
                 stagedNetwork = new StagedNetworkBridge(_networkBridge);
                 stagedRbxApi = _rbxApiFactory(candidate, stagedNetwork);
                 SessionSourceStore stagedSources = new(this, sourceReplacement.SourceStore);
@@ -3560,6 +3833,31 @@ namespace CoreAI.Mods.WorldPackages
             {
                 DisposeSourceReplacement(sourceReplacement);
             }
+        }
+
+        /// <summary>
+        /// Gives a staged world whose package holds no Terrain cells its Workspace's one Terrain, with the live Terrain's
+        /// limits, as the default world has one. Every load and startup restore does; the undo's in-place restore does not.
+        /// </summary>
+        /// <remarks>
+        /// WHY: a package restores a Terrain only with its cells (the node is runtime infrastructure and stays out of the
+        /// tree), so a new world, or a world saved before its first block, opened without <c>workspace.Terrain</c>, and a
+        /// world generator failed on its first line.
+        /// WHY not for an undo: the created node takes the registry's next id, and the undo must give back exactly the
+        /// bytes of the world before the change.
+        /// TODO: an undo to a world without Terrain cells still restores no Terrain.
+        /// </remarks>
+        private void EnsureStagedTerrain(IRbxWorldSessionCandidate candidate)
+        {
+            RbxInstance stagedWorkspace = candidate?.Game?.FindFirstChildOfClass("Workspace");
+            if (stagedWorkspace == null || RbxTerrainBootstrap.Find(stagedWorkspace) != null)
+            {
+                return;
+            }
+
+            RbxInstance liveWorkspace = Current.RbxApi?.Game?.FindFirstChildOfClass("Workspace");
+            RbxTerrainBootstrap.EnsureTerrain(
+                candidate.Registry, stagedWorkspace, RbxTerrainBootstrap.Find(liveWorkspace)?.Store.Limits);
         }
 
         private void DisposeSourceReplacement(IRbxWorldModSourceReplacement sourceReplacement)
@@ -5247,7 +5545,7 @@ namespace CoreAI.Mods.WorldPackages
                 "The startup world selection #" + sequence.ToString(CultureInfo.InvariantCulture)
                 + " ('" + (worldId ?? "") + "') could not be restored, so the default world stays live: "
                 + reason + " The selection was kept; choose 'Start with the default world next time' on "
-                + "the Hub World Loads page to clear it.");
+                + "the Hub's World page to clear it.");
             return new RbxWorldStartupRestoreResult(
                 RbxWorldStartupRestoreOutcome.FellBack,
                 sequence,

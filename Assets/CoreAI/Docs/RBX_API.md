@@ -1194,7 +1194,7 @@ tool result.
 
 The load flow is deliberately fail-closed: host or UI code subscribes to `ManualLoadConfirmationRequested` (or
 reads `GetPendingManualLoads`) and calls `ConfirmManualLoadAsync(requestId, true|false)`. The built-player **Hub
-→ World Loads** page renders those pending requests and is the surface where the player accepts or rejects one.
+→ World** page renders those pending requests and is the surface where the player accepts or rejects one.
 A world the player confirms there also **reopens on the next start**: it is recorded as the durable startup
 selection (`Saves/Startup`), restored at boot through the same staged swap, and the default world opens instead
 on any failure. While that world stays live, the selection follows it: every change through `execute_lua` or a

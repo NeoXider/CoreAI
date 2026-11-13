@@ -1,12 +1,12 @@
 --[[@coreai
 id: blockworld_world
 name: Block World 1 - World
-version: 1.6.1
+version: 1.6.2
 active: false
 capabilities: All
 category: Samples/Block World
 author: CoreAI
-description: Part of the Block World demo (the ten mods of the Samples/Block World folder; turn the whole folder on). Generates a seeded voxel world in workspace.Terrain - islands and coasts with sandy beaches, grass lowlands, hills, rocky ridges and snowy peaks, lakes, woods and single trees of three shapes, winding caves with chambers and mouths that open onto hillsides (flooded below the sea level at the shore), and an unbreakable bedrock floor - and streams it around the player in budgeted steps: the spawn's column first, then what the camera faces. The view distance is the workspace attribute BlockWorldViewRadius (1 to 16 columns of 16 blocks, 8 when it is not set; a host may allow less with BlockWorldMaxViewRadius) and is followed while the world runs: a longer one streams the new ring of land, a shorter one stops streaming past it and keeps the land already made. The spawn and the first heading are chosen so the first view shows a peak, water and a wood. The same seed always gives the same world; set the workspace attribute BlockWorldSeed before the mod loads to pick another. Generation only fills empty cells, so a saved build is never overwritten. Each character gets a block game's body: 1.8 blocks tall, a jump of 1.25 blocks and a walk of 4.3 blocks a second.
+description: Part of the Block World demo (the ten mods of the Samples/Block World folder; turn the whole folder on). Generates a seeded voxel world in workspace.Terrain - islands and coasts with sandy beaches, grass lowlands, hills, rocky ridges and snowy peaks, lakes, woods and single trees of three shapes, winding caves with chambers and mouths that open onto hillsides (flooded below the sea level at the shore), and an unbreakable bedrock floor - and streams it around the player in budgeted steps: the spawn's column first, then what the camera faces. The view distance is the workspace attribute BlockWorldViewRadius (1 to 16 columns of 16 blocks, 8 when it is not set; a host may allow less with BlockWorldMaxViewRadius) and is followed while the world runs: a longer one streams the new ring of land, a shorter one stops streaming past it and keeps the land already made. The spawn and the first heading are chosen so the first view shows a peak, water and a wood. The same seed always gives the same world; set the workspace attribute BlockWorldSeed before the mod loads to pick another; without it the mod takes CoreAIWorldSeed, which the host gives every new world (the Hub's World page, New world). Generation only fills empty cells, so a saved build is never overwritten. Each character gets a block game's body: 1.8 blocks tall, a jump of 1.25 blocks and a walk of 4.3 blocks a second.
 ]]
 
 -- How it works. The world is cut into columns of 16 x 32 x 16 cells (one Terrain chunk wide, two
@@ -116,7 +116,12 @@ local SEA = Enum.Material.Water
 local TRUNK = Enum.Material.Mud -- WHY: Terrain has no log material; the block look draws Mud as bark
 local LEAVES = Enum.Material.LeafyGrass
 
+-- WHY CoreAIWorldSeed next: the host puts a new one on the Workspace of a world the player started from zero (the
+-- Hub's World page, New world), so each new world is another land; a world that has its own BlockWorldSeed keeps it.
 local seed = workspace:GetAttribute("BlockWorldSeed")
+if type(seed) ~= "number" then
+    seed = workspace:GetAttribute("CoreAIWorldSeed")
+end
 if type(seed) ~= "number" then
     seed = DEFAULT_SEED
 end

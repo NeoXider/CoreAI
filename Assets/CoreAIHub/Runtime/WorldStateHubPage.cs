@@ -6,12 +6,31 @@ using UnityEngine.UIElements;
 
 namespace CoreAI.Hub.UI
 {
+    /// <summary>
+    /// The legacy "AI objects" page over <see cref="IWorldStateManager"/>: the objects C# world commands spawned
+    /// (<c>world_command</c>) and their save file, with Remove and Save. It never touches a Roblox-style world (its
+    /// Terrain, Workspace or a kept world); the mods package's World page saves, loads and starts those.
+    /// </summary>
+    /// <remarks>
+    /// WHY renamed and not hidden: the page cannot see whether a scene keeps a Roblox-style world, and hiding it by a
+    /// guess would take the legacy objects' only controls from the scenes that still spawn them. Named for what it
+    /// clears, it can no longer pass for the world's reset.
+    /// </remarks>
     public sealed class WorldStateHubPage : HubPageBase
     {
         public const string DefaultPageId = "coreai.hub.worldstate";
 
+        /// <summary>The tab name of the page; it says which objects it manages.</summary>
+        public const string DefaultDisplayName = "AI objects";
+
         /// <summary>Prefix of the saved-state line asserted by the G11 §6.5 browser run.</summary>
         internal const string SavedStatePrefix = "Has saved state: ";
+
+        /// <summary>What the page acts on, and what it never touches.</summary>
+        internal const string ScopeText =
+            "Objects that AI world commands (world_command) spawned, and their save file. Remove AI objects deletes "
+            + "both; Save Now writes the file. Neither touches Terrain, the Workspace or a world kept between "
+            + "starts: save, load or start a new world on the World page.";
 
         /// <summary>Shown while a local storage operation is running. The legacy member name is retained.</summary>
         public const string FlushPendingText =
@@ -38,11 +57,11 @@ namespace CoreAI.Hub.UI
 
         public WorldStateHubPage(IWorldStateManager manager,
             string pageId = DefaultPageId,
-            string displayName = "World",
+            string displayName = DefaultDisplayName,
             int order = 300)
             : base(
                 string.IsNullOrWhiteSpace(pageId) ? DefaultPageId : pageId,
-                string.IsNullOrWhiteSpace(displayName) ? "World" : displayName,
+                string.IsNullOrWhiteSpace(displayName) ? DefaultDisplayName : displayName,
                 order)
         {
             _manager = manager;
@@ -55,7 +74,7 @@ namespace CoreAI.Hub.UI
             VisualElement panel = new() { name = "coreai-hub-worldstate-page" };
             panel.AddToClassList("coreai-hub-page");
 
-            Label title = new("World State")
+            Label title = new("AI objects (legacy)")
             {
                 name = "coreai-hub-worldstate-title"
             };
@@ -75,8 +94,9 @@ namespace CoreAI.Hub.UI
             _statusLabel.style.marginBottom = 12f;
             panel.Add(_statusLabel);
 
-            panel.Add(new Label("Reset all AI/mod-spawned world objects and delete the save file.")
+            panel.Add(new Label(ScopeText)
             {
+                name = "coreai-hub-worldstate-scope",
                 style =
                 {
                     color = new Color(0.7f, 0.7f, 0.7f, 1f),
@@ -95,8 +115,9 @@ namespace CoreAI.Hub.UI
 
             _resetButton = new Button(OnResetClicked)
             {
-                text = "Reset World",
-                name = "coreai-hub-worldstate-reset"
+                text = "Remove AI objects",
+                name = "coreai-hub-worldstate-reset",
+                tooltip = "Remove the objects AI world commands spawned and delete their save file."
             };
             _resetButton.AddToClassList("coreai-hub-action-button");
             _resetButton.style.color = new Color(1f, 0.4f, 0.4f, 1f);

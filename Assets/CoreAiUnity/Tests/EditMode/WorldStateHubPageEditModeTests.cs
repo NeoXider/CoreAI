@@ -116,6 +116,28 @@ namespace CoreAI.Tests.EditMode
                 "A page rebuilt after teardown must re-subscribe exactly once.");
         }
 
+        /// <summary>
+        /// The legacy page no longer passes for the world's reset: its tab and title name the AI objects it manages, its
+        /// button says it removes them, and its text says it never touches Terrain, the Workspace or a kept world.
+        /// </summary>
+        [Test]
+        public void LegacyPage_IsNamedForTheAiObjects_AndOffersNoWorldReset()
+        {
+            WorldStateHubPage page = new(new StubWorldStateManager());
+            VisualElement panel = (VisualElement)page.CreatePageContent();
+
+            Assert.AreEqual("AI objects", page.DisplayName);
+            Assert.AreEqual("AI objects (legacy)", panel.Q<Label>("coreai-hub-worldstate-title").text);
+            Button reset = panel.Q<Button>("coreai-hub-worldstate-reset");
+            Assert.AreEqual("Remove AI objects", reset.text);
+            StringAssert.DoesNotContain("World", reset.text);
+            string scope = panel.Q<Label>("coreai-hub-worldstate-scope").text;
+            StringAssert.Contains("world_command", scope);
+            StringAssert.Contains("Neither touches Terrain, the Workspace or a world kept between starts", scope);
+            StringAssert.Contains("World page", scope);
+            page.OnDestroyed();
+        }
+
         private sealed class TestHubWindow : CoreAiHubWindow
         {
             public void InvokeOnEnable()

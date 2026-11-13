@@ -859,7 +859,7 @@ namespace CoreAI.Mods.WorldPackages
             {
                 return new RbxWorldUndoResult(false, RbxWorldUndoResult.RestoreFailedStatus,
                     "The " + Verb(undo) + " did not run, and the world was not changed: "
-                    + (restored?.Error ?? "the world session returned no result") + " Open the World Loads page "
+                    + (restored?.Error ?? "the world session returned no result") + " Open the Hub's World page "
                     + "to restore an autosave instead.",
                     actorId, 0, 0);
             }
@@ -1046,7 +1046,7 @@ namespace CoreAI.Mods.WorldPackages
 
         private string DescribeWorldChanged(string actorId, Entry top, RbxWorldStateMark now)
         {
-            const string WayOut = " Open the World Loads page to restore an autosave instead.";
+            const string WayOut = " Open the Hub's World page to restore an autosave instead.";
             if (!now.IsSameWorldAs(top.After))
             {
                 return "The world was replaced (a world load, a restore or another undo) after this AI change, "

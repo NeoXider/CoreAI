@@ -6,6 +6,17 @@ using UnityEngine.UIElements;
 namespace CoreAI.Hub.UI
 {
     /// <summary>
+    /// A child page of a <see cref="HubSubTabPage"/> that opens inner views (a detail panel, an editor) over its
+    /// first view: pressing its sub-tab calls <see cref="ReturnToRoot"/>, as a top tab press goes back to a page's
+    /// start in most apps.
+    /// </summary>
+    public interface IHubSubTabRoot
+    {
+        /// <summary>Closes the inner views and shows the first view; an inner view that would lose work may stay and say so.</summary>
+        void ReturnToRoot();
+    }
+
+    /// <summary>
     /// A top-level <see cref="IHubPage"/> that groups several child pages under one tab as sub-tabs, via
     /// <see cref="HubSubTabView"/>. Each child's <see cref="IHubPage.CreatePageContent"/> becomes a sub-tab
     /// content factory, and the active child receives <see cref="IHubPage.OnActivated"/> /
@@ -57,7 +68,16 @@ namespace CoreAI.Hub.UI
 
             _view = new HubSubTabView(tabs);
             _view.SelectionChanged += OnSubTabSelected;
+            _view.TabPressed += OnSubTabPressed;
             return _view;
+        }
+
+        private void OnSubTabPressed(int index)
+        {
+            if (!_destroyed && index >= 0 && index < _children.Count && _children[index] is IHubSubTabRoot root)
+            {
+                root.ReturnToRoot();
+            }
         }
 
         private void OnSubTabSelected(int index)

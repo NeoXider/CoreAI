@@ -46,6 +46,12 @@ player's Terrain holds.
 
 ## The world
 
+A world from zero: F2 -> **World** -> **New world...** -> **Start the new world** replaces the live world with an
+empty one at once (your builds go; the old world stays as a `load_world-pre` autosave on that page), and the mods
+that are on fill it. `blockworld_world` takes the new world's `CoreAIWorldSeed` as its seed, so it is new land; the
+kept world then reopens as the new one. **Save** on the same page keeps the live world in a slot that **Load...**
+brings back.
+
 One seed always makes the same world. At the sea level lie the sea, lakes and sandy beaches; above them grass
 lowlands with woods (one stands near the spawn) and single trees of three shapes: round oaks, tall narrow trees
 and big oaks (a trunk is the Terrain material Mud, which the block look draws as bark). Hills rise in steps a block or two high, and a step's side shows the earth under the grass, as in
@@ -157,7 +163,7 @@ takes the light on the water, so a flooded cave is dark too.
 `/undo` takes back your latest AI change as a whole, and `/redo` puts it back, as long as nothing else in the
 saved world changed since. Walking, flying, looking around, the clock, the villagers and the autopilot's walking
 do not count. Breaking or placing a block, putting down or taking back a torch, or another AI change after it
-does: then `/undo` changes nothing and says why, and the World Loads page in the Hub restores an autosave
+does: then `/undo` changes nothing and says why, and the World page in the Hub restores an autosave
 instead. So try it right after the AI built: "Build a watchtower here", look at it, `/undo`, `/redo`.
 
 ## After a reload

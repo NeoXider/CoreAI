@@ -889,8 +889,15 @@ Owner's questions and decisions on the Block World (2026-11-11):
         too (no new turn starts, owner's rule). Left: the Lua chat (`coreai_chat`, `AIService:GetAssistant()`) still
         refuses a second line - it needs an `assistant:Post` or a `Send` that posts while busy; a line typed during a
         host turn waits for the slot instead of joining the wake turn.
-      - **The Hub's "Reset World" does not reset the Block World (owner, 2026-11-13: all mods off + Reset World,
-        nothing cleared).** `WorldStateHubPage` ("World State", "Reset all AI/mod-spawned world objects and delete
+      - **Done (2026-11-13): the Hub's "Reset World" did not reset the Block World.** The World Loads page is the
+        Hub's **World** page with Save / Load / New world (`IRbxWorldPlayerActions.OpenNewWorldAsync`: an empty world
+        through the gate, a new `CoreAIWorldSeed` that `blockworld_world` takes, a kept world's record and journals
+        dropped and the new world recorded); the legacy page is "AI objects" with "Remove AI objects". Left: a
+        "Starting world" entry (back to the first start's world) was not added. Found on the way and fixed: a
+        package without Terrain cells restored no Terrain (`workspace.Terrain` nil); loads and startup restores now
+        add it, an undo does not (its bytes must match). The original note follows.
+        (owner, 2026-11-13: all mods off + Reset World, nothing cleared).
+        `WorldStateHubPage` ("World State", "Reset all AI/mod-spawned world objects and delete
         the save file") drives the legacy `IWorldStateManager` - the C# `world_command` objects, the "[WorldState]
         Saved 0 objects" lines - not the Rbx world (Terrain cells, Workspace, the kept-world record and journal).
         And turning `blockworld_world` off stops the generator but leaves its cells: Terrain is world data, not the

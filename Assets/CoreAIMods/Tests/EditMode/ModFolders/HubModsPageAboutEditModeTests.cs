@@ -5,6 +5,8 @@ using CoreAI.Ai;
 using CoreAI.Ai.Hub;
 using CoreAI.ChatMarkdown;
 using CoreAI.ChatOverlay;
+using CoreAI.Hub;
+using CoreAI.Hub.UI;
 using CoreAI.Mods.Folders;
 using NUnit.Framework;
 using UnityEngine.UIElements;
@@ -133,6 +135,100 @@ namespace CoreAI.Tests.EditMode.ModFolders
             Assert.AreEqual(DisplayStyle.None, page.AboutPanel.style.display.value);
         }
 
+        /// <summary>
+        /// Pressing the "Mods" sub-tab leaves a mod's views: from the editor and from the About panel, also when the
+        /// player came back from the Logs sub-tab, the list is shown again.
+        /// </summary>
+        [Test]
+        public void ModsSubTab_Pressed_LeavesTheEditorAndTheAboutPanel_ForTheList()
+        {
+            RecordsHubModService service = new(("castle", Description));
+            HubModsPage mods = new(service, 300, action => action(), null, null, new InMemoryHubModFolderPreferences());
+            HubSubTabPage page = new("coreai.hub.mods", "Mods", 300, mods, new OtherPage());
+            VisualElement view = (VisualElement)page.CreatePageContent();
+            Button modsTab = view.Q<Button>("coreai-hub-subtab-0");
+            Button logsTab = view.Q<Button>("coreai-hub-subtab-1");
+            Assert.IsNotNull(modsTab);
+            Assert.IsNotNull(logsTab);
+            VisualElement list = view.Q<VisualElement>("coreai-hub-mods-list");
+
+            mods.ToggleAbout("castle");
+            mods.OpenEditEditorForTests("castle");
+            Assert.IsTrue(mods.IsEditorOpen, "precondition: the editor replaces the list");
+            Assert.AreEqual("castle", mods.AboutModId, "precondition: the About panel is open");
+            Assert.AreEqual(DisplayStyle.None, list.style.display.value);
+
+            InvokeButton(modsTab);
+
+            Assert.IsFalse(mods.IsEditorOpen, "the Mods sub-tab goes back to the list");
+            Assert.AreEqual(DisplayStyle.Flex, list.style.display.value);
+            Assert.IsNull(mods.AboutModId, "and closes the About panel");
+
+            mods.ToggleAbout("castle");
+            InvokeButton(logsTab);
+            InvokeButton(modsTab);
+            Assert.IsNull(mods.AboutModId, "coming back from Logs shows the list too");
+
+            page.OnDestroyed();
+        }
+
+        /// <summary>
+        /// Negative twin: a new mod's draft that was never saved keeps the editor open with its discard choice instead
+        /// of being lost, as the editor's own Back does.
+        /// </summary>
+        [Test]
+        public void ModsSubTab_Pressed_WithAnUnsavedDraft_KeepsTheEditorAndOffersToDiscard()
+        {
+            RecordsHubModService service = new(("castle", Description));
+            HubModsPage mods = new(service, 300, action => action(), null, null, new InMemoryHubModFolderPreferences());
+            HubSubTabPage page = new("coreai.hub.mods", "Mods", 300, mods);
+            VisualElement view = (VisualElement)page.CreatePageContent();
+            mods.OpenNewEditorForTests();
+
+            InvokeButton(view.Q<Button>("coreai-hub-subtab-0"));
+
+            Assert.IsTrue(mods.IsEditorOpen, "the draft is kept");
+            Assert.AreEqual(DisplayStyle.Flex, view.Q<Button>("coreai-hub-mod-discard").style.display.value);
+            page.OnDestroyed();
+        }
+
+        /// <summary>A second sub-tab that stands in for the Logs page.</summary>
+        private sealed class OtherPage : IHubPage
+        {
+            public string PageId => "other";
+
+            public string DisplayName => "Logs";
+
+            public int Order => 350;
+
+            public Func<object> CreatePageContent => () => new Label("logs");
+
+            public void OnActivated()
+            {
+            }
+
+            public void OnDeactivated()
+            {
+            }
+
+            public void OnDestroyed()
+            {
+            }
+        }
+
+        private static void InvokeButton(Button button)
+        {
+            System.Reflection.MethodInfo invoke = typeof(Clickable).GetMethod(
+                "Invoke",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public
+                | System.Reflection.BindingFlags.NonPublic,
+                null,
+                new[] { typeof(EventBase) },
+                null);
+            Assert.IsNotNull(invoke, "Unity UI Toolkit Clickable.Invoke(EventBase) must be available.");
+            invoke.Invoke(button.clickable, new object[] { null });
+        }
+
         private sealed class CountingRenderer : ICoreAiMarkdownRenderer
         {
             public int Renders { get; private set; }
@@ -187,8 +283,8 @@ namespace CoreAI.Tests.EditMode.ModFolders
 
             public bool TryGetSource(string id, out string source)
             {
-                source = null;
-                return false;
+                source = Records.Exists(record => record.Id == id) ? "return true" : null;
+                return source != null;
             }
 
             public bool IsLoaded(string id)

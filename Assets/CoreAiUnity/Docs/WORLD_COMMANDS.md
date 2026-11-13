@@ -297,9 +297,9 @@ Net effect: a mod that re-spawns "its" objects on load never races the snapshot 
 
 ### Hub controls
 
-The **World** tab in the CoreAI Hub shows:
+The **AI objects** tab in the CoreAI Hub (the legacy page, titled "AI objects (legacy)") shows:
 - Current saved-state status ("Has saved state: Yes / No")
-- **Reset World** — destroys all tracked objects and deletes the save file
+- **Remove AI objects** — destroys all tracked `world_command` objects and deletes the save file
 - **Save Now** — trigger a manual save at any time
 - A browser-storage line reporting whether the platform confirmed durability
 
@@ -310,6 +310,11 @@ answer comes from `CoreAiWebGlPersistence`, which reports whether the engine's a
 exposes, now that the manual `FS.syncfs` callback it used to await never fires. On desktop the file
 write is already durable, so the answer is immediate as well. A page that never armed that
 persistence shows "flush NOT confirmed" instead of being hidden behind a green status.
+
+Neither button touches a Roblox-style world (its Terrain, its Workspace, a world kept between starts):
+the mods package's **World** page saves, loads and starts those (Save, Load, New world). The page was
+called "World" with a "Reset World" button before, which read as the world's reset and cleared nothing
+in a Block World.
 
 ### Save format
 

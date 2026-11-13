@@ -144,6 +144,8 @@ namespace CoreAI.Mods.Folders
         private string _movingModId = "";
         private ModFolderPath _movingFolder;
         private ModFolderPath _movingFrom;
+        private readonly List<RowElements> _madeRows = new();
+        private bool _twoLineRows;
 
         /// <param name="options">Look and behaviour; null uses the defaults.</param>
         public ModFolderTreeView(ModFolderTreeViewOptions options = null)
@@ -228,6 +230,7 @@ namespace CoreAI.Mods.Folders
                 itemsSource = _rows
             };
             _listView.style.flexGrow = 1f;
+            _listView.RegisterCallback<GeometryChangedEvent>(_ => UpdateTwoLineRows());
             Add(_listView);
         }
 
@@ -479,9 +482,13 @@ namespace CoreAI.Mods.Folders
             row.Toggle.RegisterValueChangedCallback(evt => OnToggleChanged(row, evt.newValue));
             root.Add(row.Toggle);
 
+            // WHY the name and the detail shrink and the buttons do not: a long status line ("id: ... caps: ... stored
+            // (disabled) [bundled]") used to keep its whole width and push the row's last buttons past the panel's edge,
+            // where the row clips them. The labels now give way, cut with an ellipsis, and show the whole text as a tooltip.
             row.Name = new Label();
             row.Name.style.flexGrow = 1f;
             row.Name.style.flexShrink = 1f;
+            row.Name.style.minWidth = NameMinWidth;
             row.Name.style.overflow = Overflow.Hidden;
             row.Name.style.whiteSpace = WhiteSpace.NoWrap;
             row.Name.style.textOverflow = TextOverflow.Ellipsis;
@@ -489,17 +496,27 @@ namespace CoreAI.Mods.Folders
             root.Add(row.Name);
 
             row.Detail = new Label();
-            row.Detail.style.flexShrink = 0f;
+            row.Detail.style.flexShrink = DetailShrink;
+            row.Detail.style.minWidth = 0f;
+            row.Detail.style.overflow = Overflow.Hidden;
+            row.Detail.style.whiteSpace = WhiteSpace.NoWrap;
+            row.Detail.style.textOverflow = TextOverflow.Ellipsis;
             row.Detail.style.marginLeft = 6f;
             row.Detail.style.marginRight = 6f;
             row.Detail.style.color = _options.MutedColor;
             root.Add(row.Detail);
 
+            row.Actions = new VisualElement { name = "coreai-mod-tree-row-actions" };
+            row.Actions.style.flexDirection = FlexDirection.Row;
+            row.Actions.style.alignItems = Align.Center;
+            row.Actions.style.flexShrink = 0f;
+            root.Add(row.Actions);
+
             row.Here = MakeButton("Here", () => OnHereClicked(row), "Move the chosen item into this folder.");
-            root.Add(row.Here);
+            row.Actions.Add(row.Here);
 
             row.Move = MakeButton("Move", () => OnMoveClicked(row), "Move to another folder.");
-            root.Add(row.Move);
+            row.Actions.Add(row.Move);
 
             IReadOnlyList<string> folderActions = _options.FolderActions ?? Array.Empty<string>();
             row.FolderActions = new Button[folderActions.Count];
@@ -507,7 +524,7 @@ namespace CoreAI.Mods.Folders
             {
                 string action = folderActions[i];
                 row.FolderActions[i] = MakeButton(action, () => OnFolderAction(row, action), null);
-                root.Add(row.FolderActions[i]);
+                row.Actions.Add(row.FolderActions[i]);
             }
 
             IReadOnlyList<string> modActions = _options.ModActions ?? Array.Empty<string>();
@@ -518,10 +535,127 @@ namespace CoreAI.Mods.Folders
                 string action = modActions[i];
                 row.ModActionLabels[i] = action;
                 row.ModActions[i] = MakeButton(action, () => OnModAction(row, action), null);
-                root.Add(row.ModActions[i]);
+                row.Actions.Add(row.ModActions[i]);
             }
 
+            row.Actions.RegisterCallback<GeometryChangedEvent>(_ => UpdateTwoLineRows());
+            // WHY followed: a list rebuild drops its rows, and a row kept here would never be freed.
+            root.RegisterCallback<DetachFromPanelEvent>(_ => _madeRows.Remove(row));
+            root.RegisterCallback<AttachToPanelEvent>(_ =>
+            {
+                if (!_madeRows.Contains(row))
+                {
+                    _madeRows.Add(row);
+                    ApplyRowLayout(row);
+                }
+            });
+            ApplyRowLayout(row);
+            _madeRows.Add(row);
             return root;
+        }
+
+        /// <summary>The narrowest a row's name gets before its buttons move to a second line.</summary>
+        internal const float NameMinWidth = 48f;
+
+        /// <summary>How much faster the status line gives way than the name when a row is short of room.</summary>
+        internal const float DetailShrink = 4f;
+
+        /// <summary>How much wider than it needs the view must be before two-line rows go back to one line.</summary>
+        private const float OneLineHysteresis = 16f;
+
+        /// <summary>
+        /// True while the rows are two lines high, the buttons on the second: the view is narrower than the widest row's
+        /// fixed parts, buttons and <see cref="NameMinWidth"/> together.
+        /// </summary>
+        internal bool UsesTwoLineRows => _twoLineRows;
+
+        /// <summary>
+        /// Whether rows should be two lines high in a view <paramref name="available"/> wide when one line needs
+        /// <paramref name="required"/>; <paramref name="twoLine"/> is the current choice, kept within the hysteresis.
+        /// </summary>
+        internal static bool NeedsTwoLineRows(float available, float required, bool twoLine)
+        {
+            if (float.IsNaN(available) || float.IsNaN(required) || available <= 0f || required <= 0f)
+            {
+                return twoLine;
+            }
+
+            return twoLine ? available < required + OneLineHysteresis : available < required;
+        }
+
+        /// <summary>
+        /// Puts every row on two lines (the buttons under the name) or back on one. WHY two lines of a fixed height and
+        /// not wrapping rows: the list stays virtualized with fixed-height rows, and a narrow Hub still reaches every
+        /// button.
+        /// </summary>
+        internal void SetTwoLineRows(bool twoLine)
+        {
+            if (_twoLineRows == twoLine)
+            {
+                return;
+            }
+
+            _twoLineRows = twoLine;
+            _listView.fixedItemHeight = twoLine ? _options.RowHeight * 2f : _options.RowHeight;
+            for (int i = 0; i < _madeRows.Count; i++)
+            {
+                ApplyRowLayout(_madeRows[i]);
+            }
+
+            _listView.RefreshItems();
+        }
+
+        private void ApplyRowLayout(RowElements row)
+        {
+            VisualElement root = row.Root;
+            root.style.height = _twoLineRows ? _options.RowHeight * 2f : _options.RowHeight;
+            root.style.flexWrap = _twoLineRows ? Wrap.Wrap : Wrap.NoWrap;
+            root.style.alignContent = Align.Stretch;
+            row.Actions.style.width = _twoLineRows ? Length.Percent(100f) : new StyleLength(StyleKeyword.Auto);
+            row.Actions.style.paddingLeft = _twoLineRows ? 22f : 0f;
+        }
+
+        /// <summary>Measures what one line needs against the view's width and picks one- or two-line rows.</summary>
+        private void UpdateTwoLineRows()
+        {
+            float required = 0f;
+            for (int i = 0; i < _madeRows.Count; i++)
+            {
+                RowElements row = _madeRows[i];
+                if (row.Root.panel == null || row.Root.resolvedStyle.display == DisplayStyle.None)
+                {
+                    continue;
+                }
+
+                float width = OuterWidth(row.Indent) + OuterWidth(row.Fold) + OuterWidth(row.Toggle) + NameMinWidth;
+                for (int child = 0; child < row.Actions.childCount; child++)
+                {
+                    width += OuterWidth(row.Actions[child]);
+                }
+
+                if (width > required)
+                {
+                    required = width;
+                }
+            }
+
+            SetTwoLineRows(NeedsTwoLineRows(_listView.contentRect.width, required, _twoLineRows));
+        }
+
+        private static float OuterWidth(VisualElement element)
+        {
+            if (element == null || element.resolvedStyle.display == DisplayStyle.None)
+            {
+                return 0f;
+            }
+
+            float width = element.layout.width;
+            if (float.IsNaN(width))
+            {
+                return 0f;
+            }
+
+            return width + element.resolvedStyle.marginLeft + element.resolvedStyle.marginRight;
         }
 
         /// <summary>Binds a pooled row element to visible row <paramref name="index"/>; allocates nothing.</summary>
@@ -563,8 +697,10 @@ namespace CoreAI.Mods.Folders
             row.Toggle.SetValueWithoutNotify(node.ModCount > 0 && node.EnabledModCount == node.ModCount);
 
             row.Name.text = node.Name;
+            row.Name.tooltip = node.Name;
             row.Name.style.color = _options.AccentColor;
             row.Detail.text = _tree.GetCountText(folderIndex);
+            row.Detail.tooltip = row.Detail.text;
 
             bool here = _moving && CanTakeMovingItem(node.Path) && !IsMovingFrom(node.Path);
             SetShown(row.Here, here);
@@ -588,9 +724,11 @@ namespace CoreAI.Mods.Folders
 
             row.Name.text = mod.Name;
             row.Name.style.color = mod.Enabled ? _options.TextColor : _options.MutedColor;
+            row.Name.tooltip = mod.Name;
             row.Detail.text = _options.ModDetail != null
                 ? _options.ModDetail(mod) ?? ""
                 : string.Equals(mod.Name, mod.Id, StringComparison.Ordinal) ? "" : mod.Id;
+            row.Detail.tooltip = row.Detail.text;
 
             bool moving = _moving && _movingKind == ModFolderRowKind.Mod &&
                           string.Equals(_movingModId, mod.Id, StringComparison.Ordinal);
@@ -801,6 +939,7 @@ namespace CoreAI.Mods.Folders
             public Toggle Toggle;
             public Label Name;
             public Label Detail;
+            public VisualElement Actions;
             public Button Here;
             public Button Move;
             public Button[] FolderActions;

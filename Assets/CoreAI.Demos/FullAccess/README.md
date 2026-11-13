@@ -107,7 +107,7 @@ refusal is logged as `failure reason=ArgumentException` instead of the tools' JS
 `invalid_argument` result. Stable `WORLD_MARKER_*`, `WORLD_SAVE`, and `WORLD_LOAD_REQUEST` log markers
 report each request and outcome. `CreateWorldMarker` executes through the production `execute_lua` backup gate, while save
 and load-request calls use `IRbxWorldRuntimeService`. There is deliberately no confirmation command:
-after `RequestWorldLoad`, approve or reject the metadata-only request in Hub → **World Loads**.
+after `RequestWorldLoad`, approve or reject the metadata-only request in Hub → **World**.
 
 ## Safety
 

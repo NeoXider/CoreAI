@@ -802,7 +802,25 @@ direct trusted host loading. Requests expire after two minutes by default, a new
 older request for the same slot, and the bounded eight-entry pool evicts its oldest request. Expired,
 unknown, rejected, and reused ids are fail-closed and never mutate the live session.
 
-The built-player Hub registers a **World Loads** page when `IRbxWorldRuntimeService` is available.
+The built-player Hub registers a **World** page (id `coreai.hub.world-loads`) when `IRbxWorldRuntimeService`
+is available. Save, Load and New world sit on it together:
+
+- **This world**: a slot name (a fresh `world-<date>-<time>` by default) and **Save**, which writes the live world
+  to a create-once manual slot through `SaveManualAsync` (the path `save_world` uses). When the service also
+  implements `IRbxWorldPlayerActions` (the production controller does) there is **New world...**: a second click
+  ("Start the new world") calls `OpenNewWorldAsync(true)`, which replaces the live world now, through the shared
+  gate and its `load_world-pre` safety autosave, with an empty one: the services and the Workspace's Camera, no
+  Terrain cells, no builds, no saved state, and a new `CoreAIWorldSeed` number (1 to 999,999) on the Workspace. The
+  mods that are on start on it as on a fresh start (format version 1, legacy placement) and fill it; a world
+  generator may take `CoreAIWorldSeed` as its seed (`blockworld_world` does when `BlockWorldSeed` is not set), and
+  with no mod on the world stays empty. A world kept between starts also drops its startup record and change
+  journal and records the new world at once, so the next start opens it. `OpenNewWorldAsync(false)` changes
+  nothing. No AI tool is given `IRbxWorldPlayerActions`.
+- **Pending confirmation**: the load requests (the AI's `load_world` / `load_autosave` and the page's own Load).
+- **Saved worlds**: the manual slots (`ListManualSaves`), each with **Load...**, which queues the same one-use
+  confirmation as `load_world`.
+- **Autosaves** and **Next start**, below.
+
 It renders the immutable pending metadata returned by `GetPendingManualLoads`, subscribes before its
 visual tree is opened so late navigation cannot miss a request, and removes/disables a row before
 calling `ConfirmManualLoadAsync(requestId, true|false)`. It never receives package bytes and exposes

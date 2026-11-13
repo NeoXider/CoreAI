@@ -85,7 +85,7 @@ namespace CoreAI.Tests.EditMode
             Assert.IsFalse(refused.Success);
             Assert.AreEqual(RbxWorldUndoResult.WorldChangedStatus, refused.Status);
             StringAssert.Contains("a player, a mod script or the Hub", refused.Message);
-            StringAssert.Contains("World Loads page", refused.Message);
+            StringAssert.Contains("World page", refused.Message);
             Assert.AreSame(live, session.Controller.CurrentRbxApi.Registry, "the world was not replaced");
             Assert.IsNotNull(live.WorldRoot.FindFirstChild("Tower1"));
             Assert.IsNotNull(live.WorldRoot.FindFirstChild("PlayerMade"));

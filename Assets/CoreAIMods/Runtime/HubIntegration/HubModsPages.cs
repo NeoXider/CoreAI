@@ -198,8 +198,10 @@ namespace CoreAI.Ai.Hub
     }
 
     /// <summary>
-    /// Runtime UI Toolkit surface that exposes only metadata and one-shot load decisions, plus the
-    /// player's own control over which world opens on the next start.
+    /// The Hub's World page: Save the live world to a manual slot, Load a manual save or an autosave after the
+    /// player confirms it, start a New world (with <see cref="IRbxWorldPlayerActions"/>), and choose which world
+    /// opens on the next start. Load requests, the AI's included, show metadata only and change the live world
+    /// only through a one-shot player decision.
     /// </summary>
     public sealed class HubWorldLoadConfirmationPage : IHubPage
     {
@@ -207,13 +209,22 @@ namespace CoreAI.Ai.Hub
 
         private readonly IRbxWorldRuntimeService _service;
         private readonly IRbxWorldStartupSelection _startupSelection;
+        private readonly IRbxWorldPlayerActions _playerActions;
         private readonly Action _attentionRequested;
         private readonly ActorContext _actorContext;
         private readonly HashSet<string> _autoLoadsInFlight = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _manualLoadsInFlight = new(StringComparer.Ordinal);
         private readonly HashSet<string> _inFlight = new(StringComparer.Ordinal);
 
         private VisualElement _root;
         private VisualElement _autoSaveRows;
+        private VisualElement _manualSaveRows;
+        private TextField _slotField;
+        private Button _saveButton;
+        private Button _newWorldButton;
+        private VisualElement _newWorldConfirm;
+        private bool _saveInFlight;
+        private bool _newWorldInFlight;
         private VisualElement _rows;
         private Label _status;
         private Label _outcome;
@@ -241,6 +252,7 @@ namespace CoreAI.Ai.Hub
         {
             _service = service ?? throw new ArgumentNullException(nameof(service));
             _startupSelection = startupSelection ?? service as IRbxWorldStartupSelection;
+            _playerActions = service as IRbxWorldPlayerActions;
             _attentionRequested = attentionRequested;
             _actorContext = actorContext;
             Order = order;
@@ -251,7 +263,7 @@ namespace CoreAI.Ai.Hub
         public string PageId => HubModsPages.WorldLoadsPageId;
 
         /// <inheritdoc />
-        public string DisplayName => "World Loads";
+        public string DisplayName => "World";
 
         /// <inheritdoc />
         public int Order { get; }
@@ -294,10 +306,11 @@ namespace CoreAI.Ai.Hub
             _root = new VisualElement { name = "coreai-hub-world-loads" };
             _root.style.flexGrow = 1f;
             _root.style.flexDirection = FlexDirection.Column;
-            _root.Add(HubModWidgets.MakeTitle("World load approval"));
+            _root.Add(HubModWidgets.MakeTitle("World"));
             _root.Add(HubModWidgets.MakeNote(
-                "A saved world can replace the live world only after you approve it here. " +
-                "The request shows metadata only; rejecting it leaves the current world unchanged."));
+                "Save the live world, load a saved one, or start a new world. A saved world replaces the live " +
+                "world only after you confirm it here; a request shows metadata only, and rejecting it leaves " +
+                "the current world unchanged."));
 
             _status = HubModWidgets.MakeStatus();
             _status.name = "coreai-hub-world-loads-status";
@@ -313,6 +326,26 @@ namespace CoreAI.Ai.Hub
                 name = "coreai-hub-world-loads-scroll"
             };
             scroll.style.flexGrow = 1f;
+            scroll.contentContainer.Add(HubModWidgets.MakeTitle("This world"));
+            scroll.contentContainer.Add(BuildSaveRow());
+            if (_playerActions != null)
+            {
+                scroll.contentContainer.Add(BuildNewWorldRow());
+            }
+
+            scroll.contentContainer.Add(HubModWidgets.MakeTitle("Pending confirmation"));
+            _rows = new VisualElement { name = "coreai-world-load-pending-rows" };
+            scroll.contentContainer.Add(_rows);
+            if (_playerActions != null)
+            {
+                scroll.contentContainer.Add(HubModWidgets.MakeTitle("Saved worlds"));
+                _manualSaveRows = new VisualElement { name = "coreai-manual-saves-rows" };
+                scroll.contentContainer.Add(_manualSaveRows);
+            }
+
+            scroll.contentContainer.Add(HubModWidgets.MakeTitle("Autosaves"));
+            _autoSaveRows = new VisualElement { name = "coreai-autosaves-rows" };
+            scroll.contentContainer.Add(_autoSaveRows);
             if (_startupSelection != null)
             {
                 scroll.contentContainer.Add(HubModWidgets.MakeTitle("Next start"));
@@ -330,12 +363,6 @@ namespace CoreAI.Ai.Hub
                 scroll.contentContainer.Add(_startupResetButton);
             }
 
-            scroll.contentContainer.Add(HubModWidgets.MakeTitle("Autosaves"));
-            _autoSaveRows = new VisualElement { name = "coreai-autosaves-rows" };
-            scroll.contentContainer.Add(_autoSaveRows);
-            scroll.contentContainer.Add(HubModWidgets.MakeTitle("Pending confirmation"));
-            _rows = new VisualElement { name = "coreai-world-load-pending-rows" };
-            scroll.contentContainer.Add(_rows);
             _root.Add(scroll);
 
             _refreshSchedule = _root.schedule.Execute(() => Refresh(false)).Every(1000);
@@ -463,6 +490,325 @@ namespace CoreAI.Ai.Hub
             }
         }
 
+        private VisualElement BuildSaveRow()
+        {
+            VisualElement row = new() { name = "coreai-world-save-row" };
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.flexWrap = Wrap.Wrap;
+            row.style.alignItems = Align.Center;
+            row.style.marginBottom = 6f;
+
+            _slotField = new TextField("Save as") { name = "coreai-world-save-slot", value = NewSlotName() };
+            _slotField.tooltip = "1-64 letters, digits, '-' and '_'. A saved slot is never overwritten.";
+            _slotField.style.flexGrow = 1f;
+            _slotField.style.minWidth = 160f;
+            row.Add(_slotField);
+
+            _saveButton = HubModWidgets.MakeButton("Save", SaveLiveWorld);
+            _saveButton.name = "coreai-world-save";
+            _saveButton.tooltip = "Save the live world to this slot; load it later under Saved worlds.";
+            row.Add(_saveButton);
+            return row;
+        }
+
+        private VisualElement BuildNewWorldRow()
+        {
+            VisualElement row = new() { name = "coreai-world-new-row" };
+            row.style.marginBottom = 6f;
+
+            _newWorldButton = HubModWidgets.MakeButton("New world...", () => ShowNewWorldConfirmation(true));
+            _newWorldButton.name = "coreai-world-new";
+            _newWorldButton.tooltip = "Start an empty world; the mods that are on fill it. Asks first.";
+            row.Add(_newWorldButton);
+
+            _newWorldConfirm = HubModWidgets.MakePanel();
+            _newWorldConfirm.name = "coreai-world-new-confirmation";
+            _newWorldConfirm.style.display = DisplayStyle.None;
+            _newWorldConfirm.Add(HubModWidgets.MakeNote(
+                "Replace the live world with an empty one now? Everything in it goes: blocks, builds and their "
+                + "saved state. The mods that are on start again and fill the new world (a world generator makes "
+                + "new land); with none on it stays empty. The current world is kept as a 'load_world-pre' "
+                + "autosave below."));
+            VisualElement actions = new();
+            actions.style.flexDirection = FlexDirection.Row;
+            actions.style.flexWrap = Wrap.Wrap;
+            actions.style.marginTop = 6f;
+            Button confirm = HubModWidgets.MakeDangerButton("Start the new world", StartNewWorld);
+            confirm.name = "coreai-world-new-confirm";
+            actions.Add(confirm);
+            Button cancel = HubModWidgets.MakeButton("Cancel", () => ShowNewWorldConfirmation(false));
+            cancel.name = "coreai-world-new-cancel";
+            actions.Add(cancel);
+            _newWorldConfirm.Add(actions);
+            row.Add(_newWorldConfirm);
+            return row;
+        }
+
+        private static string NewSlotName()
+        {
+            return "world-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+        }
+
+        private void ShowNewWorldConfirmation(bool shown)
+        {
+            if (_destroyed || _newWorldConfirm == null)
+            {
+                return;
+            }
+
+            _newWorldConfirm.style.display = shown ? DisplayStyle.Flex : DisplayStyle.None;
+            _newWorldButton.style.display = shown ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+
+        private void SaveLiveWorld()
+        {
+            if (_destroyed || _saveInFlight || _slotField == null)
+            {
+                return;
+            }
+
+            string slot = _slotField.value?.Trim() ?? "";
+            _saveInFlight = true;
+            _saveButton.SetEnabled(false);
+            SaveLiveWorldAsync(slot);
+        }
+
+        private async void SaveLiveWorldAsync(string slot)
+        {
+            try
+            {
+                RbxWorldPackageWriteResult result = await _service.SaveManualAsync(_actorContext, slot);
+                if (_destroyed)
+                {
+                    return;
+                }
+
+                if (result != null && result.Success)
+                {
+                    SetOutcome("Saved the live world as '" + slot + "'. Load it under Saved worlds.", HubModWidgets.Muted);
+                    _slotField.value = NewSlotName();
+                }
+                else
+                {
+                    SetOutcome("The world was not saved: " + (result?.Error ?? "the world service returned no result"),
+                        HubModWidgets.Danger);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                if (!_destroyed)
+                {
+                    SetOutcome("Saving the world was cancelled.", HubModWidgets.Muted);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!_destroyed)
+                {
+                    SetOutcome("The world was not saved: " + ex.Message, HubModWidgets.Danger);
+                }
+            }
+            finally
+            {
+                _saveInFlight = false;
+                if (!_destroyed)
+                {
+                    _saveButton?.SetEnabled(true);
+                    RefreshManualSaves();
+                }
+            }
+        }
+
+        private void StartNewWorld()
+        {
+            if (_destroyed || _playerActions == null || _newWorldInFlight)
+            {
+                return;
+            }
+
+            _newWorldInFlight = true;
+            ShowNewWorldConfirmation(false);
+            _newWorldButton.SetEnabled(false);
+            SetOutcome("Starting a new world…", HubModWidgets.Muted);
+            StartNewWorldAsync();
+        }
+
+        /// <summary>The outcome line of a new world that opened: what started, and whether it reopens after a restart.</summary>
+        internal static string DescribeNewWorld(RbxWorldLoadResult result)
+        {
+            string text = "A new world is open; active mods started: "
+                          + result.ActiveModsStarted.ToString(CultureInfo.InvariantCulture) + ".";
+            if (result.BackupWarning.Length > 0)
+            {
+                text += " " + result.BackupWarning;
+            }
+
+            return result.StartupSelectionPersisted
+                ? text + " It also opens on the next start."
+                : text + " It will NOT reopen after a restart: "
+                       + (result.StartupSelectionError.Length > 0
+                           ? result.StartupSelectionError
+                           : "this world service keeps no startup selection") + ".";
+        }
+
+        private async void StartNewWorldAsync()
+        {
+            try
+            {
+                RbxWorldLoadResult result = await _playerActions.OpenNewWorldAsync(true);
+                if (_destroyed)
+                {
+                    return;
+                }
+
+                if (result != null && result.Success)
+                {
+                    string opened = DescribeNewWorld(result);
+                    SetOutcome(opened, result.StartupSelectionPersisted || _startupSelection == null
+                        ? HubModWidgets.Accent
+                        : HubModWidgets.Danger);
+                }
+                else
+                {
+                    SetOutcome("No new world was started: " + (result?.Error ?? "the world service returned no result"),
+                        HubModWidgets.Danger);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                if (!_destroyed)
+                {
+                    SetOutcome("Starting a new world was cancelled.", HubModWidgets.Muted);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!_destroyed)
+                {
+                    SetOutcome("No new world was started: " + ex.Message, HubModWidgets.Danger);
+                }
+            }
+            finally
+            {
+                _newWorldInFlight = false;
+                if (!_destroyed)
+                {
+                    _newWorldButton?.SetEnabled(true);
+                    RefreshAutoSaves();
+                    RefreshStartupSelection();
+                }
+            }
+        }
+
+        private void RefreshManualSaves()
+        {
+            if (_destroyed || _manualSaveRows == null || _playerActions == null)
+            {
+                return;
+            }
+
+            _manualSaveRows.Clear();
+            IReadOnlyList<string> slots;
+            try
+            {
+                slots = _playerActions.ListManualSaves();
+            }
+            catch (Exception ex)
+            {
+                Label error = HubModWidgets.MakeNote("Could not read the saved worlds: " + ex.Message);
+                error.name = "coreai-manual-saves-error";
+                _manualSaveRows.Add(error);
+                return;
+            }
+
+            bool hasRows = false;
+            foreach (string slot in slots ?? Array.Empty<string>())
+            {
+                if (string.IsNullOrEmpty(slot))
+                {
+                    continue;
+                }
+
+                _manualSaveRows.Add(BuildManualSaveRow(slot));
+                hasRows = true;
+            }
+
+            if (!hasRows)
+            {
+                Label empty = HubModWidgets.MakeNote("No saved worlds yet. Save the live world above.");
+                empty.name = "coreai-manual-saves-empty";
+                _manualSaveRows.Add(empty);
+            }
+        }
+
+        private VisualElement BuildManualSaveRow(string slot)
+        {
+            VisualElement panel = HubModWidgets.MakePanel();
+            panel.name = "coreai-manual-save-row-" + slot;
+            panel.style.flexDirection = FlexDirection.Row;
+            panel.style.flexWrap = Wrap.Wrap;
+            panel.style.alignItems = Align.Center;
+
+            Label name = HubModWidgets.MakeFieldLabel(slot);
+            name.style.unityFontStyleAndWeight = FontStyle.Bold;
+            name.style.flexGrow = 1f;
+            panel.Add(name);
+
+            Button loadButton = HubModWidgets.MakeButton("Load...", () => RequestManualLoad(slot));
+            loadButton.name = "coreai-manual-save-load-" + slot;
+            loadButton.tooltip = "Request this saved world, then review it in Pending confirmation.";
+            loadButton.SetEnabled(!_manualLoadsInFlight.Contains(slot));
+            panel.Add(loadButton);
+            return panel;
+        }
+
+        private void RequestManualLoad(string slot)
+        {
+            if (_destroyed || string.IsNullOrEmpty(slot) || !_manualLoadsInFlight.Add(slot))
+            {
+                return;
+            }
+
+            _manualSaveRows?.Q<Button>("coreai-manual-save-load-" + slot)?.SetEnabled(false);
+            RequestManualLoadAsync(slot);
+        }
+
+        private async void RequestManualLoadAsync(string slot)
+        {
+            bool requestQueued = false;
+            try
+            {
+                await _service.RequestManualLoadAsync(_actorContext, slot);
+                requestQueued = true;
+            }
+            catch (OperationCanceledException)
+            {
+                if (!_destroyed)
+                {
+                    SetOutcome("Saved world load request cancelled.", HubModWidgets.Muted);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!_destroyed)
+                {
+                    SetOutcome("Saved world load request failed: " + ex.Message, HubModWidgets.Danger);
+                }
+            }
+            finally
+            {
+                _manualLoadsInFlight.Remove(slot);
+                if (requestQueued)
+                {
+                    Refresh(true);
+                }
+                else
+                {
+                    RefreshManualSaves();
+                }
+            }
+        }
+
         private void SetOutcome(string text, Color color)
         {
             if (_outcome == null)
@@ -515,6 +861,7 @@ namespace CoreAI.Ai.Hub
             }
 
             RefreshAutoSaves();
+            RefreshManualSaves();
 
             IReadOnlyList<RbxPendingWorldLoadRequest> pending;
             try

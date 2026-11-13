@@ -620,6 +620,12 @@ namespace CoreAI.Ai.Hub
             }
         }
 
+        /// <summary>Goes back to the list as the Back button does: an unsaved draft keeps the editor open and says so.</summary>
+        internal void RequestClose()
+        {
+            Close();
+        }
+
         private void Close()
         {
             if (_destroyed)

@@ -331,5 +331,79 @@ namespace CoreAI.Tests.EditMode.ModFolders
             Assert.IsFalse(view.IsPrompting);
             CollectionAssert.AreEqual(new[] { "Utilities" }, accepted);
         }
+
+        /// <summary>
+        /// A long status line can no longer push a row's buttons out of the panel: the name and the detail shrink and cut
+        /// with an ellipsis (the detail first, both whole in a tooltip), and no button shrinks.
+        /// </summary>
+        [Test]
+        public void Row_LabelsEllipsizeAndShrink_ButtonsNever_AndTheTooltipHoldsTheWholeText()
+        {
+            const string longDetail = "id: sample_clicker  v1.5.0  caps: All  stored (disabled)  [bundled]";
+            ModFolderTree tree = SmallTree();
+            ModFolderTreeView view = new(new ModFolderTreeViewOptions
+            {
+                ModActions = new[] { "About", "Edit", "Export", "Apply update", "Delete" },
+                ModDetail = _ => longDetail
+            });
+            view.SetTree(tree);
+            VisualElement element = view.MakeRow();
+            ModFolderTreeView.RowElements row = (ModFolderTreeView.RowElements)element.userData;
+
+            view.BindRow(element, RowOfMod(tree, "racer"));
+
+            foreach (Label label in new[] { row.Name, row.Detail })
+            {
+                Assert.AreEqual(TextOverflow.Ellipsis, label.style.textOverflow.value);
+                Assert.AreEqual(Overflow.Hidden, label.style.overflow.value);
+                Assert.AreEqual(WhiteSpace.NoWrap, label.style.whiteSpace.value);
+                Assert.Greater(label.style.flexShrink.value, 0f);
+            }
+
+            Assert.AreEqual(0f, row.Detail.style.minWidth.value.value, "the status line may give all its room");
+            Assert.Greater(row.Detail.style.flexShrink.value, row.Name.style.flexShrink.value, "the detail gives way first");
+            Assert.AreEqual(longDetail, row.Detail.tooltip);
+            Assert.AreEqual("Lane Racer", row.Name.tooltip);
+            Assert.AreEqual(0f, row.Actions.style.flexShrink.value);
+            Assert.AreEqual(2 + 5 + 2, row.Actions.childCount, "Here, Move, the folder actions and the mod actions");
+            foreach (VisualElement button in row.Actions.Children())
+            {
+                Assert.AreEqual(0f, button.style.flexShrink.value, ((Button)button).text + " keeps its width");
+            }
+        }
+
+        /// <summary>
+        /// A view too narrow for a row's buttons puts every row on two fixed-height lines, the buttons on the second, and
+        /// goes back to one line only once it is wider than that by the hysteresis.
+        /// </summary>
+        [Test]
+        public void TwoLineRows_ANarrowView_PutsTheButtonsOnASecondLine_AndAWideOneBack()
+        {
+            ModFolderTreeView view = new();
+            view.SetTree(SmallTree());
+            ModFolderTreeView.RowElements row = (ModFolderTreeView.RowElements)view.MakeRow().userData;
+            float height = new ModFolderTreeViewOptions().RowHeight;
+
+            Assert.IsFalse(ModFolderTreeView.NeedsTwoLineRows(400f, 300f, false));
+            Assert.IsTrue(ModFolderTreeView.NeedsTwoLineRows(299f, 300f, false));
+            Assert.IsTrue(ModFolderTreeView.NeedsTwoLineRows(310f, 300f, true), "within the hysteresis it stays");
+            Assert.IsFalse(ModFolderTreeView.NeedsTwoLineRows(330f, 300f, true));
+            Assert.IsTrue(ModFolderTreeView.NeedsTwoLineRows(float.NaN, 300f, true), "no layout yet keeps the choice");
+
+            view.SetTwoLineRows(true);
+
+            Assert.IsTrue(view.UsesTwoLineRows);
+            Assert.AreEqual(height * 2f, view.ListView.fixedItemHeight);
+            Assert.AreEqual(CollectionVirtualizationMethod.FixedHeight, view.ListView.virtualizationMethod);
+            Assert.AreEqual(height * 2f, row.Root.style.height.value.value);
+            Assert.AreEqual(Wrap.Wrap, row.Root.style.flexWrap.value);
+            Assert.AreEqual(Length.Percent(100f), row.Actions.style.width.value, "the buttons take a line of their own");
+
+            view.SetTwoLineRows(false);
+
+            Assert.AreEqual(height, view.ListView.fixedItemHeight);
+            Assert.AreEqual(height, row.Root.style.height.value.value);
+            Assert.AreEqual(Wrap.NoWrap, row.Root.style.flexWrap.value);
+        }
     }
 }

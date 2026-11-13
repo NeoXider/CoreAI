@@ -84,6 +84,33 @@ namespace CoreAI.Tests.EditMode.RbxApi.BlockWorld
             CollectionAssert.AreNotEqual(first, other);
         }
 
+        /// <summary>
+        /// A new world from the Hub carries <c>CoreAIWorldSeed</c>: without a <c>BlockWorldSeed</c> the mod takes it (and
+        /// publishes it as its seed), and a world that has its own <c>BlockWorldSeed</c> keeps that one.
+        /// </summary>
+        [Test]
+        public void P6_World_TakesTheHostsNewWorldSeed_UnlessItHasItsOwn()
+        {
+            using (BlockWorldTestWorld fresh = new())
+            {
+                fresh.SetAttribute("CoreAIWorldSeed", 4242d);
+                fresh.Load(Mod);
+                Assert.AreEqual(4242d, fresh.Number("BlockWorldSeed"), "the new world's seed");
+            }
+
+            using (BlockWorldTestWorld own = new())
+            {
+                own.SetAttribute("CoreAIWorldSeed", 4242d);
+                own.SetAttribute("BlockWorldSeed", 7d);
+                own.Load(Mod);
+                Assert.AreEqual(7d, own.Number("BlockWorldSeed"), "a world's own seed wins");
+            }
+
+            using BlockWorldTestWorld plain = new();
+            plain.Load(Mod);
+            Assert.AreEqual(1337d, plain.Number("BlockWorldSeed"), "no seed at all is the default");
+        }
+
         [Test]
         public void P6_World_TheStreamedWorld_HasHillsSeaShoreStoneAndTrees()
         {

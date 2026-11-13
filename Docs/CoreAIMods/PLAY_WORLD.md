@@ -120,7 +120,7 @@ on) keeps it:
 - A saved world that cannot be opened at a start (a damaged file, a mod the restore refuses) is kept: the default
   world opens, the state is `"failed"` with the reason, and nothing of this start is recorded until the player
   types `/save`, which keeps this world instead and replaces the saved one, or chooses "Start with the default world
-  next time" on the Hub's World Loads page.
+  next time" on the Hub's World page.
 - A world generator marks its own Terrain writes by setting the workspace attribute `CoreAITerrainGenerating` to
   true around them: cells made from a seed come back from it, so streaming alone records nothing. A Terrain write
   made while it is false (a player's block, a falling block) marks the world for its next record.

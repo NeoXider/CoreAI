@@ -25,7 +25,7 @@ namespace CoreAI.Ai.Hub
     /// UI or the AI's manage_mods tool) and via a manual Refresh button. Content is built lazily in
     /// <see cref="CreatePageContent"/>; everything is retained-mode (no OnGUI).
     /// </summary>
-    public sealed class HubModsPage : IHubPage, IHubEscapeHandler
+    public sealed class HubModsPage : IHubPage, IHubEscapeHandler, CoreAI.Hub.UI.IHubSubTabRoot
     {
         /// <summary>Default registry id for the Mods page.</summary>
         public const string DefaultPageId = "coreai.hub.mods";
@@ -150,8 +150,41 @@ namespace CoreAI.Ai.Hub
         /// <inheritdoc />
         public Func<object> CreatePageContent => Build;
 
+        /// <summary>Whether the mod editor replaces the list (false before the page content is built).</summary>
+        internal bool IsEditorOpen => _editorOpen;
+
         /// <inheritdoc />
         public bool TryHandleEscape() => !_destroyed && _editorOpen && (_editor?.TryHandleEscape() ?? false);
+
+        /// <summary>
+        /// The "Mods" sub-tab was pressed: closes the About panel and the editor and shows the list. An editor with an
+        /// unsaved draft stays open and offers its own "Discard draft and go back", as its Back button does.
+        /// </summary>
+        public void ReturnToRoot()
+        {
+            if (_destroyed || _root == null)
+            {
+                return;
+            }
+
+            CloseAbout();
+            if (_editorOpen)
+            {
+                _editor?.RequestClose();
+            }
+        }
+
+        /// <summary>Opens the editor on a new mod, as the "Add" button does.</summary>
+        internal void OpenNewEditorForTests()
+        {
+            OpenNewEditor();
+        }
+
+        /// <summary>Opens the editor on mod <paramref name="id"/>, as its Edit button does.</summary>
+        internal void OpenEditEditorForTests(string id)
+        {
+            OpenEditEditor(id);
+        }
 
         /// <inheritdoc />
         public void OnActivated()

@@ -543,7 +543,7 @@ namespace CoreAI.Mods.WorldPackages
                    + "the same call fails until the world fits again. Ways back within the package limits: "
                    + "the player can undo the last AI change (it restores the smaller world kept in memory), "
                    + "forget a mod that is no longer needed (manage_mods action 'forget'), or load a smaller "
-                   + "save or autosave on the World Loads page.";
+                   + "save or autosave on the Hub's World page.";
         }
 
         private async Task<RbxPreparedAutoSave> PrepareBehindAsync(
