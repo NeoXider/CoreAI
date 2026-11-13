@@ -37,7 +37,12 @@ namespace CoreAI.Mods.WorldPackages
         /// The steps running for at least <paramref name="olderThan"/>, oldest first, as one line
         /// (<c>lane: step for 42 s; ...</c>); empty when none is.
         /// </summary>
-        internal static string DescribeStuck(TimeSpan olderThan)
+        /// <param name="startedSince">
+        /// Only steps that began at or after this <see cref="Stopwatch"/> timestamp; 0 for all. WHY: the steps are
+        /// process-wide, so a world session reports only its own era, not a step an earlier session (an earlier test
+        /// fixture) left running.
+        /// </param>
+        internal static string DescribeStuck(TimeSpan olderThan, long startedSince = 0L)
         {
             long now = Stopwatch.GetTimestamp();
             StringBuilder text = null;
@@ -46,7 +51,7 @@ namespace CoreAI.Mods.WorldPackages
                 foreach (Step step in Active)
                 {
                     double seconds = (now - step.Since) / (double)Stopwatch.Frequency;
-                    if (seconds < olderThan.TotalSeconds)
+                    if (seconds < olderThan.TotalSeconds || step.Since < startedSince)
                     {
                         continue;
                     }

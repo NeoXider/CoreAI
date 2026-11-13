@@ -24,6 +24,19 @@ namespace CoreAI.Tests.EditMode.RbxApi.Acceptance
         }
 
         [Test]
+        public void AStepFromAnEarlierSession_IsNotNamed_ByALaterOne()
+        {
+            using (WorldSaveStages.Enter("autosave", "'stages_test_earlier' left running"))
+            {
+                long laterSession = System.Diagnostics.Stopwatch.GetTimestamp() + 1L;
+                StringAssert.DoesNotContain("'stages_test_earlier'",
+                    WorldSaveStages.DescribeStuck(TimeSpan.Zero, laterSession), "another session's step");
+                StringAssert.Contains("'stages_test_earlier'", WorldSaveStages.DescribeStuck(TimeSpan.Zero),
+                    "still named without the session bound");
+            }
+        }
+
+        [Test]
         public void AStepYoungerThanTheThreshold_IsNotNamed_NegativeTwin()
         {
             using (WorldSaveStages.Enter("record", "'stages_test_world' writes the record"))

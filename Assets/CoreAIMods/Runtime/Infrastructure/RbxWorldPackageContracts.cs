@@ -3937,6 +3937,7 @@ namespace CoreAI.Mods.WorldPackages
         internal static readonly TimeSpan StuckSaveReportAfter = TimeSpan.FromSeconds(20d);
 
         private long _nextStuckCheckTicks;
+        private readonly long _createdTicks = System.Diagnostics.Stopwatch.GetTimestamp();
         private string _lastStuckReport = "";
 
         /// <summary>
@@ -3952,7 +3953,7 @@ namespace CoreAI.Mods.WorldPackages
             }
 
             _nextStuckCheckTicks = now + System.Diagnostics.Stopwatch.Frequency * 2L;
-            string stuck = WorldSaveStages.DescribeStuck(StuckSaveReportAfter);
+            string stuck = WorldSaveStages.DescribeStuck(StuckSaveReportAfter, _createdTicks);
             // WHY the seconds left out of the comparison: they grow every check, and one report per stuck set is enough.
             string key = System.Text.RegularExpressions.Regex.Replace(stuck, @" for \d+ s", "");
             if (string.Equals(key, _lastStuckReport, StringComparison.Ordinal))
