@@ -854,6 +854,16 @@ Owner's questions and decisions on the Block World (2026-11-11):
         get the same; the F2 panel and the overlay keep the input enabled. Tests: a line sent during a tool call
         reaches the next request; a line sent after the last answer starts one more round; Stop still cancels.
         Not started (weekly limits).
+      - **The Hub's "Reset World" does not reset the Block World (owner, 2026-11-13: all mods off + Reset World,
+        nothing cleared).** `WorldStateHubPage` ("World State", "Reset all AI/mod-spawned world objects and delete
+        the save file") drives the legacy `IWorldStateManager` - the C# `world_command` objects, the "[WorldState]
+        Saved 0 objects" lines - not the Rbx world (Terrain cells, Workspace, the kept-world record and journal).
+        And turning `blockworld_world` off stops the generator but leaves its cells: Terrain is world data, not the
+        mod's objects (as in Roblox, where disabling a script does not undo what it made). The only reset today is
+        World Loads -> "Start with the default world next time", which acts on the next start. Wanted: one honest
+        "New world" in the Hub for a kept world (confirm; clear the startup selection and journals; reload the
+        default world now, the mods regenerate it), and the legacy page hidden or renamed where no legacy objects
+        exist. Belongs with the World tab as a Roblox Explorer (owner's wish).
       - **The Block World on the Lua chat by default.** `coreai_chat` is installed and can be turned on from
         the Hub's Mods page (`useLuaChat` on `BlockWorldDemoModule` turns it on at the start). What still
         differs from the C# overlay is listed in `dev-docs/CHAT_AS_LUA_MOD_DESIGN.md` 5.1 (a host turn's
