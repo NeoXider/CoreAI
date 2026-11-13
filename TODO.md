@@ -817,6 +817,34 @@ Owner's questions and decisions on the Block World (2026-11-11):
         survives a reload; it lives only in the session scratchpad, not in the repository. Why the first one's
         68 CFrame writes a frame cost over 500 ms in WebGL is open - measure a Part.CFrame write there.
         `BasePart.CanQuery` is NOT_IMPLEMENTED (a pig's body parts wanted it).
+      - **Goal mode: an agent works until it says the goal is done (owner's design, 2026-11-13; plan only, not
+        started; build on "Send a message while the model's turn runs").** Today a turn ends when the model
+        answers without a tool call. Plan:
+        - A turn-ending mode per agent role, chosen in CoreAI (role definition / settings asset, changeable at
+          runtime): **Default** (an answer without tool calls ends the turn, as now), **Goal** (the turn ends only
+          with `goal_done` "done, here is the result" or `goal_blocked` "cannot, why, what I need"),
+          **Autonomous** (Goal without the chat: the report goes to the agent that started it - the orchestrator's
+          background sub-agents).
+        - `/goal <text>` in a chat switches that chat into Goal mode for one goal. The model is told in its
+          instructions and in the goal tools' descriptions that it is in goal mode and ends with `goal_done`.
+          When it answers in text without `goal_done`, the harness calls it again with a short reminder: the goal,
+          what is done so far, "continue, or call goal_done / goal_blocked to stop".
+        - The player's messages during a goal reach the model at the next step (the mid-turn delivery).
+        - Stop cancels the turn and drops the goal; the next turn is in Default mode again.
+        - The chat status shows it: "Goal: castle - step 12 - 6 min".
+        - Limits on rounds, time and tokens, configurable per role and in the settings asset, and changeable at
+          runtime (DSH has the same knobs: `defaultMaxGoalRounds`); at a limit the model writes a summary of what
+          it managed instead of stopping silently.
+        - Stagnation: the same tool call repeated or no world change for N rounds stops the goal with a question
+          to the player.
+        - Evidence for `goal_done` only where it fits: a goal that changes the world (a build) attaches a check (a
+          screenshot, a read of the world); a goal to study or think does not.
+        - A goal survives F5 together with the chat history (depends on what the session-persistence check finds).
+        - Every agent loop gets it, not only `SmartToolCallingChatClient`: the chat role (SmartChat is the default
+          chat role in CoreAI and most demos; orchestrator mode is off by default and on only in the Block World),
+          the orchestrator's Team chat agent and its sub-agents, the Lua `AIService:GetAssistant()`, MCP agent turns.
+        - Reference: DSH's goal tools (round cap, recover the goal at the start of a round, done only with
+          evidence).
       - **Block World: the player's position is not kept** - `blockworld_world` puts the character at
         `BlockWorldSpawn` at every start (owner: "местоположение тоже сбрасывается"). A Lua fix: keep the last
         position in the world (an attribute written when the player stops, not every frame, so it does not keep the
