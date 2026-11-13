@@ -24,6 +24,8 @@ Assets/CoreAIMods/Runtime/RbxApi/Unity/Resources/CoreAIRbxMaterials/NoiseShader/
 # Visual Studio / Unity generated project files are Windows-native.
 *.sln text eol=crlf
 *.csproj text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
 
 # Unity YAML assets.
 *.meta text eol=lf
