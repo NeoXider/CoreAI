@@ -856,6 +856,19 @@ Owner's questions and decisions on the Block World (2026-11-11):
         CoreAI's defaults. To decide: its role and tool profile, when it delegates, how the existing roles
         (Programmer, PlainChat, SmartChat, CoreMechanic...) become its sub-agents or skills, what a scene still
         configures, history and persistence of that one session, and how goal mode and mid-turn messages ride on it.
+      - **The chat session must survive F5 (owner, 2026-11-13: "сессия должна сохраняться").** Today neither chat
+        keeps it in the Block World WebGL build: both the T overlay (`CoreAiOverlayChatModule` roleId Programmer in
+        `BlockWorld.unity`) and the F2 chat (`HubChatPage.DefaultRoleId` = Programmer) talk to Programmer, whose
+        `WithChatHistory = false` (`BuiltInRoleDefinitions.cs`), and chat turns borrow history with
+        `PersistChatHistory` false on purpose (`AiOrchestrator.ResolveRoleConfigForRequest`, "conversation starts
+        empty after a page reload") - so the model remembers nothing and the window is empty after F5. The T feed
+        (`ChatFeed`) is memory-only and never loads from the store; F2 loads persisted history on start
+        (`LoadPersistedChatOnStartup`) but finds none for Programmer. Only SmartChat/PlainChat persist (to IndexedDB
+        through `FileAgentMemoryStore`). Team-mode sub-agent sessions are memory-only. Wanted: the player's chat
+        session (what the model remembers and what both windows show) is kept and restored after a reload, with
+        compaction keeping it bounded; decide it together with "One chat agent for everything" (persist that one
+        agent's session, not Programmer's tool turns), then the T overlay fills its feed from the persisted
+        history at start, and running goals and sub-agent sessions come back too or are reported as ended.
       - **Block World: the player's position is not kept** - `blockworld_world` puts the character at
         `BlockWorldSpawn` at every start (owner: "местоположение тоже сбрасывается"). A Lua fix: keep the last
         position in the world (an attribute written when the player stops, not every frame, so it does not keep the
