@@ -837,12 +837,11 @@ Owner's questions and decisions on the Block World (2026-11-11):
           it managed instead of stopping silently.
         - Stagnation: the same tool call repeated or no world change for N rounds stops the goal with a question
           to the player.
-        - Evidence for `goal_done`, two layers (as DSH and Claude Code do it): a soft rule in the instructions
-          ("done only when the result is shown: a read of the world, a screenshot, a test" - DSH's goal prompt says
-          "mark complete only when the objective and acceptance criteria are evidenced"; the model judges), and an
-          optional hard check like Claude Code's Stop hook: a verifier the game registers (C# `IGoalVerifier` or a Lua
-          callback) may refuse `goal_done` with a reason, and the model goes on with that reason. A goal to study or
-          think has no verifier, so its `goal_done` is accepted.
+        - Evidence for `goal_done` as in DSH (owner's decision): a soft rule in the instructions only ("done when
+          the result is shown: a read of the world, a screenshot, a test"; DSH: "mark complete only when the
+          objective and acceptance criteria are evidenced"), and the model judges. No hard check by the harness: a
+          small model that could not do the goal would hardly close it anyway, and a check would get in a large
+          model's way. A game verifier (like Claude Code's Stop hook) only if a game asks for one later.
         - A goal survives F5 together with the chat history (depends on what the session-persistence check finds).
         - Every agent loop gets it, not only `SmartToolCallingChatClient`: the chat role (SmartChat is the default
           chat role in CoreAI and most demos; orchestrator mode is off by default and on only in the Block World),
