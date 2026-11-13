@@ -74,6 +74,8 @@ namespace CoreAI.Chat
         private const string CollapsedClassName = "coreai-collapsed";
         private const string CollapsedPrefsKey = "CoreAI.Chat.Collapsed";
         private const string SendButtonStopClassName = "coreai-chat-send-button-stop";
+        private const string StopButtonElementName = "coreai-chat-stop";
+        private const string StopButtonClassName = "coreai-chat-stop-button";
         private const string TypingDotsElementName = "coreai-typing-dots";
         private const string TypingDotsClassName = "coreai-typing-dots";
         private const string TypingDotsPulseClassName = "coreai-typing-dots--pulse";
@@ -142,6 +144,13 @@ namespace CoreAI.Chat
         protected ScrollView MessageScroll;
         protected TextField InputField;
         protected Button SendButton;
+
+        /// <summary>
+        /// Stops the running turn; shown only while one runs (and Stop Generation is on), next to
+        /// <see cref="SendButton"/>, which stays a send control so the player can write while the model works. Bound
+        /// from the UXML element <c>coreai-chat-stop</c>, or created beside the send button when a custom UXML has none.
+        /// </summary>
+        protected Button StopButton;
         protected Button ClearButton;
         protected Button CollapseButton;
         protected Button FabButton;
@@ -178,6 +187,18 @@ namespace CoreAI.Chat
         private bool _streamingRenderCapReached;
 
         private bool _isSending; // WHY: prevents Shift+Enter sending while AI is busy
+
+        /// <summary>
+        /// The running turn's inbox: a line the player sends while it runs goes here and reaches the model at the
+        /// turn's next step (<see cref="LlmTurnInbox"/>). Null between turns.
+        /// </summary>
+        private LlmTurnInbox _activeInbox;
+
+        /// <summary>
+        /// Lines sent while the panel was still busy but the turn no longer took lines (it was already ending); they
+        /// start a turn of their own when it is over.
+        /// </summary>
+        private readonly List<string> _lateLines = new();
         private bool _stopRequestedByUser;
         private bool _isStopping;
         private bool _isClearing;
@@ -1255,6 +1276,13 @@ namespace CoreAI.Chat
                 SendButton.focusable = false;
             }
 
+            StopButton = ResolveOrCreateStopButton();
+            if (StopButton != null)
+            {
+                StopButton.RegisterCallback<ClickEvent>(OnStopClicked);
+                StopButton.focusable = false;
+            }
+
             if (ClearButton != null)
             {
                 ClearButton.RegisterCallback<ClickEvent>(OnClearClicked);
@@ -1423,9 +1451,49 @@ namespace CoreAI.Chat
                 : root.Q<VisualElement>("coreai-chat-root");
         }
 
+        /// <summary>
+        /// The UXML's stop button, or one made next to the send button for a custom UXML that predates it; null when
+        /// there is no send button to stand beside.
+        /// </summary>
+        private Button ResolveOrCreateStopButton()
+        {
+            Button stop = Root?.Q<Button>(StopButtonElementName);
+            if (stop != null || SendButton?.parent == null)
+            {
+                return stop;
+            }
+
+            stop = new Button { name = StopButtonElementName };
+            stop.AddToClassList("coreai-chat-send-button");
+            stop.AddToClassList(SendButtonStopClassName);
+            stop.AddToClassList(StopButtonClassName);
+            stop.style.display = DisplayStyle.None;
+            VisualElement row = SendButton.parent;
+            row.Insert(row.IndexOf(SendButton), stop);
+            return stop;
+        }
+
+        private void OnStopClicked(ClickEvent evt)
+        {
+            MarkInputEventHandled(evt);
+            try
+            {
+                if (Options.EnableStopGeneration)
+                {
+                    StopActiveGeneration();
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(GameLogFeature.Core, $"[CoreAiChatPanel] Stop button handler failed: {ex}");
+                ResetBusyStateWithoutCancellation();
+            }
+        }
+
         private void UnbindUiCallbacks(bool ignoreReleasedElements)
         {
             TryUnregisterCallback<ClickEvent>(SendButton, OnSendClicked, ignoreReleasedElements);
+            TryUnregisterCallback<ClickEvent>(StopButton, OnStopClicked, ignoreReleasedElements);
             TryUnregisterCallback<ClickEvent>(ClearButton, OnClearClicked, ignoreReleasedElements);
             TryUnregisterCallback<ClickEvent>(CollapseButton, OnCollapseClicked, ignoreReleasedElements);
             TryUnregisterCallback<ClickEvent>(FabButton, OnFabClicked, ignoreReleasedElements);
@@ -1469,6 +1537,7 @@ namespace CoreAI.Chat
             MessageScroll = null;
             InputField = null;
             SendButton = null;
+            StopButton = null;
             ClearButton = null;
             CollapseButton = null;
             FabButton = null;
@@ -2571,6 +2640,9 @@ namespace CoreAI.Chat
             // on, so it stops touching the transcript/busy state under its own logic — this is what makes
             // the "second error message" defect impossible rather than merely suppressed.
             Interlocked.Increment(ref _currentTurnGeneration);
+            _activeInbox?.Close();
+            _activeInbox = null;
+            _lateLines.Clear();
 
             string roleId = ActiveRoleId;
             CancellationTokenSource activeRequestCts = _activeRequestCts;
@@ -2646,26 +2718,19 @@ namespace CoreAI.Chat
             return isSending || isStreaming || isStopping || isClearing;
         }
 
-        private void TrySendInput(bool stopIfBusy)
+        private void TrySendInput(bool fromButton)
         {
-            if (IsRequestInProgress)
-            {
-                if (stopIfBusy && Options.EnableStopGeneration)
-                {
-                    StopActiveGeneration();
-                }
-
-                return;
-            }
-
-            if (IsActionInProgress())
+            // WHY a running turn no longer blocks the input: the line goes to the turn's inbox and reaches the model
+            // at its next step, without interrupting the stream or the thinking. Stopping is the stop button's (and
+            // Escape's) job alone.
+            bool midTurn = IsRequestInProgress && !_isStopping && !_isClearing;
+            if (!midTurn && IsActionInProgress())
             {
                 return;
             }
 
-            // WHY: even if the button is disabled, TextField key events can still fire — never send
-            // while an AI request/stream is in progress.
-            if (IsActionInProgress() || (SendButton != null && !SendButton.enabledSelf))
+            // WHY: even if the button is disabled, TextField key events can still fire.
+            if (SendButton != null && !SendButton.enabledSelf)
             {
                 return;
             }
@@ -2697,7 +2762,74 @@ namespace CoreAI.Chat
             AddMessage(text, true);
             OnUserMessageSent?.Invoke(text);
 
+            if (midTurn)
+            {
+                PostToRunningTurn(text);
+                return;
+            }
+
             SendToAI(text);
+        }
+
+        /// <summary>
+        /// Hands a line the player sent during a turn to that turn: its inbox delivers it at the model's next step. A
+        /// turn that no longer takes lines (it is ending) leaves the line for a turn of its own afterwards.
+        /// </summary>
+        private void PostToRunningTurn(string text)
+        {
+            LlmTurnInbox inbox = _activeInbox;
+            if (inbox != null && inbox.TryPost(text))
+            {
+                return;
+            }
+
+            _lateLines.Add(text);
+        }
+
+        /// <summary>
+        /// Ends <paramref name="inbox"/> with its turn. After an answer, lines the model never saw (and lines sent while
+        /// the turn was ending) start a turn of their own; after a stop or a failure the inbox's lines stay for the
+        /// orchestrator, which records them in the history for the next turn the player starts.
+        /// </summary>
+        private void EndTurnInbox(LlmTurnInbox inbox, bool answered)
+        {
+            if (inbox == null)
+            {
+                return;
+            }
+
+            inbox.Close();
+            if (ReferenceEquals(_activeInbox, inbox))
+            {
+                _activeInbox = null;
+            }
+
+            List<string> next = new();
+            if (answered)
+            {
+                next.AddRange(inbox.TakeUndelivered());
+            }
+
+            next.AddRange(_lateLines);
+            _lateLines.Clear();
+            if (next.Count == 0 || _destroyed || !CanStartAgentTurn())
+            {
+                return;
+            }
+
+            string joined = string.Join("\n", next);
+            if (_activeInbox != null && _activeInbox.TryPost(joined))
+            {
+                return;
+            }
+
+            if (IsActionInProgress())
+            {
+                _lateLines.Add(joined);
+                return;
+            }
+
+            SendToAI(joined);
         }
 
         /// <summary>
@@ -3111,6 +3243,8 @@ namespace CoreAI.Chat
             // is disposed, while a token copy keeps answering IsCancellationRequested. Everything after the first
             // await - the catch included - uses this copy, never the source.
             CancellationToken requestToken = CancellationToken.None;
+            LlmTurnInbox turnInbox = new();
+            bool answered = false;
 
             try
             {
@@ -3118,6 +3252,7 @@ namespace CoreAI.Chat
                     GetOrCreateCancellationTokenSource().Token, cancellationToken);
                 requestToken = requestCts.Token;
                 _activeRequestCts = requestCts;
+                _activeInbox = turnInbox;
                 // WHY the host deadline is not linked in here: requestToken is the "somebody asked to stop" side of
                 // the classification below and of the orchestrator's metrics. The service links it with its own
                 // idle deadline and the host deadline into the operation token, and reports a fired deadline at a
@@ -3147,6 +3282,7 @@ namespace CoreAI.Chat
                 AiTaskRequest request = BuildAiTaskRequest(userTextForModel, roleId);
                 request.ActorContext = _chatService.BindActorContext(request.ActorContext, roleId);
                 _activeRequestActor = request.ActorContext;
+                request.Inbox = turnInbox;
                 if (AiUserMessageBuilder.HasAttachments(attachments))
                 {
                     request.Attachments = attachments;
@@ -3156,12 +3292,11 @@ namespace CoreAI.Chat
                 bool useStreaming = ShouldUseStreamingForRole(roleId, uiStreaming) &&
                                     _chatService.IsStreamingEnabled(roleId, uiStreaming);
 
-                if (useStreaming)
-                {
-                    return await SendStreamingAsync(request, turnGeneration, outcome, requestToken, deadlineToken);
-                }
-
-                return await SendNonStreamingAsync(request, turnGeneration, requestToken, deadlineToken, outcome);
+                string? answer = useStreaming
+                    ? await SendStreamingAsync(request, turnGeneration, outcome, requestToken, deadlineToken)
+                    : await SendNonStreamingAsync(request, turnGeneration, requestToken, deadlineToken, outcome);
+                answered = answer != null && !requestToken.IsCancellationRequested;
+                return answer;
             }
             catch (OperationCanceledException error)
             {
@@ -3251,6 +3386,10 @@ namespace CoreAI.Chat
                     UpdateSendButtonVisualState();
                     InputField?.schedule.Execute(FocusInputField);
                 }
+
+                // WHY last: a line left for a turn of its own starts one, and that turn must find this turn's busy
+                // state already released.
+                EndTurnInbox(turnInbox, answered);
             }
         }
 
@@ -4388,6 +4527,11 @@ namespace CoreAI.Chat
             try
             {
                 _stopRequestedByUser = true;
+                // WHY closed before the cancel: the lines already in it stay there for the orchestrator to keep in
+                // the history, and a line sent after the stop is a turn of its own, never a continuation.
+                _activeInbox?.Close();
+                _activeInbox = null;
+                _lateLines.Clear();
                 string roleId = ActiveRoleId;
                 CancellationTokenSource activeRequestCts = _activeRequestCts;
 
@@ -4534,113 +4678,60 @@ namespace CoreAI.Chat
             // RaiseBusyStateChangedIfChanged() everywhere.
             RaiseBusyStateChangedIfChanged();
 
-            if (SendButton == null)
-            {
-                return;
-            }
-
             bool isBusy = IsRequestInProgress;
             bool stopEnabled = Options.EnableStopGeneration;
             ICoreAiChatTextOptions textOptions = TextOptions;
-            SendButton.text =
-                GetSendButtonText(isBusy, stopEnabled, textOptions.SendButtonText, textOptions.StopButtonText);
-            SendButton.tooltip = GetSendButtonTooltip(
-                isBusy,
-                stopEnabled,
-                textOptions.SendButtonTooltip,
-                textOptions.StopButtonTooltip);
-            SendButton.SetEnabled(ShouldSendButtonBeEnabled(
-                _isSending,
-                _isStreaming,
-                _isStopping,
-                _isClearing,
-                stopEnabled));
-
-            if (isBusy && stopEnabled)
+            if (SendButton != null)
             {
-                SendButton.AddToClassList(SendButtonStopClassName);
-            }
-            else
-            {
+                SendButton.text = TextOrDefault(textOptions.SendButtonText, CoreAiChatOptions.DefaultSendButtonText);
+                SendButton.tooltip =
+                    TextOrDefault(textOptions.SendButtonTooltip, CoreAiChatOptions.DefaultSendButtonTooltip);
+                SendButton.SetEnabled(ShouldSendButtonBeEnabled(_isStopping, _isClearing));
                 SendButton.RemoveFromClassList(SendButtonStopClassName);
             }
-        }
 
-        internal static string GetSendButtonText(bool isBusy)
-        {
-            return GetSendButtonText(isBusy, true);
-        }
-
-        internal static string GetSendButtonText(bool isBusy, bool stopGenerationEnabled)
-        {
-            return GetSendButtonText(
-                isBusy,
-                stopGenerationEnabled,
-                CoreAiChatOptions.DefaultSendButtonText,
-                CoreAiChatOptions.DefaultStopButtonText);
-        }
-
-        internal static string GetSendButtonText(
-            bool isBusy,
-            bool stopGenerationEnabled,
-            string sendText,
-            string stopText)
-        {
-            return isBusy && stopGenerationEnabled
-                ? TextOrDefault(stopText, CoreAiChatOptions.DefaultStopButtonText)
-                : TextOrDefault(sendText, CoreAiChatOptions.DefaultSendButtonText);
-        }
-
-        internal static string GetSendButtonTooltip(bool isBusy)
-        {
-            return GetSendButtonTooltip(isBusy, true);
-        }
-
-        internal static string GetSendButtonTooltip(bool isBusy, bool stopGenerationEnabled)
-        {
-            return GetSendButtonTooltip(
-                isBusy,
-                stopGenerationEnabled,
-                CoreAiChatOptions.DefaultSendButtonTooltip,
-                CoreAiChatOptions.DefaultStopButtonTooltip);
-        }
-
-        internal static string GetSendButtonTooltip(
-            bool isBusy,
-            bool stopGenerationEnabled,
-            string sendTooltip,
-            string stopTooltip)
-        {
-            return isBusy && stopGenerationEnabled
-                ? TextOrDefault(stopTooltip, CoreAiChatOptions.DefaultStopButtonTooltip)
-                : TextOrDefault(sendTooltip, CoreAiChatOptions.DefaultSendButtonTooltip);
-        }
-
-        internal static bool ShouldSendButtonBeEnabled(bool isSending, bool isStreaming, bool isStopping,
-            bool isClearing)
-        {
-            return ShouldSendButtonBeEnabled(isSending, isStreaming, isStopping, isClearing, true);
-        }
-
-        internal static bool ShouldSendButtonBeEnabled(
-            bool isSending,
-            bool isStreaming,
-            bool isStopping,
-            bool isClearing,
-            bool stopGenerationEnabled)
-        {
-            // WHY: while a request is running the button is the stop control, so it must stay clickable.
-            if (isStopping || isClearing)
+            if (StopButton != null)
             {
-                return false;
+                StopButton.text = GetStopButtonText(textOptions.StopButtonText);
+                StopButton.tooltip = GetStopButtonTooltip(textOptions.StopButtonTooltip);
+                StopButton.SetEnabled(ShouldStopButtonBeEnabled(_isStopping, _isClearing));
+                StopButton.style.display = ShouldShowStopButton(isBusy, stopEnabled)
+                    ? DisplayStyle.Flex
+                    : DisplayStyle.None;
             }
+        }
 
-            if (!stopGenerationEnabled && (isSending || isStreaming))
-            {
-                return false;
-            }
+        /// <summary>The stop button's text: <paramref name="stopText"/>, or the default when it is null.</summary>
+        internal static string GetStopButtonText(string stopText = null)
+        {
+            return TextOrDefault(stopText, CoreAiChatOptions.DefaultStopButtonText);
+        }
 
-            return true;
+        /// <summary>The stop button's tooltip: <paramref name="stopTooltip"/>, or the default when it is null.</summary>
+        internal static string GetStopButtonTooltip(string stopTooltip = null)
+        {
+            return TextOrDefault(stopTooltip, CoreAiChatOptions.DefaultStopButtonTooltip);
+        }
+
+        /// <summary>The stop button is on screen while a turn runs, when Stop Generation is on.</summary>
+        internal static bool ShouldShowStopButton(bool isBusy, bool stopGenerationEnabled)
+        {
+            return isBusy && stopGenerationEnabled;
+        }
+
+        /// <summary>The stop button takes a click unless a stop or a clear is already under way.</summary>
+        internal static bool ShouldStopButtonBeEnabled(bool isStopping, bool isClearing)
+        {
+            return !isStopping && !isClearing;
+        }
+
+        /// <summary>
+        /// The send button takes a click unless a stop or a clear is under way. A running turn does not disable it:
+        /// what the player sends then goes to the turn's inbox and reaches the model at its next step.
+        /// </summary>
+        internal static bool ShouldSendButtonBeEnabled(bool isStopping, bool isClearing)
+        {
+            return !isStopping && !isClearing;
         }
 
         public void ShowTypingIndicator()

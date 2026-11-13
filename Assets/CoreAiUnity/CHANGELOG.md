@@ -10,6 +10,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Breaking
 
+- **The chat panel's send button stays a send button while a turn runs.** A separate Stop button (`coreai-chat-stop`, created beside `coreai-chat-send` when a custom UXML has none) and Esc stop the turn; Send and Enter during a turn send the line to the running turn (`LlmTurnInbox`), which reads it at its next step. With `EnableStopGeneration` off the Stop button stays hidden and sending still works.
 - **The in-world chat overlay is on by default.** Every `CoreAILifetimeScope` shows it over the running game; T, Enter and `/` open its input while no CoreAI text field has focus. A host switches it off with `ChatOverlay.Enabled = false` (Inspector field `chatOverlay`).
 - **The default look is on by default.** Every scene with a `CoreAILifetimeScope` gets tonemapping, bloom on bright surfaces, anti-aliasing, a procedural sky, a sky-only reflection probe, fog and shadow options. A host that owns its rendering sets `CoreAILifetimeScope.Look.Mode = LookMode.Off`.
 - **New `CoreAISettingsAsset`s start with the universal prefix.** A freshly created asset carries the 4-rule `CRITICAL RULES FOR ALL AGENTS` block (`CoreAISettings.DefaultUniversalSystemPromptPrefix`), the same default as the portable core; existing assets keep the prefix they store.
@@ -26,6 +27,7 @@ Unity host: **CoreAI.Source** build, EditMode / PlayMode tests, Editor menus, do
 
 ### Added
 
+- **The Hub chat (F2) sends while the model works.** The line shows at once as the player's bubble and goes to the running turn's inbox; a line the answered turn never saw runs as a turn of its own afterwards, and after a stop the undelivered lines stay in the role's history. `CoreAiChatServiceTurnSender` passes the overlay's inbox to the orchestrator.
 - `CoreAILifetimeScope.OrchestratorMode` (set before the scope builds) switches orchestrator mode on or off and picks its style and budgets for one scene; `OrchestratorModeChatPresenter` forwards tool names and outcomes to the sub-agents and runs their wake turns as overlay host turns. Hosts that already enable the mode now get Team style. `ORCHESTRATOR_MODE.md` is rewritten for both styles.
 - WebGL: `CoreAiWebGlPersistence.IsFlushIdle`, `OtherPagesSharingStorage` and `GuardPageLeave` (the kept world's save state and leave guard use them). `RuntimeUiElement.TryMeasureText` measures a text element's text.
 - **Chat overlay: stepping aside.** While another surface claims the chat (`IChatOverlaySurfaceSwitch`), the overlay's view is detached, no keys are read and its built-in commands are given back; the installer registers the switch and `ChatAgentTurns`. `RuntimeUiElement.FocusForTyping` focuses a field for typing and swallows the opening keystroke. `CHAT_OVERLAY.md` has the new section.

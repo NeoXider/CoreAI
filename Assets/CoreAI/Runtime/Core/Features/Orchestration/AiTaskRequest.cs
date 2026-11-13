@@ -220,6 +220,14 @@ namespace CoreAI.Ai
         public LlmRequestProgress Progress { get; set; }
 
         /// <summary>
+        /// Lines the player sends while this turn runs; <c>null</c> (the default) takes none. The tool loop appends them
+        /// as user messages at its next step boundary, and the orchestrator records them in the role's history in the
+        /// order the model saw them (<see cref="LlmTurnInbox"/>). Copied to <see cref="LlmCompletionRequest.Inbox"/>; a
+        /// clone shares the same inbox, so a lead request built from a chat turn reads the player's lines too.
+        /// </summary>
+        public LlmTurnInbox Inbox { get; set; }
+
+        /// <summary>
         /// Creates an independent copy carrying every request-scoped field. Consumers that must observe a
         /// request without owning it (session inspection, retry of the same turn) copy through this helper
         /// instead of re-listing properties: a partial copy silently drops whatever the list forgot, and the
@@ -262,7 +270,8 @@ namespace CoreAI.Ai
                 MemoryMode = MemoryMode,
                 RequestTools = RequestTools,
                 ConversationId = ConversationId,
-                Progress = Progress
+                Progress = Progress,
+                Inbox = Inbox
             };
         }
 

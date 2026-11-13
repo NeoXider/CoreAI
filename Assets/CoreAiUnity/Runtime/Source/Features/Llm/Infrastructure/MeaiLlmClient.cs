@@ -248,7 +248,10 @@ namespace CoreAI.Infrastructure.Llm
             SmartToolCallingChatClient functionClient = new(_innerClient, Log.Instance, _settings, allowDuplicates,
                 invocationTools, roleId, _settings.MaxToolCallRetries, request.TraceId,
                 MessagePipeToolCallEventPublisher.Instance, CoreAiToolExecutionNotifier.Instance,
-                request.MaxToolCallRoundtrips, request.ActorId, allowTextShapedToolCalls);
+                request.MaxToolCallRoundtrips, request.ActorId, allowTextShapedToolCalls)
+            {
+                Inbox = request.Inbox
+            };
 
             List<MEAI.ChatMessage> chatMessages = BuildMeaiChatMessages(request);
 
@@ -715,11 +718,12 @@ namespace CoreAI.Infrastructure.Llm
                 _logger.LogWarning(GameLogFeature.Llm,
                     $"MeaiLlmClient: {stopReason}; running one final tools-disabled roundtrip so the model can summarize.");
 
-                List<MEAI.ChatMessage> summaryMessages = new(chatMessages)
-                {
-                    new MEAI.ChatMessage(MEAI.ChatRole.User,
-                        ToolLoopFallbackPrompts.ToolBudgetExhaustedFinalTurn)
-                };
+                List<MEAI.ChatMessage> summaryMessages = new(chatMessages);
+                // WHY before the budget prompt: the summary is the turn's last word, so a line the player sent
+                // meanwhile is answered in it instead of being left behind.
+                SmartToolCallingChatClient.DeliverInboxLines(request.Inbox, summaryMessages);
+                summaryMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User,
+                    ToolLoopFallbackPrompts.ToolBudgetExhaustedFinalTurn));
 
                 // Tools deliberately omitted (not just ToolMode=None): the model physically cannot
                 // emit another native tool call in this extra roundtrip.
@@ -1030,6 +1034,10 @@ namespace CoreAI.Infrastructure.Llm
                 // disposes the enumerator on every exit path (try/finally is yield-safe).
                 // WHY: lifting right before every streaming request is what lets typed tool images reach the image channel from every append site (a repaired malformed-JSON call loops back here without a lift of its own), since an unlifted typed result would send its text only; lifting is idempotent.
                 SmartToolCallingChatClient.LiftCameraImages(chatMessages, ref liftedCameraCallIds);
+                // WHY here: the last batch's tool results are in the history by now, so a line the player sent
+                // meanwhile reaches the model right after what the tool returned - the stream and the thinking
+                // that were running when it was sent are never touched.
+                SmartToolCallingChatClient.DeliverInboxLines(request.Inbox, chatMessages);
                 IAsyncEnumerable<MEAI.ChatResponseUpdate> updateStream =
                     _innerClient.GetStreamingResponseAsync(chatMessages, iterationOptions, cancellationToken);
                 await using IAsyncEnumerator<MEAI.ChatResponseUpdate> updateEnumerator =
@@ -1794,6 +1802,23 @@ namespace CoreAI.Infrastructure.Llm
                     yield return BuildMissingRequiredToolChunk(
                         policy, requiredToolName, turnUsage, streamModel, lastRoundtripUsage);
                     yield break;
+                }
+
+                if (request.Inbox != null && request.Inbox.PendingCount > 0)
+                {
+                    // WHY one more round: the player wrote while the model was giving this answer. The answer is
+                    // already on screen and stays in the history; the next request carries the line, and its reply
+                    // streams as a new message of the same turn.
+                    string answered = SanitizeAssistantVisibleText(visibleText, request);
+                    if (!string.IsNullOrWhiteSpace(answered))
+                    {
+                        chatMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, answered));
+                    }
+
+                    _logger.LogInfo(GameLogFeature.Llm,
+                        $"MeaiLlmClient: {request.Inbox.PendingCount} line(s) from the player arrived during the answer; " +
+                        "running one more round so the model answers them.");
+                    continue;
                 }
 
                 LlmStreamChunk terminal = new()

@@ -880,19 +880,15 @@ Owner's questions and decisions on the Block World (2026-11-11):
         `screen` without it, the camera render, works and so does every other tool). Nothing is logged: neither
         the end-of-frame capture nor its 5 s deadline coroutine finishes. Also: the main-thread queue's own deadline
         (`CoreAiMcpServer.FailOnTimeoutAsync`) is a `Task.Delay`, which never fires in a WebGL player.
-      - **Send a message while the model's turn runs (owner, 2026-11-13: "если мы что то написали то оно
-        отправляется сразу и модель прочитает когда тулкол завершится или если не думает - не в очередь а сразу").**
-        Today both chats refuse: the overlay (T) through `ChatAgentTurns.Start` throwing `BusyText` while `IsBusy`,
-        and the Hub chat (F2) by turning Send into Stop while `CoreAiChatPanel.IsBusy`. Wanted: the line is sent
-        and shown at once; the running turn takes it at its next boundary - after the tool batch in flight
-        (appended as a user message before the next model request) or, when the model has just answered without
-        tool calls, by one more round so it answers the line; Stop stays a separate control. Path: a per-turn
-        inbox on `ChatAgentTurn` -> `ChatOverlayTurnRequest`/the sender -> the orchestrator request -> both loops
-        of `SmartToolCallingChatClient` (non-streaming ~line 684, streaming ~line 885) drain it after each tool
-        result append; the chat history records the line in order; `AIService:GetAssistant()` and `coreai_chat`
-        get the same; the F2 panel and the overlay keep the input enabled. Tests: a line sent during a tool call
-        reaches the next request; a line sent after the last answer starts one more round; Stop still cancels.
-        Not started (weekly limits).
+      - **Done 2026-11-13: send a message while the model's turn runs (owner: "если мы что то написали то оно
+        отправляется сразу и модель прочитает когда тулкол завершится").** `LlmTurnInbox` on `AiTaskRequest` /
+        `LlmCompletionRequest` / `ChatOverlayTurnRequest`: the overlay (T) and the Hub chat (F2, Send stays Send, Stop
+        is its own button) show the line at once and post it; all three tool loops (MEAI, WebGL, streaming) append
+        it after the tool results before the next request, a line during the final answer makes one more round;
+        the orchestrator records delivered lines after the turn's message, and on stop/failure the undelivered ones
+        too (no new turn starts, owner's rule). Left: the Lua chat (`coreai_chat`, `AIService:GetAssistant()`) still
+        refuses a second line - it needs an `assistant:Post` or a `Send` that posts while busy; a line typed during a
+        host turn waits for the slot instead of joining the wake turn.
       - **The Hub's "Reset World" does not reset the Block World (owner, 2026-11-13: all mods off + Reset World,
         nothing cleared).** `WorldStateHubPage` ("World State", "Reset all AI/mod-spawned world objects and delete
         the save file") drives the legacy `IWorldStateManager` - the C# `world_command` objects, the "[WorldState]

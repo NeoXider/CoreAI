@@ -213,16 +213,17 @@ namespace CoreAI.Tests.EditMode.ChatOverlay
         }
 
         [Test]
-        public void Submit_WhileAnswering_IsRefusedLocally()
+        public void Submit_WhileAnswering_IsShownAtOnce_AndGoesToTheRunningTurn()
         {
             using ChatOverlayHarness harness = new();
             harness.Controller.Submit("first");
 
             harness.Controller.Submit("second");
 
-            Assert.AreEqual(1, harness.Sender.Requests.Count);
-            Assert.AreEqual(ChatFeedLineKind.Error, harness.LastLine.Kind);
-            StringAssert.Contains("/stop", harness.LastLine.Text);
+            Assert.AreEqual(1, harness.Sender.Requests.Count, "the running turn is not interrupted");
+            Assert.AreEqual(ChatFeedLineKind.Player, harness.LastLine.Kind);
+            Assert.AreEqual("second", harness.LastLine.Text);
+            Assert.AreEqual(1, harness.Sender.Requests[0].Inbox.PendingCount);
         }
 
         [Test]

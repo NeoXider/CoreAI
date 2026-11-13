@@ -38,7 +38,13 @@ WebGL (no threads, no blocking waits), and is UI Toolkit only.
   cancel; while sub-agents go on working in the background it names them instead.
 - A failed turn adds one readable error line (the same sentences the chat panel uses, from
   `LlmErrorPresentation`); a stopped turn adds `Stopped.`.
-- While the agent is still answering, a new message is refused locally with a hint to type `/stop`.
+- While the agent is still answering, a new message is sent at once: it shows in the feed as the player's line
+  and reaches the running turn at its next step, without interrupting the stream or the thinking - after the tool
+  call in flight (as a user message next to the tool's result), or, when the model is giving its final answer,
+  through one more round in which it answers the line (`LlmTurnInbox`). A line typed while a host turn or another
+  chat's turn holds the slot waits and starts a turn of its own when the slot is free. `/stop` ends the dialog for
+  now: lines the turn had not delivered are kept in the role's history as the player's messages (the next turn
+  sees them) and nothing starts by itself.
 
 ### Built-in commands
 

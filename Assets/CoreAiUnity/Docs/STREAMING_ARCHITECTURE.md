@@ -364,10 +364,10 @@ Both streaming and non-streaming paths use `ToolExecutionPolicy` for:
 
 ### Stop / clear guarantees
 
-All stop paths of `CoreAiChatPanel` (the send button in stop mode, Esc, the public `StopAgent()`) run one private stop routine:
+All stop paths of `CoreAiChatPanel` (the Stop button, Esc, the public `StopAgent()`) run one private stop routine:
 
 - It has an `_isStopping` re-entrancy guard — concurrent Escape + button click cannot double-fire.
-- The send button stays enabled while a request is running (when **Enable Stop Generation** is on); it is the stop control in that state.
+- The Stop button is a control of its own, shown while a request runs (when **Enable Stop Generation** is on); the send button stays a send control, and a message sent then reaches the running turn at its next step (`LlmTurnInbox`).
 - It advances the turn generation, calls `CoreAi.StopAgent(roleId)` (falling back to `CoreAiChatService.StopAgent`), cancels the active request CTS, replaces the root CTS and resets streaming/typing/sending UI state — even when the static `CoreAi` path is unavailable.
 - **`ClearChat()`** runs the same stop before clearing the feed and history.
 

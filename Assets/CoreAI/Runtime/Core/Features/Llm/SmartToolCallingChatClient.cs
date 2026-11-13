@@ -311,6 +311,76 @@ namespace CoreAI.Infrastructure.Llm
         /// <summary>Whether a successful tool intentionally completed this request without another model turn.</summary>
         public bool LastTurnEndedByTool { get; private set; }
 
+        /// <summary>
+        /// Lines the player sends while this client's request runs (<see cref="LlmCompletionRequest.Inbox"/>); null takes
+        /// none. Before every model request the loop appends the waiting lines as user messages, so a line sent during
+        /// a tool call reaches the model together with the tool's result; a line waiting when the model answers without
+        /// a tool call makes the loop run one more round, and the answers of both rounds form the turn's text.
+        /// </summary>
+        public LlmTurnInbox Inbox { get; set; }
+
+        /// <summary>
+        /// Appends the lines waiting in <paramref name="inbox"/> to <paramref name="messages"/> as user messages, in
+        /// order, and returns how many; 0 for a null inbox. The streaming loop calls it at the same boundary as this
+        /// client's own loops, so both paths deliver alike.
+        /// </summary>
+        public static int DeliverInboxLines(LlmTurnInbox inbox, IList<MEAI.ChatMessage> messages)
+        {
+            if (inbox == null || messages == null)
+            {
+                return 0;
+            }
+
+            IReadOnlyList<string> lines = inbox.TakeForDelivery();
+            foreach (string line in lines)
+            {
+                messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User, line));
+            }
+
+            return lines.Count;
+        }
+
+        /// <summary>
+        /// True when the model just answered without a tool call while a line of the player waits: the loop records
+        /// that answer and asks the model once more, so the line is answered within the same turn.
+        /// </summary>
+        internal static bool HasWaitingInboxLine(LlmTurnInbox inbox)
+        {
+            return inbox != null && inbox.PendingCount > 0;
+        }
+
+        /// <summary>
+        /// Puts the answers given before an inbox round in front of the final answer's text, so the turn's text holds
+        /// everything the model said to the player (<see cref="MEAI.ChatMessage.Text"/> of the last assistant message).
+        /// </summary>
+        internal static void PrependEarlierAnswers(MEAI.ChatResponse response, List<string> earlierAnswers)
+        {
+            if (response == null || earlierAnswers == null || earlierAnswers.Count == 0)
+            {
+                return;
+            }
+
+            string earlier = string.Join("\n\n", earlierAnswers.Where(answer => !string.IsNullOrWhiteSpace(answer)));
+            if (earlier.Length == 0)
+            {
+                return;
+            }
+
+            response.Messages ??= new List<MEAI.ChatMessage>();
+            for (int index = response.Messages.Count - 1; index >= 0; index--)
+            {
+                MEAI.ChatMessage message = response.Messages[index];
+                if (message.Role == MEAI.ChatRole.Assistant)
+                {
+                    bool hasText = !string.IsNullOrWhiteSpace(message.Text);
+                    message.Contents.Insert(0, new MEAI.TextContent(hasText ? earlier + "\n\n" : earlier));
+                    return;
+                }
+            }
+
+            response.Messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, earlier));
+        }
+
         public Task<MEAI.ChatResponse> GetResponseAsync(IEnumerable<MEAI.ChatMessage> chatMessages,
             MEAI.ChatOptions? options = null, CancellationToken cancellationToken = default)
         {
@@ -493,6 +563,7 @@ namespace CoreAI.Infrastructure.Llm
             /// </summary>
             private readonly Dictionary<string, object> _serviceAnswers = new(StringComparer.Ordinal);
             private HashSet<string> _liftedCameraCallIds;
+            private readonly List<string> _earlierAnswers = new();
 
             public List<MEAI.ChatMessage> LastAssistantMessages { get; private set; } = new();
 
@@ -686,6 +757,9 @@ namespace CoreAI.Infrastructure.Llm
                     cancellationToken.ThrowIfCancellationRequested();
                     // WHY: lifting right before every request to the inner client is what lets typed tool images reach the image channel from every append site (a corrected tool name `continue`s here without the lift above), since an unlifted typed result would send its text only; lifting is idempotent.
                     LiftCameraImages(messages, ref _liftedCameraCallIds);
+                    // WHY here: MEAI has appended the last batch's tool results by now, so a line the player sent
+                    // meanwhile reaches the model right after what the tool returned, before it speaks again.
+                    DeliverInboxLines(_owner.Inbox, messages);
                     _requests++;
                     int limit = _owner._maxRoundtripsOverride ?? _owner._settings.MaxToolCallRoundtrips;
                     bool finalSummary = limit > 0 && _requests > limit;
@@ -783,6 +857,18 @@ namespace CoreAI.Infrastructure.Llm
                             ToolLoopFallbackPrompts.EmptyResponseNudge));
                         continue;
                     }
+                    else if (_calls.Count == 0 && !hasNativeCalls && HasWaitingInboxLine(_owner.Inbox))
+                    {
+                        // WHY one more round: the player wrote while the model was giving this answer; the answer
+                        // stays in the history and the next request carries the line, so it is answered now.
+                        if (!string.IsNullOrWhiteSpace(text))
+                        {
+                            messages.AddRange(response.Messages);
+                            _earlierAnswers.Add(text);
+                        }
+
+                        continue;
+                    }
                     List<MEAI.FunctionCallContent> unbound =
                         _calls.Where(call => !IsBound(requestOptions, call)).ToList();
                     if (unbound.Count > 0)
@@ -837,6 +923,12 @@ namespace CoreAI.Infrastructure.Llm
                     }
                     _callOptions = requestOptions;
                     _batchReady = false;
+                    if (_calls.Count == 0 && _earlierAnswers.Count > 0)
+                    {
+                        PrependEarlierAnswers(response, _earlierAnswers);
+                        _earlierAnswers.Clear();
+                    }
+
                     LastAssistantMessages = response.Messages.Where(message => message.Role == MEAI.ChatRole.Assistant)
                         .Select(message => new MEAI.ChatMessage(MEAI.ChatRole.Assistant,
                             message.Contents.Where(content => content is not MEAI.FunctionCallContent).ToList())
@@ -867,6 +959,10 @@ namespace CoreAI.Infrastructure.Llm
             // They exist only as error feedback so the model can retry; once a later iteration
             // succeeds they are obsolete and removed from history to stop wasting tokens.
             List<MEAI.ChatMessage> pendingErrorFeedback = new();
+
+            // WHY kept: an answer given before a round that answers a line the player sent meanwhile would vanish
+            // from the turn's text, which carries only the last response; it leads the final text instead.
+            List<string> earlierAnswers = new();
 
             // Whole-turn usage: providers report usage once per roundtrip; sum across the loop so
             // the returned response carries the total tokens the turn burned, not just the last
@@ -938,6 +1034,9 @@ namespace CoreAI.Infrastructure.Llm
                             LogTag.Llm);
                     }
 
+                    // WHY here: the last batch's tool results are in the history, so a line the player sent
+                    // meanwhile reaches the model right after what the tool returned.
+                    DeliverInboxLines(Inbox, messages);
                     MEAI.ChatOptions iterationOptions = options;
                     if (executedToolCallInRequest &&
                         options?.ToolMode != null &&
@@ -1057,12 +1156,26 @@ namespace CoreAI.Infrastructure.Llm
                             continue;
                         }
 
+                        if (HasWaitingInboxLine(Inbox))
+                        {
+                            // WHY one more round: the player wrote while the model was giving this answer; the
+                            // answer stays in the history and the next request carries the line.
+                            if (!string.IsNullOrWhiteSpace(thisTurnText))
+                            {
+                                messages.Add(new MEAI.ChatMessage(MEAI.ChatRole.Assistant, thisTurnText));
+                                earlierAnswers.Add(thisTurnText);
+                            }
+
+                            continue;
+                        }
+
                         if (_settings.LogMeaiToolCallingSteps)
                         {
                             _logger.Info(
                                 $"[SmartToolCall] Iteration {iteration}: Text response, stopping.", LogTag.Llm);
                         }
 
+                        PrependEarlierAnswers(response, earlierAnswers);
                         int maxResponseChars = _settings.MaxResponseChars;
                         if (maxResponseChars > 0)
                         {
@@ -1531,6 +1644,7 @@ namespace CoreAI.Infrastructure.Llm
                 // WHY: this summary request is built by branches that return before the regular lift, and an unlifted typed tool image would reach the model as its text only, so it is lifted here too; lifting is idempotent.
                 HashSet<string> liftedForSummary = null;
                 LiftCameraImages(summaryMessages, ref liftedForSummary);
+                DeliverInboxLines(Inbox, summaryMessages);
                 summaryMessages.Add(new MEAI.ChatMessage(MEAI.ChatRole.User,
                     ToolLoopFallbackPrompts.ToolBudgetExhaustedFinalTurn));
 

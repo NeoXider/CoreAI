@@ -562,6 +562,12 @@
   background-color: rgba(180, 32, 50, 1);
 }
 
+/* Stop button: shown beside the send button while a turn runs; the send button stays a send control. */
+.coreai-chat-stop-button {
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
 /* Examples menu button: compact affordance on the input row, left of the text field. */
 .coreai-chat-examples-button {
   width: 40px;

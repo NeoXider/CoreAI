@@ -143,15 +143,27 @@ namespace CoreAI.Tests.EditMode.ChatOverlay
         }
 
         [Test]
-        public void PlayerLine_WhileAHostTurnRuns_GetsTheBusyNotice()
+        public void PlayerLine_WhileAHostTurnRuns_IsShown_AndStartsItsTurnOnceTheSlotIsFree()
         {
             using ChatOverlayHarness harness = new();
             harness.Controller.TryStartHostTurn(Request(new List<ChatOverlayHostTurnResult>()));
 
             harness.Controller.Submit("build a castle");
+            harness.Controller.Tick();
 
-            Assert.AreEqual(1, harness.Sender.Requests.Count, "the player's line did not start a second turn");
-            StringAssert.Contains("still answering", harness.LastLine.Text);
+            Assert.AreEqual(1, harness.Sender.Requests.Count, "the player's line does not interrupt the host turn");
+            Assert.AreEqual(ChatFeedLineKind.Player, harness.LastLine.Kind, "the line shows at once, no busy notice");
+            Assert.AreEqual("build a castle", harness.LastLine.Text);
+            Assert.AreEqual(1, harness.Controller.WaitingLineCount);
+            Assert.IsFalse(harness.Controller.TryStartHostTurn(new ChatOverlayHostTurnRequest { Text = "wake" }),
+                "a waiting player line goes before the next host turn");
+
+            harness.Sender.Complete();
+            harness.Controller.Tick();
+
+            Assert.AreEqual(2, harness.Sender.Requests.Count);
+            Assert.AreEqual("build a castle", harness.Sender.Requests[1].Text);
+            Assert.AreEqual(0, harness.Controller.WaitingLineCount);
         }
 
         [Test]

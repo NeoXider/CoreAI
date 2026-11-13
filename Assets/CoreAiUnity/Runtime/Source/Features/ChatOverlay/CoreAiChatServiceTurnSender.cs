@@ -93,7 +93,8 @@ namespace CoreAI.ChatOverlay
                 ActorContext = actor,
                 CancellationScope = actor.SessionId,
                 TraceId = request.TraceId ?? "",
-                HistoryMode = request.HistoryMode
+                HistoryMode = request.HistoryMode,
+                Inbox = request.Inbox
             };
         }
 

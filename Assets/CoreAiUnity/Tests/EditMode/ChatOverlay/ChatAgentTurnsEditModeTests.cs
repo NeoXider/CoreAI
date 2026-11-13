@@ -346,7 +346,7 @@ namespace CoreAI.Tests.EditMode.ChatOverlay
             Assert.IsFalse(harness.Controller.TryStartHostTurn(new ChatOverlayHostTurnRequest { Text = "repair" }),
                 "a host turn waits for it");
             harness.Controller.Submit("hello");
-            Assert.AreEqual(1, harness.Sender.Requests.Count, "a line typed in the overlay is refused as busy");
+            Assert.AreEqual(1, harness.Sender.Requests.Count, "a line typed in the overlay waits for the slot");
 
             Assert.IsTrue(harness.Controller.StopActiveTurn(), "the overlay's /stop stops it");
             Assert.IsFalse(turn.IsActive);

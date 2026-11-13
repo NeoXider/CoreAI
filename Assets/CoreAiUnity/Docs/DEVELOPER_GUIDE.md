@@ -702,19 +702,20 @@ CoreAi.StopAgent("Teacher");
 
 ### Stopping from built-in Chat UI (`CoreAiChatPanel`)
 
-While a reply is generating and `CoreAiChatConfig.EnableStopGeneration` is on (the default), the send button `coreai-chat-send` in `CoreAiChatPanel` switches to **Stop** mode:
+While a reply is generating and `CoreAiChatConfig.EnableStopGeneration` is on (the default), `CoreAiChatPanel` shows a separate **Stop** button `coreai-chat-stop` next to the send button:
 
-- visually turns red (`.coreai-chat-send-button-stop`);
-- button label changes from `>` to `X`;
+- red (`.coreai-chat-send-button-stop`, plus `.coreai-chat-stop-button`);
+- label `X` (`StopButtonText`);
 - tooltip: `CoreAiChatOptions.StopButtonTooltip` (the shipped default, `DefaultStopButtonTooltip`, is a Russian-language "Stop generation (Esc)"; set your own text through the chat options).
+
+The send button stays a send control: a message sent while the turn runs shows at once and reaches the model at the turn's next step (after the tool call in flight, or through one more round after the final answer) without interrupting the stream or the thinking; see `LlmTurnInbox`. A custom UXML without `coreai-chat-stop` gets the button created beside `coreai-chat-send`.
 
 The user can interrupt generation:
 
-- by clicking that button again;
+- with the Stop button;
 - with the `Esc` key while the chat is focused.
 
-In both cases the UI calls `CoreAi.StopAgent(roleId)` and cancels the active request token, which safely stops the current reply and related role tasks in `QueuedAiOrchestrator`.
-The button stays enabled during generation (stop control), busy state is set before the first `await`, and the UI clears streaming/sending state after cancel. With `EnableStopGeneration` off, the button keeps its `>` label and stays disabled while the request runs, and Esc does not cancel.
+In both cases the UI calls `CoreAi.StopAgent(roleId)` and cancels the active request token, which safely stops the current reply and related role tasks in `QueuedAiOrchestrator`. Lines the stopped turn had not delivered stay in the role's history as the player's messages; nothing starts by itself. Busy state is set before the first `await`, and the UI clears streaming/sending state after cancel. With `EnableStopGeneration` off there is no Stop button and Esc does not cancel; sending during a turn still works.
 
 #### Public busy contract
 

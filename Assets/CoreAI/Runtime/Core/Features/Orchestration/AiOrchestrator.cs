@@ -2097,6 +2097,9 @@ namespace CoreAI.Ai
                                                                     _memoryPolicy?.GetRoleConfig(roleId) ??
                                                                     new AgentMemoryPolicy.RoleMemoryConfig(),
                                                                     task, roleId);
+                // WHY closed here: this is the end of the turn for its inbox on every terminal path; a line the
+                // player sends from now on starts a turn of its own instead of waiting for a loop that is gone.
+                task.Inbox?.Close();
                 if (!roleConfig.WithChatHistory || _memoryStore == null)
                 {
                     return false;
@@ -2109,13 +2112,13 @@ namespace CoreAI.Ai
                 bool resend = bundle != null
                     ? bundle.ResendOfUnansweredUserTurn
                     : IsResendOfUnansweredUserTurn(roleId, traceId, task);
-                if (resend)
+                if (!resend)
                 {
-                    return true;
+                    _memoryStore.AppendChatMessage(roleId, "user", BuildUserTurnHistoryText(task),
+                        roleConfig.PersistChatHistory);
                 }
 
-                _memoryStore.AppendChatMessage(roleId, "user", BuildUserTurnHistoryText(task),
-                    roleConfig.PersistChatHistory);
+                RecordInboxLines(roleId, roleConfig, task.Inbox, suppressPersistenceErrors);
                 return true;
             }
             catch (Exception ex) when (suppressPersistenceErrors)
@@ -2127,6 +2130,51 @@ namespace CoreAI.Ai
                     $"could not persist the user turn: {ex.Message}",
                     LogTag.Llm);
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Records the lines the player sent while the turn ran (<see cref="AiTaskRequest.Inbox"/>) right after the
+        /// turn's own message, as user messages, in the order the model saw them. On a turn that ended without an
+        /// answer (<paramref name="endedWithoutAnswer"/>: stopped, failed, timed out) the lines nobody delivered follow
+        /// them.
+        /// <para>
+        /// WHY the undelivered ones only then: the chat has already shown them as sent, and a stop must not cost the
+        /// player those words, yet the dialog must not go on by itself either (the owner's rule: like Codex). In the
+        /// history they wait for the next turn the player starts. After an answer the chat takes them instead and
+        /// sends them as a turn of their own, because the model never saw them.
+        /// </para>
+        /// </summary>
+        private void RecordInboxLines(string roleId, AgentMemoryPolicy.RoleMemoryConfig roleConfig, LlmTurnInbox inbox,
+            bool endedWithoutAnswer)
+        {
+            if (inbox == null)
+            {
+                return;
+            }
+
+            foreach (string line in inbox.Delivered)
+            {
+                _memoryStore.AppendChatMessage(roleId, "user", line, roleConfig.PersistChatHistory);
+            }
+
+            if (!endedWithoutAnswer)
+            {
+                return;
+            }
+
+            IReadOnlyList<string> undelivered = inbox.TakeUndelivered();
+            foreach (string line in undelivered)
+            {
+                _memoryStore.AppendChatMessage(roleId, "user", line, roleConfig.PersistChatHistory);
+            }
+
+            if (undelivered.Count > 0)
+            {
+                Log.Instance.Info(
+                    $"[AiOrchestrator] role='{roleId}': the turn ended without an answer; {undelivered.Count} line(s) " +
+                    "the player sent meanwhile were kept in the history for the next turn.",
+                    LogTag.Llm);
             }
         }
 
@@ -3415,6 +3463,7 @@ namespace CoreAI.Ai
                 // (AiTaskRequest) could not reach it, while the docs prescribed it as the cure.
                 AllowTextShapedToolCallsOnNativeEndpoint = task.AllowTextShapedToolCallsOnNativeEndpoint,
                 Progress = task.Progress,
+                Inbox = task.Inbox,
                 Reasoning = ResolveReasoning(task.Reasoning, bundle.RoleConfig.Reasoning),
                 Sampling = ResolveSampling(task.Sampling, bundle.RoleConfig.Sampling),
                 TemperatureOverride = task.Temperature ?? bundle.RoleConfig.Temperature,

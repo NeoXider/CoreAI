@@ -39,7 +39,7 @@ Configure in the Inspector:
 - **Session / history** — see [session restore](#persisted-chat-session)
 - **Programmatic submit** — see [`SubmitMessageFromExternalAsync`](#programmatic-chat-submit)
 - **Enable Streaming** — streamed generation of replies
-- **Enable Stop Generation** — when off, the send button is disabled while the AI is replying and never switches to `X`; Esc does not stop the active request.
+- **Enable Stop Generation** — when off, no Stop button appears while the AI is replying and Esc does not stop the active request (sending during a turn still works).
 - **Show Clear Button** — when off, the header clear button is hidden. `CoreAiChatPanel.ClearChat(...)` remains available from code.
 - **UI Text Overrides** — optional copy for panel controls: `SendButtonText` (default `>`), `StopButtonText`,
   send/stop tooltips, clear/collapse/open-chat labels and tooltips, and the FAB fallback text. Empty strings are
@@ -406,22 +406,23 @@ reply = await chatPanel.SubmitMessageFromExternalAsync("Summarize the lesson", t
 
 ## Stopping generation (Stop)
 
-`CoreAiChatConfig.EnableStopGeneration` controls whether the player can stop an active AI turn from this UI. It is **on by default**. When disabled, the send button keeps the normal `>` label, stays disabled while the request is running, does not receive `.coreai-chat-send-button-stop`, and Esc does not cancel the active request. Code can still call lower-level cancellation APIs if the host game owns that flow.
+`CoreAiChatConfig.EnableStopGeneration` controls whether the player can stop an active AI turn from this UI. It is **on by default**. When disabled, no Stop button appears and Esc does not cancel the active request. Code can still call lower-level cancellation APIs if the host game owns that flow.
 
-There is no separate “stop” button in the **header** — stop only via the send button and Esc (below). The send button stays enabled while it shows `X`, and the active request CTS is cancelled even if `CoreAi.StopAgent(roleId)` is unavailable.
+There is no separate “stop” button in the **header** — stop only via the Stop button beside the send button and Esc (below). The Stop button `coreai-chat-stop` shows only while a turn runs (the shipped UXML declares it; a custom UXML without it gets one created next to `coreai-chat-send`), and the active request CTS is cancelled even if `CoreAi.StopAgent(roleId)` is unavailable.
 
-- **Send (Enter) vs stop:** While a turn is in progress, pressing **Enter** (or your configured send shortcut in the text field) does **not** stop generation — it is ignored until the turn completes. **Stop** is only the send button while it shows **`X`**, plus **Esc** when **Enable Escape Chat Shortcuts** is on. This prevents accidental cancellation during the orchestrator tail (e.g. chat history append + `ApplyAiGameCommand`) after the last streamed token.
+- **Send during a turn:** while a turn is in progress, **Enter** and the send button still **send** and never stop generation. The message shows at once as the player's bubble and goes to the running turn's inbox (`LlmTurnInbox`): the model reads it at its next step — after the tool call in flight, next to the tool's result, or, when the line arrives during the final answer, in one more round where it answers the line. Nothing interrupts the stream or the thinking, and the orchestrator stores the line in the role's history where the model saw it. A line sent in the turn's last moments, after it stopped taking lines, starts a turn of its own when the turn is over.
+- **Stop** is the Stop button, plus **Esc** when **Enable Escape Chat Shortcuts** is on. Lines the stopped turn had not delivered are kept in the history as the player's messages (the next turn sees them), and the dialog does not continue by itself.
 - **Busy until enumerator ends:** The panel treats the request as active until the streaming **enumerator** fully finishes (not merely when the model emits a terminal chunk). That keeps the UI and orchestrator in sync with `QueuedAiOrchestrator` / `AiOrchestrator` post-stream work.
 
-During active generation `CoreAiChatPanel` switches the send button to stop mode:
+During active generation `CoreAiChatPanel` shows the Stop button:
 
-- button label: `X` instead of `>`;
+- button label: `X` (`StopButtonText`);
 - tooltip: `CoreAiChatOptions.StopButtonTooltip` (the shipped default is a Russian-language "Stop generation (Esc)"; override it through **UI Text Overrides**);
-- style: red (`.coreai-chat-send-button-stop`).
+- style: red (`.coreai-chat-send-button-stop`, `.coreai-chat-stop-button`).
 
 Stop the current reply in two ways:
 
-- press the send button again (in `Stop` mode);
+- press the Stop button;
 - press `Esc` while the chat is generating (if **Enable Escape Chat Shortcuts** is on in `CoreAiChatConfig`).
 
 The public `StopAgent()` runs the same stop. Under the hood it advances `CurrentTurnGeneration`, calls `CoreAi.StopAgent(roleId)` (falling back to `CoreAiChatService.StopAgent`), cancels the token of the request the panel owns (this ends the turn, queued or running), and replaces the panel's root cancellation source. Text already streamed stays in the bubble; no extra cancellation message is added.

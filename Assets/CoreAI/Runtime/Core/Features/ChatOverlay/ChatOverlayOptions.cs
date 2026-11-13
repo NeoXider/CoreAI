@@ -54,7 +54,10 @@ namespace CoreAI.ChatOverlay
         /// <summary>Shown when no AI service is connected.</summary>
         public string ServiceUnavailableText { get; set; } = "The AI is not connected.";
 
-        /// <summary>Shown when the player sends while the agent is still answering.</summary>
+        /// <summary>
+        /// The refusal of a second line while a turn runs, used by <see cref="ChatAgentTurns.Start"/> (a script's chat);
+        /// the overlay itself takes such a line into the running turn instead.
+        /// </summary>
         public string BusyText { get; set; } = "The AI is still answering. Type {prefix}stop to cancel it.";
 
         /// <summary>Shown when a turn is stopped; empty shows nothing.</summary>

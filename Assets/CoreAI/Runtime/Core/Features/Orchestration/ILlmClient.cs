@@ -606,6 +606,13 @@ namespace CoreAI.Ai
         /// window of <see cref="CoreAI.Infrastructure.Llm.TimeoutLlmClientDecorator"/>. <c>null</c> keeps the plain deadline.
         /// </summary>
         public LlmRequestProgress Progress { get; set; }
+
+        /// <summary>
+        /// Lines the player sends while this request runs (from <see cref="AiTaskRequest.Inbox"/>); <c>null</c> takes
+        /// none. Both tool loops append them as user messages after a tool batch's results and before the next model
+        /// request, and run one more round when a line is waiting after a final answer.
+        /// </summary>
+        public LlmTurnInbox Inbox { get; set; }
     }
 
     /// <summary>

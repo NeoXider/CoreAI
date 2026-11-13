@@ -194,7 +194,7 @@ namespace CoreAI.Tests.EditMode.ChatOverlay
         }
 
         [Test]
-        public void DeclinedLine_WhileTheAgentIsAnswering_IsShownThenRefusedAsBusy()
+        public void DeclinedLine_WhileTheAgentIsAnswering_IsShownOnce_AndGoesToTheRunningTurn()
         {
             using ChatOverlayHarness harness = new();
             harness.Controller.Submit("build me a house");
@@ -202,23 +202,25 @@ namespace CoreAI.Tests.EditMode.ChatOverlay
 
             harness.Controller.Submit("and a tower");
 
-            Assert.AreEqual(1, harness.Sender.Requests.Count);
-            Assert.AreEqual(1, LinesOf(harness, ChatFeedLineKind.Error).Count);
+            Assert.AreEqual(1, harness.Sender.Requests.Count, "the running turn is not interrupted");
+            CollectionAssert.IsEmpty(LinesOf(harness, ChatFeedLineKind.Error), "no busy refusal");
             List<ChatFeedLine> player = LinesOf(harness, ChatFeedLineKind.Player);
-            Assert.AreEqual(2, player.Count, "with a hook the line is shown before the agent refuses it");
+            Assert.AreEqual(2, player.Count, "with a hook the line is shown once, before the hooks run");
             Assert.AreEqual("and a tower", player[1].Text);
+            Assert.AreEqual(1, harness.Sender.Requests[0].Inbox.PendingCount, "the turn's inbox holds the line");
         }
 
         [Test]
-        public void WithoutHooks_ABusyLineIsStillNotShown()
+        public void WithoutHooks_ALineWhileTheAgentAnswers_IsShownAtOnce_AndPostedToTheTurn()
         {
             using ChatOverlayHarness harness = new();
             harness.Controller.Submit("build me a house");
 
             harness.Controller.Submit("and a tower");
 
-            Assert.AreEqual(1, LinesOf(harness, ChatFeedLineKind.Player).Count);
-            Assert.AreEqual(1, LinesOf(harness, ChatFeedLineKind.Error).Count);
+            Assert.AreEqual(2, LinesOf(harness, ChatFeedLineKind.Player).Count);
+            CollectionAssert.IsEmpty(LinesOf(harness, ChatFeedLineKind.Error));
+            CollectionAssert.AreEqual(new[] { "and a tower" }, harness.Sender.Requests[0].Inbox.TakeForDelivery());
         }
 
         [Test]

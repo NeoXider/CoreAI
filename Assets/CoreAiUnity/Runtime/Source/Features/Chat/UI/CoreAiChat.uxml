@@ -35,6 +35,8 @@
         <ui:Label name="coreai-chat-unread-count" text="" class="coreai-chat-unread-count" picking-mode="Ignore"/>
       </ui:VisualElement>
       <ui:TextField name="coreai-chat-input" multiline="true" class="coreai-chat-input-field"/>
+      <ui:Button name="coreai-chat-stop" text="X" class="coreai-chat-send-button coreai-chat-send-button-stop coreai-chat-stop-button"
+                 style="display: none;"/>
       <ui:Button name="coreai-chat-send" text=">" class="coreai-chat-send-button"/>
     </ui:VisualElement>
   </ui:VisualElement>

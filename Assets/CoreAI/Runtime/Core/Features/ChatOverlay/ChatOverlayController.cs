@@ -47,6 +47,7 @@ namespace CoreAI.ChatOverlay
         private IChatExternalTurnSlot _external;
         private int _holdTicks;
         private bool _publishedHold;
+        private readonly List<WaitingLine> _waitingLines = new();
 
         /// <summary>Creates the controller and subscribes to the view and the tool events.</summary>
         public ChatOverlayController(
@@ -299,23 +300,65 @@ namespace CoreAI.ChatOverlay
             TurnState turn = _turn;
             if (turn == null)
             {
+                _waitingLines.Clear();
                 return _external != null && _external.IsTurnActive && _external.StopActiveTurn();
             }
 
+            // WHY the waiting lines go into the stopped turn: a stop ends the dialog for now, so nothing may start by
+            // itself afterwards; a player turn's inbox hands them to the history, a host turn has none to keep them.
+            foreach (WaitingLine waiting in _waitingLines)
+            {
+                turn.Inbox?.TryPost(waiting.Text);
+            }
+
+            _waitingLines.Clear();
             turn.Stop();
             return true;
         }
 
+        private void StartWaitingTurn()
+        {
+            if (_waitingLines.Count == 0 || IsTurnActive || !_sender.IsAvailable)
+            {
+                return;
+            }
+
+            string roleId = _waitingLines[0].RoleId;
+            StringBuilder text = new();
+            int taken = 0;
+            while (taken < _waitingLines.Count &&
+                   string.Equals(_waitingLines[taken].RoleId, roleId, StringComparison.Ordinal))
+            {
+                if (text.Length > 0)
+                {
+                    text.Append('\n');
+                }
+
+                text.Append(_waitingLines[taken].Text);
+                taken++;
+            }
+
+            _waitingLines.RemoveRange(0, taken);
+            StartPlayerTurn(text.ToString(), roleId, _clock.NowSeconds);
+        }
+
+        /// <summary>
+        /// Lines the player sent that wait for the turn slot (typed while a host turn or another chat's turn ran, or
+        /// left over after a turn that answered before it could take them); they start a turn of their own on the next
+        /// <see cref="Tick"/> once the slot is free.
+        /// </summary>
+        public int WaitingLineCount => _waitingLines.Count;
+
         /// <summary>
         /// Starts a turn the host asks for instead of the player (<see cref="ChatOverlayHostTurnRequest"/>): it takes the
         /// chat's turn slot, so the status line follows it and <c>/stop</c> stops it. False, with no callback, when a turn
-        /// already runs, no AI service is connected, the request has no text or the chat is disposed; the host tries
-        /// again later.
+        /// already runs, lines of the player wait for the slot (<see cref="WaitingLineCount"/>), no AI service is
+        /// connected, the request has no text or the chat is disposed; the host tries again later.
         /// </summary>
         public bool TryStartHostTurn(ChatOverlayHostTurnRequest request)
         {
             if (_disposed || request == null || string.IsNullOrWhiteSpace(request.Text) || IsTurnActive ||
-                !_sender.IsAvailable)
+                _waitingLines.Count > 0 || !_sender.IsAvailable)
             {
                 return false;
             }
@@ -399,6 +442,7 @@ namespace CoreAI.ChatOverlay
             double now = _clock.NowSeconds;
             DrainMessages(now);
             DrainToolEvents();
+            StartWaitingTurn();
             FlushDirtyLines();
             RefreshVisibility(now);
             PushStatus(now);
@@ -443,6 +487,7 @@ namespace CoreAI.ChatOverlay
             _closeReleasePending = false;
             _holdTicks = 0;
             _preSendHooks.Clear();
+            _waitingLines.Clear();
             PublishInputState();
             PublishKeyboardHold();
         }
@@ -490,18 +535,34 @@ namespace CoreAI.ChatOverlay
                 return;
             }
 
-            if (IsTurnActive)
-            {
-                Feed.Add(ChatFeedLineKind.Error, "", _options.WithPrefix(_options.BusyText), now);
-                return;
-            }
-
             if (!playerLineShown)
             {
                 Feed.Add(ChatFeedLineKind.Player, _options.PlayerSpeakerName, text, now);
             }
+
             string roleId = string.IsNullOrWhiteSpace(roleOverride) ? _agents.ActiveRoleId : roleOverride.Trim();
-            TurnState turn = new(this, roleId, Guid.NewGuid().ToString("N"));
+            if (IsTurnActive || _waitingLines.Count > 0)
+            {
+                // WHY no busy refusal: the line is the player's at once and never interrupts the running stream or
+                // thinking; the running turn of this role takes it at its next step, anything else (a host turn,
+                // another chat's turn, lines already waiting) lets it wait for the slot.
+                TurnState running = _turn;
+                if (_waitingLines.Count == 0 && running?.Inbox != null &&
+                    string.Equals(running.RoleId, roleId, StringComparison.Ordinal) && running.Inbox.TryPost(text))
+                {
+                    return;
+                }
+
+                _waitingLines.Add(new WaitingLine(text, roleId));
+                return;
+            }
+
+            StartPlayerTurn(text, roleId, now);
+        }
+
+        private void StartPlayerTurn(string text, string roleId, double now)
+        {
+            TurnState turn = new(this, roleId, Guid.NewGuid().ToString("N")) { Inbox = new LlmTurnInbox() };
             _turn = turn;
             Status.BeginTurn(now);
             PushStatus(now);
@@ -511,7 +572,8 @@ namespace CoreAI.ChatOverlay
                 Text = text,
                 RoleId = roleId,
                 TraceId = turn.TraceId,
-                StreamingOverride = _options.EnableStreaming ? (bool?)null : false
+                StreamingOverride = _options.EnableStreaming ? (bool?)null : false,
+                Inbox = turn.Inbox
             };
 
             try
@@ -535,6 +597,23 @@ namespace CoreAI.ChatOverlay
 
             _turn = null;
             double now = _clock.NowSeconds;
+            LlmTurnInbox inbox = turn.Inbox;
+            if (inbox != null)
+            {
+                inbox.Close();
+                // WHY only after an answer: the model never saw these lines, so they become a turn of their own. A
+                // stopped or failed turn leaves them in the inbox, where the orchestrator records them in the history
+                // for the next turn the player starts - the dialog does not go on by itself.
+                if (!failure.HasValue)
+                {
+                    IReadOnlyList<string> leftover = inbox.TakeUndelivered();
+                    for (int i = leftover.Count - 1; i >= 0; i--)
+                    {
+                        _waitingLines.Insert(0, new WaitingLine(leftover[i], turn.RoleId));
+                    }
+                }
+            }
+
             if (failure.HasValue)
             {
                 ChatOverlayTurnFailure value = failure.Value;
@@ -806,6 +885,19 @@ namespace CoreAI.ChatOverlay
             }
         }
 
+        private readonly struct WaitingLine
+        {
+            public WaitingLine(string text, string roleId)
+            {
+                Text = text ?? "";
+                RoleId = roleId ?? "";
+            }
+
+            public string Text { get; }
+
+            public string RoleId { get; }
+        }
+
         private readonly struct PendingMessage
         {
             public PendingMessage(string speaker, string text, ChatFeedLineKind kind)
@@ -979,6 +1071,9 @@ namespace CoreAI.ChatOverlay
             public string RoleId { get; }
 
             public string TraceId { get; }
+
+            /// <summary>The player's lines for this turn; null for a host turn, which takes none.</summary>
+            public LlmTurnInbox Inbox { get; set; }
 
             private bool IsCurrent => !_ended && ReferenceEquals(_owner._turn, this);
 

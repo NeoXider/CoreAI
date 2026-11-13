@@ -23,6 +23,12 @@ namespace CoreAI.ChatOverlay
 
         /// <summary>Whether the turn reads and extends the role's chat history (<see cref="AiTaskRequest.HistoryMode"/>).</summary>
         public AiTaskHistoryMode HistoryMode { get; set; }
+
+        /// <summary>
+        /// Lines the player sends while this turn runs; null takes none. A sender passes it on as
+        /// <see cref="AiTaskRequest.Inbox"/>, so the running turn reads them at its next step.
+        /// </summary>
+        public LlmTurnInbox Inbox { get; set; }
     }
 
     /// <summary>

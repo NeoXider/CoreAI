@@ -68,36 +68,26 @@ namespace CoreAI.Tests.EditMode
         }
 
         [Test]
-        public void GetSendButtonPresentation_WhenIdle_ReturnsSendState()
+        public void StopButtonPresentation_DefaultTexts()
         {
-            Assert.AreEqual(">", CoreAiChatPanel.GetSendButtonText(false));
-            Assert.AreEqual("Отправить сообщение", CoreAiChatPanel.GetSendButtonTooltip(false));
+            Assert.AreEqual("X", CoreAiChatPanel.GetStopButtonText());
+            Assert.AreEqual("Остановить генерацию (Esc)", CoreAiChatPanel.GetStopButtonTooltip());
         }
 
         [Test]
-        public void GetSendButtonPresentation_WhenBusy_ReturnsStopState()
+        public void StopButtonPresentation_CustomTexts_UsesOverrides()
         {
-            Assert.AreEqual("X", CoreAiChatPanel.GetSendButtonText(true));
-            Assert.AreEqual("Остановить генерацию (Esc)", CoreAiChatPanel.GetSendButtonTooltip(true));
+            Assert.AreEqual("Stop", CoreAiChatPanel.GetStopButtonText("Stop"));
+            Assert.AreEqual("Stop tooltip", CoreAiChatPanel.GetStopButtonTooltip("Stop tooltip"));
+            Assert.AreEqual("X", CoreAiChatPanel.GetStopButtonText(null), "no override keeps the default");
         }
 
         [Test]
-        public void GetSendButtonPresentation_WhenBusyAndStopDisabled_ReturnsSendState()
+        public void StopButton_IsShownOnlyWhileBusy_AndOnlyWithStopGeneration()
         {
-            Assert.AreEqual(">", CoreAiChatPanel.GetSendButtonText(true, false));
-            Assert.AreEqual("Отправить сообщение", CoreAiChatPanel.GetSendButtonTooltip(true, false));
-        }
-
-        [Test]
-        public void GetSendButtonPresentation_CustomTexts_UsesOverrides()
-        {
-            Assert.AreEqual("Send", CoreAiChatPanel.GetSendButtonText(false, true, "Send", "Stop"));
-            Assert.AreEqual("Stop", CoreAiChatPanel.GetSendButtonText(true, true, "Send", "Stop"));
-            Assert.AreEqual("Send", CoreAiChatPanel.GetSendButtonText(true, false, "Send", "Stop"));
-            Assert.AreEqual("Send tooltip",
-                CoreAiChatPanel.GetSendButtonTooltip(false, true, "Send tooltip", "Stop tooltip"));
-            Assert.AreEqual("Stop tooltip",
-                CoreAiChatPanel.GetSendButtonTooltip(true, true, "Send tooltip", "Stop tooltip"));
+            Assert.IsTrue(CoreAiChatPanel.ShouldShowStopButton(true, true));
+            Assert.IsFalse(CoreAiChatPanel.ShouldShowStopButton(false, true), "idle: nothing to stop");
+            Assert.IsFalse(CoreAiChatPanel.ShouldShowStopButton(true, false), "Stop Generation off");
         }
 
         [Test]
@@ -152,54 +142,29 @@ namespace CoreAI.Tests.EditMode
             Assert.IsTrue(CoreAiChatPanel.IsChatInputLocked(true, true, false, false), "sending+streaming");
         }
 
+        /// <summary>
+        /// A running turn no longer turns Send into Stop: the player can send while the model works (the line goes to
+        /// the turn's inbox), and Stop is a control of its own.
+        /// </summary>
         [Test]
-        public void ShouldSendButtonBeEnabled_WhenRequestIsRunning_ReturnsTrue()
+        public void ShouldSendButtonBeEnabled_WhileATurnRuns_ReturnsTrue()
         {
-            Assert.IsTrue(CoreAiChatPanel.ShouldSendButtonBeEnabled(
-                true,
-                false,
-                false,
-                false));
-
-            Assert.IsTrue(CoreAiChatPanel.ShouldSendButtonBeEnabled(
-                false,
-                true,
-                false,
-                false));
-        }
-
-        [Test]
-        public void ShouldSendButtonBeEnabled_WhenRequestIsRunningAndStopDisabled_ReturnsFalse()
-        {
-            Assert.IsFalse(CoreAiChatPanel.ShouldSendButtonBeEnabled(
-                true,
-                false,
-                false,
-                false,
-                false));
-
-            Assert.IsFalse(CoreAiChatPanel.ShouldSendButtonBeEnabled(
-                false,
-                true,
-                false,
-                false,
-                false));
+            Assert.IsTrue(CoreAiChatPanel.ShouldSendButtonBeEnabled(false, false));
         }
 
         [Test]
         public void ShouldSendButtonBeEnabled_WhenStoppingOrClearing_ReturnsFalse()
         {
-            Assert.IsFalse(CoreAiChatPanel.ShouldSendButtonBeEnabled(
-                true,
-                true,
-                true,
-                false));
+            Assert.IsFalse(CoreAiChatPanel.ShouldSendButtonBeEnabled(true, false));
+            Assert.IsFalse(CoreAiChatPanel.ShouldSendButtonBeEnabled(false, true));
+        }
 
-            Assert.IsFalse(CoreAiChatPanel.ShouldSendButtonBeEnabled(
-                false,
-                false,
-                false,
-                true));
+        [Test]
+        public void ShouldStopButtonBeEnabled_UnlessStoppingOrClearing()
+        {
+            Assert.IsTrue(CoreAiChatPanel.ShouldStopButtonBeEnabled(false, false));
+            Assert.IsFalse(CoreAiChatPanel.ShouldStopButtonBeEnabled(true, false));
+            Assert.IsFalse(CoreAiChatPanel.ShouldStopButtonBeEnabled(false, true));
         }
 
         [Test]
@@ -336,6 +301,12 @@ namespace CoreAI.Tests.EditMode
                 SetPrivateField<CancellationTokenSource>(panel, "_activeRequestCts", null);
 
                 Assert.DoesNotThrow(() => InvokePrivate(panel, "TrySendInput", true));
+                Assert.IsFalse(rootCts.IsCancellationRequested, "Send no longer stops a running turn");
+
+                using (ClickEvent click = ClickEvent.GetPooled())
+                {
+                    Assert.DoesNotThrow(() => InvokePrivate(panel, "OnStopClicked", click));
+                }
 
                 Assert.IsTrue(rootCts.IsCancellationRequested);
                 Assert.IsFalse(GetPrivateField<bool>(panel, "_isSending"));
