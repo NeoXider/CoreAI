@@ -841,6 +841,19 @@ Owner's questions and decisions on the Block World (2026-11-11):
         `screen` without it, the camera render, works and so does every other tool). Nothing is logged: neither
         the end-of-frame capture nor its 5 s deadline coroutine finishes. Also: the main-thread queue's own deadline
         (`CoreAiMcpServer.FailOnTimeoutAsync`) is a `Task.Delay`, which never fires in a WebGL player.
+      - **Send a message while the model's turn runs (owner, 2026-11-13: "если мы что то написали то оно
+        отправляется сразу и модель прочитает когда тулкол завершится или если не думает - не в очередь а сразу").**
+        Today both chats refuse: the overlay (T) through `ChatAgentTurns.Start` throwing `BusyText` while `IsBusy`,
+        and the Hub chat (F2) by turning Send into Stop while `CoreAiChatPanel.IsBusy`. Wanted: the line is sent
+        and shown at once; the running turn takes it at its next boundary - after the tool batch in flight
+        (appended as a user message before the next model request) or, when the model has just answered without
+        tool calls, by one more round so it answers the line; Stop stays a separate control. Path: a per-turn
+        inbox on `ChatAgentTurn` -> `ChatOverlayTurnRequest`/the sender -> the orchestrator request -> both loops
+        of `SmartToolCallingChatClient` (non-streaming ~line 684, streaming ~line 885) drain it after each tool
+        result append; the chat history records the line in order; `AIService:GetAssistant()` and `coreai_chat`
+        get the same; the F2 panel and the overlay keep the input enabled. Tests: a line sent during a tool call
+        reaches the next request; a line sent after the last answer starts one more round; Stop still cancels.
+        Not started (weekly limits).
       - **The Block World on the Lua chat by default.** `coreai_chat` is installed and can be turned on from
         the Hub's Mods page (`useLuaChat` on `BlockWorldDemoModule` turns it on at the start). What still
         differs from the C# overlay is listed in `dev-docs/CHAT_AS_LUA_MOD_DESIGN.md` 5.1 (a host turn's
