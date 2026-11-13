@@ -849,6 +849,14 @@ Owner's questions and decisions on the Block World (2026-11-11):
           the orchestrator's Team chat agent and its sub-agents, the Lua `AIService:GetAssistant()`, MCP agent turns.
         - Reference: DSH's goal tools (round cap, recover the goal at the start of a round, done only with
           evidence).
+      - **One chat agent for everything - think it through (owner, 2026-11-13).** Today the chat role differs by
+        scene: SmartChat is the default chat role in CoreAI and most demos, orchestrator mode is off by default and
+        on only in the Block World (its Team-style chat agent hands big jobs to background sub-agents), and the
+        Block World also talks to Programmer. Wanted, ideally: one chat agent the player always talks to, which
+        does a job itself or acts as the orchestrator and hands it out - the same agent in every demo and in
+        CoreAI's defaults. To decide: its role and tool profile, when it delegates, how the existing roles
+        (Programmer, PlainChat, SmartChat, CoreMechanic...) become its sub-agents or skills, what a scene still
+        configures, history and persistence of that one session, and how goal mode and mid-turn messages ride on it.
       - **Block World: the player's position is not kept** - `blockworld_world` puts the character at
         `BlockWorldSpawn` at every start (owner: "местоположение тоже сбрасывается"). A Lua fix: keep the last
         position in the world (an attribute written when the player stops, not every frame, so it does not keep the
