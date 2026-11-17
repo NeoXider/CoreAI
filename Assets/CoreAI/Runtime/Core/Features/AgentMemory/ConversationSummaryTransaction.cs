@@ -19,16 +19,30 @@ namespace CoreAI.Ai
     {
         private readonly Func<string, bool> _commit;
         private readonly Func<string, CancellationToken, Task<bool>> _commitAsync;
+        private readonly Func<string, CancellationToken, IAiTurnCommitGuard, Task<bool>> _guardedCommitAsync;
         private IDisposable _lease;
         private bool _disposed;
 
         /// <summary>Creates a backend-owned compare-and-save binding. Dispose only after its commit has settled.</summary>
         public ConversationSummaryTransaction(string summary, Func<string, bool> commit,
             Func<string, CancellationToken, Task<bool>> commitAsync, IDisposable lease = null)
+            : this(summary, commit, commitAsync, lease, null)
+        {
+        }
+
+        /// <summary>
+        /// Creates a summary transaction for guarded turns. Put the actual compare-and-save publication
+        /// inside the supplied turn guard's synchronous action, after preparing any asynchronous I/O.
+        /// Decline a revoked turn without mutating the store.
+        /// </summary>
+        public ConversationSummaryTransaction(string summary, Func<string, bool> commit,
+            Func<string, CancellationToken, Task<bool>> commitAsync, IDisposable lease,
+            Func<string, CancellationToken, IAiTurnCommitGuard, Task<bool>> guardedCommitAsync)
         {
             Summary = summary ?? "";
             _commit = commit;
             _commitAsync = commitAsync;
+            _guardedCommitAsync = guardedCommitAsync;
             _lease = lease;
         }
 
@@ -47,17 +61,29 @@ namespace CoreAI.Ai
             Dispose();
         }
 
-        internal async Task CommitAsync(string summary, CancellationToken cancellationToken)
+        internal async Task CommitAsync(string summary, CancellationToken cancellationToken, IAiTurnCommitGuard guard = null)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(ConversationSummaryTransaction));
             cancellationToken.ThrowIfCancellationRequested();
-            if (_commitAsync == null) throw new NotSupportedException("This summary transaction requires synchronous commit.");
-            if (!await _commitAsync(summary, cancellationToken))
+            AiTurnCommit.ThrowIfRevoked(guard);
+            bool committed;
+            if (guard != null)
             {
-                Dispose();
-                throw new InvalidOperationException("Summary changed or was cleared while context was being prepared; rebuild context before committing.");
+                if (_guardedCommitAsync == null)
+                    throw new NotSupportedException("The summary store does not support guarded asynchronous commits.");
+                committed = await _guardedCommitAsync(summary, cancellationToken, guard);
+            }
+            else
+            {
+                if (_commitAsync == null) throw new NotSupportedException("This summary transaction requires synchronous commit.");
+                committed = await _commitAsync(summary, cancellationToken);
             }
             Dispose();
+            if (!committed)
+            {
+                AiTurnCommit.ThrowIfRevoked(guard);
+                throw new InvalidOperationException("Summary changed or was cleared while context was being prepared; rebuild context before committing.");
+            }
         }
 
         /// <summary>Releases the captured generation when the prepared context is discarded.</summary>

@@ -9,6 +9,19 @@ build as a plain `netstandard2.1` DLL through [`tools/portable`](../../tools/por
 
 Hosts supplying multiple players should start with [multiplayer sessions](../../Docs/CoreAI/MULTIPLAYER_SESSIONS.md): an actor, connection session, persistence partition and role have different purposes. Players may share a role. Supply the admitted `ActorContext` on each request, and use actor/session cancellation for a player stop; global role/scope operations are administrative. The host owns authentication, admission and view lifetimes.
 
+Hosts that reuse a role's conversation store across logical sessions can set
+`AiTaskRequest.TurnCommitGuard`. Implement `IAiTurnCommitGuard.TryCommit` with the same lock the host
+uses to revoke the session, invoke the action synchronously only while active, and return whether it
+ran. Revoke before clearing or reassigning the store, then release the lifetime lock before clearing
+or calling cancellation callbacks. Pass cancellation separately so transport and already-running tools
+can stop. A revoked turn cannot append its transcript, publish its command, or start a marshaled tool.
+Tools that await before their own side effects must still honor the request's cancellation.
+
+Built-in summary stores also guard publication of a deferred summary. A custom asynchronous summary
+store used with guarded turns must expose `ITransactionalConversationSummaryStore` and supply the
+guard-aware `ConversationSummaryTransaction` callback. Guard only the final compare-and-save
+mutation, after any asynchronous preparation. Requests that omit the guard use ordinary orchestration.
+
 See the [changelog](CHANGELOG.md) for release history and the
 [Gateway Client guide](../../Docs/CoreAI/GATEWAY_CLIENT.md) for server-managed requests.
 Portable [code-editing contracts](../../Docs/CoreAI/CODE_EDITOR.md#replaceable-ports) also let a

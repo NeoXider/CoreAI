@@ -9,6 +9,7 @@ using CoreAI.AgentMemory;
 using CoreAI.Ai;
 using CoreAI.Authority;
 using CoreAI.Config;
+using CoreAI.Infrastructure.Llm;
 using CoreAI.Logging;
 using CoreAI.Messaging;
 using CoreAI.Session;
@@ -1163,6 +1164,258 @@ namespace CoreAI.Tests.EditMode
             Assert.AreEqual("cancelled stream build", memory.Appended[0].Content);
             Assert.IsFalse(memory.Appended[0].Persist);
             Assert.AreEqual(0, llm.Requests.Count, "The cancellation must happen before provider dispatch.");
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task QueuedTurn_RevokedAfterProviderEntry_LeavesNextConversationIntact(bool providerCancels)
+        {
+            const string role = "Teacher";
+            const string marker = "New conversation marker";
+            InMemoryAgentMemoryStore memory = new();
+            DeferredTurnLlmClient llm = new(providerCancels);
+            TestSink sink = new();
+            AiOrchestrator orchestrator = BuildOrchestrator(
+                llm, memory, BuildToolResultPolicy(role), settings: new TestSettings { EnableStreaming = false }, sink: sink);
+            using QueuedAiOrchestrator queue = new(orchestrator, new AiOrchestrationQueueOptions());
+            using CancellationTokenSource cancellation = new();
+            RevocableTurnGuard guard = new();
+            Task<LlmCompletionResult> turn = queue.RunTaskResultAsync(
+                new AiTaskRequest { RoleId = role, Hint = "Old question", TurnCommitGuard = guard },
+                cancellation.Token);
+            await WaitForProviderAsync(llm.Entered.Task, turn);
+
+            guard.Revoke();
+            cancellation.Cancel();
+            memory.ClearChatHistory(role);
+            memory.AppendChatMessage(role, "user", marker);
+            llm.Resume.TrySetResult(true);
+            await CaptureExceptionAsync<OperationCanceledException>(() => turn);
+
+            CollectionAssert.AreEqual(new[] { marker }, memory.GetChatHistory(role).Select(row => row.Content));
+            Assert.That(sink.Commands, Is.Empty);
+        }
+
+        [Test]
+        public async Task QueuedTurn_RevokedBeforeStart_DoesNotRecordTheUnstartedQuestion()
+        {
+            const string role = "Teacher";
+            InMemoryAgentMemoryStore memory = new();
+            TestLlmClient llm = new();
+            using QueuedAiOrchestrator queue = new(
+                BuildOrchestrator(llm, memory, BuildToolResultPolicy(role)), new AiOrchestrationQueueOptions());
+            using CancellationTokenSource cancellation = new();
+            RevocableTurnGuard guard = new();
+            guard.Revoke();
+            cancellation.Cancel();
+            memory.AppendChatMessage(role, "user", "Current marker");
+
+            await CaptureExceptionAsync<OperationCanceledException>(() => queue.RunTaskResultAsync(
+                new AiTaskRequest { RoleId = role, Hint = "Revoked question", TurnCommitGuard = guard },
+                cancellation.Token));
+
+            CollectionAssert.AreEqual(new[] { "Current marker" }, memory.GetChatHistory(role).Select(row => row.Content));
+            Assert.That(llm.LastRequest, Is.Null);
+        }
+
+        [Test]
+        public async Task GuardedTurn_WithActiveConversation_CommitsHistoryAndPublishesExactlyOnce()
+        {
+            const string role = "Teacher";
+            InMemoryAgentMemoryStore memory = new();
+            TestLlmClient llm = new();
+            TestSink sink = new();
+            using QueuedAiOrchestrator queue = new(
+                BuildOrchestrator(llm, memory, BuildToolResultPolicy(role), sink: sink),
+                new AiOrchestrationQueueOptions());
+
+            LlmCompletionResult result = await queue.RunTaskResultAsync(
+                new AiTaskRequest { RoleId = role, Hint = "Question", TurnCommitGuard = new RevocableTurnGuard() });
+
+            Assert.That(result.Content, Is.EqualTo("Hello"));
+            CollectionAssert.AreEqual(new[] { "Question", "Hello" }, memory.GetChatHistory(role).Select(row => row.Content));
+            Assert.That(sink.Commands, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public async Task GuardedStream_RevokedWhileProviderWaits_DiscardsLateTextAndEffects()
+        {
+            const string role = "Teacher";
+            InMemoryAgentMemoryStore memory = new();
+            DeferredTurnLlmClient llm = new(false);
+            TestSink sink = new();
+            AiOrchestrator orchestrator = BuildOrchestrator(llm, memory, BuildToolResultPolicy(role),
+                settings: new TestSettings { EnableStreaming = true }, sink: sink);
+            using QueuedAiOrchestrator queue = new(orchestrator, new AiOrchestrationQueueOptions());
+            RevocableTurnGuard guard = new();
+            List<LlmStreamChunk> chunks = new();
+
+            async Task DrainAsync()
+            {
+                await foreach (LlmStreamChunk chunk in queue.RunStreamingAsync(
+                                   new AiTaskRequest { RoleId = role, Hint = "Old stream question", TurnCommitGuard = guard }))
+                    chunks.Add(chunk);
+            }
+
+            Task turn = DrainAsync();
+            await WaitForProviderAsync(llm.Entered.Task, turn);
+            guard.Revoke();
+            memory.AppendChatMessage(role, "user", "Current marker");
+            llm.Resume.TrySetResult(true);
+            await turn;
+
+            Assert.That(chunks.All(chunk => string.IsNullOrEmpty(chunk.Text)), Is.True);
+            Assert.That(chunks.Single(chunk => chunk.IsDone).ErrorCode, Is.EqualTo(LlmErrorCode.Cancelled));
+            CollectionAssert.AreEqual(new[] { "Current marker" }, memory.GetChatHistory(role).Select(row => row.Content));
+            Assert.That(sink.Commands, Is.Empty);
+        }
+
+        [Test]
+        public async Task GuardedTool_RevokedWhileWaitingForHostMarshaler_DoesNotInvoke()
+        {
+            const string role = "Teacher";
+            DeferredToolMarshaler marshaler = new();
+            RevocableTurnGuard guard = new();
+            int toolInvocations = 0;
+            DelegateLlmTool tool = new("update_scene", "Updates the current scene.", (Func<string>)(() =>
+            {
+                toolInvocations++;
+                return "updated";
+            }));
+            InMemoryAgentMemoryStore memory = new();
+            AiOrchestrator orchestrator = BuildOrchestrator(
+                new NativeToolLlmClient(tool, role, marshaler), memory,
+                BuildToolResultPolicy(role, tool), settings: new TestSettings { EnableStreaming = false });
+
+            Task<LlmCompletionResult> turn = orchestrator.RunTaskResultAsync(
+                new AiTaskRequest { RoleId = role, Hint = "Update the scene.", TurnCommitGuard = guard });
+            await WaitForProviderAsync(marshaler.Entered.Task, turn);
+            guard.Revoke();
+            marshaler.Resume.TrySetResult(true);
+            await CaptureExceptionAsync<OperationCanceledException>(() => turn);
+
+            Assert.That(toolInvocations, Is.Zero);
+            Assert.That(memory.GetChatHistory(role), Is.Empty);
+        }
+
+        private sealed class DeferredToolMarshaler : ILlmAsyncMarshaler
+        {
+            public TaskCompletionSource<bool> Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public TaskCompletionSource<bool> Resume { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public async Task<T> InvokeAsync<T>(Func<Task<T>> factory, CancellationToken cancellationToken)
+            {
+                Entered.TrySetResult(true);
+                await Resume.Task;
+                return await factory();
+            }
+        }
+
+        private sealed class NativeToolLlmClient : ILlmClient
+        {
+            private readonly ToolExecutionPolicy _policy;
+            private readonly ChatOptions _toolOptions;
+            private readonly string _toolName;
+
+            public NativeToolLlmClient(DelegateLlmTool tool, string role, ILlmAsyncMarshaler marshaler)
+            {
+                CoreAISettingsOptions settings = new() { ToolInvocationMarshaler = marshaler, DefaultToolTimeoutMs = 0 };
+                _policy = new ToolExecutionPolicy(null, settings, new[] { tool }, true, role);
+                _toolOptions = new ChatOptions { Tools = new List<AITool> { tool.CreateAIFunction() } };
+                _toolName = tool.Name;
+            }
+
+            public async Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            {
+                await _policy.ExecuteSingleAsync(new FunctionCallContent("turn-tool", _toolName), _toolOptions, cancellationToken);
+                return new LlmCompletionResult { Ok = true, Content = "Done." };
+            }
+        }
+
+        [Test]
+        public async Task FileSummaryGuard_RevokedAtPublication_DoesNotReplacePreviousSummary()
+        {
+            string root = Path.Combine(Path.GetTempPath(), "coreai-summary-guard-" + Guid.NewGuid().ToString("N"));
+            const string role = "Teacher";
+            try
+            {
+                using FileConversationSummaryStore store = new(root);
+                await store.SaveSummaryAsync(role, "Current summary");
+                using ConversationSummaryTransaction transaction = await store.OpenSummaryTransactionAsync(role);
+                RevocableTurnGuard guard = new(() =>
+                    Directory.GetFiles(root, "*.tmp", SearchOption.AllDirectories).Length > 0);
+
+                await CaptureExceptionAsync<OperationCanceledException>(
+                    () => transaction.CommitAsync("Revoked summary", CancellationToken.None, guard));
+
+                Assert.That(await store.LoadSummaryAsync(role), Is.EqualTo("Current summary"));
+                Assert.That(Directory.GetFiles(root, "*.tmp", SearchOption.AllDirectories), Is.Empty);
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            }
+        }
+
+        private static async Task WaitForProviderAsync(Task entry, Task turn)
+        {
+            using CancellationTokenSource timeout = new();
+            Task deadline = Task.Delay(TimeSpan.FromSeconds(5), timeout.Token);
+            Task first = await Task.WhenAny(entry, turn, deadline);
+            timeout.Cancel();
+            Assert.That(first, Is.SameAs(entry), "The old turn must be blocked inside the provider before the host revokes it.");
+        }
+
+        private sealed class RevocableTurnGuard : IAiTurnCommitGuard
+        {
+            private readonly object _lock = new();
+            private readonly Func<bool> _revokeBeforeCommit;
+            private bool _revoked;
+
+            public RevocableTurnGuard(Func<bool> revokeBeforeCommit = null) => _revokeBeforeCommit = revokeBeforeCommit;
+
+            public void Revoke()
+            {
+                lock (_lock) _revoked = true;
+            }
+
+            public bool TryCommit(Action commit)
+            {
+                lock (_lock)
+                {
+                    if (_revokeBeforeCommit?.Invoke() == true) _revoked = true;
+                    if (_revoked) return false;
+                    commit();
+                    return true;
+                }
+            }
+        }
+
+        private sealed class DeferredTurnLlmClient : ILlmClient
+        {
+            private readonly bool _observeCancellation;
+
+            public DeferredTurnLlmClient(bool observeCancellation) => _observeCancellation = observeCancellation;
+
+            public TaskCompletionSource<bool> Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            public TaskCompletionSource<bool> Resume { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public async Task<LlmCompletionResult> CompleteAsync(
+                LlmCompletionRequest request, CancellationToken cancellationToken = default)
+            {
+                Entered.TrySetResult(true);
+                await Resume.Task;
+                if (_observeCancellation) cancellationToken.ThrowIfCancellationRequested();
+                return new LlmCompletionResult { Ok = true, Content = "Old assistant reply" };
+            }
+
+            public async IAsyncEnumerable<LlmStreamChunk> CompleteStreamingAsync(LlmCompletionRequest request,
+                [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                LlmCompletionResult completion = await CompleteAsync(request, cancellationToken);
+                yield return new LlmStreamChunk { IsDone = true, Text = completion.Content };
+            }
         }
 
         [Test]
@@ -2745,11 +2998,12 @@ namespace CoreAI.Tests.EditMode
             IConversationContextManager contextManager = null,
             IRoleStructuredResponsePolicy structuredPolicy = null,
             TestSettings settings = null,
-            IAgentUserPromptTemplateProvider userTemplates = null)
+            IAgentUserPromptTemplateProvider userTemplates = null,
+            IAiGameCommandSink sink = null)
         {
             settings ??= new TestSettings();
             return new AiOrchestrator(
-                new TestAuthority(), llm, new TestSink(), new TestTelemetry(),
+                new TestAuthority(), llm, sink ?? new TestSink(), new TestTelemetry(),
                 new AiPromptComposer(
                     new NullSys(), userTemplates ?? new NullUsr(), null, null, policy, settings),
                 memory, policy, structuredPolicy, null, settings, TestActorIdentityProvider,
@@ -2787,9 +3041,9 @@ namespace CoreAI.Tests.EditMode
 
         internal sealed class TestSink : IAiGameCommandSink
         {
-            public void Publish(ApplyAiGameCommand command)
-            {
-            }
+            public List<ApplyAiGameCommand> Commands { get; } = new();
+
+            public void Publish(ApplyAiGameCommand command) => Commands.Add(command);
         }
 
         internal sealed class TestTelemetry : ISessionTelemetryProvider

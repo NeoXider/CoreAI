@@ -1,9 +1,60 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using CoreAI.Authority;
 
 namespace CoreAI.Ai
 {
+    /// <summary>Serializes a turn's committed effects with its host-owned lifetime.</summary>
+    public interface IAiTurnCommitGuard
+    {
+        /// <summary>
+        /// Invokes the action synchronously while the turn is active and returns true. Returns false without
+        /// invoking it once the host has revoked the turn. Revocation and the action must share the same lock.
+        /// </summary>
+        bool TryCommit(Action commit);
+    }
+
+    internal static class AiTurnCommit
+    {
+        private static readonly Action NoEffect = () => { };
+        private static readonly AsyncLocal<IAiTurnCommitGuard> DispatchGuard = new();
+
+        internal static IAiTurnCommitGuard CurrentDispatchGuard => DispatchGuard.Value;
+
+        internal static DispatchScope PushDispatchGuard(IAiTurnCommitGuard guard) => new(guard);
+
+        internal readonly struct DispatchScope : IDisposable
+        {
+            private readonly IAiTurnCommitGuard _previous;
+
+            public DispatchScope(IAiTurnCommitGuard guard)
+            {
+                _previous = DispatchGuard.Value;
+                DispatchGuard.Value = guard;
+            }
+
+            public void Dispose() => DispatchGuard.Value = _previous;
+        }
+
+        internal static bool Try(IAiTurnCommitGuard guard, Action commit)
+        {
+            if (guard != null) return guard.TryCommit(commit);
+            commit();
+            return true;
+        }
+
+        internal static void ThrowIfRevoked(IAiTurnCommitGuard guard)
+        {
+            if (guard != null && !guard.TryCommit(NoEffect)) throw new RevokedException();
+        }
+
+        internal sealed class RevokedException : OperationCanceledException
+        {
+            internal RevokedException() : base(LlmCancellation.CancelledErrorText) { }
+        }
+    }
+
     /// <summary>
     /// Request object passed to AI orchestration services.
     /// </summary>
@@ -101,6 +152,12 @@ namespace CoreAI.Ai
         /// actual cancellation remains controlled by the token passed to the orchestration method.
         /// </summary>
         public CancellationToken DeadlineCancellationToken { get; set; }
+
+        /// <summary>
+        /// Optional host-owned turn lifetime. A revoked turn cannot commit transcript, summary or command
+        /// effects to a view or memory partition that the host has retired or reused.
+        /// </summary>
+        public IAiTurnCommitGuard TurnCommitGuard { get; set; }
 
         /// <summary>
         /// Lua script version key.
@@ -206,6 +263,7 @@ namespace CoreAI.Ai
                 CancellationScope = CancellationScope,
                 CallerCancellationToken = CallerCancellationToken,
                 DeadlineCancellationToken = DeadlineCancellationToken,
+                TurnCommitGuard = TurnCommitGuard,
                 LuaScriptVersionKey = LuaScriptVersionKey,
                 DataOverlayVersionKeysCsv = DataOverlayVersionKeysCsv,
                 ForcedToolMode = ForcedToolMode,

@@ -6,7 +6,8 @@ namespace CoreAI.Ai
     /// <summary>
     /// Empty summary store used when an application does not persist compacted conversation summaries.
     /// </summary>
-    public sealed class NullConversationSummaryStore : IConversationSummaryStore, IAsyncConversationSummaryStore
+    public sealed class NullConversationSummaryStore : IConversationSummaryStore, IAsyncConversationSummaryStore,
+        ITransactionalConversationSummaryStore
     {
         /// <inheritdoc />
         public string LoadSummary(string roleId)
@@ -31,6 +32,21 @@ namespace CoreAI.Ai
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.CompletedTask;
+        }
+
+        /// <inheritdoc />
+        public ConversationSummaryTransaction OpenSummaryTransaction(string roleId)
+        {
+            return new ConversationSummaryTransaction("", _ => true, (_, _) => Task.FromResult(true), null,
+                (_, token, _) => Task.FromResult(!token.IsCancellationRequested));
+        }
+
+        /// <inheritdoc />
+        public Task<ConversationSummaryTransaction> OpenSummaryTransactionAsync(
+            string roleId, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(OpenSummaryTransaction(roleId));
         }
 
         /// <inheritdoc />

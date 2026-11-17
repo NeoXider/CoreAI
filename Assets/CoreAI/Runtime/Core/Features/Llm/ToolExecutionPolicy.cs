@@ -662,6 +662,8 @@ namespace CoreAI.Infrastructure.Llm
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            IAiTurnCommitGuard guard = AiTurnCommit.CurrentDispatchGuard;
+            AiTurnCommit.ThrowIfRevoked(guard);
             MEAI.FunctionCallContent fc = resolved.Call;
             if (chatOptions?.ToolMode is MEAI.NoneChatToolMode)
             {
@@ -756,7 +758,8 @@ namespace CoreAI.Infrastructure.Llm
             try
             {
                 LlmToolCallInfo info = BuildInfo(fc);
-                _eventPublisher.PublishStarted(info);
+                if (!AiTurnCommit.Try(guard, () => _eventPublisher.PublishStarted(info)))
+                    throw new AiTurnCommit.RevokedException();
                 Stopwatch sw = Stopwatch.StartNew();
 
                 string validationError = ValidateRequiredArguments(fc, aiFunc);
@@ -839,7 +842,7 @@ namespace CoreAI.Infrastructure.Llm
                         Task<object> invokeTask = marshaler
                             .InvokeAsync<object>(
                                 async () =>
-                                    await InvokeResolvedAsync(resolved, aiFunc, args, cts.Token),
+                                    await InvokeResolvedAsync(resolved, aiFunc, args, cts.Token, guard),
                                 cts.Token);
                         TraceStep(fc, "invoke-started", invokeTask.IsCompleted ? "sync" : "async");
 
@@ -862,7 +865,8 @@ namespace CoreAI.Infrastructure.Llm
                         result = await invokeTask;
                         TraceStep(fc, "result-awaited", null);
                     }
-                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                    catch (OperationCanceledException ex) when (
+                        ex is not AiTurnCommit.RevokedException && !cancellationToken.IsCancellationRequested)
                     {
                         // Tool-level timeout fired, not outer cancellation
                         sw.Stop();
@@ -895,7 +899,7 @@ namespace CoreAI.Infrastructure.Llm
                     // CoreAiChatService's PlayerLoop timer — remains the only thing that ends a tool body
                     // that never returns.
                     result = await marshaler.InvokeAsync<object>(
-                        async () => await InvokeResolvedAsync(resolved, aiFunc, args, cancellationToken),
+                        async () => await InvokeResolvedAsync(resolved, aiFunc, args, cancellationToken, guard),
                         cancellationToken);
                     TraceStep(fc, "result-awaited", "no-timeout");
                 }
@@ -954,13 +958,14 @@ namespace CoreAI.Infrastructure.Llm
                 }
 
                 double elapsedMs = sw.Elapsed.TotalMilliseconds;
-                if (succeeded)
+                if (!AiTurnCommit.Try(guard, () =>
+                    {
+                        string resultJson = SafeResultJson(diagnosticResultText);
+                        if (succeeded) _eventPublisher.PublishCompleted(info, resultJson, elapsedMs);
+                        else _eventPublisher.PublishFailed(info, resultJson, elapsedMs);
+                    }))
                 {
-                    _eventPublisher.PublishCompleted(info, SafeResultJson(diagnosticResultText), elapsedMs);
-                }
-                else
-                {
-                    _eventPublisher.PublishFailed(info, SafeResultJson(diagnosticResultText), elapsedMs);
+                    throw new AiTurnCommit.RevokedException();
                 }
 
                 AddTrace(new LlmToolCallTrace(fc.Name ?? "", succeeded, elapsedMs, "native",
@@ -979,7 +984,7 @@ namespace CoreAI.Infrastructure.Llm
                 // Notify subscribers
                 try
                 {
-                    _notifier.NotifyToolExecuted(_roleId, fc.Name, fc.Arguments, result);
+                    AiTurnCommit.Try(guard, () => _notifier.NotifyToolExecuted(_roleId, fc.Name, fc.Arguments, result));
                 }
                 catch (Exception notifyEx)
                 {
@@ -994,7 +999,8 @@ namespace CoreAI.Infrastructure.Llm
                     Succeeded = succeeded
                 };
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException ex) when (
+                ex is AiTurnCommit.RevokedException || cancellationToken.IsCancellationRequested)
             {
                 // Outer cancellation must propagate; it is never converted into a "failed result".
                 // (Tool-level timeouts are handled above and surfaced as a normal error result instead.)
@@ -1035,11 +1041,24 @@ namespace CoreAI.Infrastructure.Llm
         }
 
         private static async Task<object> InvokeResolvedAsync(ResolvedCall resolved,
-            MEAI.AIFunction function, MEAI.AIFunctionArguments arguments, CancellationToken cancellationToken)
+            MEAI.AIFunction function, MEAI.AIFunctionArguments arguments, CancellationToken cancellationToken,
+            IAiTurnCommitGuard guard)
         {
-            return resolved.Invocation != null
-                ? await resolved.Invocation.InvokeAsync(cancellationToken)
-                : await function.InvokeAsync(arguments, cancellationToken);
+            async Task<object> InvokeToolAsync()
+            {
+                if (guard != null) cancellationToken.ThrowIfCancellationRequested();
+                return resolved.Invocation != null
+                    ? await resolved.Invocation.InvokeAsync(cancellationToken)
+                    : await function.InvokeAsync(arguments, cancellationToken);
+            }
+
+            Task<object> invocation = null;
+            if (!AiTurnCommit.Try(guard, () => invocation = InvokeToolAsync()))
+                throw new AiTurnCommit.RevokedException();
+
+            object result = await invocation;
+            AiTurnCommit.ThrowIfRevoked(guard);
+            return result;
         }
 
         /// <summary>

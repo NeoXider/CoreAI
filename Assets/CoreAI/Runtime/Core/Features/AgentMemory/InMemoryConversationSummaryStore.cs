@@ -111,11 +111,15 @@ namespace CoreAI.Ai
                         return true;
                     }
                 }
-                return new ConversationSummaryTransaction(summary, Commit, (value, token) =>
+                Task<bool> CommitAsync(string value, CancellationToken token, IAiTurnCommitGuard guard)
                 {
                     token.ThrowIfCancellationRequested();
-                    return Task.FromResult(Commit(value));
-                }, lease);
+                    bool stored = false;
+                    AiTurnCommit.Try(guard, () => stored = Commit(value));
+                    return Task.FromResult(stored);
+                }
+                return new ConversationSummaryTransaction(summary, Commit,
+                    (value, token) => CommitAsync(value, token, null), lease, CommitAsync);
             }
         }
 

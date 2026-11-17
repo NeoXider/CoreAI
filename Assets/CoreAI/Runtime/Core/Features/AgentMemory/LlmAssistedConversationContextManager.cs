@@ -201,7 +201,7 @@ namespace CoreAI.Ai
 
                 cancellationToken.ThrowIfCancellationRequested();
                 snapshot.OwnSummaryLease(transaction);
-                snapshot.CommitSummaryAsync = token => transaction.CommitAsync(persistedSummary, token);
+                snapshot.CommitSummaryAsync = (token, guard) => transaction.CommitAsync(persistedSummary, token, guard);
                 transferred = true;
                 if (buildArgs?.DeferSummaryPersistence != true) await snapshot.CommitAsync(cancellationToken);
 

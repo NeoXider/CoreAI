@@ -816,7 +816,7 @@ namespace CoreAI.Ai
                 finally { ExitOperation(); }
             }
 
-            async Task<bool> CommitAsync(string value, CancellationToken token)
+            async Task<bool> CommitAsync(string value, CancellationToken token, IAiTurnCommitGuard guard)
             {
                 EnterOperation();
                 try
@@ -831,7 +831,7 @@ namespace CoreAI.Ai
                             {
                                 token.ThrowIfCancellationRequested();
                                 PersistedDto dto = new() { Summary = value, RoleId = roleId };
-                                AtomicWriteAllText(path, JsonConvert.SerializeObject(dto, JsonSettings), token);
+                                AtomicWriteAllText(path, JsonConvert.SerializeObject(dto, JsonSettings), token, guard);
                             });
                             ownPending = state.RecordMutation(this);
                         }
@@ -842,7 +842,8 @@ namespace CoreAI.Ai
                 }
                 finally { ExitOperation(); }
             }
-            return new ConversationSummaryTransaction(summary, Commit, CommitAsync, lease);
+            return new ConversationSummaryTransaction(summary, Commit,
+                (value, token) => CommitAsync(value, token, null), lease, CommitAsync);
         }
 
         private bool DeleteSummaryCore(string path)
@@ -1055,7 +1056,8 @@ namespace CoreAI.Ai
         /// file name and JSON shape are unchanged. Callers hold the per-path gate, so the
         /// exists/replace-versus-move decision cannot race another in-process writer for the same target.
         /// </summary>
-        private static void AtomicWriteAllText(string path, string contents, CancellationToken cancellationToken = default)
+        private static void AtomicWriteAllText(string path, string contents, CancellationToken cancellationToken = default,
+            IAiTurnCommitGuard guard = null)
         {
             string dir = Path.GetDirectoryName(path);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
@@ -1067,14 +1069,14 @@ namespace CoreAI.Ai
             try
             {
                 File.WriteAllText(tmpPath, contents);
-                cancellationToken.ThrowIfCancellationRequested();
-                if (File.Exists(path))
+                if (!AiTurnCommit.Try(guard, () =>
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (File.Exists(path)) File.Replace(tmpPath, path, null);
+                        else File.Move(tmpPath, path);
+                    }))
                 {
-                    File.Replace(tmpPath, path, null);
-                }
-                else
-                {
-                    File.Move(tmpPath, path);
+                    throw new AiTurnCommit.RevokedException();
                 }
             }
             finally

@@ -44,7 +44,7 @@ namespace CoreAI.Ai
         public int DeferredFoldMessageCount { get; set; }
 
         internal System.Action CommitSummary { get; set; }
-        internal Func<CancellationToken, Task> CommitSummaryAsync { get; set; }
+        internal Func<CancellationToken, IAiTurnCommitGuard, Task> CommitSummaryAsync { get; set; }
 
         internal void OwnSummaryLease(IDisposable lease)
         {
@@ -78,7 +78,7 @@ namespace CoreAI.Ai
             }
         }
 
-        internal async Task CommitAsync(CancellationToken cancellationToken = default)
+        internal async Task CommitAsync(CancellationToken cancellationToken = default, IAiTurnCommitGuard guard = null)
         {
             EnterCommit();
             bool acquired = false;
@@ -91,7 +91,7 @@ namespace CoreAI.Ai
                 if (CommitSummary != null)
                     throw new InvalidOperationException("BuildSnapshotAsync is required for nonblocking asynchronous summary persistence.");
                 if (CommitSummaryAsync == null) return;
-                await CommitSummaryAsync(cancellationToken);
+                await CommitSummaryAsync(cancellationToken, guard);
                 // WHY: The store owns post-commit cancellation and durability; only acknowledged success consumes the callback.
                 CommitSummaryAsync = null;
             }

@@ -176,6 +176,7 @@ namespace CoreAI.Ai
             ContextOverflowEvidence overflowEvidence,
             CancellationToken cancellationToken)
         {
+            AiTurnCommit.ThrowIfRevoked(task.TurnCommitGuard);
             string roleId = ResolveRoleId(task);
             ActorContext actorContext = task.ActorContext.Value;
             actorContext.AssertTrusted();
@@ -199,7 +200,8 @@ namespace CoreAI.Ai
                 if (AgentMemoryPromptPlacement.NeedsInitialSnapshot(memoryState) &&
                     AgentMemoryPromptPlacement.ConsolidateSnapshot(memoryState))
                 {
-                    _memoryStore.Save(roleId, memoryState);
+                    if (!AiTurnCommit.Try(task.TurnCommitGuard, () => _memoryStore.Save(roleId, memoryState)))
+                        throw new AiTurnCommit.RevokedException();
                 }
 
                 memoryParts = AgentMemoryPromptPlacement.Build(memoryState);
@@ -330,7 +332,8 @@ namespace CoreAI.Ai
                 AgentMemoryPromptPlacement.HasPendingUpdates(memoryState) &&
                 AgentMemoryPromptPlacement.ConsolidateSnapshot(memoryState))
             {
-                _memoryStore.Save(roleId, memoryState);
+                if (!AiTurnCommit.Try(task.TurnCommitGuard, () => _memoryStore.Save(roleId, memoryState)))
+                    throw new AiTurnCommit.RevokedException();
                 memoryParts = AgentMemoryPromptPlacement.Build(memoryState);
             }
 
@@ -517,7 +520,7 @@ namespace CoreAI.Ai
                 }
             }
 
-            EnsureUserTurnRecorded(bundle, task, userTurn);
+            if (task.TurnCommitGuard == null) EnsureUserTurnRecorded(bundle, task, userTurn);
             string content = result.Content;
             if (_structuredPolicy.ShouldValidate(roleId) &&
                 !_structuredPolicy.TryValidate(roleId, content, out string failReason))
@@ -526,6 +529,7 @@ namespace CoreAI.Ai
                 {
                     LlmCompletionResult invalid = NormalizeTaskFailure(result, "Structured response validation failed after tool execution.");
                     invalid.ErrorCode = LlmErrorCode.InvalidRequest;
+                    EnsureUserTurnRecorded(bundle, task, userTurn);
                     RecordTrace(bundle, invalid, content, invalid.Error);
                     return invalid;
                 }
@@ -542,14 +546,24 @@ namespace CoreAI.Ai
                 // attribution all read the same object. Driving the retry from the ORIGINAL task hid every field
                 // the copy dropped: the retried completion ignored the copy's tool-roundtrip cap, and a dropped
                 // caller/deadline token was attributed as the caller's stop instead of the deadline's.
-                LlmCompletionResult second = await CompleteMeasuredForTaskAsync(
-                    bundle,
-                    retryTask,
-                    BuildCompletionRequest(bundle, retryTask, userRetry, maxOutputTokens),
-                    cancellationToken);
+                LlmCompletionResult second;
+                try
+                {
+                    second = await CompleteMeasuredForTaskAsync(
+                        bundle,
+                        retryTask,
+                        BuildCompletionRequest(bundle, retryTask, userRetry, maxOutputTokens),
+                        cancellationToken);
+                }
+                catch
+                {
+                    EnsureUserTurnRecorded(bundle, task, userTurn, true);
+                    throw;
+                }
 
                 if (second == null || !second.Ok || string.IsNullOrEmpty(second.Content))
                 {
+                    EnsureUserTurnRecorded(bundle, task, userTurn);
                     RecordTrace(bundle, second, null, second?.Error ?? "structured retry failed");
                     return NormalizeTaskFailure(second, "structured retry failed");
                 }
@@ -557,6 +571,7 @@ namespace CoreAI.Ai
                 content = second.Content;
                 if (!_structuredPolicy.TryValidate(roleId, content, out _))
                 {
+                    EnsureUserTurnRecorded(bundle, task, userTurn);
                     RecordTrace(bundle, second, content, "structured validation failed");
                     RecordTokenObservation(bundle, second);
                     LlmCompletionResult invalid = NormalizeTaskFailure(second, "Structured response validation failed.");
@@ -567,7 +582,7 @@ namespace CoreAI.Ai
                 result = second;
             }
 
-            content = SanitizeAndPublish(bundle, task, content, user, result);
+            content = SanitizeAndPublish(bundle, task, content, result, userTurn);
             result.Content = content;
             return result;
         }
@@ -712,14 +727,34 @@ namespace CoreAI.Ai
             {
                 while (true)
                 {
-                    bool hasNext;
-                    LlmStreamChunk chunk;
+                    bool hasNext = false;
+                    bool revoked = false;
+                    LlmStreamChunk chunk = null;
                     // WHY: Each MoveNext starts in its caller's execution context. A lease spanning
                     // yield return alone cannot keep AsyncLocal memory identity across reader resumes.
                     using (AgentMemoryScopeExecutionContext.Push(actorContext))
                     {
-                        hasNext = await core.MoveNextAsync();
-                        chunk = hasNext ? core.Current : null;
+                        try
+                        {
+                            using AiTurnCommit.DispatchScope dispatch = AiTurnCommit.PushDispatchGuard(task.TurnCommitGuard);
+                            hasNext = await core.MoveNextAsync();
+                            chunk = hasNext ? core.Current : null;
+                            AiTurnCommit.ThrowIfRevoked(task.TurnCommitGuard);
+                        }
+                        catch (AiTurnCommit.RevokedException)
+                        {
+                            revoked = true;
+                        }
+                    }
+                    if (revoked)
+                    {
+                        yield return new LlmStreamChunk
+                        {
+                            IsDone = true,
+                            Error = LlmCancellation.CancelledErrorText,
+                            ErrorCode = LlmErrorCode.Cancelled
+                        };
+                        yield break;
                     }
                     if (!hasNext) yield break;
                     yield return chunk;
@@ -1223,9 +1258,7 @@ namespace CoreAI.Ai
                     // WHY: SanitizeAndPublish already records the token-calibration observation from
                     // streamResult.PromptTokens; recording it again here double-applied the EMA and did a
                     // second disk write per streaming turn (the non-streaming path records exactly once).
-                    EnsureUserTurnRecorded(bundle, task, turn.UserTurn);
-                    content = SanitizeAndPublish(
-                        bundle, task, content, bundle.UserPayload, streamResult);
+                    content = SanitizeAndPublish(bundle, task, content, streamResult, turn.UserTurn);
                 }
                 else if (!string.IsNullOrEmpty(terminalError))
                 {
@@ -1284,7 +1317,10 @@ namespace CoreAI.Ai
             AiLlmCompletionOutcome outcome = AiLlmCompletionOutcome.ProviderFailure;
             try
             {
+                AiTurnCommit.ThrowIfRevoked(task.TurnCommitGuard);
+                using AiTurnCommit.DispatchScope dispatch = AiTurnCommit.PushDispatchGuard(task.TurnCommitGuard);
                 LlmCompletionResult result = await CompleteForTaskAsync(request, cancellationToken);
+                AiTurnCommit.ThrowIfRevoked(task.TurnCommitGuard);
                 // WHY: a failed result returned after the caller cancelled is the caller's stop whatever its code,
                 // exactly like a thrown fault (LlmCancellation.ClassifyCode); the copy keeps the inner client's
                 // instance untouched.
@@ -1749,8 +1785,9 @@ namespace CoreAI.Ai
             // message. Committing here is what makes that eviction safe - the evicted source is
             // already retold. A summary is a retelling of messages the store still holds, so writing
             // one for a turn that later fails costs a rolled summary, not a lost message.
-            await snapshot.CommitAsync(cancellationToken);
+            await snapshot.CommitAsync(cancellationToken, task.TurnCommitGuard);
             cancellationToken.ThrowIfCancellationRequested();
+            AiTurnCommit.ThrowIfRevoked(task.TurnCommitGuard);
 
             // WHY the budget is enforced AFTER the commit, not before: EnforceSummaryBudget MUTATES
             // snapshot.Summary, so running it first would persist the truncated text and lose the
@@ -2072,6 +2109,16 @@ namespace CoreAI.Ai
             UserTurnHistoryLatch latch,
             bool suppressPersistenceErrors = false)
         {
+            AiTurnCommit.Try(task?.TurnCommitGuard,
+                () => RecordUserTurn(bundle, task, latch, suppressPersistenceErrors));
+        }
+
+        private void RecordUserTurn(
+            RequestBundle bundle,
+            AiTaskRequest task,
+            UserTurnHistoryLatch latch,
+            bool suppressPersistenceErrors = false)
+        {
             if (latch == null || latch.Attempted || task == null)
             {
                 return;
@@ -2257,9 +2304,11 @@ namespace CoreAI.Ai
             RequestBundle bundle,
             AiTaskRequest task,
             string content,
-            string userPayload,
-            LlmCompletionResult result)
+            LlmCompletionResult result,
+            UserTurnHistoryLatch userTurn)
         {
+            if (task.TurnCommitGuard == null) RecordUserTurn(bundle, task, userTurn);
+
             // WHY: Defense-in-depth for the FALLBACK path only: strip tool-call JSON that leaked into the
             // visible answer where a call is written as text in the first place. Two gates. Tools must be
             // configured — on plain text roles there is nothing to leak, and scanning huge reasoning
@@ -2298,6 +2347,24 @@ namespace CoreAI.Ai
                 }
             }
 
+            if (!AiTurnCommit.Try(task.TurnCommitGuard, () =>
+                {
+                    RecordUserTurn(bundle, task, userTurn);
+                    PersistAndPublish(bundle, task, content, result);
+                }))
+            {
+                throw new AiTurnCommit.RevokedException();
+            }
+
+            _metrics.RecordCommandPublished(bundle.ActorId, bundle.RoleId, bundle.TraceId);
+            RecordTokenObservation(bundle, result);
+            RecordTrace(bundle, result, content, null);
+            return content;
+        }
+
+        private void PersistAndPublish(RequestBundle bundle, AiTaskRequest task, string content,
+            LlmCompletionResult result)
+        {
             if (bundle.RoleConfig.WithChatHistory && _memoryStore != null)
             {
                 // WHY: Persist the assistant turn WITHOUT hidden <think> reasoning: chain-of-thought is
@@ -2340,10 +2407,6 @@ namespace CoreAI.Ai
                 LuaScriptVersionKey = task.LuaScriptVersionKey ?? "",
                 DataOverlayVersionKeysCsv = task.DataOverlayVersionKeysCsv ?? ""
             });
-            _metrics.RecordCommandPublished(bundle.ActorId, bundle.RoleId, bundle.TraceId);
-            RecordTokenObservation(bundle, result);
-            RecordTrace(bundle, result, content, null);
-            return content;
         }
 
         /// <summary>

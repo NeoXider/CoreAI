@@ -1,5 +1,10 @@
 # TODO
 
+- [x] Fence request commits when a host retires a conversation. Opt-in turn guards protect queued
+  cancellation teardown, the transcript and final command, deferred rolling summary publication, and
+  marshaled tool dispatch. The portable regression probe reproduces both late-success and cooperative
+  cancellation leakage without a guard and preserves the next conversation with a guard.
+
 - [x] Verify the live-scene per-run world-state and audit-store composition before accepting another real-model demo run. Verified 2026-10-28 in `live-free1`: the fixture's `STORAGE_PREFLIGHT`/`STARTED` checks (owned snapshot path, audit and mod stores asserted before any request) passed in FullAccess twice and QwenSpellcraft, the non-live exact-slot storage test passed, and the owner folder was unchanged. The test-run storage root now adds a second layer of isolation.
 - [ ] Recover the pre-existing `world_state.json` only from a verified backup; the live test overwrote it and no previous bytes have been found. Owner decision.
 - [ ] Re-run the three failed OpenRouter scenarios (`ActualProgrammer_ModelCreatesThenEditsOwnedMod_WithSavedSourceAndObservableLuaEffects`, `Demo01_FullAccess_SelfTestTetrisAndLiveChat`, `Demo14_QwenSpellcraft_HttpCastExecutesToolAndSpendsMana`). 2026-10-28 rerun on `nvidia/nemotron-3-ultra-550b-a55b:free`: all three got `HTTP 401` (4 single-attempt requests): the owner's local test config holds a local-server placeholder key, not an OpenRouter key. Environment, not CoreAI. Confirmed on the way: Demo01's Tetris precondition fix (whole sequence passes up to the live chat) and Spellcraft's input-targeting fix (a real request is admitted); the UI-turn helper now fails fast on a provider error. Needs a run with a valid key in `COREAI_TEST_API_KEY`. [Triage](dev-docs/completion-2026-10-27/OPENROUTER_TRIAGE.md#free-model-rerun---2026-10-28).

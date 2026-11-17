@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Hosts can attach a turn commit guard to prevent a late or unstarted AI turn from changing a retired
+  conversation's transcript, rolling summary, or game commands. Tool dispatch checks the same lifetime
+  after host-thread marshaling.
+
 ## [7.56.0] - 2026-10-28
 
 Released on `main` with tag `v7.56.0`. Full EditMode 8,307: 8,292 passed / 0 failed / 15 skipped; hermetic PlayMode 395: 391 passed / 0 failed / 4 skipped. The real-provider (OpenRouter `:free`) demo cases did not run: every request was refused with HTTP 401 because the local test key is not an OpenRouter key. They stay open in the [verification report](../../dev-docs/completion-2026-10-27/FINAL_VERIFICATION.md) together with the manual input/visual and player/IL2CPP/browser/device gates.
